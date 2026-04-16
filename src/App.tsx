@@ -2,9 +2,11 @@
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState } from "react";
 import CompanyManager from "./CompanyManager";
+import CalendarManager from "./CalendarManager"; // 👈 追加
 import StaffManager from "./StaffManager"; // 👈 追加
 import AttendanceManager from "./AttendanceManager"; // ✨ 新しく作った専門家を呼ぶ
 import PaySlipManager from "./PaySlipManager"; // 👈 これを追加！
+import CustomItemManager from "./CustomItemManager"; // 👈 これを追加！
 
 function App() {
   const [db, setDb] = useState<Database | null>(null);
@@ -33,7 +35,11 @@ function App() {
             address TEXT,
             phone TEXT,
             corporate_number TEXT, -- 法人番号
-            representative TEXT    -- 代表者名
+            representative TEXT,    -- 代表者名
+            health_ins_num TEXT, -- 社会保険（厚年・健保）事業所番号
+            labor_ins_num TEXT,  -- 労働保険番号
+            annual_holidays INTEGER DEFAULT 120,
+            holiday_csv_url TEXT DEFAULT 'https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv'
           );
         `);
 
@@ -44,7 +50,46 @@ function App() {
             name TEXT NOT NULL,
             zip_code TEXT,
             prefecture TEXT NOT NULL,
-            address TEXT
+            address TEXT,
+            phone TEXT,
+            health_ins_num TEXT,
+            labor_ins_num TEXT
+          );
+        `);
+
+        // 1. カレンダーパターンのマスターテーブルを追加
+        await sqlite.execute(`
+          CREATE TABLE IF NOT EXISTS calendar_patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL
+          );
+        `);
+
+        await sqlite.execute("PRAGMA foreign_keys = ON;");
+        const patterns = await sqlite.select<any[]>("SELECT * FROM calendar_patterns WHERE id = 1");
+        if (patterns.length === 0) {
+          // 確実に id=1 で「標準」を入れる
+          await sqlite.execute("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
+        }
+
+        // 2. カレンダー詳細テーブルを「パターンID」付きに作り直す
+        // ※ work_date だけを PRIMARY KEY にすると1つのパターンしか保存できないため、
+        // pattern_id との組み合わせ（複合主キー）に変更します。
+        await sqlite.execute(`
+          CREATE TABLE IF NOT EXISTS company_calendar (
+            pattern_id INTEGER,
+            work_date TEXT, -- '2026-04-01' 形式
+            is_holiday INTEGER DEFAULT 0, -- 0:稼働日, 1:休日
+            description TEXT,
+            PRIMARY KEY (pattern_id, work_date),
+            FOREIGN KEY (pattern_id) REFERENCES calendar_patterns(id) ON DELETE CASCADE
+          );
+        `);
+
+        await sqlite.execute(`
+          CREATE TABLE IF NOT EXISTS holiday_master (
+            holiday_date TEXT PRIMARY KEY, -- '2026-05-03'
+            name TEXT NOT NULL             -- '憲法記念日'
           );
         `);
 
@@ -66,8 +111,8 @@ function App() {
           
           if (hasName && hasPref) {
             setIsSetupComplete(true);
-            // セットアップ済みならデフォルトタブをスタッフ管理などにしてもOK
-            setActiveTab("staff"); 
+            // 自動で切り替えないよう、ここを "company" のままにするか、行自体を削除
+            setActiveTab("company"); 
           } else {
             setIsSetupComplete(false);
             setActiveTab("company");
@@ -78,11 +123,36 @@ function App() {
 
         await sqlite.execute(`
           CREATE TABLE IF NOT EXISTS staff (
-            id TEXT PRIMARY KEY, name TEXT NOT NULL, furigana TEXT, 
-            birthday TEXT, join_date TEXT, zip_code TEXT, address TEXT, phone TEXT, mobile TEXT, wage_type TEXT DEFAULT 'hourly',
-            hourly_wage INTEGER NOT NULL, commute_type TEXT DEFAULT 'none', commute_wage INTEGER DEFAULT 0, branch_id INTEGER DEFAULT 0, dependents_count INTEGER DEFAULT 0, resident_tax INTEGER DEFAULT 0
+            id TEXT PRIMARY KEY, 
+            name TEXT NOT NULL, 
+            furigana TEXT, 
+            birthday TEXT, 
+            join_date TEXT, 
+            health_ins_id TEXT,  -- 健康保険 被保険者番号
+            pension_num TEXT,   -- 基礎年金番号（または厚年整理番号）
+            employment_ins_num TEXT, -- 雇用保険 被保険者番号
+            my_number TEXT,     -- マイナンバー（取り扱い注意ですが項目として）
+            retirement_date TEXT, -- 🆕 追加：退職日
+            status TEXT DEFAULT 'active', -- 🆕 追加：状態（active: 在籍, on_leave: 休職, retired: 退職）
+            zip_code TEXT, 
+            address TEXT, 
+            phone TEXT, 
+            mobile TEXT, 
+            wage_type TEXT DEFAULT 'hourly',
+            hourly_wage INTEGER NOT NULL, 
+            calendar_pattern_id INTEGER DEFAULT 1,
+            commute_type TEXT DEFAULT 'none', 
+            commute_wage INTEGER DEFAULT 0, 
+            branch_id INTEGER DEFAULT 0, 
+            dependents_count INTEGER DEFAULT 0, 
+            resident_tax INTEGER DEFAULT 0,
+            scheduled_work_hours REAL DEFAULT 8.0, -- 1日の所定労働時間（例: 8.0）
+            monthly_work_days REAL DEFAULT 20.0,    -- 月平均の所定労働日数（例: 20.33）
+            FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id)
           );
-          
+        `);
+
+        await sqlite.execute(`  
           CREATE TABLE IF NOT EXISTS attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             staff_id TEXT NOT NULL,
@@ -103,8 +173,25 @@ function App() {
             FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
           );
         `);
-        
-        await sqlite.execute("PRAGMA foreign_keys = ON;");
+
+        await sqlite.execute(`
+          -- 項目の辞書（何手当があるか）
+          CREATE TABLE IF NOT EXISTS salary_item_master (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,       -- 'earning' (支給) or 'deduction' (控除)
+            category TEXT NOT NULL    -- 'fixed' (固定), 'variable' (変動), 'formula' (自動計算)
+          );
+
+          -- スタッフごとの金額設定
+          CREATE TABLE IF NOT EXISTS staff_salary_values (
+              staff_id TEXT NOT NULL,
+              item_id INTEGER NOT NULL,
+              amount INTEGER DEFAULT 0,
+              PRIMARY KEY (staff_id, item_id),
+              FOREIGN KEY (item_id) REFERENCES salary_item_master(id) ON DELETE CASCADE
+          );
+        `);
 
         setDb(sqlite);
         const resStaff = await sqlite.select<any[]>("SELECT * FROM staff ORDER BY id ASC");
@@ -117,7 +204,6 @@ function App() {
   // --- 会社設定側から完了を通知された時の処理 ---
   const handleSetupComplete = async () => {
     setIsSetupComplete(true);
-    setActiveTab("staff"); // 自動でタブを切り替えて「解放感」を出す
     await refreshData();
   };
 
@@ -146,7 +232,9 @@ function App() {
           {/* ✨ セットアップ完了時のみ表示されるメニュー */}
           {isSetupComplete && (
             <>
+              <li onClick={() => setActiveTab("calendar")} style={tabStyle(activeTab === "calendar")}>📅 会社カレンダー</li>
               <li onClick={() => setActiveTab("staff")} style={tabStyle(activeTab === "staff")}>👤 従業員管理</li>
+              <li onClick={() => setActiveTab("custom_items")} style={tabStyle(activeTab === "custom_items")}>💰 支給・控除項目管理</li>
               <li onClick={() => setActiveTab("attendance")} style={tabStyle(activeTab === "attendance")}>📅 勤務・給与</li>
               <li onClick={() => setActiveTab("payslip")} style={tabStyle(activeTab === "payslip")}>📄 給与明細書</li>
             </>
@@ -169,8 +257,14 @@ function App() {
         {/* セットアップ未完了なら他のコンポーネントは表示させない（ガード） */}
         {isSetupComplete && (
           <>
+            {activeTab === "calendar" && db && (
+              <CalendarManager db={db} />
+            )}
             {activeTab === "staff" && db && (
               <StaffManager db={db} staffList={staffList} onDataChange={refreshData} />
+            )}
+            {activeTab === "custom_items" && db && (
+              <CustomItemManager db={db} staffList={staffList} />
             )}
             {activeTab === "attendance" && db && (
               <AttendanceManager 

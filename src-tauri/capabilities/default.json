@@ -6,8 +6,18 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "dialog:default",
+    "http:default",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
     "sql:allow-execute",
     "sql:allow-select",
-    "sql:allow-load"
+    "sql:allow-load",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv" }
+      ]
+    }
   ]
 }

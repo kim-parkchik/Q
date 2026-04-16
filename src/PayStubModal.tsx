@@ -1,27 +1,21 @@
-import React, { useState } from 'react';
-import { calculateSalary } from './calcSalary';
+import React, { useState, useMemo, useEffect } from 'react';
+import { calculateSalary, PREFECTURES, type SalaryExtras } from './calcSalary';
 
-const formatHours = (num: number) => {
+const fmtH = (num: number) => {
     const h = Math.floor(num);
     const m = Math.round((num - h) * 60);
     return `${h}:${String(m).padStart(2, '0')}`;
 };
 
-// 指定した数まで空行（tr）を生成する関数
-const renderEmptyRows = (currentCount: number, targetCount: number) => {
-    const rows = [];
-    for (let i = currentCount; i < targetCount; i++) {
-        rows.push(
-            <tr key={`empty-${i}`} style={{ height: '35px' }}>
-                <td style={tdStyle}></td>
-                <td style={tdStyle}></td>
-            </tr>
-        );
-    }
-    return rows;
-};
+const padRows = (current: number, target: number) =>
+    Array.from({ length: Math.max(0, target - current) }, (_, i) => (
+        <tr key={`pad-${i}`} style={{ height: 34 }}>
+            <td style={tdS} /><td style={tdS} />
+        </tr>
+    ));
 
 interface Props {
+    db: any;
     staff: any;
     attendanceData: any[];
     year: number;
@@ -29,165 +23,191 @@ interface Props {
     onClose: () => void;
 }
 
-export default function PayStubModal({ staff, attendanceData, year, month, onClose }: Props) {
-    // 1. 手入力が必要な最小限の項目だけを State にする
-    const [extras, setExtras] = useState({
-        allowanceName: "役職手当",
+export default function PayStubModal({ db, staff, attendanceData, year, month, onClose }: Props) {
+    const [extras, setExtras] = useState<SalaryExtras>({
+        allowanceName:   "役職手当",
         allowanceAmount: 0,
-        residentTax: 0,      // 住民税だけは手入力
-        prefecture: "東京",   // 健保の計算用
-        dependents: 0        // 所得税の計算用
+        residentTax:     Number(staff.resident_tax)     || 0,
+        prefecture:      staff.prefecture               || "東京",
+        dependents:      Number(staff.dependents_count) || 0,
+        customItems:     [],
     });
 
-    const salary = calculateSalary(staff, attendanceData, extras, year, month);
+    useEffect(() => {
+        const loadCustomItems = async () => {
+            if (!db) return;
+            try {
+                const rows = await db.select<any[]>(
+                    `SELECT m.name, m.type, COALESCE(v.amount, 0) as amount
+                    FROM salary_item_master m
+                    LEFT JOIN staff_salary_values v ON m.id = v.item_id AND v.staff_id = ?
+                    WHERE m.category != 'formula'
+                    ORDER BY m.type DESC, m.id ASC`,
+                    [staff.id]
+                );
+                const items = rows
+                .filter(r => r.amount > 0)
+                .map(r => ({ name: r.name, amount: Number(r.amount), type: r.type as 'earning' | 'deduction' }));
+                setExtras(p => ({ ...p, customItems: items }));
+            } catch (e) {
+                console.error("customItems 読み込みエラー:", e);
+            }
+        };
+        loadCustomItems();
+    }, [db, staff.id]);
+
+    const salary = useMemo(
+        () => calculateSalary(staff, attendanceData, extras, year, month),
+        [staff, attendanceData, extras, year, month]
+    );
+
+    const wageLabel = staff.wage_type === "monthly" ? "月給制" : "時給制";
+    const customEarningItems   = extras.customItems.filter(i => i.type === 'earning');
+    const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
+  
+    // ── 行数計算（左右を完全に同期させる） ──
+    // 支給基本: 基本給(1) + 残業(1) + 深夜(1) + 通勤(1) + 任意手当(1) = 5行
+    // 控除基本: 健保(1) + 介護(1) + 厚生(1) + 雇用(1) + 所得税(1) + 住民税(1) = 6行
+    const earningItemsCount   = 5 + (salary.absenceDeduction > 0 ? 1 : 0) + customEarningItems.length;
+    const deductionItemsCount = 6 + customDeductionItems.length;
+  
+    // 左右で多い方に合わせる（最低でも合計10行程度あると見栄えが良い）
+    const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
 
     return (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '12px', width: '900px', maxHeight: '95vh', overflowY: 'auto', color: '#000' }}>
-                {/* 🆕 右上の閉じるボタンを追加 */}
-                <button 
-                    onClick={onClose} 
-                    className="no-print"
-                    style={{
-                        position: 'absolute',
-                        top: '10px',
-                        right: '10px',
-                        border: 'none',
-                        background: '#eee',
-                        borderRadius: '50%',
-                        width: '30px',
-                        height: '30px',
-                        cursor: 'pointer',
-                        fontSize: '18px',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center'
-                    }}
-                >
-                    ×
-                </button>
+        <div style={overlayS}>
+            <div style={containerS}>
+                <button onClick={onClose} className="no-print" style={closeBtnS}>✕</button>
 
-                {/* 調整エリア：詳細5項目 */}
-                <div className="no-print" style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#f0f4f8', borderRadius: '8px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
-                        {/* エンジンが計算した結果を value に表示しつつ、変更もできるように */}
+                {/* ─── 操作パネル ─── */}
+                <div className="no-print" style={panelS}>
+                    <h3 style={{ margin: "0 0 12px 0", fontSize: 15 }}>給与明細 設定</h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
                         <div>
-                            <label style={sLabel}>健康保険 (自動)</label>
-                            <input type="number" style={sInput} value={salary.healthInsurance} readOnly />
+                            <label style={labelS}>都道府県</label>
+                            <select value={extras.prefecture} onChange={e => setExtras(p => ({ ...p, prefecture: e.target.value }))} style={inputS}>
+                                {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
                         </div>
                         <div>
-                            <label style={sLabel}>介護保険 {salary.isNursingCareTarget ? "⚠️対象" : ""}</label>
-                            <input type="number" style={sInput} value={salary.nursingInsurance} readOnly />
+                            <label style={labelS}>扶養人数</label>
+                            <input type="number" min={0} max={7} value={extras.dependents} onChange={e => setExtras(p => ({ ...p, dependents: Number(e.target.value) }))} style={inputS} />
                         </div>
                         <div>
-                            <label style={sLabel}>厚生年金 (自動)</label>
-                            <input type="number" style={sInput} value={salary.welfarePension} readOnly />
-                        </div>
-                        <div>
-                            <label style={sLabel}>所得税 (自動)</label>
-                            <input type="number" style={sInput} value={salary.incomeTax} readOnly />
-                        </div>
-                        <div>
-                            <label style={sLabel}>住民税 (手入力)</label>
-                            <input type="number" style={sInput} value={extras.residentTax} onChange={e => setExtras({...extras, residentTax: Number(e.target.value)})} />
+                            <label style={labelS}>住民税</label>
+                            <input type="number" min={0} value={extras.residentTax} onChange={e => setExtras(p => ({ ...p, residentTax: Number(e.target.value) }))} style={inputS} />
                         </div>
                     </div>
+                    <button onClick={() => window.print()} style={printBtnS}>🖨 印刷・PDF保存</button>
                 </div>
 
-                {/* 明細書本体 */}
-                <div id="print-area" style={{ padding: '20px', backgroundColor: 'white' }}>
-                    <h1 style={{ textAlign: 'center', letterSpacing: '10px', margin: '0 0 20px 0' }}>給与明細書</h1>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-                        <div style={{ fontSize: '18px', borderBottom: '1px solid #000', width: '250px', paddingBottom: '2px' }}>{staff.name} 様</div>
-                        <div>{year} 年 {month} 月分</div>
+                {/* ─── 明細書本体 ─── */}
+                <div id="print-area" style={{ padding: 16, backgroundColor: "white" }}>
+                    <h1 style={titleS}>給　与　明　細　書</h1>
+          
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, alignItems: "flex-end" }}>
+                        <div>
+                            <div style={{ fontSize: 18, borderBottom: "1.5px solid #000", paddingBottom: 2, paddingRight: 40 }}>{staff.name} 様</div>
+                        </div>
+                        <div style={{ textAlign: "right", fontSize: 13 }}>
+                            <div>{year} 年 {month} 月分</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{wageLabel}</div>
+                        </div>
                     </div>
 
-                    <table style={tableStyle}>
+                    <table style={tableS}>
                         <thead>
-                            <tr style={thStyle}>
-                                <th style={tdStyle}>出勤日数</th>
-                                <th style={tdStyle}>総労働時間</th>
-                                <th style={tdStyle}>時間外(残業)</th>
-                                <th style={tdStyle}>うち60h超</th>
+                            <tr style={theadS}>
+                                <th style={thS}>出勤日数</th><th style={thS}>総労働時間</th><th style={thS}>残業時間</th><th style={thS}>深夜時間</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
-                                <td style={tdCenter}>{salary.workDays} 日</td>
-                                <td style={tdCenter}>{formatHours(salary.totalWorkHours)}</td>
-                                <td style={tdCenter}>{formatHours(salary.totalOvertimeHours)}</td>
-                                <td style={tdCenter}>{formatHours(Math.max(0, salary.totalOvertimeHours - 60))}</td>
+                                <td style={tdCtrS}>{salary.workDays} 日</td>
+                                <td style={tdCtrS}>{fmtH(salary.totalWorkHours)}</td>
+                                <td style={tdCtrS}>{fmtH(salary.totalOvertimeHours)}</td>
+                                <td style={tdCtrS}>{fmtH(salary.totalNightHours)}</td>
                             </tr>
                         </tbody>
                     </table>
 
-                    <div style={{ display: 'flex', gap: '20px', marginTop: '20px' }}>
+                    <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
                         {/* 支給項目 */}
                         <div style={{ flex: 1 }}>
-                            <table style={tableStyle}>
-                                <thead><tr style={thStyle}><th colSpan={2} style={tdStyle}>支給項目</th></tr></thead>
+                            <table style={tableS}>
+                                <thead><tr style={theadS}><th colSpan={2} style={thS}>支給項目</th></tr></thead>
                                 <tbody>
-                                    <tr><td style={tdStyle}>基本時給分</td><td style={rightTd}>¥{Math.ceil(salary.basePay).toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>残業手当(25%増)</td><td style={rightTd}>¥{Math.ceil(salary.overtime25Pay).toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>残業手当(50%増)</td><td style={rightTd}>¥{Math.ceil(salary.overtime50Pay).toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>深夜手当(25%増)</td><td style={rightTd}>¥{Math.ceil(salary.nightPay).toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>通勤手当</td><td style={rightTd}>¥{salary.commutePay.toLocaleString()}</td></tr>
-                                    {/* 現在5行なので、7行まで残り2行を自動生成 */}
-                                    {renderEmptyRows(5, 7)}
-                                    <tr style={{ fontWeight: 'bold', backgroundColor: '#f9f9f9' }}>
-                                        <td style={tdStyle}>支給合計</td><td style={rightTd}>¥{salary.totalEarnings.toLocaleString()}</td>
-                                    </tr>
+                                    <tr><td style={tdS}>基本給/時給分</td><td style={rtdS}>¥{salary.basePay.toLocaleString()}</td></tr>
+                                    {salary.absenceDeduction > 0 && (
+                                    <tr><td style={{...tdS, color: "#c0392b"}}>欠勤控除</td><td style={{...rtdS, color: "#c0392b"}}>－¥{salary.absenceDeduction.toLocaleString()}</td></tr>
+                                    )}
+                                    <tr><td style={tdS}>残業手当</td><td style={rtdS}>¥{(salary.overtime25Pay + salary.overtime50Pay).toLocaleString()}</td></tr>
+                                    <tr><td style={tdS}>深夜手当</td><td style={rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
+                                    <tr><td style={tdS}>通勤手当</td><td style={rtdS}>¥{salary.commutePay.toLocaleString()}</td></tr>
+                                    <tr><td style={tdS}>{extras.allowanceName || "任意手当"}</td><td style={rtdS}>¥{salary.allowanceAmount.toLocaleString()}</td></tr>
+                                    {customEarningItems.map((item, i) => (
+                                        <tr key={i}><td style={tdS}>{item.name}</td><td style={rtdS}>¥{item.amount.toLocaleString()}</td></tr>
+                                    ))}
+                                    {padRows(earningItemsCount, targetRows)}
+                                    <tr style={totalRowS}><td style={tdS}>支給合計</td><td style={rtdS}>¥{salary.totalEarnings.toLocaleString()}</td></tr>
                                 </tbody>
                             </table>
                         </div>
 
-                        {/* 控除項目（詳細版） */}
+                        {/* 控除項目 */}
                         <div style={{ flex: 1 }}>
-                            <table style={tableStyle}>
-                                <thead><tr style={thStyle}><th colSpan={2} style={tdStyle}>控除項目</th></tr></thead>
+                            <table style={tableS}>
+                                <thead><tr style={theadS}><th colSpan={2} style={thS}>控除項目</th></tr></thead>
                                 <tbody>
-                                    {/* 全て salary から取得するように変更します */}
-                                    <tr><td style={tdStyle}>健康保険</td><td style={rightTd}>¥{salary.healthInsurance.toLocaleString()}</td></tr>
-                                    <tr style={{ color: !salary.isNursingCareTarget ? '#ccc' : '#000' }}>
-                                        <td style={tdStyle}>介護保険 {!salary.isNursingCareTarget && "(非該当)"}</td>
-                                        <td style={rightTd}>¥{salary.nursingInsurance.toLocaleString()}</td>
-                                    </tr>
-                                    <tr><td style={tdStyle}>厚生年金</td><td style={rightTd}>¥{salary.welfarePension.toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>雇用保険</td><td style={rightTd}>¥{salary.empInsurance.toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>所得税</td><td style={rightTd}>¥{salary.incomeTax.toLocaleString()}</td></tr>
-                                    <tr><td style={tdStyle}>住民税</td><td style={rightTd}>¥{salary.residentTax.toLocaleString()}</td></tr>
-                                    {renderEmptyRows(6, 7)}
-                                    <tr style={{ fontWeight: 'bold', backgroundColor: '#f9f9f9' }}>
-                                        <td style={tdStyle}>控除合計</td><td style={rightTd}>¥{salary.totalDeductions.toLocaleString()}</td>
-                                    </tr>
+                                <tr><td style={tdS}>健康保険料</td><td style={rtdS}>¥{salary.healthInsurance.toLocaleString()}</td></tr>
+                                <tr><td style={tdS}>介護保険料</td><td style={rtdS}>¥{salary.nursingInsurance.toLocaleString()}</td></tr>
+                                <tr><td style={tdS}>厚生年金保険料</td><td style={rtdS}>¥{salary.welfarePension.toLocaleString()}</td></tr>
+                                <tr><td style={tdS}>雇用保険料</td><td style={rtdS}>¥{salary.empInsurance.toLocaleString()}</td></tr>
+                                <tr><td style={tdS}>所得税</td><td style={rtdS}>¥{salary.incomeTax.toLocaleString()}</td></tr>
+                                <tr><td style={tdS}>住民税</td><td style={rtdS}>¥{salary.residentTax.toLocaleString()}</td></tr>
+                                {customDeductionItems.map((item, i) => (
+                                    <tr key={i}><td style={tdS}>{item.name}</td><td style={rtdS}>¥{item.amount.toLocaleString()}</td></tr>
+                                ))}
+                                {padRows(deductionItemsCount, targetRows)}
+                                <tr style={totalRowS}><td style={tdS}>控除合計</td><td style={rtdS}>¥{salary.totalDeductions.toLocaleString()}</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
 
-                    <div style={{ marginTop: '30px', textAlign: 'right' }}>
-                        <div style={{ display: 'inline-block', border: '2px solid #000', padding: '12px 25px' }}>
-                            <span style={{ fontSize: '15px' }}>差引支払額：</span>
-                            <span style={{ fontSize: '28px', fontWeight: 'bold' }}>¥{salary.netPay.toLocaleString()}</span>
+                    <div style={{ marginTop: 24, textAlign: "right" }}>
+                        <div style={{ display: "inline-block", border: "2px solid #000", padding: "12px 28px" }}>
+                            <span>差引支払額：</span>
+                            <span style={{ fontSize: 30, fontWeight: "bold" }}>¥{salary.netPay.toLocaleString()}</span>
                         </div>
+                    </div>
+
+                    <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
+                        ※ 健康保険料は協会けんぽ{extras.prefecture}支部料率（2026年度見込）を適用。
+                        厚生年金 18.3%（折半）。雇用保険 0.7%（本人負担分）。
+                        所得税は2026年版源泉徴収税額表（甲欄）を適用。住民税は手入力値。
                     </div>
                 </div>
             </div>
-            <style>{`
-                @media print {
-                    .no-print { display: none !important; }
-                    body { background-color: white !important; }
-                    #print-area { width: 100% !important; margin: 0 !important; padding: 0 !important; }
-                }
-            `}</style>
+            <style>{`@media print {.no-print { display: none !important; } #print-area { width: 100% !important; }}`}</style>
         </div>
     );
 }
 
-const tableStyle = { width: '100%', borderCollapse: 'collapse' as const, border: '1px solid #000', fontSize: '12px' };
-const thStyle = { backgroundColor: '#f2f2f2' };
-const tdStyle = { border: '1px solid #000', padding: '8px' };
-const tdCenter = { ...tdStyle, textAlign: 'center' as const };
-const rightTd = { ...tdStyle, textAlign: 'right' as const };
-const sInput = { width: '100%', padding: '4px', boxSizing: 'border-box' as const };
-const sLabel = { fontSize: '10px', display: 'block', marginBottom: '2px' };
+const overlayS:    React.CSSProperties = { position: "fixed", top: 0, left: 0, width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0.78)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 };
+const containerS:  React.CSSProperties = { position: "relative", backgroundColor: "white", padding: 28, borderRadius: 12, width: 940, maxHeight: "95vh", overflowY: "auto", color: "#000" };
+const closeBtnS:   React.CSSProperties = { position: "absolute", top: 12, right: 12, width: 32, height: 32, border: "none", borderRadius: "50%", backgroundColor: "#eee", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" };
+const panelS:      React.CSSProperties = { marginBottom: 20, padding: 16, backgroundColor: "#f5f7fa", borderRadius: 8, border: "1px solid #e2e8f0" };
+const summaryS:    React.CSSProperties = { fontSize: 11, color: "#555", backgroundColor: "#eef2f7", borderRadius: 4, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 };
+const previewBoxS: React.CSSProperties = { backgroundColor: "white", border: "1px solid #e0e0e0", borderRadius: 6, padding: "6px 10px", textAlign: "center" };
+const printBtnS:   React.CSSProperties = { width: "100%", padding: 10, cursor: "pointer", backgroundColor: "#27ae60", color: "white", border: "none", borderRadius: 6, fontWeight: "bold", fontSize: 14 };
+const labelS:      React.CSSProperties = { fontSize: 11, display: "block", marginBottom: 3, color: "#555" };
+const inputS:      React.CSSProperties = { width: "100%", padding: "5px 8px", boxSizing: "border-box", border: "1px solid #ccc", borderRadius: 4, fontSize: 13 };
+const titleS:      React.CSSProperties = { textAlign: "center", letterSpacing: 12, margin: "0 0 16px 0", fontSize: 20, fontWeight: "bold" };
+const tableS:      React.CSSProperties = { width: "100%", borderCollapse: "collapse", border: "1px solid #000", fontSize: 12 };
+const theadS:      React.CSSProperties = { backgroundColor: "#f2f2f2" };
+const thS:         React.CSSProperties = { border: "1px solid #000", padding: "7px 8px", textAlign: "left" };
+const tdS:         React.CSSProperties = { border: "1px solid #000", padding: "6px 8px" };
+const tdCtrS:      React.CSSProperties = { ...tdS, textAlign: "center" };
+const rtdS:        React.CSSProperties = { ...tdS, textAlign: "right" };
+const totalRowS:   React.CSSProperties = { fontWeight: "bold", backgroundColor: "#f9f9f9" };

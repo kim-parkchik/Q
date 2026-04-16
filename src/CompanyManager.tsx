@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
+import { fetchAddressByZip } from "./utils"; // 👈 utilsからインポート
 
 interface Props {
     db: Database;
@@ -17,6 +18,8 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
     const [compPhone, setCompPhone] = useState("");
     const [compNum, setCompNum] = useState(""); // 法人番号
     const [compRep, setCompRep] = useState("");
+    const [compHealth, setCompHealth] = useState(""); // ✨追加
+    const [compLabor, setCompLabor] = useState("");   // ✨追加
     const [headPref, setHeadPref] = useState("");
     const [isSaving, setIsSaving] = useState(false);
     const [isSearchingZip, setIsSearchingZip] = useState(false);
@@ -28,6 +31,9 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
     const [bZip, setBZip] = useState("");
     const [bPref, setBPref] = useState("");
     const [bAddr, setBAddr] = useState("");
+    const [bPhone, setBPhone] = useState("");       // ✨追加
+    const [bHealth, setBHealth] = useState("");     // ✨追加
+    const [bLabor, setBLabor] = useState("");       // ✨追加
     const [isSearchingBZip, setIsSearchingBZip] = useState(false);
     const [deletingBranchId, setDeletingBranchId] = useState<number | null>(null);
 
@@ -46,6 +52,46 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
         e.currentTarget.style.boxShadow = "none";
     };
 
+    // 🆕 共通：郵便番号を整形して住所を取得する関数
+    const handleZipSearch = async (
+        zip: string, 
+        setZip: (z: string) => void, 
+        setPref: (p: string) => void, 
+        setAddr: (a: string) => void, 
+        setLoading: (l: boolean) => void
+    ) => {
+        // 数字以外を除去（utils側でもやってますが、ここでもバリデーションとして実行）
+        const cleanZip = zip.replace(/[^\d]/g, "");
+        
+        if (cleanZip.length !== 7) {
+            alert("郵便番号は7桁で入力してください");
+            return;
+        }
+
+        // 💡 ハイフンを自動挿入して見た目を整える
+        const formattedZip = cleanZip.slice(0, 3) + "-" + cleanZip.slice(3);
+        setZip(formattedZip);
+
+        setLoading(true);
+        try {
+            // 💡 utils.ts の共通関数を呼び出す
+            const res = await fetchAddressByZip(cleanZip);
+            
+            if (res) {
+                setPref(res.address1);
+                setAddr(res.address2 + res.address3);
+            } else {
+                alert("該当する住所が見つかりませんでした");
+            }
+        } catch (e) {
+            console.error("住所検索エラー:", e);
+            alert("住所検索中にエラーが発生しました");
+        } finally {
+            // ローディングが速すぎてチカチカするのを防ぐ
+            setTimeout(() => setLoading(false), 300);
+        }
+    };
+
     const loadData = async () => {
         try {
             const res = await db.select<any[]>("SELECT * FROM company WHERE id = 1");
@@ -57,6 +103,8 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 setCompPhone(c.phone || "");
                 setCompNum(c.corporate_number || "");
                 setCompRep(c.representative || "");
+                setCompHealth(c.health_ins_num || ""); // ✨
+                setCompLabor(c.labor_ins_num || "");   // ✨
                 if (c.name) setHasSavedOnce(true);
             }
             const resB = await db.select<any[]>("SELECT * FROM branches ORDER BY id ASC");
@@ -68,22 +116,6 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
     useEffect(() => { loadData(); }, [db]);
 
-    const searchAddressBase = async (zip: string, setPref: (p: string) => void, setAddr: (a: string) => void, setLoading: (l: boolean) => void) => {
-        const cleanZip = zip.replace(/[^\d]/g, "");
-        if (cleanZip.length !== 7) return;
-        setLoading(true);
-        try {
-            const response = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${cleanZip}`);
-            const data = await response.json();
-            if (data.results) {
-                const res = data.results[0];
-                setPref(res.address1);
-                setAddr(res.address2 + res.address3);
-            }
-        } catch (e) { console.error(e); }
-        finally { setTimeout(() => setLoading(false), 300); }
-    };
-
     const saveCompany = async () => {
         if (!compName.trim()) return alert("会社名/屋号は必須です");
         if (!headPref) return alert("都道府県を選択してください");
@@ -93,11 +125,15 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
         setIsSaving(true);
         try {
             await db.execute(
-                `REPLACE INTO company (id, name, zip_code, address, phone, corporate_number, representative) 
-                VALUES (1, ?, ?, ?, ?, ?, ?)`,
-                [compName, finalZip, compAddr, compPhone, compNum, compRep]
+                `REPLACE INTO company (id, name, zip_code, address, phone, corporate_number, representative, health_ins_num, labor_ins_num) 
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [compName, compZip, compAddr, compPhone, compNum, compRep, compHealth, compLabor]
             );
-            await db.execute("UPDATE branches SET name = ?, zip_code = ?, prefecture = ?, address = ? WHERE id = 1", [compName, finalZip, headPref, compAddr]);
+            await db.execute(
+                `UPDATE branches SET name = ?, zip_code = ?, prefecture = ?, address = ?, phone = ?, health_ins_num = ?, labor_ins_num = ? 
+                WHERE id = 1`, 
+                [compName, compZip, headPref, compAddr, compPhone, compHealth, compLabor]
+            );
             setHasSavedOnce(true);
             await loadData();
             if (onSetupComplete) onSetupComplete();
@@ -107,18 +143,35 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
     const saveBranch = async () => {
         if (!bName || !bPref) return alert("名称と都道府県は必須です");
+        
+        // 郵便番号の整形（ハイフンありで統一して保存する場合）
         let finalZip = bZip.replace(/[^\d]/g, "");
         if (finalZip.length === 7) finalZip = finalZip.slice(0, 3) + "-" + finalZip.slice(3);
 
         try {
             if (editingBranchId !== null) {
-                await db.execute("UPDATE branches SET name = ?, zip_code = ?, prefecture = ?, address = ? WHERE id = ?", [bName, finalZip, bPref, bAddr, editingBranchId]);
+                await db.execute(
+                    `UPDATE branches SET 
+                        name = ?, zip_code = ?, prefecture = ?, address = ?, 
+                        phone = ?, health_ins_num = ?, labor_ins_num = ? 
+                    WHERE id = ?`, 
+                    [bName, finalZip, bPref, bAddr, bPhone, bHealth, bLabor, editingBranchId]
+                );
             } else {
-                await db.execute("INSERT INTO branches (name, zip_code, prefecture, address) VALUES (?, ?, ?, ?)", [bName, finalZip, bPref, bAddr]);
+                await db.execute(
+                    `INSERT INTO branches (
+                        name, zip_code, prefecture, address, 
+                        phone, health_ins_num, labor_ins_num
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)`, 
+                    [bName, finalZip, bPref, bAddr, bPhone, bHealth, bLabor]
+                );
             }
             resetBranchForm();
             loadData();
-        } catch (e) { console.error(e); }
+        } catch (e) { 
+            console.error(e);
+            alert("支店情報の保存に失敗しました。");
+        }
     };
 
     const resetBranchForm = () => { 
@@ -128,15 +181,20 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
         setBZip(""); 
         setBPref(""); 
         setBAddr(""); 
+        setBPhone(""); setBHealth(""); setBLabor(""); // ✨
     };
 
     const startEditBranch = (b: any) => { 
-        setDeletingBranchId(null); // 追加
-        setEditingBranchId(b.id); 
+        if (b.id === 1) return; // 💡 本店の場合は処理を中断
+        setDeletingBranchId(null);
+        setEditingBranchId(b.id);
         setBName(b.name); 
         setBZip(b.zip_code || ""); 
         setBPref(b.prefecture); 
         setBAddr(b.address || ""); 
+        setBPhone(b.phone || "");        // ✨
+        setBHealth(b.health_ins_num || ""); // ✨
+        setBLabor(b.labor_ins_num || "");   // ✨
     };
 
     const deleteBranch = async (id: number) => {
@@ -269,7 +327,10 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                         zIndex: isZipFocus ? 2 : 0,
                                     }} 
                                 />
-                                <button onClick={() => searchAddressBase(compZip, setHeadPref, setCompAddr, setIsSearchingZip)} style={{ ...zipBtnStyle, zIndex: 1 }}>
+                                <button 
+                                    onClick={() => handleZipSearch(compZip, setCompZip, setHeadPref, setCompAddr, setIsSearchingZip)} 
+                                    style={{ ...zipBtnStyle, zIndex: 1 }}
+                                >
                                     {isSearchingZip ? "⌛" : "🔍 住所検索"}
                                 </button>
                             </div>
@@ -308,6 +369,12 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                         <div>
                             <label style={labelStyle}>電話番号</label>
                             <input value={compPhone} onChange={e => setCompPhone(e.target.value)} onFocus={handleFocus} onBlur={(e) => handleBlur(e)} style={inputStyle} />
+                        </div>
+
+                        {/* ✨ 会社用の社会保険・労働保険番号入力欄 */}
+                        <div style={{ gridColumn: "1 / 3", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "15px", backgroundColor: "#f0f9ff", borderRadius: "8px" }}>
+                            <div><label style={labelStyle}>🛡️ 社会保険 整理記号・番号</label><input value={compHealth} onChange={e => setCompHealth(e.target.value)} placeholder="例: 12-あいう 1234" style={inputStyle} /></div>
+                            <div><label style={labelStyle}>🏗️ 労働保険番号</label><input value={compLabor} onChange={e => setCompLabor(e.target.value)} placeholder="例: 12-1-03-123456-000" style={inputStyle} /></div>
                         </div>
 
                         <div style={{ gridColumn: "1 / 3" }}>
@@ -351,7 +418,9 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                         </div>
                                         <div style={{ fontSize: "12px", color: "#7f8c8d" }}>〒{b.zip_code} {b.prefecture}{b.address}</div>
                                     </div>
-                                    <button onClick={() => startEditBranch(b)} style={editBtnStyle}>編集</button>
+                                    {b.id !== 1 && (
+                                        <button onClick={() => startEditBranch(b)} style={editBtnStyle}>編集</button>
+                                    )}
                                     {b.id !== 1 && (
                                         deletingBranchId === b.id ? (
                                             <div style={{ display: "flex", gap: "5px" }}>
@@ -381,9 +450,9 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                             <h4 style={{ margin: "0 0 15px 0" }}>{editingBranchId !== null ? "📝 支店の編集" : "➕ 支店の追加"}</h4>
                             
                             <label style={miniLabelStyle}>支店名</label>
-                            <input value={bName} onChange={e => setBName(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} style={{ ...inputStyle, marginBottom: "10px" }} />
+                            <input value={bName} onChange={e => setBName(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} style={{ ...inputStyle, ...inputBottomSpace }} />
                             
-                            <div style={{ display: "flex", marginBottom: "10px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
+                            <div style={{ display: "flex", ...inputBottomSpace, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
                                 <input 
                                     value={bZip} 
                                     onChange={e => setBZip(e.target.value)} 
@@ -392,16 +461,45 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     placeholder="郵便番号" 
                                     style={{ ...zipInputStyle, zIndex: isBZipFocus ? 2 : 0 }} 
                                 />
-                                <button onClick={() => searchAddressBase(bZip, setBPref, setBAddr, setIsSearchingBZip)} style={{ ...zipBtnStyle, zIndex: 1, borderLeft: "1px solid #ddd" }}>
+                                <button 
+                                    onClick={() => handleZipSearch(bZip, setBZip, setBPref, setBAddr, setIsSearchingBZip)} 
+                                    style={{ ...zipBtnStyle, zIndex: 1, borderLeft: "1px solid #ddd" }}
+                                >
                                     {isSearchingBZip ? "⌛" : "🔍"}
                                 </button>
                             </div>
 
-                            <select value={bPref} onChange={e => setBPref(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} style={{ ...inputStyle, marginBottom: "10px" }}>
-                                <option value="">都道府県...</option>
-                                {["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"].map(p => <option key={p} value={p}>{p}</option>)}
+                            <select value={bPref} onChange={e => setBPref(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} style={{ ...inputStyle, ...inputBottomSpace }}>
+                                <option value="">都道府県 (必須)</option>
+                                    {["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"].map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
-                            <input value={bAddr} onChange={e => setBAddr(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} placeholder="市区町村・番地" style={{ ...inputStyle, marginBottom: "15px" }} />
+
+                            <input value={bAddr} onChange={e => setBAddr(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} placeholder="市区町村・番地" style={{ ...inputStyle, ...inputBottomSpace }} />
+                            
+                            {/* ✨ 支店固有の項目 */}
+                            <label style={miniLabelStyle}>支店電話番号</label>
+                            <input 
+                                value={bPhone} 
+                                onChange={e => setBPhone(e.target.value)} 
+                                placeholder="空欄なら本店と同じ"
+                                style={{ ...inputStyle, ...inputBottomSpace }} 
+                            />
+
+                            <label style={miniLabelStyle}>社会保険番号 (支店固有の場合)</label>
+                            <input 
+                                value={bHealth} 
+                                onChange={e => setBHealth(e.target.value)} 
+                                placeholder="未入力なら本店と同じ"
+                                style={{ ...inputStyle, ...inputBottomSpace }} 
+                            />
+
+                            <label style={miniLabelStyle}>労働保険番号 (支店固有の場合)</label>
+                            <input 
+                                value={bLabor} 
+                                onChange={e => setBLabor(e.target.value)} 
+                                placeholder="未入力なら本店と同じ"
+                                style={{ ...inputStyle, ...inputBottomSpace }} 
+                            />
                             <div style={{ display: "flex", gap: "10px" }}>
                                 <button 
                                     onClick={saveBranch} 
@@ -451,7 +549,19 @@ const deleteBtnStyle = {
 const editBtnStyle = { background: "none", border: "none", color: "#3498db", cursor: "pointer", fontSize: "12px", fontWeight: "bold" as const };
 const subBtnStyle = { padding: "0 15px", borderRadius: "6px", border: "1px solid #ddd", cursor: "pointer", backgroundColor: "white", whiteSpace: "nowrap" as const };
 const addBoxStyle = { backgroundColor: "#f8fafc", padding: "20px", borderRadius: "12px", alignSelf: "start" as const };
-const miniLabelStyle = { fontSize: "11px", fontWeight: "bold" as const, color: "#94a3b8", marginBottom: "4px", display: "block" };
+// ラベルの余白を最小限にする
+const miniLabelStyle = { 
+    fontSize: "11px", 
+    fontWeight: "bold" as const, 
+    color: "#94a3b8", 
+    marginBottom: "1px", // 👈 4pxから1pxへ。ほぼ密着させます
+    display: "block" 
+};
+
+// 入力欄の下に余白を作り、次のラベルとの距離を離す
+const inputBottomSpace = {
+    marginBottom: "12px" // 👈 これで「セット間」の距離を作ります
+};
 const addBtnStyle = { flex: 1, backgroundColor: "#2ecc71", color: "white", border: "none", padding: "12px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" as const };
 const zipInputStyle = { ...inputStyle, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none", position: "relative" as const, transition: "all 0.2s" };
 const zipBtnStyle = { ...subBtnStyle, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, backgroundColor: "#f8fafc", transition: "all 0.2s" };

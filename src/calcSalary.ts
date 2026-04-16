@@ -1,78 +1,75 @@
 /**
- * calcSalary.ts — 給与計算エンジン（2024年度版）
- *
- * 自動計算: 健康保険料 / 介護保険料 / 厚生年金 / 雇用保険 / 所得税
- * 手入力:   住民税（前年所得ベースのため自動計算不可）
+ * calcSalary.ts — 給与計算エンジン（2026年度版）
+ * * 自動計算: 健康保険料 / 介護保険料 / 厚生年金 / 雇用保険 / 所得税
  */
- 
-// ─── 外部から渡す「手入力」項目 ───────────────────────────
+
 export interface SalaryExtras {
   allowanceName: string;
   allowanceAmount: number;
-  residentTax: number;      // 住民税のみ手入力
-  prefecture: string;       // 健保料率の都道府県
-  dependents: number;       // 扶養親族数（所得税甲欄）
+  residentTax: number;
+  prefecture: string;
+  dependents: number;
+  customItems: { name: string; amount: number; type: 'earning' | 'deduction' }[];
 }
- 
-// ─── 計算結果 ─────────────────────────────────────────────
+
 export interface SalaryResult {
-  // 勤怠
   workDays: number;
   totalWorkHours: number;
   totalOvertimeHours: number;
   totalNightHours: number;
-  // 支給
   basePay: number;
+  absenceDeduction: number;
   overtime25Pay: number;
   overtime50Pay: number;
   nightPay: number;
   commutePay: number;
   allowanceAmount: number;
+  customEarnings: number;
   totalEarnings: number;
-  // 控除（全て自動計算。住民税のみ手入力値）
   healthInsurance: number;
   nursingInsurance: number;
   welfarePension: number;
   empInsurance: number;
   incomeTax: number;
   residentTax: number;
+  customDeductions: number;
   totalDeductions: number;
   netPay: number;
-  // メタ
   isNursingCareTarget: boolean;
-  hyojunHoshu: number;       // 標準報酬月額（確認用）
+  hyojunHoshu: number;
 }
- 
+
 // ═══════════════════════════════════════════════════════════
-// 1. 協会けんぽ 健康保険料率（2024年度・本人負担分）
+// 1. 協会けんぽ 健康保険料率（2026年度見込・本人負担分）
 //    [健保のみ料率, 介護保険込み料率（40〜64歳）]
 // ═══════════════════════════════════════════════════════════
 const KENPO: Record<string, [number, number]> = {
-  "北海道": [5.00, 5.79], "青森": [4.95, 5.74], "岩手": [4.75, 5.54],
-  "宮城": [5.02, 5.81], "秋田": [4.85, 5.64], "山形": [4.84, 5.63],
-  "福島": [4.85, 5.64], "茨城": [4.87, 5.66], "栃木": [4.89, 5.68],
-  "群馬": [4.85, 5.64], "埼玉": [4.85, 5.64], "千葉": [4.89, 5.68],
-  "東京": [4.90, 5.69], "神奈川": [4.98, 5.77], "新潟": [4.80, 5.59],
-  "富山": [4.68, 5.47], "石川": [4.90, 5.69], "福井": [4.58, 5.37],
-  "山梨": [4.96, 5.75], "長野": [4.79, 5.58], "静岡": [4.77, 5.56],
-  "愛知": [4.90, 5.69], "三重": [4.83, 5.62], "滋賀": [4.90, 5.69],
-  "京都": [5.02, 5.81], "大阪": [5.02, 5.81], "兵庫": [5.06, 5.85],
-  "奈良": [4.90, 5.69], "和歌山": [4.83, 5.62], "鳥取": [4.82, 5.61],
-  "島根": [4.85, 5.64], "岡山": [4.95, 5.74], "広島": [5.01, 5.80],
-  "山口": [4.86, 5.65], "徳島": [4.89, 5.68], "香川": [5.00, 5.79],
-  "愛媛": [4.89, 5.68], "高知": [4.96, 5.75], "福岡": [4.90, 5.69],
-  "佐賀": [4.85, 5.64], "長崎": [4.83, 5.62], "熊本": [4.90, 5.69],
-  "大分": [4.77, 5.56], "宮崎": [4.79, 5.58], "鹿児島": [4.84, 5.63],
-  "沖縄": [4.80, 5.59],
+  "北海道": [5.05, 5.90], "青森": [5.00, 5.85], "岩手": [4.80, 5.65],
+  "宮城": [5.07, 5.92], "秋田": [4.90, 5.75], "山形": [4.89, 5.74],
+  "福島": [4.90, 5.75], "茨城": [4.92, 5.77], "栃木": [4.94, 5.79],
+  "群馬": [4.90, 5.75], "埼玉": [4.90, 5.75], "千葉": [4.94, 5.79],
+  "東京": [4.98, 5.83], "神奈川": [5.03, 5.88], "新潟": [4.85, 5.70],
+  "富山": [4.73, 5.58], "石川": [4.95, 5.80], "福井": [4.63, 5.48],
+  "山梨": [5.01, 5.86], "長野": [4.84, 5.69], "静岡": [4.82, 5.67],
+  "愛知": [4.95, 5.80], "三重": [4.88, 5.73], "滋賀": [4.95, 5.80],
+  "京都": [5.07, 5.92], "大阪": [5.07, 5.92], "兵庫": [5.11, 5.96],
+  "奈良": [4.95, 5.80], "和歌山": [4.88, 5.73], "鳥取": [4.87, 5.72],
+  "島根": [4.90, 5.75], "岡山": [5.00, 5.85], "広島": [5.06, 5.91],
+  "山口": [4.91, 5.76], "徳島": [4.94, 5.79], "香川": [5.05, 5.90],
+  "愛媛": [4.94, 5.79], "高知": [5.01, 5.86], "福岡": [4.95, 5.80],
+  "佐賀": [4.90, 5.75], "長崎": [4.88, 5.73], "熊本": [4.95, 5.80],
+  "大分": [4.82, 5.67], "宮崎": [4.84, 5.69], "鹿児島": [4.89, 5.74],
+  "沖縄": [4.85, 5.70],
 };
 export const PREFECTURES = Object.keys(KENPO);
- 
-// 厚生年金（固定、2017年9月〜）/ 雇用保険（一般業種 2024年度）
-const PENSION_RATE = 9.15;   // % 本人負担
-const EMP_INS_RATE = 0.006;  // 0.6% 本人負担
- 
+
+// 厚生年金：18.3%（折半で9.15%） ※固定化されています
+const PENSION_RATE = 9.15; 
+// 雇用保険：2026年度 一般の事業（本人負担 0.7% = 7/1000）
+const EMP_INS_RATE = 0.007;
+
 // ═══════════════════════════════════════════════════════════
-// 2. 標準報酬月額 等級表（協会けんぽ 2024年）
+// 2. 標準報酬月額 等級表（協会けんぽ 2026年）
 // ═══════════════════════════════════════════════════════════
 const HYOJUN: [number, number, number][] = [
   [0,63000,58000],[63000,73000,68000],[73000,83000,78000],[83000,93000,88000],
@@ -92,16 +89,16 @@ const HYOJUN: [number, number, number][] = [
   [1005000,1055000,1030000],[1055000,1115000,1090000],[1115000,1175000,1150000],
   [1175000,Infinity,1210000],
 ];
- 
+
 export const getHyojunHoshu = (monthly: number): number => {
   for (const [lo, hi, std] of HYOJUN) {
     if (monthly >= lo && monthly < hi) return std;
   }
   return HYOJUN[HYOJUN.length - 1][2];
 };
- 
+
 // ═══════════════════════════════════════════════════════════
-// 3. 源泉徴収税額表（月額・甲欄 2024年版）
+// 3. 源泉徴収税額表（月額・甲欄 2026年版）
 // ═══════════════════════════════════════════════════════════
 const GENSEN: [number, number, ...number[]][] = [
   [0,88000,0,0,0,0,0,0,0,0],
@@ -185,7 +182,7 @@ const GENSEN: [number, number, ...number[]][] = [
   [940000,960000,41270,39160,38150,37130,36120,35100,34090,33070],[960000,980000,42220,40120,39100,38090,37070,36060,35040,34030],
   [980000,1000000,43180,41070,40060,39040,38030,37010,36000,34980],
 ];
- 
+
 const getGensenTax = (taxBase: number, dependents: number): number => {
   const dep = Math.min(Math.max(0, dependents), 7);
   if (taxBase >= 1000000) {
@@ -200,7 +197,7 @@ const getGensenTax = (taxBase: number, dependents: number): number => {
   }
   return 0;
 };
- 
+
 // ═══════════════════════════════════════════════════════════
 // 4. 介護保険 対象判定（40歳以上65歳未満）
 // ═══════════════════════════════════════════════════════════
@@ -215,7 +212,7 @@ export const checkNursingCare = (birthday: string, year: number, month: number):
     target <  new Date(reach65.getFullYear(), reach65.getMonth(), 1)
   );
 };
- 
+
 // ═══════════════════════════════════════════════════════════
 // 5. メイン: calculateSalary
 // ═══════════════════════════════════════════════════════════
@@ -226,30 +223,42 @@ export const calculateSalary = (
   targetYear: number,
   targetMonth: number,
 ): SalaryResult => {
- 
+
   // ── 勤怠集計 ──────────────────────────────────────────────
   const workDays = attendanceData.length;
   let totalWorkHours = 0, totalNightHours = 0, totalOvertimeHours = 0;
   let basePay = 0, overtime25Pay = 0, overtime50Pay = 0, nightPay = 0;
- 
+  let absenceDeduction = 0;
+
   if (staff.wage_type === 'monthly') {
     // 月給制: 残業単価 = 月給 ÷ 月の所定労働時間
     const monthlyWage = Number(staff.hourly_wage) || 0;
-    basePay = monthlyWage;
+
+    // 月の所定労働時間（平日 × 所定時間 or スタッフ設定値）
     const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
     let weekends = 0;
     for (let d = 1; d <= daysInMonth; d++) {
       const dow = new Date(targetYear, targetMonth - 1, d).getDay();
       if (dow === 0 || dow === 6) weekends++;
     }
-    const hourlyRate = ((daysInMonth - weekends) * 8) > 0
-      ? monthlyWage / ((daysInMonth - weekends) * 8) : 0;
- 
+    const prescribedDays  = Number(staff.monthly_work_days)   || (daysInMonth - weekends);
+    const scheduledHours  = Number(staff.scheduled_work_hours) || 8;
+    const prescribedTotal = prescribedDays * scheduledHours;
+    const hourlyRate = prescribedTotal > 0 ? monthlyWage / prescribedTotal : 0;
+
+    // 欠勤控除：（月給 ÷ 所定労働日数） × 欠勤日数
+    // 欠勤日数 = 所定日数 - 実出勤日数
+    const absentDays = Math.max(0, prescribedDays - workDays);
+    absenceDeduction = absentDays > 0
+      ? Math.floor((monthlyWage / prescribedDays) * absentDays)
+      : 0;
+    basePay = monthlyWage - absenceDeduction;
+
     attendanceData.forEach(row => {
       const h = Number(row.work_hours) || 0;
       const n = Number(row.night_hours) || 0;
       totalWorkHours += h; totalNightHours += n;
-      let rem = Math.max(0, h - 8);
+      let rem = Math.max(0, h - scheduledHours); // 所定時間超を残業とする
       while (rem > 0.0099) {
         const c = Math.min(rem, 0.01);
         totalOvertimeHours < 60 ? (overtime25Pay += hourlyRate * 1.25 * c) : (overtime50Pay += hourlyRate * 1.50 * c);
@@ -257,7 +266,7 @@ export const calculateSalary = (
       }
       nightPay += hourlyRate * 0.25 * n;
     });
- 
+
   } else {
     // 時給制
     attendanceData.forEach(row => {
@@ -275,43 +284,52 @@ export const calculateSalary = (
       nightPay += wage * 0.25 * n;
     });
   }
- 
-  // ── 通勤手当・支給合計 ──────────────────────────────────────
-  const commutePay =
-    staff.commute_type === 'daily'   ? (Number(staff.commute_wage) || 0) * workDays :
-    staff.commute_type === 'monthly' ? (Number(staff.commute_wage) || 0) : 0;
+
+  // ── 通勤手当・任意手当 ──────────────────────────────────────
+  const commutePay = staff.commute_type === 'daily'   ? (Number(staff.commute_wage) || 0) * workDays
+                   : staff.commute_type === 'monthly' ? (Number(staff.commute_wage) || 0) : 0;
   const allowanceAmount = Number(extras.allowanceAmount) || 0;
+
+  // ── カスタム項目の集計 ─────────────────────────────────────
+  const customItems = extras.customItems ?? [];
+  const customEarnings   = customItems.filter(i => i.type === 'earning')  .reduce((s, i) => s + i.amount, 0);
+  const customDeductions = customItems.filter(i => i.type === 'deduction').reduce((s, i) => s + i.amount, 0);
+
+  // ── 支給合計 ──────────────────────────────────────────────
   const totalEarnings = Math.ceil(basePay + overtime25Pay + overtime50Pay + nightPay)
-                      + commutePay + allowanceAmount;
- 
-  // ── 社会保険料 ────────────────────────────────────────────
+                      + commutePay + allowanceAmount + customEarnings;
+
+  // ── 社会保険料（標準報酬月額ベース） ────────────────────────
   const reportable  = Math.ceil(basePay + overtime25Pay + overtime50Pay + nightPay + commutePay);
   const hyojunHoshu = getHyojunHoshu(reportable);
   const rates       = KENPO[extras.prefecture] ?? KENPO["東京"];
   const nursingTarget = checkNursingCare(staff.birthday || '', targetYear, targetMonth);
- 
+
   const healthRate       = nursingTarget ? rates[1] : rates[0];
   const nursingRate      = nursingTarget ? (rates[1] - rates[0]) : 0;
   const healthTotal      = Math.floor(hyojunHoshu * healthRate  / 100);
   const nursingInsurance = Math.floor(hyojunHoshu * nursingRate / 100);
   const healthInsurance  = healthTotal - nursingInsurance;
   const welfarePension   = Math.floor(hyojunHoshu * PENSION_RATE / 100);
-  const empInsurance     = Math.round(totalEarnings * EMP_INS_RATE); // 四捨五入
- 
-  // ── 所得税（社保控除後で計算） ───────────────────────────────
+  const empInsurance     = Math.round(totalEarnings * EMP_INS_RATE);
+
+  // ── 所得税（社保控除後） ─────────────────────────────────────
   const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
   const incomeTax   = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0);
- 
+
   const residentTax     = Number(extras.residentTax) || 0;
-  const totalDeductions = healthInsurance + nursingInsurance + welfarePension + empInsurance + incomeTax + residentTax;
- 
+  const totalDeductions = healthInsurance + nursingInsurance + welfarePension
+                        + empInsurance + incomeTax + residentTax + customDeductions;
+
   return {
     workDays, totalWorkHours, totalOvertimeHours, totalNightHours,
-    basePay: Math.ceil(basePay), overtime25Pay: Math.ceil(overtime25Pay),
-    overtime50Pay: Math.ceil(overtime50Pay), nightPay: Math.ceil(nightPay),
-    commutePay, allowanceAmount, totalEarnings,
+    basePay: Math.ceil(basePay), absenceDeduction,
+    overtime25Pay: Math.ceil(overtime25Pay),
+    overtime50Pay: Math.ceil(overtime50Pay),
+    nightPay: Math.ceil(nightPay),
+    commutePay, allowanceAmount, customEarnings, totalEarnings,
     healthInsurance, nursingInsurance, welfarePension,
-    empInsurance, incomeTax, residentTax,
+    empInsurance, incomeTax, residentTax, customDeductions,
     totalDeductions, netPay: totalEarnings - totalDeductions,
     isNursingCareTarget: nursingTarget, hyojunHoshu,
   };
