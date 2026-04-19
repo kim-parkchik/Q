@@ -2,12 +2,12 @@
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState } from "react";
 import CompanyManager from "./CompanyManager";
-import CalendarManager from "./CalendarManager"; // 👈 追加
-import StaffManager from "./StaffManager"; // 👈 追加
-import AttendanceManager from "./AttendanceManager"; // ✨ 新しく作った専門家を呼ぶ
-import PaySlipManager from "./PaySlipManager"; // 👈 これを追加！
-import CustomItemManager from "./CustomItemManager"; // 👈 これを追加！
-import BonusManager from "./BonusManager"; // 👈 これを追加！
+import CalendarManager from "./CalendarManager";
+import StaffManager from "./StaffManager";
+import AttendanceManager from "./AttendanceManager";
+import PaySlipManager from "./PaySlipManager";
+import CustomItemManager from "./CustomItemManager";
+import BonusManager from "./BonusManager";
 
 function App() {
   const [db, setDb] = useState<Database | null>(null);
@@ -18,6 +18,7 @@ function App() {
   
   const [targetYear, setTargetYear] = useState(2026);
   const [targetMonth, setTargetMonth] = useState(4);
+  const isStaffReady = staffList.length > 0; // ✨ 従業員が1人以上いるか
 
   useEffect(() => {
     const init = async () => {
@@ -138,6 +139,16 @@ function App() {
             my_number TEXT,     -- マイナンバー（取り扱い注意ですが項目として）
             retirement_date TEXT, -- 🆕 追加：退職日
             status TEXT DEFAULT 'active', -- 🆕 追加：状態（active: 在籍, on_leave: 休職, retired: 退職）
+            -- 1. 役員かどうか (0:従業員, 1:役員)
+            is_executive INTEGER DEFAULT 0,
+
+            -- 2. 雇用保険の対象か (0:対象外, 1:対象)
+            -- 役員なら基本0、兼務役員や一般社員なら1
+            is_employment_ins_eligible INTEGER DEFAULT 1,
+
+            -- 3. 残業代計算の対象か (0:対象外, 1:対象)
+            -- 管理監督者や役員なら0、一般社員なら1
+            is_overtime_eligible INTEGER DEFAULT 1,
             zip_code TEXT, 
             address TEXT, 
             phone TEXT, 
@@ -151,8 +162,11 @@ function App() {
             branch_id INTEGER DEFAULT 0, 
             dependents INTEGER DEFAULT 0, 
             resident_tax INTEGER DEFAULT 0,
+            work_days TEXT,
             scheduled_work_hours REAL DEFAULT 8.0, -- 1日の所定労働時間（例: 8.0）
             monthly_work_days REAL DEFAULT 20.0,    -- 月平均の所定労働日数（例: 20.33）
+            fixed_overtime_hours REAL DEFAULT 0.0,    -- 固定残業時間（時間分）
+            fixed_overtime_allowance INTEGER DEFAULT 0, -- 固定残業代（円）
             FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id)
           );
         `);
@@ -212,20 +226,35 @@ function App() {
     await refreshData();
   };
 
-  const tabStyle = (isActive: boolean) => ({
-    padding: "12px 15px",
-    cursor: "pointer",
-    borderRadius: "5px",
-    marginBottom: "5px",
-    backgroundColor: isActive ? "#3498db" : "transparent",
-    transition: "background-color 0.2s"
-  });
+  // const tabStyle = (isActive: boolean) => ({
+  //   padding: "12px 15px",
+  //   cursor: "pointer",
+  //   borderRadius: "5px",
+  //   marginBottom: "5px",
+  //   backgroundColor: isActive ? "#3498db" : "transparent",
+  //   transition: "background-color 0.2s"
+  // });
 
   const refreshData = async () => {
     if (!db) return;
     const resStaff = await db.select<any[]>("SELECT * FROM staff ORDER BY id ASC");
     setStaffList(resStaff);
   };
+
+  // タブのスタイルを動的に生成する関数をアップデート
+  const tabStyle = (isActive: boolean, isDisabled: boolean = false) => ({
+    padding: "12px 15px",
+    cursor: isDisabled ? "not-allowed" : "pointer", // 🚫 禁止カーソル
+    borderRadius: "5px",
+    marginBottom: "5px",
+    backgroundColor: isActive ? "#3498db" : "transparent",
+    transition: "all 0.2s",
+    opacity: isDisabled ? 0.4 : 1, // 🌫️ グレーアウト
+    pointerEvents: isDisabled ? ("none" as const) : ("auto" as const), // 物理的にクリック不可に
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between"
+  });
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif", backgroundColor: "#f4f7f6" }}>
@@ -234,25 +263,59 @@ function App() {
         <ul style={{ listStyle: "none", padding: "10px", margin: 0 }}>
           <li onClick={() => setActiveTab("company")} style={tabStyle(activeTab === "company")}>🏢 会社設定</li>
           
-          {/* ✨ セットアップ完了時のみ表示されるメニュー */}
           {isSetupComplete && (
             <>
               <li onClick={() => setActiveTab("calendar")} style={tabStyle(activeTab === "calendar")}>📅 会社カレンダー</li>
-              <li onClick={() => setActiveTab("staff")} style={tabStyle(activeTab === "staff")}>👤 従業員管理</li>
-              <li onClick={() => setActiveTab("custom_items")} style={tabStyle(activeTab === "custom_items")}>⚙️ 項目設定</li> {/* 👈 支給・控除項目 */}
-              <li onClick={() => setActiveTab("attendance")} style={tabStyle(activeTab === "attendance")}>⏱️ 勤怠・月次給与</li>
-              <li onClick={() => setActiveTab("bonus")} style={tabStyle(activeTab === "bonus")}>💰 賞与計算</li> {/* 👈 active判定を修正 */}
-              <li onClick={() => setActiveTab("payslip")} style={tabStyle(activeTab === "payslip")}>📄 明細書出力</li>
+              <li onClick={() => setActiveTab("staff")} style={tabStyle(activeTab === "staff")}>👤 従業員詳細管理</li>
+              
+              {/* --- 以下、従業員登録が必要なメニュー --- */}
+              <li 
+                onClick={() => isStaffReady && setActiveTab("custom_items")} 
+                style={tabStyle(activeTab === "custom_items", !isStaffReady)}
+              >
+                ⚙️ 項目設定
+              </li>
+              <li 
+                onClick={() => isStaffReady && setActiveTab("attendance")} 
+                style={tabStyle(activeTab === "attendance", !isStaffReady)}
+              >
+                ⏱️ 勤怠・月次給与
+              </li>
+              <li 
+                onClick={() => isStaffReady && setActiveTab("bonus")} 
+                style={tabStyle(activeTab === "bonus", !isStaffReady)}
+              >
+                💰 賞与計算
+              </li>
+              <li 
+                onClick={() => isStaffReady && setActiveTab("payslip")} 
+                style={tabStyle(activeTab === "payslip", !isStaffReady)}
+              >
+                📄 明細書出力
+              </li>
             </>
           )}
         </ul>
         
-        {/* 未設定時のガイドを表示するとさらにオシャレ */}
-        {!isSetupComplete && (
-          <div style={{ marginTop: "auto", padding: "20px", fontSize: "12px", color: "#95a5a6", lineHeight: "1.6" }}>
-            💡 会社名と本店の所在地を設定すると、すべての機能が解放されます。
-          </div>
-        )}
+        {/* ガイドメッセージの出し分け */}
+        <div style={{ marginTop: "auto", padding: "20px", fontSize: "12px", color: "#95a5a6", lineHeight: "1.6" }}>
+          {!isSetupComplete ? (
+            <>💡 会社名と本店の所在地を設定すると、基本機能が解放されます。</>
+          ) : !isStaffReady ? (
+            <div style={{ color: "#f1c40f" }}>💡 次は「従業員管理」から、最初の1人を登録しましょう！</div>
+          ) : (
+            <div style={{ 
+              marginTop: "auto", 
+              padding: "20px", 
+              fontSize: "11px", 
+              color: "#bdc3c7", 
+              textAlign: "right",
+              fontFamily: "monospace" // バージョン表記っぽく
+            }}>
+              ver 0.0.1
+            </div>
+          )}
+        </div>
       </nav>
 
       <div style={{ flex: 1, padding: "30px", overflowY: "auto" }}>

@@ -119,6 +119,31 @@ export default function AttendanceManager({
     const [companySettings, setCompanySettings] = useState<any>(null);
     const [branchPrefecture, setBranchPrefecture] = useState<string>("東京");
 
+    // 1. フィルタ状態の管理（初期値は 'active' のみ）
+        const [activeFilters, setActiveFilters] = useState<string[]>(["active"]);
+    
+    // 2. フィルタボタンの定義
+    const statusOptions = [
+        { label: "在籍", value: "active", color: "#2ecc71" },   // 緑
+        { label: "休職", value: "on_leave", color: "#f1c40f" }, // 黄
+        { label: "退職", value: "retired", color: "#e74c3c" },  // 赤
+    ];
+
+    // 3. フィルタリングされたリストを作成
+    const filteredStaffList = (staffList || []).filter(s => {
+        // 選択されているステータスに含まれる人だけを通す
+        return activeFilters.includes(s.status || "active");
+    });
+
+    // 4. トグル関数
+    const toggleFilter = (val: string) => {
+        setActiveFilters(prev => 
+            prev.includes(val) 
+                ? prev.filter(v => v !== val) // すでにあれば削除
+                : [...prev, val]              // なければ追加
+        );
+    };
+
     const handleExportCSV = async () => {
         if (!db) return;
         
@@ -320,7 +345,7 @@ export default function AttendanceManager({
 
         const targetTimes = [row.in, row.out, row.bStart, row.bEnd, row.outTime, row.returnTime];
         if (targetTimes.some(isOver48)) {
-            alert("48:00以上の時間は入力できません。大手ソフト（freee等）の仕様に合わせ、上限は47:59までとしています。");
+            alert("48:00以上の時間は入力できません。他社ソフトの仕様に合わせ、上限は47:59までとしています。");
             return;
         }
         // ---------------------------------
@@ -337,7 +362,8 @@ export default function AttendanceManager({
             // 一旦消して
             await db.execute("DELETE FROM attendance WHERE staff_id = ? AND work_date = ?", [selectedStaffId, date]);
             
-            // 🆕 新しいカラムを含めて保存
+            const isMonthly = currentStaff.wage_type === "monthly";
+
             await db.execute(
                 `INSERT INTO attendance (
                     staff_id, work_date, entry_time, exit_time, 
@@ -349,9 +375,10 @@ export default function AttendanceManager({
                     selectedStaffId, date, row.in||"", row.out||"", 
                     row.bStart||"", row.bEnd||"", row.outTime||"", row.returnTime||"", 
                     Number(total), Number(night),
-                    currentStaff.base_wage,       // ★その時の時給
-                    PAYROLL_SETTINGS.OVERTIME_RATE, // ★その時の残業率(1.25)
-                    0.25                            // ★その時の深夜率
+                    // ✅ 月給制なら 0 (または NULL)、時給制なら base_wage を入れる
+                    isMonthly ? 0 : currentStaff.base_wage, 
+                    PAYROLL_SETTINGS.OVERTIME_RATE,
+                    0.25
                 ]
             );
 
@@ -362,7 +389,7 @@ export default function AttendanceManager({
                     isSaved: true, 
                     savedHours: Number(total), 
                     nightHours: Number(night),
-                    actual_base_wage: currentStaff.base_wage 
+                    actual_base_wage: isMonthly ? 0 : currentStaff.base_wage
                 } 
             }));
         } catch (e) {
@@ -519,30 +546,79 @@ export default function AttendanceManager({
                 </div>
             </div>
 
-            {/* 🆕 従業員選択と一括保存ボタンを横並びにするセクション */}
+            {/* 🆕 従業員選択・フィルタ・一括保存セクション */}
             <section style={{ 
                 display: "flex", 
-                justifyContent: "space-between", // 両端に広げる
-                alignItems: "flex-end",         // 下揃え
+                justifyContent: "space-between", 
+                alignItems: "stretch", // 高さを揃える
                 gap: "20px", 
-                marginBottom: "25px",           // 下の表との間隔を広めに（少し離す）
+                marginBottom: "25px", 
                 marginTop: "20px"
             }}>
-                {/* 左側：従業員選択（幅を半分くらいに） */}
-                <div style={{ ...cardStyle, flex: "0 1 50%", margin: 0, borderTop: "4px solid #3498db" }}>
-                    <label style={labelStyle}>対象の従業員を選択</label>
-                    <select 
-                        value={selectedStaffId} 
-                        onChange={e => setSelectedStaffId(e.target.value)} 
-                        style={{ ...inputStyle, fontSize: "16px", fontWeight: "bold" }}
-                    >
-                        <option value="">-- 従業員を選んでください --</option>
-                        {staffList.map(s => <option key={s.id} value={s.id}>{s.id}: {s.name}</option>)}
-                    </select>
+                {/* 左側：従業員選択カード（フィルタ機能付き） */}
+                <div style={{ ...cardStyle, flex: "1", margin: 0, borderTop: "4px solid #3498db", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    
+                    {/* フィルタボタン群 */}
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "bold", color: "#7f8c8d" }}>表示:</span>
+                        {statusOptions.map(opt => {
+                            const isActive = activeFilters.includes(opt.value);
+                            return (
+                                <button
+                                    key={opt.value}
+                                    onClick={() => toggleFilter(opt.value)}
+                                    style={{
+                                        padding: "4px 12px",
+                                        borderRadius: "15px",
+                                        border: `1px solid ${opt.color}`,
+                                        backgroundColor: isActive ? opt.color : "white",
+                                        color: isActive ? "white" : opt.color,
+                                        cursor: "pointer",
+                                        fontSize: "11px",
+                                        fontWeight: "bold",
+                                        transition: "0.2s"
+                                    }}
+                                >
+                                    {isActive ? "✅ " : ""}{opt.label}
+                                </button>
+                            );
+                        })}
+                        <button
+                            onClick={() => setActiveFilters(["active", "on_leave", "retired"])}
+                            style={{
+                                padding: "4px 12px",
+                                borderRadius: "15px",
+                                border: "1px solid #95a5a6",
+                                backgroundColor: "white",
+                                color: "#7f8c8d",
+                                cursor: "pointer",
+                                fontSize: "11px"
+                            }}
+                        >
+                            全員
+                        </button>
+                    </div>
+
+                    {/* 従業員選択プルダウン */}
+                    <div>
+                        <label style={labelStyle}>対象の従業員を選択</label>
+                        <select 
+                            value={selectedStaffId} 
+                            onChange={e => setSelectedStaffId(e.target.value)} 
+                            style={{ ...inputStyle, fontSize: "16px", fontWeight: "bold" }}
+                        >
+                            <option value="">-- {activeFilters.length === 0 ? "表示をオンにしてください" : "従業員を選んでください"} --</option>
+                            {filteredStaffList.map(s => (
+                                <option key={s.id} value={s.id}>
+                                    {s.id}: {s.name} ({s.status === 'active' ? '在籍' : s.status === 'retired' ? '退職' : '休職'})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
-                {/* 右側：一括保存ボタン（スタッフが選択されている時だけ表示） */}
-                <div style={{ flex: "0 1 auto", paddingBottom: "5px" }}>
+                {/* 右側：一括保存ボタン（配置バランスのため位置調整） */}
+                <div style={{ flex: "0 0 auto", display: "flex", alignItems: "flex-end", paddingBottom: "10px" }}>
                     {selectedStaffId && (
                         <button 
                             onClick={saveAllMonthlyData} 
@@ -553,7 +629,9 @@ export default function AttendanceManager({
                                 display: "flex", 
                                 alignItems: "center", 
                                 gap: "8px",
-                                boxShadow: "0 2px 4px rgba(0,0,0,0.1)" // 少し浮かせて押しやすく
+                                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                                height: "fit-content",
+                                padding: "12px 20px"
                             }}
                         >
                             📂 今月の未保存分をすべて保存

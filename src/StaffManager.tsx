@@ -58,11 +58,14 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const [targetPhone, setTargetPhone] = useState("");
     const [targetMobile, setTargetMobile] = useState("");
     const [targetCommuteType, setTargetCommuteType] = useState("daily");
-    const [targetCommuteWage, setTargetCommuteWage] = useState(0);
+    const [targetCommuteAmount, setTargetCommuteAmount] = useState(0);
     const [targetWageType, setTargetWageType] = useState("hourly");
     const [targetDependents, setTargetDependents] = useState(0);
     const [targetResidentTax, setTargetResidentTax] = useState(0);
     const [targetStandardRemuneration, setTargetStandardRemuneration] = useState(0);
+    const [targetWorkDays, setTargetWorkDays] = useState<Record<string, boolean>>({
+        mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false
+    });
 
     const [branches, setBranches] = useState<any[]>([]);
     const [targetBranchId, setTargetBranchId] = useState(1); // 1（本店）をデフォルトに
@@ -76,6 +79,18 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const [calendarPatterns, setCalendarPatterns] = useState<CalendarPattern[]>([]);
     const [targetPatternId, setTargetPatternId] = useState(1);
 
+    const [targetIsExecutive, setTargetIsExecutive] = useState(0);
+    const [targetIsEmploymentInsEligible, setTargetIsEmploymentInsEligible] = useState(1);
+    const [targetIsOvertimeEligible, setTargetIsOvertimeEligible] = useState(1);
+
+    const [targetFixedOvertimeHours, setTargetFixedOvertimeHours] = useState(0);
+    const [targetFixedOvertimeAmount, setTargetFixedOvertimeAmount] = useState(0);
+
+    // --- 検索・絞り込み用ステート ---
+    const [searchKeyword, setSearchKeyword] = useState("");
+    const [filterStatus, setFilterStatus] = useState<string[]>(["active", "on_leave"]); // 初期値は在籍と休職
+    const [filterBranchId, setFilterBranchId] = useState<string>("all");
+    
     // 🆕 住所検索を実行する関数
     const handleZipSearch = async () => {
         // 数字以外を除去
@@ -108,8 +123,33 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     // --- 年間稼働日数を計算する関数 (patternIdを引数に取る) ---
     const calculateDays = async (patternId: number) => {
         if (!db) return;
-        const year = 2026; 
+        
+        // 常に「現在」または「計算対象」の年を取得（うるう年判定のため）
+        const year = new Date().getFullYear(); 
 
+        // --- A. カレンダー設定がない（チェックなし）場合 ---
+        if (patternId === 0) {
+            let workDays = 0;
+            const date = new Date(year, 0, 1); // 1月1日からスタート
+
+            // 1年分ループ（年が変わるまで）
+            while (date.getFullYear() === year) {
+                // JSの getDay() は 0:日, 1:月, 2:火, 3:水, 4:木, 5:金, 6:土
+                const dayLabels = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+                const dayKey = dayLabels[date.getDay()];
+
+                // targetWorkDays の boolean値を確認
+                if (targetWorkDays[dayKey as keyof typeof targetWorkDays]) {
+                    workDays++;
+                }
+                date.setDate(date.getDate() + 1); // 翌日へ
+            }
+            setAnnualWorkDays(workDays);
+            return;
+        }
+
+        // --- B. カレンダー設定がある場合 ---
+        // (既存の祝日マスターや company_calendar を参照するロジック)
         try {
             const resHolidays = await db.select<any[]>("SELECT holiday_date FROM holiday_master");
             const hSet = new Set(resHolidays.map(h => h.holiday_date.replaceAll("/", "-")));
@@ -167,9 +207,28 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     // パターンが変更されたら日数を再計算
     useEffect(() => {
         calculateDays(targetPatternId);
-    }, [targetPatternId]);
+    }, [targetPatternId, targetWorkDays]);
 
-    const sortedList = [...staffList].sort((a, b) => {
+    // 絞り込みと言語検索を適用
+    const filteredList = staffList.filter(s => {
+        // 1. ステータス絞り込み
+        const matchesStatus = filterStatus.includes(s.status || "active");
+        
+        // 2. キーワード検索 (ID, 名前, フリガナ)
+        const keyword = searchKeyword.toLowerCase();
+        const matchesKeyword = 
+            String(s.id).includes(keyword) ||
+            s.name.toLowerCase().includes(keyword) ||
+            (s.furigana || "").toLowerCase().includes(keyword);
+
+        // 🆕 3. 店舗絞り込み (ここが抜けていました！)
+        const matchesBranch = filterBranchId === "all" || String(s.branch_id) === filterBranchId;
+
+        return matchesStatus && matchesKeyword && matchesBranch;
+    });
+
+    // filteredList に対してソートを行う
+    const sortedAndFilteredList = [...filteredList].sort((a, b) => {
         const valA = a[sortKey];
         const valB = b[sortKey];
 
@@ -195,11 +254,12 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const clearForm = () => {
         setTargetId(""); setTargetName(""); setTargetFurigana(""); setTargetBirthday(""); 
         setTargetJoinDate(new Date().toISOString().split('T')[0]);
-        setTargetRetirementDate(""); // 🆕
-        setTargetStatus("active"); // 🆕
-        setTargetZip(""); setTargetAddress(""); setTargetPhone(""); setTargetMobile(""); setTargetCommuteWage(0);
+        setTargetRetirementDate("");
+        setTargetStatus("active");
+        setTargetZip(""); setTargetAddress(""); setTargetPhone(""); setTargetMobile(""); setTargetCommuteAmount(0);
         setTargetBranchId(1); setTargetDependents(0); setTargetResidentTax(0);
-        setTargetStandardRemuneration(0); // 🆕 追加
+        setTargetStandardRemuneration(0);
+        setTargetWorkDays({ mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false });
         setEditingId(null);
     };
 
@@ -219,7 +279,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         setTargetMobile(s.mobile || ""); // 👈 追加
         setTargetWage(s.base_wage);
         setTargetCommuteType(s.commute_type);
-        setTargetCommuteWage(s.commute_amount);
+        setTargetCommuteAmount(s.commute_amount);
         setTargetWageType(s.wage_type || "hourly");
         setTargetPatternId(s.calendar_pattern_id || 1);
         const hoursVal = s.scheduled_work_hours || 8; 
@@ -231,6 +291,22 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         setTargetDependents(s.dependents || 0);
         setTargetResidentTax(s.resident_tax || 0);
         setTargetStandardRemuneration(s.standard_remuneration || 0); // 🆕 追加
+        setTargetIsExecutive(s.is_executive || 0);
+        setTargetIsEmploymentInsEligible(s.is_employment_ins_eligible ?? 1); // 雇用保険はデフォルト1なので??を使用
+        setTargetIsOvertimeEligible(s.is_overtime_eligible ?? 1);
+        setTargetFixedOvertimeHours(s.fixed_overtime_hours || 0);
+        setTargetFixedOvertimeAmount(s.fixed_overtime_allowance || 0);
+        // 🆕 曜日データの復元
+        const newWorkDays = { mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false };
+        if (s.work_days) {
+            s.work_days.split(',').forEach((day: string) => {
+                if (day in newWorkDays) {
+                    (newWorkDays as any)[day] = true;
+                }
+            });
+        }
+        setTargetWorkDays(newWorkDays);
+
         setShowForm(true);
     };
 
@@ -245,9 +321,13 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         const original = staffList.find(s => String(s.id) === String(editingId));
         if (!original) return true;
 
+        const currentWorkDaysStr = Object.entries(targetWorkDays).filter(([_,v])=>v).map(([k])=>k).join(',');
+        const originalWorkDaysStr = original.work_days || "";
+
         return (
-            String(targetStatus) !== String(original.status || "active") || // 🆕
-            String(targetRetirementDate) !== String(original.retirement_date || "") || // 🆕
+            currentWorkDaysStr !== originalWorkDaysStr ||
+            String(targetStatus) !== String(original.status || "active") ||
+            String(targetRetirementDate) !== String(original.retirement_date || "") ||
             String(targetWageType) !== String(original.wage_type || "hourly") ||
             String(targetName) !== String(original.name) ||
             String(targetFurigana) !== String(original.furigana || "") ||
@@ -256,15 +336,21 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
             String(targetJoinDate) !== String(original.join_date || "") ||
             String(targetZip) !== String(original.zip_code || "") ||
             String(targetAddress) !== String(original.address || "") ||
-            String(targetPhone) !== String(original.phone || "") || // 👈 追加
-            String(targetMobile) !== String(original.mobile || "") || // 👈 追加
+            String(targetPhone) !== String(original.phone || "") ||
+            String(targetMobile) !== String(original.mobile || "") ||
             String(targetCommuteType) !== String(original.commute_type) ||
-            Number(targetCommuteWage) !== Number(original.commute_amount) ||
+            Number(targetCommuteAmount) !== Number(original.commute_amount) ||
             Number(targetBranchId) !== Number(original.branch_id || 1) ||
             Number(targetDependents) !== Number(original.dependents || 0) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
-            Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) || // 👈 追加・修正
-            Number(targetStandardRemuneration) !== Number(original.standard_remuneration || 0)
+            Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
+            Number(targetStandardRemuneration) !== Number(original.standard_remuneration || 0) ||
+            Number(targetIsExecutive) !== Number(original.is_executive || 0) ||
+            Number(targetIsEmploymentInsEligible) !== Number(original.is_employment_ins_eligible ?? 1) ||
+            Number(targetIsOvertimeEligible) !== Number(original.is_overtime_eligible ?? 1) ||
+            Number(targetFixedOvertimeHours) !== Number(original.fixed_overtime_hours || 0) ||
+            Number(targetFixedOvertimeAmount) !== Number(original.fixed_overtime_allowance || 0) ||
+            Number(targetPatternId) !== Number(original.calendar_pattern_id || 0) // カレンダーIDの比較を追加
         );
     };
 
@@ -277,20 +363,33 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         if (!db || !targetId || !targetName) return;
         const safeId = String(targetId).trim();
         setIsSaving(true);
+
+        const workDaysString = Object.entries(targetWorkDays)
+            .filter(([_, checked]) => checked)
+            .map(([day]) => day)
+            .join(',');
+
         try {
-            const params = [
+            // SQLに渡すパラメータ配列 (UPDATEとINSERTで共通、最後だけ異なる)
+            const baseParams = [
                 targetName, targetFurigana, targetBirthday, targetJoinDate, 
                 targetRetirementDate, targetStatus, targetZip, targetAddress, 
                 targetPhone, targetMobile, targetWageType, Number(targetWage), 
-                targetCommuteType, Number(targetCommuteWage), Number(targetBranchId), 
+                targetCommuteType, Number(targetCommuteAmount), Number(targetBranchId), 
                 Number(targetDependents), Number(targetResidentTax), 
-                targetPatternId, 
-                targetDailyHours,
+                Number(targetPatternId), // calendar_pattern_id
+                Number(targetDailyHours),
                 Number(targetStandardRemuneration),
-                safeId
+                workDaysString,
+                Number(targetIsExecutive), 
+                Number(targetIsEmploymentInsEligible), 
+                Number(targetIsOvertimeEligible),
+                Number(targetFixedOvertimeHours),
+                Number(targetFixedOvertimeAmount)
             ];
 
             if (editingId) {
+                // UPDATE処理
                 await db.execute(
                     `UPDATE staff SET 
                         name=?, furigana=?, birthday=?, join_date=?, 
@@ -298,12 +397,14 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         phone=?, mobile=?, wage_type=?, base_wage=?, 
                         commute_type=?, commute_amount=?, branch_id=?, 
                         dependents=?, resident_tax=?, calendar_pattern_id=?,
-                        scheduled_work_hours=?,
-                        standard_remuneration=?
+                        scheduled_work_hours=?, standard_remuneration=?,
+                        work_days=?, is_executive=?, is_employment_ins_eligible=?, 
+                        is_overtime_eligible=?, fixed_overtime_hours=?, fixed_overtime_allowance=?
                     WHERE id=?`,
-                    params
+                    [...baseParams, safeId]
                 );
             } else {
+                // INSERT処理
                 await db.execute(
                     `INSERT INTO staff (
                         name, furigana, birthday, join_date, 
@@ -311,11 +412,11 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         phone, mobile, wage_type, base_wage, 
                         commute_type, commute_amount, branch_id, 
                         dependents, resident_tax, calendar_pattern_id,
-                        scheduled_work_hours,
-                        standard_remuneration,
-                        id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    params
+                        scheduled_work_hours, standard_remuneration,
+                        work_days, is_executive, is_employment_ins_eligible, 
+                        is_overtime_eligible, fixed_overtime_hours, fixed_overtime_allowance, id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [...baseParams, safeId]
                 );
             }
             onDataChange();
@@ -331,9 +432,16 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     };
 
     const deleteStaff = async (id: any) => {
+        // 🆕 編集中の場合は削除させない
+        if (editingId && String(id) === String(editingId)) {
+            alert("編集中のため削除できません。一度編集を閉じてください。");
+            return;
+        }
+        
         try {
             await db.execute("DELETE FROM staff WHERE id = ?", [String(id)]);
             onDataChange();
+            setDeletingId(null); // 削除完了後にリセット
         } catch (e) {
             console.error(e);
         }
@@ -352,6 +460,8 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const monthlyAverageHours = annualTotalHours / 12;
     const hourlyConversion = targetWageType === "monthly" ? (targetWage / monthlyAverageHours) : targetWage;
 
+    const branchMap = Object.fromEntries(branches.map(b => [b.id, b.name]));
+    
     return (
         <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
@@ -367,166 +477,83 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "25px" }}>
                         
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <h4 style={{ borderLeft: "4px solid #3498db", paddingLeft: "10px", margin: "0 0 5px 0", fontSize: "14px" }}>基本情報・給与</h4>
+                            <h4 style={{ borderLeft: "4px solid #3498db", paddingLeft: "10px", margin: "0 0 5px 0", fontSize: "14px" }}>基本情報</h4>
                             
                             <div style={{ display: "flex", gap: "10px" }}>
-                                <div style={{ flex: 1 }}>
-                                    <label style={labelStyle}>従業員ID {editingId && "(固定)"}</label>
-                                    <input placeholder="001" value={targetId} onChange={e => setTargetId(e.target.value)} style={{ ...inputStyle, borderColor: isIdDuplicated() ? "#e74c3c" : "#ddd" }} disabled={!!editingId} />
+                                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    {/* 従業員IDエリア */}
+                                    <div>
+                                        <label style={labelStyle}>
+                                            従業員ID 
+                                            <span style={{ 
+                                                marginLeft: "6px", 
+                                                color: "#e74c3c", 
+                                                fontSize: "10px", 
+                                                backgroundColor: "#fdedec", 
+                                                padding: "1px 4px", 
+                                                borderRadius: "3px" 
+                                            }}>必須</span>
+                                        </label>
+                                        <input placeholder="001" value={targetId} onChange={e => setTargetId(e.target.value)} style={{ ...inputStyle, borderColor: isIdDuplicated() ? "#e74c3c" : "#ddd" }} disabled={!!editingId} />
+                                    </div>
                                 </div>
+
+                                {/* 氏名エリア */}
                                 <div style={{ flex: 2 }}>
-                                    <label style={labelStyle}>氏名</label>
+                                    <label style={labelStyle}>
+                                        氏名
+                                        <span style={{ 
+                                            marginLeft: "6px", 
+                                            color: "#e74c3c", 
+                                            fontSize: "10px", 
+                                            backgroundColor: "#fdedec", 
+                                            padding: "1px 4px", 
+                                            borderRadius: "3px" 
+                                        }}>必須</span>
+                                    </label>
                                     <input placeholder="浜 太郎" value={targetName} onChange={e => setTargetName(e.target.value)} style={inputStyle} />
                                     <input placeholder="はま たろう" value={targetFurigana} onChange={e => setTargetFurigana(e.target.value)} style={{ ...inputStyle, marginTop: "4px", fontSize: "12px", height: "30px" }} />
                                 </div>
                             </div>
 
-                            <div style={{ display: "flex", gap: "10px" }}>
-                                <div style={{ flex: 1 }}>
-                                    <label style={labelStyle}>生年月日</label>
-                                    <input type="date" value={targetBirthday} onChange={e => setTargetBirthday(e.target.value)} style={inputStyle} />
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <label style={labelStyle}>状態</label> {/* 🆕 ステータス選択 */}
-                                    <select value={targetStatus} onChange={e => setTargetStatus(e.target.value)} style={inputStyle}>
-                                        <option value="active">在籍</option>
-                                        <option value="on_leave">休職</option>
-                                        <option value="retired">退職</option>
-                                    </select>
-                                </div>
+                            {/* ✨ 生年月日（背景をなくして他と統一） */}
+                            <div>
+                                <label style={labelStyle}>生年月日</label>
+                                <input type="date" value={targetBirthday} onChange={e => setTargetBirthday(e.target.value)} style={inputStyle} />
                             </div>
 
-                            <div style={{ display: "flex", gap: "10px" }}>
-                                <div style={{ flex: 1 }}>
-                                    <label style={labelStyle}>入社日</label>
-                                    <input type="date" value={targetJoinDate} onChange={e => setTargetJoinDate(e.target.value)} style={inputStyle} />
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                    <label style={labelStyle}>退職日</label> {/* 🆕 退職日入力 */}
+                            {/* 🆕 郵便番号セクションをグループ化 */}
+                            <div>
+                                <label style={labelStyle}>郵便番号</label>
+                                <div style={{ display: "flex", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", borderRadius: "6px", overflow: "hidden", marginTop: "4px" }}>
                                     <input 
-                                        type="date" 
-                                        value={targetRetirementDate} 
-                                        onChange={e => setTargetRetirementDate(e.target.value)} 
-                                        style={{ ...inputStyle, backgroundColor: targetStatus !== 'retired' ? '#f0f0f0' : '#fff' }} 
-                                        disabled={targetStatus !== 'retired'}
+                                        placeholder="000-0000" 
+                                        value={targetZip} 
+                                        onChange={e => setTargetZip(e.target.value)} 
+                                        style={{ ...inputStyle, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none", flex: 1 }} 
                                     />
+                                    <button 
+                                        onClick={handleZipSearch}
+                                        disabled={isSearchingZip}
+                                        style={{ 
+                                            padding: "0 15px", backgroundColor: "#f8fafc", border: "1px solid #ddd", 
+                                            cursor: "pointer", fontSize: "12px", color: "#3498db", fontWeight: "bold", whiteSpace: "nowrap" 
+                                        }}
+                                    >
+                                        {isSearchingZip ? "⌛" : "🔍 住所検索"}
+                                    </button>
                                 </div>
                             </div>
 
-                            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                                <div style={{ flex: 1, minWidth: "120px" }}>
-                                    <label style={labelStyle}>給与区分</label>
-                                    <select value={targetWageType} onChange={e => setTargetWageType(e.target.value)} style={{ ...inputStyle, height: "38px" }}>
-                                        <option value="hourly">⏱️ 時給制</option>
-                                        <option value="monthly">📅 月給制</option>
-                                    </select>
-                                </div>
-                                <div style={{ flex: 2, minWidth: "200px" }}>
-                                    <label style={labelStyle}>{targetWageType === "hourly" ? "基本時給" : "基本月給"}</label>
-                                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                                        <input type="number" value={targetWage} onChange={e => setTargetWage(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "50px" }} />
-                                        <span style={{ position: "absolute", right: "12px", fontSize: "12px", color: "#7f8c8d" }}>
-                                            {targetWageType === "hourly" ? "円 / 時" : "円 / 月"}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {targetWageType === "monthly" && (
-                                    <div style={{ 
-                                        width: "100%", backgroundColor: "#f8f9fa", padding: "15px", borderRadius: "8px", 
-                                        border: "1px dashed #3498db", marginTop: "5px"
-                                    }}>
-                                        {/* 1. カレンダーパターンの選択 */}
-                                        <div style={{ marginBottom: "15px", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
-                                            <label style={labelStyle}>適用カレンダーパターン</label>
-                                            <select 
-                                                value={targetPatternId} 
-                                                onChange={e => setTargetPatternId(Number(e.target.value))} 
-                                                style={{ ...inputStyle, backgroundColor: "#fff" }}
-                                            >
-                                                {calendarPatterns.map(p => (
-                                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                                ))}
-                                            </select>
-                                            <p style={{ fontSize: "10px", color: "#64748b", marginTop: "4px", marginLeft: "2px" }}>
-                                                ※選択したパターンの休日設定から年間稼働日数を算出します
-                                            </p>
-                                        </div>
-
-                                        {/* 2. 所定労働時間と統計 */}
-                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                            <div style={{ flex: 1 }}>
-                                                <label style={labelStyle}>1日の所定労働時間</label>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                                                        <input 
-                                                            type="number" min="0" max="24" 
-                                                            value={targetHours} 
-                                                            onChange={e => setTargetHours(Number(e.target.value))} 
-                                                            style={{ ...inputStyle, width: "80px", paddingRight: "30px", textAlign: "right" }} 
-                                                        />
-                                                        <span style={{ position: "absolute", right: "8px", fontSize: "11px", color: "#7f8c8d" }}>時</span>
-                                                    </div>
-                                                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                                                        <input 
-                                                            type="number" min="0" max="55" step="5" 
-                                                            value={targetMinutes} 
-                                                            onChange={e => setTargetMinutes(Number(e.target.value))} 
-                                                            style={{ ...inputStyle, width: "80px", paddingRight: "30px", textAlign: "right" }} 
-                                                        />
-                                                        <span style={{ position: "absolute", right: "8px", fontSize: "11px", color: "#7f8c8d" }}>分</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div style={{ flex: 1, display: "flex", justifyContent: "space-around", fontSize: "13px", marginTop: "15px" }}>
-                                                <div style={{ textAlign: "center" }}>
-                                                    <div style={labelStyle}>年間稼働</div>
-                                                    <b style={{ color: "#2c3e50", fontSize: "1.1rem" }}>{annualWorkDays}</b> 日
-                                                </div>
-                                                <div style={{ textAlign: "center" }}>
-                                                    <div style={labelStyle}>月平均所定</div>
-                                                    <b style={{ fontSize: "1.1rem" }}>{monthlyAverageHours.toFixed(2)}</b> h
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* 3. 時給換算結果 */}
-                                        <div style={{ 
-                                            textAlign: "right", borderTop: "1px solid #dee2e6", paddingTop: "8px", 
-                                            color: "#2980b9", fontWeight: "bold", marginTop: "10px" 
-                                        }}>
-                                            💰 時給換算： 約 {Math.round(hourlyConversion).toLocaleString()} 円
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                            <h4 style={{ borderLeft: "4px solid #e67e22", paddingLeft: "10px", margin: "0 0 5px 0", fontSize: "14px" }}>連絡先・住所</h4>
-                            {/* 🆕 郵便番号検索セクション */}
-                            <label style={labelStyle}>郵便番号</label>
-                            <div style={{ display: "flex", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", borderRadius: "6px", overflow: "hidden" }}>
-                                <input 
-                                    placeholder="000-0000" 
-                                    value={targetZip} 
-                                    onChange={e => setTargetZip(e.target.value)} 
-                                    style={{ ...inputStyle, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: "none", flex: 1 }} 
+                            {/* 🆕 住所セクションをグループ化 */}
+                            <div>
+                                <label style={labelStyle}>住所</label>
+                                <textarea 
+                                    value={targetAddress} 
+                                    onChange={e => setTargetAddress(e.target.value)} 
+                                    style={{ ...inputStyle, height: "80px", resize: "none", marginTop: "4px" }} 
                                 />
-                                <button 
-                                    onClick={handleZipSearch}
-                                    disabled={isSearchingZip}
-                                    style={{ 
-                                        padding: "0 15px", backgroundColor: "#f8fafc", border: "1px solid #ddd", 
-                                        cursor: "pointer", fontSize: "12px", color: "#3498db", fontWeight: "bold", whiteSpace: "nowrap" 
-                                    }}
-                                >
-                                    {isSearchingZip ? "⌛" : "🔍 住所検索"}
-                                </button>
                             </div>
-                            <label style={labelStyle}>住所</label>
-                            <textarea value={targetAddress} onChange={e => setTargetAddress(e.target.value)} style={{ ...inputStyle, height: "80px", resize: "none" }} />
                             <div style={{ display: "flex", gap: "10px" }}>
                                 <div style={{ flex: 1 }}>
                                     <label style={labelStyle}>電話番号</label>
@@ -537,25 +564,56 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                     <input placeholder="090-xxxx-xxxx" value={targetMobile} onChange={e => setTargetMobile(e.target.value)} style={inputStyle} />
                                 </div>
                             </div>
-                            
+
                             <div style={{ marginTop: "10px" }}>
-                                <h4 style={{ borderLeft: "4px solid #9b59b6", paddingLeft: "10px", margin: "0 0 10px 0", fontSize: "14px" }}>税・社保・所属設定</h4>
+                                <h4 style={{ borderLeft: "4px solid #9b59b6", paddingLeft: "10px", margin: "0 0 10px 0", fontSize: "14px" }}>税・社保設定</h4>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                                    <div>
-                                        <label style={labelStyle}>所属店舗</label>
-                                        <select value={targetBranchId} onChange={e => setTargetBranchId(Number(e.target.value))} style={inputStyle}>
-                                            {branches.map(b => (
-                                                <option key={b.id} value={b.id}>{b.name} ({b.prefecture})</option>
-                                            ))}
-                                        </select>
+                                    {/* --- 🆕 3大フラグ・スイッチ群 --- */}
+                                    <div style={{ gridColumn: "span 2", display: "flex", gap: "15px", backgroundColor: "#f8fafc", padding: "10px", borderRadius: "5px", border: "1px solid #e2e8f0" }}>
+                                        <label style={{ fontSize: "12px", display: "flex", alignItems: "center", cursor: "pointer" }}>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={targetIsExecutive === 1} 
+                                                onChange={e => setTargetIsExecutive(e.target.checked ? 1 : 0)}
+                                                style={{ marginRight: "5px" }}
+                                            />
+                                            👔 役員
+                                        </label>
+                                        <label style={{ fontSize: "12px", display: "flex", alignItems: "center", cursor: "pointer" }}>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={targetIsEmploymentInsEligible === 1} 
+                                                onChange={e => setTargetIsEmploymentInsEligible(e.target.checked ? 1 : 0)}
+                                                style={{ marginRight: "5px" }}
+                                            />
+                                            🔰 雇用保険加入
+                                        </label>
+                                        <label style={{ fontSize: "12px", display: "flex", alignItems: "center", cursor: "pointer" }}>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={targetIsOvertimeEligible === 1} 
+                                                onChange={e => setTargetIsOvertimeEligible(e.target.checked ? 1 : 0)}
+                                                style={{ marginRight: "5px" }}
+                                            />
+                                            ⏱️ 残業代対象
+                                        </label>
                                     </div>
+                                    {/* 🆕 扶養人数（1fr） */}
                                     <div>
                                         <label style={labelStyle}>扶養人数</label>
-                                        <input type="number" value={targetDependents} onChange={e => setTargetDependents(Number(e.target.value))} style={inputStyle} />
+                                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                            <input type="number" value={targetDependents} onChange={e => setTargetDependents(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "30px", textAlign: "right" }} />
+                                            <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>人</span>
+                                        </div>
                                     </div>
-                                    <div style={{ gridColumn: "span 2" }}>
+
+                                    {/* 🆕 住民税額（span 2 を外して 1fr に） */}
+                                    <div>
                                         <label style={labelStyle}>住民税額（月額）</label>
-                                        <input type="number" value={targetResidentTax} onChange={e => setTargetResidentTax(Number(e.target.value))} style={inputStyle} />
+                                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                            <input type="number" value={targetResidentTax} onChange={e => setTargetResidentTax(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "30px", textAlign: "right" }} />
+                                            <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>円</span>
+                                        </div>
                                     </div>
                                     <div style={{ gridColumn: "span 2" }}>
                                         <label style={labelStyle}>標準報酬月額（社会保険計算用）</label>
@@ -584,6 +642,432 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                 </div>
                             </div>
                         </div>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                            <h4 style={{ borderLeft: "4px solid #e67e22", paddingLeft: "10px", margin: "0 0 5px 0", fontSize: "14px" }}>所属・給与</h4>
+                            {/* 🆕 状態と所属を横並び ＆ 両方ともラベル横配置 */}
+                            <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+                                {/* 状態エリア */}
+                                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "10px" }}>
+                                    <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: "nowrap", width: "40px" }}>状態</label> 
+                                    <select value={targetStatus} onChange={e => setTargetStatus(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+                                        <option value="active">在籍</option>
+                                        <option value="on_leave">休職</option>
+                                        <option value="retired">退職</option>
+                                    </select>
+                                </div>
+                                
+                                {/* 所属エリア（状態と同じスタイルに統一） */}
+                                <div style={{ flex: 2, display: "flex", alignItems: "center", gap: "10px" }}>
+                                    <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: "nowrap", width: "40px" }}>所属</label>
+                                    <select value={targetBranchId} onChange={e => setTargetBranchId(Number(e.target.value))} style={{ ...inputStyle, flex: 1 }}>
+                                        {branches.map(b => (
+                                            <option key={b.id} value={b.id}>{b.name} ({b.prefecture})</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* 🆕 入社日と退職日も横に並べてスッキリさせる */}
+                            <div style={{ display: "flex", gap: "10px" }}>
+                                {/* 入社日 */}
+                                <div style={{ flex: 1, backgroundColor: "#f0f7ff", padding: "8px", borderRadius: "6px", border: "1px solid #dbeafe" }}>
+                                    <label style={{ ...labelStyle, fontSize: "11px", color: "#1e40af", marginBottom: "4px" }}>入社日</label>
+                                    <input type="date" value={targetJoinDate} onChange={e => setTargetJoinDate(e.target.value)} style={inputStyle} />
+                                </div>
+                                {/* 退職日 */}
+                                <div style={{ flex: 1, backgroundColor: targetStatus === 'retired' ? "#fff1f2" : "#f1f5f9", padding: "8px", borderRadius: "6px" }}>
+                                    <label style={{ ...labelStyle, fontSize: "11px", color: targetStatus === 'retired' ? "#991b1b" : "#64748b", marginBottom: "4px" }}>退職日</label>
+                                    <input 
+                                        type="date" 
+                                        value={targetRetirementDate} 
+                                        onChange={e => setTargetRetirementDate(e.target.value)} 
+                                        style={{ ...inputStyle, backgroundColor: targetStatus !== 'retired' ? '#e2e8f0' : '#fff' }} 
+                                        disabled={targetStatus !== 'retired'}
+                                    />
+                                </div>
+                            </div>
+                            
+                            {/* 交通費設定セクション */}
+                            <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "10px" }}>
+                                <div style={{ flex: 1 }}>
+                                    <label style={labelStyle}>交通費区分</label>
+                                    <select 
+                                        value={targetCommuteType} 
+                                        onChange={e => {
+                                            setTargetCommuteType(e.target.value);
+                                            // 「支給なし」に切り替えたときに、もし単価が残っていたら0にリセットしたい場合はここに追加
+                                            // if (e.target.value === "none") setTargetCommuteAmount(0);
+                                        }} 
+                                        style={{ 
+                                            ...inputStyle, 
+                                            height: "38px",
+                                            // 支給なしの時はセレクトボックス自体も少し落ち着いた色にするなら
+                                            backgroundColor: targetCommuteType === "none" ? "#f1f5f9" : "#fff"
+                                        }}
+                                    >
+                                        <option value="none">🚶‍♀️ 支給なし</option>
+                                        <option value="daily">🚗 日額支給</option>
+                                        <option value="monthly">🎫 月額固定</option>
+                                    </select>
+                                </div>
+
+                                <div style={{ flex: 2 }}>
+                                    <label style={{ 
+                                        ...labelStyle, 
+                                        color: targetCommuteType === "none" ? "#94a3b8" : "#2c3e50" // ラベルも少し薄く
+                                    }}>
+                                        交通費単価
+                                    </label>
+                                    <div style={{ 
+                                        position: "relative", 
+                                        display: "flex", 
+                                        alignItems: "center",
+                                        opacity: targetCommuteType === "none" ? 0.6 : 1 // 全体を少し透過させてグレーアウト感を出す
+                                    }}>
+                                        <input 
+                                            type="number" 
+                                            value={targetCommuteAmount} 
+                                            onChange={e => setTargetCommuteAmount(Number(e.target.value))}
+                                            disabled={targetCommuteType === "none"} // ✨ ここで入力をブロック
+                                            style={{ 
+                                                ...inputStyle, 
+                                                paddingRight: "50px",
+                                                textAlign: "right",
+                                                // ✨ disabled時の背景色を指定
+                                                backgroundColor: targetCommuteType === "none" ? "#f1f5f9" : "#fff",
+                                                cursor: targetCommuteType === "none" ? "not-allowed" : "auto"
+                                            }} 
+                                        />
+                                        <span style={{ 
+                                            position: "absolute", 
+                                            right: "12px", 
+                                            fontSize: "12px", 
+                                            color: targetCommuteType === "none" ? "#cbd5e1" : "#7f8c8d" // 支給なし時はもっと薄く
+                                        }}>
+                                            {targetCommuteType === "daily" ? "円 / 日" : 
+                                            targetCommuteType === "monthly" ? "円 / 月" : "未設定"}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                                <div style={{ flex: 1, minWidth: "120px" }}>
+                                    <label style={labelStyle}>給与区分</label>
+                                    <select value={targetWageType} onChange={e => setTargetWageType(e.target.value)} style={{ ...inputStyle, height: "38px" }}>
+                                        <option value="hourly">⏱️ 時給制</option>
+                                        <option value="monthly">📅 月給制</option>
+                                    </select>
+                                </div>
+                                <div style={{ flex: 2, minWidth: "200px" }}>
+                                    <label style={labelStyle}>{targetWageType === "hourly" ? "基本時給" : "基本月給"}</label>
+                                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                        <input type="number" value={targetWage} onChange={e => setTargetWage(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "50px" }} />
+                                        <span style={{ position: "absolute", right: "12px", fontSize: "12px", color: "#7f8c8d" }}>
+                                            {targetWageType === "hourly" ? "円 / 時" : "円 / 月"}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* 月給・時給共通の勤務パターン設定エリア */}
+                                <div style={{ 
+                                    width: "100%", backgroundColor: "#f8f9fa", padding: "15px", borderRadius: "8px", 
+                                    border: targetWageType === "monthly" ? "1px dashed #3498db" : "1px solid #e2e8f0", marginTop: "5px"
+                                }}>
+                                    
+                                    {/* 1. カレンダーパターン と 2. 所定労働時間 の横並びコンテナ */}
+                                    <div style={{ display: "flex", gap: "15px", marginBottom: "15px", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
+                                        
+                                        {/* 左側：カレンダーパターン */}
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "5px" }}>
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="useCalendar"
+                                                    // patternId が 0 以外なら設定ありと判定
+                                                    checked={targetPatternId > 0} 
+                                                    onChange={(e) => {
+                                                        if (!e.target.checked) {
+                                                            setTargetPatternId(0);
+                                                        } else {
+                                                            setTargetPatternId(1); // チェックを入れたらデフォルトで「標準(1)」を選択
+                                                        }
+                                                    }}
+                                                />
+                                                <label htmlFor="useCalendar" style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}>
+                                                    適用カレンダーパターン
+                                                </label>
+                                            </div>
+                                            
+                                            <select 
+                                                value={targetPatternId} 
+                                                onChange={e => setTargetPatternId(Number(e.target.value))} 
+                                                disabled={targetPatternId === 0}
+                                                style={{ 
+                                                    ...inputStyle, 
+                                                    backgroundColor: targetPatternId === 0 ? "#f1f5f9" : "#fff",
+                                                    opacity: targetPatternId === 0 ? 0.5 : 1 
+                                                }}
+                                            >
+                                                {/* targetPatternId が 0 の時だけ表示されるプレースホルダー */}
+                                                {targetPatternId === 0 && <option value={0}>-- カレンダーを使用しない --</option>}
+                                                {calendarPatterns.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                                ))}
+                                            </select>
+                                            
+                                            <p style={{ fontSize: "10px", color: "#64748b", marginTop: "4px", lineHeight: "1.4" }}>
+                                                {targetPatternId === 0 
+                                                    ? "※欠勤控除などを行わない完全月給制の場合などに選択します。" 
+                                                    : "※休日設定から年間稼働日数を算出し、欠勤判定に使用します。"}
+                                            </p>
+                                        </div>
+
+                                        {/* 右側：1日の所定労働時間（任意設定） */}
+                                        <div style={{ flex: 1, paddingLeft: "15px", borderLeft: "1px solid #e2e8f0" }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "5px" }}>
+                                                <input 
+                                                    type="checkbox" 
+                                                    id="useDailyHours"
+                                                    // targetDailyHours が 0 より大きければチェック入りとみなす
+                                                    checked={targetDailyHours > 0} 
+                                                    onChange={(e) => {
+                                                        if (!e.target.checked) {
+                                                            setTargetDailyHours(0);
+                                                            setTargetHours(0);
+                                                            setTargetMinutes(0);
+                                                        } else {
+                                                            // デフォルト値として8時間をセット
+                                                            setTargetHours(8);
+                                                            setTargetMinutes(0);
+                                                            setTargetDailyHours(8.0);
+                                                        }
+                                                    }}
+                                                />
+                                                <label htmlFor="useDailyHours" style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}>
+                                                    1日の所定労働時間
+                                                </label>
+                                            </div>
+                                            
+                                            <div style={{ display: "flex", alignItems: "center", gap: "8px", opacity: targetDailyHours === 0 ? 0.5 : 1 }}>
+                                                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                                    <input 
+                                                        type="number" min="0" max="24" 
+                                                        value={targetHours} 
+                                                        onChange={e => setTargetHours(Number(e.target.value))} 
+                                                        disabled={targetDailyHours === 0}
+                                                        style={{ ...inputStyle, width: "70px", paddingRight: "25px", textAlign: "right", backgroundColor: targetDailyHours === 0 ? "#f1f5f9" : "#fff" }} 
+                                                    />
+                                                    <span style={{ position: "absolute", right: "6px", fontSize: "10px", color: "#7f8c8d" }}>時</span>
+                                                </div>
+                                                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                                    <input 
+                                                        type="number" min="0" max="55" step="5" 
+                                                        value={targetMinutes} 
+                                                        onChange={e => setTargetMinutes(Number(e.target.value))} 
+                                                        disabled={targetDailyHours === 0}
+                                                        style={{ ...inputStyle, width: "70px", paddingRight: "25px", textAlign: "right", backgroundColor: targetDailyHours === 0 ? "#f1f5f9" : "#fff" }} 
+                                                    />
+                                                    <span style={{ position: "absolute", right: "6px", fontSize: "10px", color: "#7f8c8d" }}>分</span>
+                                                </div>
+                                            </div>
+                                            <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "4px", lineHeight: "1.4" }}>
+                                                ※有給休暇の支給額計算に使用します。未設定の場合は、直近3ヶ月の平均賃金等から算出します。
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* 新設：契約曜日の設定（主に時給制・有給計算用） */}
+                                    <div style={{ marginBottom: "5px" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+                                            <label style={{ ...labelStyle, marginBottom: 0 }}>
+                                                契約曜日
+                                            </label>
+                                            {/* ✨ ここで「週 n 日」を上に持ってくる */}
+                                            <div style={{ 
+                                                fontSize: "11px", color: "#3498db", 
+                                                backgroundColor: "#ebf8ff", padding: "2px 8px", borderRadius: "12px",
+                                                border: "1px solid #bee3f8", fontWeight: "bold"
+                                            }}>
+                                                契約：週 <b>{Object.values(targetWorkDays).filter(Boolean).length}</b> 日
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                                            {[
+                                                { id: "mon", label: "月" },
+                                                { id: "tue", label: "火" },
+                                                { id: "wed", label: "水" },
+                                                { id: "thu", label: "木" },
+                                                { id: "fri", label: "金" },
+                                                { id: "sat", label: "土", color: "#3498db" },
+                                                { id: "sun", label: "日", color: "#e74c3c" }
+                                            ].map((day) => (
+                                                <label key={day.id} style={{
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: "3px",
+                                                    padding: "4px 7px", // パディングをさらに絞る
+                                                    backgroundColor: "#fff",
+                                                    border: "1px solid #d1d5db",
+                                                    borderRadius: "4px",
+                                                    cursor: "pointer",
+                                                    fontSize: "12px"
+                                                }}>
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={targetWorkDays[day.id]} 
+                                                        onChange={e => setTargetWorkDays({...targetWorkDays, [day.id]: e.target.checked})}
+                                                        style={{ cursor: "pointer" }}
+                                                    />
+                                                    <span style={{ color: day.color || "#2c3e50", fontWeight: "bold" }}>{day.label}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                        <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "4px" }}>
+                                            ※有給休暇の「出勤率（分母）」および「比例付与日数」の判定に使用します。未設定の場合は実績から推計します。
+                                        </p>
+                                    </div>
+
+                                    {/* 3. 固定残業代（みなし残業）の設定エリア */}
+                                    <div style={{ 
+                                        marginTop: "15px", 
+                                        paddingTop: "12px", 
+                                        borderTop: "1px solid #e2e8f0" 
+                                    }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "8px" }}>
+                                            <input 
+                                                type="checkbox" 
+                                                id="useFixedOvertime"
+                                                // 時間または金額のどちらかが設定されていればチェック状態とする
+                                                checked={targetFixedOvertimeHours > 0 || targetFixedOvertimeAmount > 0} 
+                                                onChange={(e) => {
+                                                    if (!e.target.checked) {
+                                                        setTargetFixedOvertimeHours(0);
+                                                        setTargetFixedOvertimeAmount(0);
+                                                    } else {
+                                                        // チェックを入れた瞬間のデフォルト値（例: 10時間）
+                                                        setTargetFixedOvertimeHours(10);
+                                                        setTargetFixedOvertimeAmount(0);
+                                                    }
+                                                }}
+                                            />
+                                            <label htmlFor="useFixedOvertime" style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}>
+                                                固定残業代（みなし残業）を適用する
+                                            </label>
+                                        </div>
+                                        
+                                        <div style={{ 
+                                            display: "flex", 
+                                            alignItems: "center", 
+                                            gap: "10px", 
+                                            opacity: (targetFixedOvertimeHours > 0 || targetFixedOvertimeAmount > 0) ? 1 : 0.5 
+                                        }}>
+                                            {/* 時間入力 */}
+                                            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                                <input 
+                                                    type="number" 
+                                                    min="0"
+                                                    step="0.1"
+                                                    value={targetFixedOvertimeHours || ""} 
+                                                    onChange={e => setTargetFixedOvertimeHours(Number(e.target.value))} 
+                                                    disabled={!(targetFixedOvertimeHours > 0 || targetFixedOvertimeAmount > 0)}
+                                                    style={{ 
+                                                        ...inputStyle, 
+                                                        width: "90px", 
+                                                        paddingRight: "40px", 
+                                                        textAlign: "right",
+                                                        backgroundColor: !(targetFixedOvertimeHours > 0 || targetFixedOvertimeAmount > 0) ? "#f1f5f9" : "#fff" 
+                                                    }} 
+                                                    placeholder="0"
+                                                />
+                                                <span style={{ position: "absolute", right: "6px", fontSize: "10px", color: "#7f8c8d" }}>時間分</span>
+                                            </div>
+
+                                            <span style={{ fontSize: "12px", color: "#64748b" }}>として</span>
+
+                                            {/* 金額入力 */}
+                                            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                                                <input 
+                                                    type="number" 
+                                                    min="0"
+                                                    step="100"
+                                                    value={targetFixedOvertimeAmount || ""} 
+                                                    onChange={e => setTargetFixedOvertimeAmount(Number(e.target.value))} 
+                                                    disabled={!(targetFixedOvertimeHours > 0 || targetFixedOvertimeAmount > 0)}
+                                                    style={{ 
+                                                        ...inputStyle, 
+                                                        width: "120px", 
+                                                        paddingRight: "25px", 
+                                                        textAlign: "right",
+                                                        backgroundColor: !(targetFixedOvertimeHours > 0 || targetFixedOvertimeAmount > 0) ? "#f1f5f9" : "#fff" 
+                                                    }} 
+                                                    placeholder="0"
+                                                />
+                                                <span style={{ position: "absolute", right: "6px", fontSize: "10px", color: "#7f8c8d" }}>円</span>
+                                            </div>
+                                            
+                                            <span style={{ fontSize: "12px", color: "#64748b" }}>を固定支給</span>
+                                        </div>
+
+                                        <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "6px", lineHeight: "1.4" }}>
+                                            ※設定時間を超過した残業が発生した場合は、1分単位で超過手当が自動計算されます。
+                                        </p>
+                                    </div>
+
+                                    {/* 統計・換算結果フッター (月給制の時のみ表示) */}
+                                    {targetWageType === "monthly" && (
+                                        <div style={{ 
+                                            marginTop: "15px", 
+                                            paddingTop: "12px", 
+                                            borderTop: "1px solid #e2e8f0", 
+                                            display: "flex", 
+                                            justifyContent: "space-between", 
+                                            alignItems: "center" 
+                                        }}>
+                                            {/* 左側～中央：稼働日数・時間統計（marginLeft で位置を調整） */}
+                                            <div style={{ display: "flex", gap: "30px", marginLeft: "40px" }}> {/* 👈 marginLeft を追加 */}
+                                                {/* 年間稼働 */}
+                                                <div style={{ display: "flex", flexDirection: "column" }}>
+                                                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "bold" }}>年間稼働</span>
+                                                    <span style={{ fontSize: "14px", color: "#2c3e50" }}>
+                                                        <b style={{ fontSize: "16px" }}>{annualWorkDays}</b> <small>日</small>
+                                                    </span>
+                                                </div>
+                                                {/* 月平均所定：時間が0なら --- */}
+                                                <div style={{ display: "flex", flexDirection: "column" }}>
+                                                    <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "bold" }}>月平均所定</span>
+                                                    <span style={{ fontSize: "14px", color: "#2c3e50" }}>
+                                                        <b style={{ fontSize: "16px" }}>
+                                                            {targetDailyHours > 0 ? monthlyAverageHours.toFixed(2) : "---"}
+                                                        </b> <small>h</small>
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* 右側：時給換算バッジ（ここはそのまま） */}
+                                            <div style={{ 
+                                                backgroundColor: "#ebf8ff", 
+                                                padding: "8px 15px", 
+                                                borderRadius: "8px", 
+                                                border: "1px solid #bee3f8",
+                                                textAlign: "right"
+                                            }}>
+                                                <div style={{ fontSize: "10px", color: "#2b6cb0", fontWeight: "bold", marginBottom: "2px" }}>💰 時給換算目安</div>
+                                                <div style={{ fontSize: "18px", color: "#2c5282", fontWeight: "bold" }}>
+                                                    {targetDailyHours > 0 && annualWorkDays > 0 ? (
+                                                        <>約 {Math.round(hourlyConversion).toLocaleString()} <span style={{ fontSize: "12px" }}>円</span></>
+                                                    ) : (
+                                                        <span style={{ color: "#94a3b8", fontSize: "14px" }}>(未設定)</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div style={{ display: "flex", gap: "12px", marginTop: "25px" }}>
@@ -594,6 +1078,80 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                     </div>
                 </section>
             )}
+
+            {/* 🆕 検索・絞り込みツールバー */}
+            <div style={{ 
+                display: "flex", 
+                gap: "15px", 
+                marginBottom: "15px", 
+                alignItems: "center",
+                backgroundColor: "#f8fafc",
+                padding: "15px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0"
+            }}>
+                {/* キーワード検索 */}
+                <div style={{ flex: 2 }}>
+                    <input 
+                        placeholder="🔍 ID、名前、フリガナで検索..." 
+                        value={searchKeyword}
+                        onChange={e => setSearchKeyword(e.target.value)}
+                        style={{ ...inputStyle, margin: 0 }}
+                    />
+                </div>
+
+                {/* 🆕 店舗絞り込みセレクトボックス */}
+                <div style={{ flex: 1 }}>
+                    <select 
+                        value={filterBranchId} 
+                        onChange={e => setFilterBranchId(e.target.value)}
+                        style={{ ...inputStyle, margin: 0, fontSize: "14px" }}
+                    >
+                        <option value="all">🏢 すべての店舗</option>
+                        {branches.map(b => (
+                            <option key={b.id} value={String(b.id)}>{b.name}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* ステータス絞り込みボタン */}
+                <div style={{ display: "flex", gap: "8px" }}>
+                    {[
+                        { label: "在籍", value: "active", color: "#2ecc71" },
+                        { label: "休職", value: "on_leave", color: "#f1c40f" },
+                        { label: "退職", value: "retired", color: "#e74c3c" }
+                    ].map(opt => {
+                        const isActive = filterStatus.includes(opt.value);
+                        return (
+                            <button
+                                key={opt.value}
+                                onClick={() => setFilterStatus(prev => 
+                                    prev.includes(opt.value) ? prev.filter(v => v !== opt.value) : [...prev, opt.value]
+                                )}
+                                style={{
+                                    padding: "5px 12px",
+                                    borderRadius: "15px",
+                                    border: `1px solid ${opt.color}`,
+                                    backgroundColor: isActive ? opt.color : "white",
+                                    color: isActive ? "white" : opt.color,
+                                    cursor: "pointer",
+                                    fontSize: "12px",
+                                    fontWeight: "bold",
+                                    transition: "0.2s"
+                                }}
+                            >
+                                {opt.label}
+                            </button>
+                        );
+                    })}
+                    <button 
+                        onClick={() => setFilterStatus(["active", "on_leave", "retired"])}
+                        style={{ fontSize: "12px", border: "none", background: "none", color: "#3498db", cursor: "pointer", textDecoration: "underline" }}
+                    >
+                        すべて表示
+                    </button>
+                </div>
+            </div>
 
             <section style={cardStyle}>
                 <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
@@ -640,7 +1198,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         </tr>
                     </thead>
                     <tbody>
-                        {sortedList.map(s => {
+                        {sortedAndFilteredList.map(s => {
                             const branch = branches.find(b => b.id === s.branch_id);
                             // 🆕 退職者の場合にスタイルを変えるためのフラグ
                             const isRetired = s.status === 'retired';
@@ -678,14 +1236,42 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                     <td style={tdStyle}>{s.wage_type === "monthly" ? "月給" : "時給"} {s.base_wage.toLocaleString()}円</td>
                                     <td style={{ ...tdStyle, textAlign: "center" }}>
                                         {deletingId === s.id ? (
+                                            /* --- 削除確認モード --- */
                                             <div style={{ display: "flex", gap: "5px", justifyContent: "center" }}>
-                                                <button className="dangerous-btn" onClick={() => deleteStaff(s.id)} style={modernIconBtnStyle("#ff0000")}>削除</button>
-                                                <button onClick={() => setDeletingId(null)} style={modernIconBtnStyle("#34495e")}>戻る</button>
+                                                <button 
+                                                    className="dangerous-btn" 
+                                                    onClick={() => deleteStaff(s.id)} 
+                                                    style={modernIconBtnStyle("#ff0000")}
+                                                >
+                                                    実行
+                                                </button>
+                                                <button 
+                                                    onClick={() => setDeletingId(null)} 
+                                                    style={modernIconBtnStyle("#34495e")}
+                                                >
+                                                    戻る
+                                                </button>
+                                            </div>
+                                        ) : editingId === s.id ? (
+                                            /* --- 🆕 編集実行中モード --- */
+                                            <div style={{ color: "#f1c40f", fontWeight: "bold", fontSize: "12px" }}>
+                                                ⚡ 編集作業中
                                             </div>
                                         ) : (
+                                            /* --- 通常モード --- */
                                             <div style={{ display: "flex", gap: "5px", justifyContent: "center" }}>
-                                                <button onClick={() => startEdit(s)} style={modernIconBtnStyle("#3498db")}>編集</button>
-                                                <button onClick={() => setDeletingId(s.id)} style={modernIconBtnStyle("#e74c3c")}>削除</button>
+                                                <button 
+                                                    onClick={() => startEdit(s)} 
+                                                    style={modernIconBtnStyle("#3498db")}
+                                                >
+                                                    編集
+                                                </button>
+                                                <button 
+                                                    onClick={() => setDeletingId(s.id)} 
+                                                    style={modernIconBtnStyle("#e74c3c")}
+                                                >
+                                                    削除
+                                                </button>
                                             </div>
                                         )}
                                     </td>

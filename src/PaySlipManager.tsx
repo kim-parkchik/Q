@@ -102,9 +102,9 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
                 <table style={tableS}>
                     <thead>
                         <tr style={theadS}>
-                            <th style={{ ...thS, width: '30%' }}>スタッフ名</th>
+                            <th style={{ ...thS, width: '30%' }}>氏名</th>
                             <th style={{ ...thS, width: '20%' }}>給与条件</th>
-                            <th style={{ ...thS, width: '25%' }}>拠点情報</th>
+                            <th style={{ ...thS, width: '25%' }}>所属</th>
                             <th style={{ ...thS, width: '10%' }}>勤怠</th>
                             <th style={{ ...thS, width: '15%', textAlign: "center" }}>操作</th>
                         </tr>
