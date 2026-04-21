@@ -663,7 +663,6 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                                     </option>
                                                 ))}
                                             </select>
-                                            <span style={{ position: "absolute", right: "12px", fontSize: "12px", color: "#7f8c8d", pointerEvents: "none" }}>円</span>
                                         </div>
                                         <p style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
                                             ※決定通知書に記載されている等級の金額を選択してください。
@@ -762,7 +761,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                             disabled={targetCommuteType === "none"} // ✨ ここで入力をブロック
                                             style={{ 
                                                 ...inputStyle, 
-                                                paddingRight: "50px",
+                                                paddingRight: "60px",
                                                 textAlign: "right",
                                                 // ✨ disabled時の背景色を指定
                                                 backgroundColor: targetCommuteType === "none" ? "#f1f5f9" : "#fff",
@@ -793,7 +792,16 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                 <div style={{ flex: 2, minWidth: "200px" }}>
                                     <label style={labelStyle}>{targetWageType === "hourly" ? "基本時給" : "基本月給"}</label>
                                     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                                        <input type="number" value={targetWage} onChange={e => setTargetWage(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "50px" }} />
+                                        <input 
+                                            type="number" 
+                                            value={targetWage} 
+                                            onChange={e => setTargetWage(Number(e.target.value))} 
+                                            style={{ 
+                                                ...inputStyle, 
+                                                textAlign: "right",    // ← これを追加（右寄せ）
+                                                paddingRight: "60px"   // ← 単位との被り防止に少し広げました
+                                            }} 
+                                        />
                                         <span style={{ position: "absolute", right: "12px", fontSize: "12px", color: "#7f8c8d" }}>
                                             {targetWageType === "hourly" ? "円 / 時" : "円 / 月"}
                                         </span>

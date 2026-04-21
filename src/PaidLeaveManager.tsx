@@ -9,6 +9,7 @@ interface Props {
 
 const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
     const [selectedStaffId, setSelectedStaffId] = useState("");
+    const [activeFilters, setActiveFilters] = useState<string[]>(["active"]);
     const [grants, setGrants] = useState<any[]>([]);
 
     // ✨ 今日の日付を初期値にする (YYYY-MM-DD形式)
@@ -141,20 +142,69 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
         }
     };
 
+    // ✨ フィルタリングされた従業員リストを作成
+    const filteredStaffList = staffList.filter(s => activeFilters.includes(s.status));
+
     return (
         <div style={{ padding: "20px", background: "white", borderRadius: "8px" }}>
             <h2>🏖 有給休暇管理</h2>
 
+            {/* ✨ 絞り込みボタンセクションを追加 */}
+            <div style={{ marginBottom: "20px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", backgroundColor: "#f8f9fa", padding: "12px", borderRadius: "8px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "#7f8c8d" }}>表示対象:</span>
+                {[
+                    { label: "在籍", value: "active", color: "#2ecc71" },
+                    { label: "休職", value: "on_leave", color: "#f1c40f" },
+                    { label: "退職", value: "retired", color: "#e74c3c" }
+                ].map(opt => {
+                    const isActive = activeFilters.includes(opt.value);
+                    return (
+                        <button
+                            key={opt.value}
+                            onClick={() => 
+                                setActiveFilters(prev => 
+                                    prev.includes(opt.value) 
+                                        ? prev.filter(v => v !== opt.value) 
+                                        : [...prev, opt.value]
+                                )
+                            }
+                            style={{
+                                padding: "5px 12px",
+                                borderRadius: "15px",
+                                border: `1px solid ${opt.color}`,
+                                backgroundColor: isActive ? opt.color : "white",
+                                color: isActive ? "white" : opt.color,
+                                cursor: "pointer",
+                                fontSize: "11px",
+                                fontWeight: "bold",
+                                transition: "0.2s"
+                            }}
+                        >
+                            {opt.label}
+                        </button>
+                    );
+                })}
+                <button 
+                    onClick={() => setActiveFilters(["active", "on_leave", "retired"])}
+                    style={{ fontSize: "11px", border: "none", background: "none", color: "#3498db", cursor: "pointer", textDecoration: "underline", marginLeft: "4px" }}
+                >
+                    すべて表示
+                </button>
+            </div>
+
             <div style={{ marginBottom: "20px" }}>
-                <label>従業員選択: </label>
+                <label style={{ fontSize: "14px", fontWeight: "bold" }}>従業員選択: </label>
                 <select 
                     value={selectedStaffId} 
                     onChange={(e) => setSelectedStaffId(e.target.value)}
-                    style={{ padding: "8px", fontSize: "16px" }}
+                    style={{ padding: "8px", fontSize: "16px", borderRadius: "4px", border: "1px solid #ccc", minWidth: "200px" }}
                 >
-                    <option value="">選択してください</option>
-                    {staffList.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
+                    <option value="">-- {activeFilters.length === 0 ? "表示をオンにしてください" : "選択してください"} --</option>
+                    {/* ✨ フィルタリング済みのリストを表示 */}
+                    {filteredStaffList.map(s => (
+                        <option key={s.id} value={s.id}>
+                            {s.id}: {s.name} ({s.status === 'active' ? '在籍' : s.status === 'retired' ? '退職' : '休職'})
+                        </option>
                     ))}
                 </select>
             </div>

@@ -1,3 +1,5 @@
+// @ts-ignore
+import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState, Fragment } from "react";
 // 🆕 calculateSalary を追加（ファイルパスは作成した場所に合わせて調整してください）
 import { calcDetailedDiff, modernIconBtnStyle, formatHours, generateAttendanceCSV, parseAttendanceCSV } from "./utils";
@@ -125,7 +127,8 @@ export default function AttendanceManager({
     // データ読み込み関数 (loadMonthlyData 内、または useEffect 内で実行)
     const loadCalendarSettings = async () => {
         // 1. 祝日マスターのロード
-        const resHolidays = await db.select<any[]>("SELECT holiday_date, name FROM holiday_master");
+        // const resHolidays = await db.select<any[]>("SELECT holiday_date, name FROM holiday_master");
+        const resHolidays = await db.select("SELECT holiday_date, name FROM holiday_master") as any[];
         const hMap: Record<string, string> = {};
         resHolidays.forEach((h) => { hMap[h.holiday_date] = h.name; });
         setHolidays(hMap);
@@ -134,10 +137,14 @@ export default function AttendanceManager({
         if (selectedStaffId) {
             const staff = staffList.find(s => String(s.id) === String(selectedStaffId));
             const patternId = staff?.calendar_pattern_id || 1;
-            const resCompany = await db.select<any[]>(
-                "SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?",
-                [patternId]
-            );
+            // const resCompany = await db.select<any[]>(
+            //     "SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?",
+            //     [patternId]
+            // );
+            const resCompany = await db.select(
+                    "SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?",
+                    [patternId]
+                ) as any[];
             const cMap: Record<string, number> = {};
             resCompany.forEach((c) => { cMap[c.work_date] = c.is_holiday; });
             setCompanyHolidays(cMap);
@@ -662,16 +669,26 @@ export default function AttendanceManager({
                 <div style={{ ...cardStyle, flex: "1", margin: 0, borderTop: "4px solid #3498db", display: "flex", flexDirection: "column", gap: "12px" }}>
                     
                     {/* フィルタボタン群 */}
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ fontSize: "12px", fontWeight: "bold", color: "#7f8c8d" }}>表示:</span>
-                        {statusOptions.map(opt => {
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "4px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "bold", color: "#7f8c8d", marginRight: "4px" }}>表示:</span>
+                        {[
+                            { label: "在籍", value: "active", color: "#2ecc71" },
+                            { label: "休職", value: "on_leave", color: "#f1c40f" },
+                            { label: "退職", value: "retired", color: "#e74c3c" }
+                        ].map(opt => {
                             const isActive = activeFilters.includes(opt.value);
                             return (
                                 <button
                                     key={opt.value}
-                                    onClick={() => toggleFilter(opt.value)}
+                                    onClick={() => 
+                                        setActiveFilters(prev => 
+                                            prev.includes(opt.value) 
+                                                ? prev.filter(v => v !== opt.value) 
+                                                : [...prev, opt.value]
+                                        )
+                                    }
                                     style={{
-                                        padding: "4px 12px",
+                                        padding: "5px 12px",
                                         borderRadius: "15px",
                                         border: `1px solid ${opt.color}`,
                                         backgroundColor: isActive ? opt.color : "white",
@@ -682,23 +699,23 @@ export default function AttendanceManager({
                                         transition: "0.2s"
                                     }}
                                 >
-                                    {isActive ? "✅ " : ""}{opt.label}
+                                    {opt.label}
                                 </button>
                             );
                         })}
-                        <button
+                        <button 
                             onClick={() => setActiveFilters(["active", "on_leave", "retired"])}
-                            style={{
-                                padding: "4px 12px",
-                                borderRadius: "15px",
-                                border: "1px solid #95a5a6",
-                                backgroundColor: "white",
-                                color: "#7f8c8d",
-                                cursor: "pointer",
-                                fontSize: "11px"
+                            style={{ 
+                                fontSize: "11px", 
+                                border: "none", 
+                                background: "none", 
+                                color: "#3498db", 
+                                cursor: "pointer", 
+                                textDecoration: "underline",
+                                marginLeft: "4px"
                             }}
                         >
-                            全員
+                            すべて表示
                         </button>
                     </div>
 
@@ -1010,15 +1027,31 @@ export default function AttendanceManager({
                                         {/* --- 3段目：備考欄 --- */}
                                         <tr style={{ backgroundColor: "#fdfdfd", borderBottom: "1px solid #eee" }}>
                                             {/* 6セル分をぶち抜いて備考欄にする */}
-                                            <td colSpan={7} style={{ padding: "6px 12px", pointerEvents: "auto" }}>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                                    <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "bold" }}>備考:</span>
+                                            <td colSpan={6} style={{ padding: "6px 12px", pointerEvents: "auto" }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: "4px", width: "100%" }}>
+                                                    <span style={{ 
+                                                        fontSize: "11px", 
+                                                        color: "#94a3b8", 
+                                                        fontWeight: "bold",
+                                                        whiteSpace: "nowrap", // ✨ これが重要！「備」と「考」を絶対に分かれないようにします
+                                                        flexShrink: 0         // ✨ ラベルが潰されないように死守します
+                                                    }}>
+                                                        備考：
+                                                    </span>
                                                     <input 
                                                         type="text" 
                                                         placeholder="理由、遅刻・早退の内容など" 
                                                         value={row.memo || ""}
                                                         onChange={e => handleCellChange(dateStr, 'memo', e.target.value)}
-                                                        style={{ width: "100%", fontSize: "12px", border: "none", borderBottom: "1px dashed #cbd5e1", background: "transparent", outline: "none" }}
+                                                        style={{ 
+                                                            flex: 1,          // ✨ 残りの横幅をすべて入力欄に割り当てます
+                                                            fontSize: "12px", 
+                                                            border: "none", 
+                                                            borderBottom: "1px dashed #cbd5e1", 
+                                                            background: "transparent", 
+                                                            outline: "none",
+                                                            minWidth: 0       // ✨ inputが親を突き破るのを防ぎます
+                                                        }}
                                                     />
                                                 </div>
                                             </td>
