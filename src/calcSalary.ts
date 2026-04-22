@@ -1,5 +1,11 @@
 /**
  * calcSalary.ts — 給与計算エンジン（2026年度版）
+ *
+ * 残業計算の法的根拠:
+ *  - 1日8時間超 → 法定外残業（割増25%必須）
+ *  - 週40時間超 → 法定外残業（割増25%必須）
+ *  - 所定時間超〜8時間 → 法定内残業（割増義務なし、基本単価のみ）
+ *  - 上記どちらかで月60時間超の分 → 割増50%必須
  */
 import { applyRounding } from './utils';
 import * as Master from './constants/salaryMaster2026';
@@ -17,12 +23,16 @@ export interface SalaryExtras {
 export interface SalaryResult {
     workDays: number;
     totalWorkHours: number;
-    totalOvertimeHours: number;
+    totalOvertimeHours: number;     // 法定外残業時間合計（週40h超含む）
     totalNightHours: number;
+    totalStatutoryOvertimeHours: number; // 法定内残業時間（所定超〜8h）
+    standardPremiumHours: number; // ★追加：標準割増（25%）の対象時間
+    highPremiumHours: number;     // ★追加：高率割増（50%）の対象時間
     basePay: number;
     absenceDeduction: number;
-    overtime25Pay: number;
-    overtime50Pay: number;
+    statutoryOvertimePay: number;   // 法定内残業代（割増なし）
+    standardOvertimePay: number;
+    highOvertimePay: number;
     nightPay: number;
     commutePay: number;
     allowanceAmount: number;
@@ -65,14 +75,11 @@ const getGensenTax = (taxBase: number, dependents: number): number => {
     return 0;
 };
 
-// ═══════════════════════════════════════════════════════════
-// 4. 介護保険 対象判定（40歳以上65歳未満）
-// ═══════════════════════════════════════════════════════════
 export const checkNursingCare = (birthday: string, year: number, month: number): boolean => {
     if (!birthday) return false;
     const b = new Date(birthday);
-    const reach40 = new Date(b.getFullYear() + 40, b.getMonth(), b.getDate() - 1);
-    const reach65 = new Date(b.getFullYear() + 65, b.getMonth(), b.getDate() - 1);
+    const reach40 = new Date(b.getFullYear() + Master.NURSING_CARE_START_AGE, b.getMonth(), b.getDate() - 1);
+    const reach65 = new Date(b.getFullYear() + Master.NURSING_CARE_END_AGE, b.getMonth(), b.getDate() - 1);
     const target  = new Date(year, month - 1, 1);
     return (
         target >= new Date(reach40.getFullYear(), reach40.getMonth(), 1) &&
@@ -80,104 +87,325 @@ export const checkNursingCare = (birthday: string, year: number, month: number):
     );
 };
 
-// ═══════════════════════════════════════════════════════════
-// 5. メイン: calculateSalary
-// ═══════════════════════════════════════════════════════════
+/* --- ヘルパー関数（内部のみで使用） --- */
+
+const parseTimeToMinutes = (t: string): number => {
+    if (!t || t.length < 5) return 0;
+    const [h, m] = t.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return 0;
+    return h * 60 + m;
+};
+
+const calcNightMinutes = (start: number, end: number): number => {
+    const nightStart = 22 * 60; // 22:00
+    const nightEnd = 29 * 60;   // 翌5:00
+    const overlapStart = Math.max(start, nightStart);
+    const overlapEnd = Math.min(end, nightEnd);
+    return Math.max(0, overlapEnd - overlapStart);
+};
+
+/* --- 外部から呼び出すメインロジック --- */
+
+/**
+ * 総労働時間と深夜時間を同時に計算する（詳細版）
+ */
+export const calcDetailedDiff = (inT: string, outT: string, bStart: string, bEnd: string, outV?: string, returnV?: string) => {
+    if (!inT || inT.length < 5 || !outT || outT.length < 5) {
+        return { total: "0.000", night: "0.000" };
+    }
+
+    let start = parseTimeToMinutes(inT);
+    let end = parseTimeToMinutes(outT);
+    
+    // 日跨ぎ対応：退勤の方が出勤より前なら翌日とみなす
+    if (end < start) end += 24 * 60;
+
+    let totalMin = end - start;
+    let nightMin = calcNightMinutes(start, end);
+
+    const deduct = (s?: string, e?: string) => {
+        if (!s || s.length < 5 || !e || e.length < 5) return;
+        let bs = parseTimeToMinutes(s);
+        let be = parseTimeToMinutes(e);
+        if (be < bs) be += 24 * 60;
+        
+        totalMin -= (be - bs);
+        nightMin -= calcNightMinutes(bs, be);
+    };
+
+    deduct(bStart, bEnd);
+    deduct(outV, returnV);
+
+    return {
+        total: (Math.max(0, totalMin) / 60).toFixed(3),
+        night: (Math.max(0, nightMin) / 60).toFixed(3)
+    };
+};
+
+/**
+ * 従来の calcDiff（後方互換性のため残す）
+ */
+export const calcDiff = (inT: string, outT: string, bStart: string, bEnd: string, outV?: string, returnV?: string): string => {
+    // 内部で calcDetailedDiff を呼び出して total だけを返す
+    return calcDetailedDiff(inT, outT, bStart, bEnd, outV, returnV).total;
+};
+
+/**
+ * 小数の時間を「〇時間〇分」の形式に変換する
+ * 例: 4.5 -> "4時間30分"
+ * 例: 10.667 -> "10時間40分"
+ */
+export const formatHours = (decimalHours: number): string => {
+  // 1. そもそも数値じゃない、または NaN の場合は「0分」と返す
+  if (typeof decimalHours !== 'number' || isNaN(decimalHours) || decimalHours <= 0) {
+    return "0分";
+  }
+  
+  try {
+    const h = Math.floor(decimalHours);
+    const m = Math.round((decimalHours - h) * 60);
+    
+    if (h === 0) return `${m}分`;
+    if (m === 0) return `${h}時間`;
+    return `${h}時間${m}分`;
+  } catch (e) {
+    // 万が一ここでエラーが起きても全体を落とさない
+    return "計算中...";
+  }
+};
+
+/**
+ * 給与計算結果をDBに保存する（確定処理）
+ */
+export const saveSalaryResult = async (
+    db: any, 
+    staffId: string, 
+    year: number, 
+    month: number, 
+    result: SalaryResult,
+    staffMaster: any // その時の基本給などのスナップショット用
+) => {
+    const sql = `
+        INSERT INTO salary_results (
+            staff_id, target_year, target_month,
+            applied_base_wage, applied_dependents,
+            total_work_hours, total_overtime_hours, total_night_hours,
+            standard_overtime_hours, high_overtime_hours,
+            standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
+            total_earnings, taxable_amount,
+            health_insurance, nursing_insurance, welfare_pension, emp_insurance,
+            social_ins_total, income_tax, resident_tax, net_pay
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
+            applied_base_wage = excluded.applied_base_wage,
+            applied_dependents = excluded.applied_dependents,
+            total_work_hours = excluded.total_work_hours,
+            total_overtime_hours = excluded.total_overtime_hours,
+            standard_overtime_hours = excluded.standard_overtime_hours,
+            high_overtime_hours = excluded.high_overtime_hours,
+            total_earnings = excluded.total_earnings,
+            net_pay = excluded.net_pay,
+            processed_at = DATETIME('now', 'localtime');
+    `;
+
+    const params = [
+        staffId, year, month,
+        staffMaster.base_wage, staffMaster.dependents,
+        result.totalWorkHours, result.totalOvertimeHours, result.totalNightHours,
+        result.standardPremiumHours, result.highPremiumHours,
+        result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
+        result.totalEarnings, (result.totalEarnings - result.commutePay), // 課税対象額（通勤費除く）
+        result.healthInsurance, result.nursingInsurance, result.welfarePension, result.empInsurance,
+        (result.healthInsurance + result.nursingInsurance + result.welfarePension + result.empInsurance),
+        result.incomeTax, result.residentTax, result.netPay
+    ];
+
+    try {
+        await db.run(sql, params);
+        return { success: true };
+    } catch (error) {
+        console.error("Failed to save salary result:", error);
+        return { success: false, error };
+    }
+};
+
+/**
+ * 週番号を返す（週の開始曜日を指定可能）
+ * weekStartDay: 0=日曜, 1=月曜, ..., 6=土曜
+ */
+const getWeekKey = (dateStr: string, weekStartDay: number): string => {
+    const d = new Date(dateStr);
+    const dow = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    // 週の開始日曜から何日目か（0〜6）
+    const daysFromStart = (dow - weekStartDay + 7) % 7;
+    const weekStart = new Date(d);
+    weekStart.setDate(d.getDate() - daysFromStart);
+    return weekStart.toISOString().split('T')[0]; // 週の最初の日をキーに
+};
+
 export const calculateSalary = (
     staff: any,
     attendanceData: any[],
     extras: SalaryExtras,
     targetYear: number,
     targetMonth: number,
-    companySettings: any, // 👈 引数に追加
+    companySettings: any,
 ): SalaryResult => {
+
+    const weekStartDay: number = companySettings?.week_start_day ?? 0; // デフォルト日曜
+    const scheduledHours = Number(staff.scheduled_work_hours) || 8;
 
     // ── 勤怠集計 ──────────────────────────────────────────────
     const workDays = attendanceData.length;
-    let totalWorkHours = 0, totalNightHours = 0, totalOvertimeHours = 0;
-    let basePay = 0, overtime25Pay = 0, overtime50Pay = 0, nightPay = 0;
+    let totalWorkHours = 0, totalNightHours = 0;
+    let basePay = 0, standardOvertimePay = 0, highOvertimePay = 0, nightPay = 0;
+    let statutoryOvertimePay = 0; // 法定内残業代（割増なし）
     let absenceDeduction = 0;
+    let totalOvertimeHours = 0;       // 法定外残業（割増対象）の累計
+    let totalStatutoryOvertimeHours = 0; // 法定内残業の累計
+    let standardPremiumHours = 0; // ★追加
+    let highPremiumHours = 0;     // ★追加
+
+    // ── 週40時間超チェック用：週ごとの実労働時間を集計 ─────────
+    // 週キー → 実労働時間合計
+    const weeklyHours: Record<string, number> = {};
+    for (const row of attendanceData) {
+        const wk = getWeekKey(row.work_date, weekStartDay);
+        weeklyHours[wk] = (weeklyHours[wk] ?? 0) + (Number(row.work_hours) || 0);
+    }
+    // 週ごとに「40時間を超えた分」を法定外残業として事前計算
+    // 週40h超の時間数（日8h未満でも発生しうる）
+    const weeklyOvertimeMap: Record<string, number> = {};
+    for (const [wk, hours] of Object.entries(weeklyHours)) {
+        weeklyOvertimeMap[wk] = Math.max(0, hours - Master.LEGAL_WORK_HOURS_WEEKLY);
+    }
 
     if (staff.wage_type === 'monthly') {
-        // ── 1. 基本給を固定（ループの外で1回だけ！） ──
         const monthlyWage = Number(staff.base_wage) || 0;
-        basePay = monthlyWage; 
+        basePay = monthlyWage;
 
-        // ── 2. 単価計算（残業代と欠勤控除のためだけに計算） ──
         const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
         let weekends = 0;
         for (let d = 1; d <= daysInMonth; d++) {
             const dow = new Date(targetYear, targetMonth - 1, d).getDay();
             if (dow === 0 || dow === 6) weekends++;
         }
-        
-        // 所定日数（設定があればそれ、なければ平日の数）
-        const prescribedDays  = Number(staff.monthly_work_days) || (daysInMonth - weekends);
-        const scheduledHours = Number(staff.scheduled_work_hours) || Master.OVERTIME_THRESHOLD_DAILY;
-        
-        // 時給単価 = 月給 / (所定日数 * 1日の所定時間)
-        const hourlyRate = (prescribedDays > 0 && scheduledHours > 0) 
-            ? monthlyWage / (prescribedDays * scheduledHours) 
+        const prescribedDays = Number(staff.monthly_work_days) || (daysInMonth - weekends);
+        const hourlyRate = (prescribedDays > 0 && scheduledHours > 0)
+            ? monthlyWage / (prescribedDays * scheduledHours)
             : 0;
 
-        // ── 3. 欠勤控除の計算（月給制の大事な「引き算」） ──
+        // 欠勤控除
         const absentDays = Math.max(0, prescribedDays - workDays);
         absenceDeduction = absentDays > 0
             ? Math.floor((monthlyWage / prescribedDays) * absentDays)
             : 0;
 
-        // ── 4. 勤怠ループ（ここでは「足し算」のための集計だけする） ──
-        attendanceData.forEach(row => {
+        // 週40h超の残業時間を日付→週のマップで追跡
+        // 各週で「すでに法定外としてカウントした時間」を管理
+        const weeklyLegalOvertimeUsed: Record<string, number> = {};
+
+        // 日付順にソートして処理（週40h超判定の正確性のため）
+        const sorted = [...attendanceData].sort((a, b) => a.work_date.localeCompare(b.work_date));
+
+        for (const row of sorted) {
             const h = Number(row.work_hours) || 0;
             const n = Number(row.night_hours) || 0;
-            
-            totalWorkHours += h; 
-            totalNightHours += n;
-
-            // 残業代の「足し算」
-            const dayOvertime = Math.max(0, h - scheduledHours);
-            if (dayOvertime > 0) {
-                const canFitInBasic = Math.max(0, Math.min(dayOvertime, Master.OVERTIME_PREMIUM_THRESHOLD - totalOvertimeHours));
-                const overPremiumThreshold = Math.max(0, dayOvertime - canFitInBasic);
-                
-                overtime25Pay += hourlyRate * Master.OVERTIME_RATE * canFitInBasic;
-                overtime50Pay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * overPremiumThreshold;
-                totalOvertimeHours += dayOvertime;
-            }
-
-            // 深夜手当の「足し算」
-            if (n > 0) {
-                nightPay += hourlyRate * Master.NIGHT_SHIFT_RATE * n;
-            }
-        });
-
-        // 🟢 【重要】このブロック内では `basePay += ...` という加算は一切行わない！
-
-    } else {
-        // --- 時給制のロジック ---
-        attendanceData.forEach(row => {
-            const h = Number(row.work_hours) || 0;
-            const n = Number(row.night_hours) || 0;
-            const wage = Number(row.actual_base_wage) || Number(staff.base_wage) || 0;
-
             totalWorkHours += h;
             totalNightHours += n;
 
-            // 時給制の場合は、ここで「時間 × 時給」を積み上げる
+            // ── 1日単位の残業判定 ─────────────────────────────
+            // 所定時間〜法定時間（8h）: 法定内残業（割増なし）
+            const statutoryOvertimeToday = Math.max(0, Math.min(h, Master.LEGAL_WORK_HOURS_DAILY) - scheduledHours);
+            // 8時間超: 法定外残業（割増あり）
+            const legalOvertimeFromDay = Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY);
+
+            // ── 週40時間超判定 ────────────────────────────────
+            // 1日8h以内でも週40h超になった部分は法定外
+            const wk = getWeekKey(row.work_date, weekStartDay);
+            const used = weeklyLegalOvertimeUsed[wk] ?? 0;
+            const weekTotal = weeklyHours[wk] ?? 0;
+            // この日の労働のうち「週40h超に貢献する部分」
+            // = max(0, min(この日の時間, weekTotal - 40) - used)
+            const weekOverflowFromDay = Math.max(0,
+                Math.min(h, Math.max(0, weekTotal - Master.LEGAL_WORK_HOURS_WEEKLY)) - used
+            );
+            // 日8h超と週40h超で重複しないように
+            const weekOnlyOvertime = Math.max(0, weekOverflowFromDay - legalOvertimeFromDay);
+
+            // 法定外残業時間合計（日超 + 週超の重複なし分）
+            const legalOvertimeToday = legalOvertimeFromDay + weekOnlyOvertime;
+            weeklyLegalOvertimeUsed[wk] = used + weekOnlyOvertime;
+
+            // 法定内残業（所定超〜8h、かつ週40h超になっていない分）
+            const effectiveStatutoryOvertime = Math.max(0, statutoryOvertimeToday - weekOnlyOvertime);
+            totalStatutoryOvertimeHours += effectiveStatutoryOvertime;
+            statutoryOvertimePay += hourlyRate * effectiveStatutoryOvertime;
+
+            // --- 月給制ループ内 (修正箇所) ---
+            if (legalOvertimeToday > 0) {
+                // 1. その日の分を一時変数で計算 (外側の standardPremiumHours と名前を分ける)
+                const standardHoursToday = Math.max(0, Math.min(legalOvertimeToday, Master.OVERTIME_PREMIUM_LIMIT_HOURS - totalOvertimeHours));
+                const highHoursToday = Math.max(0, legalOvertimeToday - standardHoursToday);
+
+                // 2. 金額を累積
+                standardOvertimePay += hourlyRate * Master.OVERTIME_RATE * standardHoursToday;
+                highOvertimePay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * highHoursToday;
+
+                // 3. 外側の合計用変数に時間を累積
+                standardPremiumHours += standardHoursToday; 
+                highPremiumHours += highHoursToday;
+                totalOvertimeHours += legalOvertimeToday;
+            }
+
+            nightPay += hourlyRate * Master.NIGHT_SHIFT_RATE * n;
+        }
+
+    } else {
+        // ── 時給制 ────────────────────────────────────────────
+        const weeklyLegalOvertimeUsed: Record<string, number> = {};
+        const sorted = [...attendanceData].sort((a, b) => a.work_date.localeCompare(b.work_date));
+
+        for (const row of sorted) {
+            const h = Number(row.work_hours) || 0;
+            const n = Number(row.night_hours) || 0;
+            const wage = Number(row.actual_base_wage) || Number(staff.base_wage) || 0;
+            totalWorkHours += h;
+            totalNightHours += n;
+
             basePay += wage * h;
 
-            const dayOvertime = Math.max(0, h - Master.OVERTIME_THRESHOLD_DAILY);
-            if (dayOvertime > 0) {
-                const canFitInBasic = Math.max(0, Math.min(dayOvertime, Master.OVERTIME_PREMIUM_THRESHOLD - totalOvertimeHours));
-                const overPremiumThreshold = Math.max(0, dayOvertime - canFitInBasic);
-                overtime25Pay += wage * (Master.OVERTIME_RATE - 1) * canFitInBasic; // 割増分のみ
-                overtime50Pay += wage * (Master.OVERTIME_PREMIUM_RATE - 1) * overPremiumThreshold;    // 割増分のみ
-                totalOvertimeHours += dayOvertime;
+            // 1日8h超
+            const legalOvertimeFromDay = Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY);
+
+            // 週40h超
+            const wk = getWeekKey(row.work_date, weekStartDay);
+            const used = weeklyLegalOvertimeUsed[wk] ?? 0;
+            const weekTotal = weeklyHours[wk] ?? 0;
+            const weekOverflowFromDay = Math.max(0,
+                Math.min(h, Math.max(0, weekTotal - Master.LEGAL_WORK_HOURS_WEEKLY)) - used
+            );
+            const weekOnlyOvertime = Math.max(0, weekOverflowFromDay - legalOvertimeFromDay);
+            weeklyLegalOvertimeUsed[wk] = used + weekOnlyOvertime;
+
+            const legalOvertimeToday = legalOvertimeFromDay + weekOnlyOvertime;
+
+            if (legalOvertimeToday > 0) {
+                // ★ 1. 名前が被らないように「今日（その行）の時間」として計算
+                const standardHoursToday = Math.max(0, Math.min(legalOvertimeToday, Master.OVERTIME_PREMIUM_LIMIT_HOURS - totalOvertimeHours));
+                const highHoursToday = Math.max(0, legalOvertimeToday - standardHoursToday);
+
+                // ★ 2. 金額を累積
+                standardOvertimePay += wage * (Master.OVERTIME_RATE - 1) * standardHoursToday;
+                highOvertimePay += wage * (Master.OVERTIME_PREMIUM_RATE - 1) * highHoursToday;
+
+                // ★ 3. 外側の変数（合計時間）に足し込む
+                standardPremiumHours += standardHoursToday; 
+                highPremiumHours += highHoursToday;
+                totalOvertimeHours += legalOvertimeToday;
             }
-            if (n > 0) {
-                nightPay += wage * Master.NIGHT_SHIFT_RATE * n;
-            }
-        });
+            nightPay += wage * Master.NIGHT_SHIFT_RATE * n;
+        }
     }
 
     // ── 通勤手当・任意手当 ──────────────────────────────────────
@@ -185,60 +413,49 @@ export const calculateSalary = (
                     : staff.commute_type === 'monthly' ? (Number(staff.commute_amount) || 0) : 0;
     const allowanceAmount = Number(extras.allowanceAmount) || 0;
 
-    // ── カスタム項目の集計 ─────────────────────────────────────
     const customItems = extras.customItems ?? [];
-    const customEarnings   = customItems.filter(i => i.type === 'earning')  .reduce((s, i) => s + i.amount, 0);
+    const customEarnings   = customItems.filter(i => i.type === 'earning').reduce((s, i) => s + i.amount, 0);
     const customDeductions = customItems.filter(i => i.type === 'deduction').reduce((s, i) => s + i.amount, 0);
 
-    // ── 支給合計の計算 ──────────────────────────────────────────────
-    // 残業代・深夜手当などの「割増賃金」の合計に対して設定を適用
-    const premiums = overtime25Pay + overtime50Pay + nightPay;
-    const roundedPremiums = applyRounding(premiums, companySettings.round_overtime || 'round');
+    // ── 支給合計 ──────────────────────────────────────────────
+    const premiums = standardOvertimePay + highOvertimePay + nightPay;
+    const roundedPremiums = applyRounding(premiums, companySettings?.round_overtime || 'round');
+    const roundedStatutory = applyRounding(statutoryOvertimePay, companySettings?.round_overtime || 'round');
 
-    // 支給合計 = 基本給(満額) - 欠勤控除 + 割増賃金 + 諸手当
-    const totalEarnings = Math.floor(basePay) 
-                        - absenceDeduction // ★ ここで初めて引く
-                        + roundedPremiums 
-                        + commutePay 
-                        + allowanceAmount 
+    const totalEarnings = Math.floor(basePay)
+                        - absenceDeduction
+                        + roundedStatutory   // 法定内残業代
+                        + roundedPremiums    // 法定外割増
+                        + commutePay
+                        + allowanceAmount
                         + customEarnings;
 
-    // ── 社会保険料（標準報酬月額ベース） ────────────────────────
+    // ── 社会保険料 ──────────────────────────────────────────────
     const dbHyojun = Number(staff.standard_remuneration) || 0;
     let hyojunHoshu: number;
-
     if (dbHyojun > 0) {
         hyojunHoshu = dbHyojun;
     } else {
-        // 標準報酬月額を判定するための報酬額（ここは法的に「円未満切り捨て」が一般的）
-        const reportable = Math.floor(basePay + overtime25Pay + overtime50Pay + nightPay + commutePay);
+        const reportable = Math.floor(basePay + standardOvertimePay + highOvertimePay + nightPay + statutoryOvertimePay + commutePay);
         hyojunHoshu = getHyojunHoshu(reportable);
     }
 
     const rates = Master.KENPO_RATES[extras.prefecture] ?? Master.KENPO_RATES["東京"];
     const nursingTarget = checkNursingCare(staff.birthday || '', targetYear, targetMonth);
-
     const healthRate  = nursingTarget ? rates[1] : rates[0];
     const nursingRate = nursingTarget ? (rates[1] - rates[0]) : 0;
-  
-    // 社会保険料の端数設定（デフォルトは切り捨て）
-    const sInsType = companySettings.round_social_ins || 'floor';
+    const sInsType = companySettings?.round_social_ins || 'floor';
 
-    const healthHyojun = Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN);
-    const healthTotal      = applyRounding(healthHyojun * healthRate  / 100, sInsType);
+    const healthHyojun    = Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN);
+    const healthTotal     = applyRounding(healthHyojun * healthRate  / 100, sInsType);
     const nursingInsurance = applyRounding(healthHyojun * nursingRate / 100, sInsType);
     const healthInsurance  = healthTotal - nursingInsurance;
 
     const pensionHyojun = Math.max(Master.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, Master.PENSION_MAX_HYOJUN));
     const welfarePension = applyRounding(pensionHyojun * Master.PENSION_RATE / 100, sInsType);
-  
-    // 雇用保険（雇用保険用の端数設定を適用：デフォルトは四捨五入）
-    const empInsurance = applyRounding(
-        totalEarnings * Master.EMP_INS_RATE, 
-        companySettings.round_emp_ins || 'round'
-    );
 
-    // ── 税金・控除合計 ─────────────────────────────────────
+    const empInsurance = applyRounding(totalEarnings * Master.EMP_INS_RATE, companySettings?.round_emp_ins || 'round');
+
     const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
     const incomeTax   = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0);
 
@@ -248,11 +465,14 @@ export const calculateSalary = (
 
     return {
         workDays, totalWorkHours, totalOvertimeHours, totalNightHours,
-        // 返却値の端数も整えておく
-        basePay: Math.floor(basePay), 
+        totalStatutoryOvertimeHours,
+        standardPremiumHours, // ★追加
+        highPremiumHours,     // ★追加
+        basePay: Math.floor(basePay),
         absenceDeduction,
-        overtime25Pay: Math.floor(overtime25Pay),
-        overtime50Pay: Math.floor(overtime50Pay),
+        statutoryOvertimePay: Math.floor(statutoryOvertimePay),
+        standardOvertimePay: Math.floor(standardOvertimePay),
+        highOvertimePay: Math.floor(highOvertimePay),
         nightPay: Math.floor(nightPay),
         commutePay, allowanceAmount, customEarnings, totalEarnings,
         healthInsurance, nursingInsurance, welfarePension,

@@ -4,7 +4,7 @@ import { useEffect, useState, Fragment } from "react";
 // 🆕 calculateSalary を追加（ファイルパスは作成した場所に合わせて調整してください）
 import { calcDetailedDiff, modernIconBtnStyle, formatHours, generateAttendanceCSV, parseAttendanceCSV } from "./utils";
 import { calculateSalary } from "./calcSalary";
-import { OVERTIME_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_THRESHOLD, OVERTIME_PREMIUM_RATE } from './constants/salaryMaster2026';
+import { OVERTIME_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_LIMIT_HOURS, OVERTIME_PREMIUM_RATE } from './constants/salaryMaster2026';
 
 
 // 🆕 ニコイチ入力コンポーネント
@@ -618,7 +618,7 @@ export default function AttendanceManager({
     const totalOvertimeHours = calcResult?.totalOvertimeHours || 0;
     const totalPay           = calcResult?.totalEarnings || 0; // 交通費・割増・端数処理すべて込み
     const totalCommute       = calcResult?.commutePay || 0;
-    const over60Hours = Math.max(0, totalOvertimeHours - OVERTIME_PREMIUM_THRESHOLD);
+    const over60Hours = Math.max(0, totalOvertimeHours - OVERTIME_PREMIUM_LIMIT_HOURS);
 
     return (
         <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
@@ -1085,7 +1085,7 @@ export default function AttendanceManager({
                             {over60Hours > 0 && (
                                 <div style={{ fontSize: "11px", color: "#ff7675" }}> 
                                     {/* 🆕 60 という数字と、50% という数字を定数から算出 */}
-                                    (うち{OVERTIME_PREMIUM_THRESHOLD}h超 [{(OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(over60Hours)}) 
+                                    (うち{OVERTIME_PREMIUM_LIMIT_HOURS}h超 [{(OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(over60Hours)}) 
                                 </div>
                             )}
                         </div>

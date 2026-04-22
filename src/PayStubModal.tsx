@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { calculateSalary, PREFECTURES, type SalaryExtras } from './calcSalary';
+import { calculateSalary, saveSalaryResult, PREFECTURES, type SalaryExtras } from './calcSalary';
 
 const fmtH = (num: number) => {
     const h = Math.floor(num);
@@ -25,6 +25,7 @@ interface Props {
 }
 
 export default function PayStubModal({ db, staff, attendanceData, year, month, companySettings, onClose }: Props) {
+    const [isSaved, setIsSaved] = useState(false); // salary_resultsへの確定保存フラグ
     const [extras, setExtras] = useState<SalaryExtras>({
         allowanceName:   "役職手当",
         allowanceAmount: 0,
@@ -89,6 +90,17 @@ export default function PayStubModal({ db, staff, attendanceData, year, month, c
     // 左右で多い方に合わせる（最低でも合計10行程度あると見栄えが良い）
     const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
 
+    const handleSaveResult = async () => {
+        if (!db || !staff) return;
+        const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
+        if (result.success) {
+            setIsSaved(true);
+            alert(`${staff.name}さん ${year}年${month}月分の給与を確定しました。\n（賞与の所得税計算で前月給与として参照されます）`);
+        } else {
+            alert("保存に失敗しました: " + result.error);
+        }
+    };
+
     return (
         <div style={overlayS}>
             <div style={containerS}>
@@ -113,7 +125,15 @@ export default function PayStubModal({ db, staff, attendanceData, year, month, c
                             <input type="number" min={0} value={extras.residentTax} onChange={e => setExtras(p => ({ ...p, residentTax: Number(e.target.value) }))} style={inputS} />
                         </div>
                     </div>
-                    <button onClick={() => window.print()} style={printBtnS}>🖨 印刷・PDF保存</button>
+                    <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => window.print()} style={{ ...printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
+                        <button 
+                            onClick={handleSaveResult} 
+                            style={{ ...printBtnS, flex: 1, backgroundColor: isSaved ? "#27ae60" : "#8e44ad" }}
+                        >
+                            {isSaved ? "✅ 確定済み" : "💾 給与確定"}
+                        </button>
+                    </div>
                 </div>
 
                 {/* ─── 明細書本体 ─── */}
@@ -156,7 +176,7 @@ export default function PayStubModal({ db, staff, attendanceData, year, month, c
                                     {salary.absenceDeduction > 0 && (
                                     <tr><td style={{...tdS, color: "#c0392b"}}>欠勤控除</td><td style={{...rtdS, color: "#c0392b"}}>－¥{salary.absenceDeduction.toLocaleString()}</td></tr>
                                     )}
-                                    <tr><td style={tdS}>残業手当</td><td style={rtdS}>¥{(salary.overtime25Pay + salary.overtime50Pay).toLocaleString()}</td></tr>
+                                    <tr><td style={tdS}>残業手当</td><td style={rtdS}>¥{(salary.standardOvertimePay + salary.highOvertimePay).toLocaleString()}</td></tr>
                                     <tr><td style={tdS}>深夜手当</td><td style={rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
                                     <tr><td style={tdS}>通勤手当</td><td style={rtdS}>¥{salary.commutePay.toLocaleString()}</td></tr>
                                     <tr><td style={tdS}>{extras.allowanceName || "任意手当"}</td><td style={rtdS}>¥{salary.allowanceAmount.toLocaleString()}</td></tr>

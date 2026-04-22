@@ -176,6 +176,13 @@ export const DB_SCHEMAS = [
     total_overtime_hours REAL,       -- 総残業時間
     total_night_hours REAL,          -- 総深夜時間
 
+    -- ★ 追加：標準と高率を分けて保存
+    standard_overtime_hours REAL,    -- 標準割増の対象時間
+    high_overtime_hours REAL,        -- 高率割増の対象時間
+    standard_overtime_pay INTEGER,   -- 標準割増の支給額
+    high_overtime_pay INTEGER,       -- 高率割増の支給額
+    statutory_overtime_pay INTEGER,  -- 法定内残業の支給額（割増なし）
+
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,
     health_insurance INTEGER DEFAULT 0,

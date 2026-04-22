@@ -235,7 +235,7 @@ export default function BonusManager({ db, staffList }: Props) {
             { title: '賞与設定の削除', kind: 'warning', okLabel: '削除', cancelLabel: 'キャンセル' }
         );
         if (!ok) return;
-        
+
         await db.execute("DELETE FROM bonus_settings WHERE id = ?", [id]);
         if (selectedSettingId === id) setSelectedSettingId(null);
         await loadSettings();
@@ -252,7 +252,13 @@ export default function BonusManager({ db, staffList }: Props) {
     };
 
     const deleteItem = async (id: number) => {
-        if (!confirm("この項目を削除しますか？")) return;
+        // ✨ window.confirm を ask に置き換え
+        const ok = await ask(
+            "この賞与項目を削除しますか？",
+            { title: '項目の削除', kind: 'warning', okLabel: '削除', cancelLabel: 'キャンセル' }
+        );
+        if (!ok) return;
+        
         await db.execute("DELETE FROM bonus_item_master WHERE id = ?", [id]);
         await loadItems();
     };

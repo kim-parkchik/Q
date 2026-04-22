@@ -171,9 +171,20 @@ export const BONUS_TAX_RATE_TABLE: [number, number, number, number, number, numb
 ];
 
 // 7. 割増率（法定基準）
-export const OVERTIME_THRESHOLD_DAILY = 8;    // 1日の法定労働時間（これを超えると残業）
-export const OVERTIME_PREMIUM_THRESHOLD = 60;      // 月間残業の割増率が変わるしきい値
+// --- 労働時間の法的基準 ---
+/** 1日の法定労働時間 (原則8時間) */
+export const LEGAL_WORK_HOURS_DAILY = 8;
+/** 週の法定労働時間 (原則40時間) */
+export const LEGAL_WORK_HOURS_WEEKLY = 40;
+
+export const OVERTIME_PREMIUM_LIMIT_HOURS = 60;      // 月間残業の割増率が変わるしきい値
 export const OVERTIME_RATE = 1.25;      // 時間外労働
 export const NIGHT_SHIFT_RATE = 0.25;   // 深夜割増分（1.25の内の0.25）
 export const HOLIDAY_WORK_RATE = 1.35;  // 法定休日労働
 export const OVERTIME_PREMIUM_RATE = 1.50;  // 月60時間超の時間外労働（現在は全企業義務化）
+
+// --- 年齢基準 ---
+/** 介護保険料の徴収開始年齢 */
+export const NURSING_CARE_START_AGE = 40;
+/** 介護保険料(第2号)の終了年齢 */
+export const NURSING_CARE_END_AGE = 65;

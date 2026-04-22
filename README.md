@@ -1,7 +1,27 @@
-# Tauri + React + Typescript
+# hama-kyuyo (はま給与)
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+ローカル環境で完結する給与計算ソフトです。
 
-## Recommended IDE Setup
+## 開発の背景
+市場の給与計算ソフトがクラウド・サブスク型に偏っているため、データの自己管理とランニングコストの削減を目的に、ローカルで動作するツールを自作しています。
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## 技術スタック
+「ローカルで動くこと」を条件に、AIの提案から選定した構成です。
+
+- **Runtime**: [Bun](https://bun.sh/) (高速な実行環境として採用)
+- **Framework**: [Tauri](https://tauri.app/) (デスクトップアプリ化)
+- **Frontend**: React + TypeScript
+- **Database**: SQLite (ローカルデータ保存)
+
+## 開発の目的
+- 「自分が作った」と言える成果物をひとつ完成させること
+- クラウドに依存しない給与計算環境の構築
+
+## 使い方
+1. 依存関係のインストール
+   ```bash
+   bun install
+
+2. 開発モードで起動
+   ```bash
+   bun tauri dev

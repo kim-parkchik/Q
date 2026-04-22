@@ -52,9 +52,14 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
     const [deletingBranchId, setDeletingBranchId] = useState<number | null>(null);
 
     // --- 🆕 端数処理設定用ステート ---
-    const [roundOvertime, setRoundOvertime] = useState("round");  // 残業
-    const [roundSocialIns, setRoundSocialIns] = useState("floor"); // 社会保険
-    const [roundEmpIns, setRoundEmpIns] = useState("round");     // 雇用保険
+    // 残業代：労基法で「四捨五入」が明確に認められているため round が標準的
+    const [roundOvertime, setRoundOvertime] = useState("round"); 
+
+    // 社会保険：法的原則は「50銭以下切り捨て」のため currency_law が最も正確
+    const [roundSocialIns, setRoundSocialIns] = useState("currency_law"); 
+
+    // 雇用保険：通貨単位法（0.51円から切上）が厳格に適用されるため currency_law が推奨
+    const [roundEmpIns, setRoundEmpIns] = useState("currency_law");
 
     // --- タブ切り替えボタンのスタイル ---
     const subTabStyle = (isActive: boolean) => ({
@@ -994,14 +999,17 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     <div style={{ ...roundingRowStyle, gap: "20px" }}>
                                         <div style={{ flex: 1 }}>
                                             <strong style={{ display: "block", whiteSpace: "nowrap" }}>⏰ 残業代・深夜手当</strong>
-                                            <small style={{ color: "#95a5a6" }}>※労働基準法に基づき、50銭以上切り上げが推奨されます。</small>
+                                            <small style={{ color: "#95a5a6" }}>
+                                                ※1ヶ月の合計額に対して適用されます。
+                                            </small>
                                         </div>
                                         <select 
                                             value={roundOvertime} 
                                             onChange={e => setRoundOvertime(e.target.value)} 
                                             style={{ ...inputStyle, width: "320px", flexShrink: 0 }}
                                         >
-                                            <option value="round">四捨五入（推奨）</option>
+                                            <option value="round">四捨五入（0.50円以上切上 / 労基法容認）</option>
+                                            <option value="currency_law">法的原則（0.51円以上切上 / 通貨単位法）</option>
                                             <option value="ceil">常に切り上げ（従業員に有利）</option>
                                             <option value="floor">常に切り捨て（⚠️未払いのリスクあり）</option>
                                         </select>
@@ -1035,6 +1043,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                             onChange={e => setRoundEmpIns(e.target.value)} 
                                             style={{ ...inputStyle, width: "320px", flexShrink: 0 }}
                                         >
+                                            <option value="currency_law">法的原則：0.51円以上切上</option>
                                             <option value="round">四捨五入（50銭ルールに近い）</option>
                                             <option value="floor">切り捨て</option>
                                             <option value="ceil">切り上げ</option>
