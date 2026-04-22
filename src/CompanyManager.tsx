@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
+import { ask } from '@tauri-apps/plugin-dialog';
 import { fetchAddressByZip } from "./utils";
 
 interface Props {
@@ -25,6 +26,8 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
     const [headPref, setHeadPref] = useState("");
     const [isSaving, setIsSaving] = useState(false);
     const [isSearchingZip, setIsSearchingZip] = useState(false);
+    const [weekStartDay, setWeekStartDay] = useState(0);
+    const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
 
     // --- 給与規定グループ用ステート ---
     const [payrollGroups, setPayrollGroups] = useState<any[]>([]);
@@ -132,6 +135,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 setCompPhone(c.phone || "");
                 setCompNum(c.corporate_number || "");
                 setCompRep(c.representative || "");
+                setWeekStartDay(c.week_start_day ?? 0); // 👈 0（日曜）をデフォルトに
                 setCompHealth(c.health_ins_num || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
@@ -163,12 +167,12 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 `REPLACE INTO company (
                     id, name, zip_code, address, phone, corporate_number, representative, 
                     health_ins_num, labor_ins_num, 
-                    round_overtime, round_social_ins, round_emp_ins
-                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    round_overtime, round_social_ins, round_emp_ins, week_start_day
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
                     compHealth, compLabor, 
-                    roundOvertime, roundSocialIns, roundEmpIns // 👈 追加
+                    roundOvertime, roundSocialIns, roundEmpIns, weekStartDay // 👈 追加
                 ]
             );
             await db.execute(
@@ -180,6 +184,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
             await loadData();
             if (onSetupComplete) onSetupComplete();
             setTimeout(() => setIsSaving(false), 1000);
+            setIsWeekStartEditable(false); // 保存が終わったら編集モードを自動で閉じるのが親切です
         } catch (e) { setIsSaving(false); }
     };
 
@@ -496,6 +501,36 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     <input value={compPhone} onChange={e => setCompPhone(e.target.value)} onFocus={handleFocus} onBlur={(e) => handleBlur(e)} style={inputStyle} />
                                 </div>
 
+                                {/* 🆕 週の起算日設定 */}
+                                <div style={{ 
+                                    gridColumn: "1 / 3", 
+                                    padding: "15px", 
+                                    backgroundColor: "#f8fafc", 
+                                    borderRadius: "8px", 
+                                    border: "1px solid #e2e8f0",
+                                    marginBottom: "10px"
+                                }}>
+                                    <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px" }}>
+                                        📅 週の起算日
+                                        <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal" }}>
+                                            ※週40時間超の残業計算に使用します
+                                        </span>
+                                    </label>
+                                    <select 
+                                        value={weekStartDay} // ステートを定義
+                                        onChange={e => setWeekStartDay(Number(e.target.value))} 
+                                        style={{ ...inputStyle, width: "200px" }}
+                                    >
+                                        <option value={0}>日曜日 (原則)</option>
+                                        <option value={1}>月曜日</option>
+                                        <option value={2}>火曜日</option>
+                                        <option value={3}>水曜日</option>
+                                        <option value={4}>木曜日</option>
+                                        <option value={5}>金曜日</option>
+                                        <option value={6}>土曜日</option>
+                                    </select>
+                                </div>
+
                                 {/* ✨ 会社用の社会保険・労働保険番号入力欄 */}
                                 <div style={{ gridColumn: "1 / 3", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "15px", backgroundColor: "#f0f9ff", borderRadius: "8px" }}>
                                     <div><label style={labelStyle}>🛡️ 社会保険 整理記号・番号</label><input value={compHealth} onChange={e => setCompHealth(e.target.value)} placeholder="例: 12-あいう 1234" style={inputStyle} /></div>
@@ -574,6 +609,73 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                 {["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"].map(p => <option key={p} value={p}>{p}</option>)}
                                             </select>
                                             <input value={compAddr} onChange={e => setCompAddr(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} placeholder="市区町村・番地" style={inputStyle} />
+                                        </div>
+                                    </div>
+
+                                    {/* 🆕 週の起算日設定（保存済み版：ガードレール付き） */}
+                                    <div style={{ 
+                                        gridColumn: "1 / 3", 
+                                        padding: "15px", 
+                                        backgroundColor: isWeekStartEditable ? "#fff5f5" : "#f8fafc", // 編集時は注意喚起の色に
+                                        borderRadius: "8px", 
+                                        border: isWeekStartEditable ? "1px solid #feb2b2" : "1px solid #e2e8f0",
+                                        marginBottom: "10px"
+                                    }}>
+                                        <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px" }}>
+                                            📅 週の起算日
+                                            <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal" }}>
+                                                ※週40時間超の残業計算に使用します
+                                            </span>
+                                        </label>
+
+                                        <div style={{ display: "flex", alignItems: "center", gap: "15px", marginTop: "5px" }}>
+                                            <select 
+                                                disabled={!isWeekStartEditable} // チェックしないと触れない
+                                                value={weekStartDay} 
+                                                onChange={e => setWeekStartDay(Number(e.target.value))} 
+                                                style={{ 
+                                                    ...inputStyle, 
+                                                    width: "200px",
+                                                    backgroundColor: isWeekStartEditable ? "#white" : "#e2e8f0",
+                                                    cursor: isWeekStartEditable ? "pointer" : "not-allowed"
+                                                }}
+                                            >
+                                                <option value={0}>日曜日 (原則)</option>
+                                                <option value={1}>月曜日</option>
+                                                <option value={2}>火曜日</option>
+                                                <option value={3}>水曜日</option>
+                                                <option value={4}>木曜日</option>
+                                                <option value={5}>金曜日</option>
+                                                <option value={6}>土曜日</option>
+                                            </select>
+
+                                            <label style={{ display: "flex", alignItems: "center", gap: "5px", cursor: "pointer", fontSize: "12px", color: "#e53e3e" }}>
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={isWeekStartEditable}
+                                                    onChange={async (e) => {
+                                                        // チェックを入れようとした（編集モードにしようとした）とき
+                                                        if (e.target.checked) {
+                                                            const ok = await ask(
+                                                                "起算日を変更すると、未確定の勤怠データの残業計算が即座に再計算されます。続行しますか？", 
+                                                                { title: '重要：設定の変更', kind: 'warning' }
+                                                            );
+
+                                                            if (ok) {
+                                                                // Yesを押した時だけチェックを入れる
+                                                                setIsWeekStartEditable(true);
+                                                            } else {
+                                                                // Noを押した時はチェックを入れない（何もしない）
+                                                                setIsWeekStartEditable(false);
+                                                            }
+                                                        } else {
+                                                            // チェックを外そうとしたときは、確認なしでオフにする
+                                                            setIsWeekStartEditable(false);
+                                                        }
+                                                    }}
+                                                />
+                                                設定を変更する
+                                            </label>
                                         </div>
                                     </div>
 

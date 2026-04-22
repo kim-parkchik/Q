@@ -13,6 +13,7 @@ export const DB_SCHEMAS = [
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'floor',
     round_emp_ins TEXT DEFAULT 'round',
+    week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
     annual_holidays INTEGER DEFAULT 120,
     holiday_csv_url TEXT DEFAULT 'https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv'
   );`,
@@ -167,9 +168,16 @@ export const DB_SCHEMAS = [
     staff_id TEXT NOT NULL,
     target_year INTEGER NOT NULL,
     target_month INTEGER NOT NULL,
+    
+    -- ★ 証拠（スナップショット）として残すべき項目
+    applied_base_wage INTEGER,       -- その時の時給/月給
+    applied_dependents INTEGER,      -- その時の扶養人数
+    total_work_hours REAL,           -- 総労働時間
+    total_overtime_hours REAL,       -- 総残業時間
+    total_night_hours REAL,          -- 総深夜時間
+
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,
-    tax_base_amount INTEGER DEFAULT 0,
     health_insurance INTEGER DEFAULT 0,
     nursing_insurance INTEGER DEFAULT 0,
     welfare_pension INTEGER DEFAULT 0,
@@ -178,6 +186,7 @@ export const DB_SCHEMAS = [
     income_tax INTEGER DEFAULT 0,
     resident_tax INTEGER DEFAULT 0,
     net_pay INTEGER DEFAULT 0,
+    processed_at TEXT DEFAULT (DATETIME('now', 'localtime')), -- いつ確定したか
     UNIQUE(staff_id, target_year, target_month),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,

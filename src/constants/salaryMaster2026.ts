@@ -29,6 +29,15 @@ export const PENSION_MAX_HYOJUN = 650000;
 export const KENPO_MAX_HYOJUN = 1390000;
 export const EMP_INS_RATE = 0.007;
 
+/** * 健康保険 標準賞与額の年度累計上限額 
+ * (毎年4月1日から翌年3月31日までの累計)
+ */
+export const HEALTH_INS_ANNUAL_LIMIT = 5730000;
+
+/** * 厚生年金保険 標準賞与額の1回あたりの上限額 
+ */
+export const PENSION_INS_SINGLE_LIMIT = 1500000;
+
 // 3. 標準報酬月額 等級表
 export const HYOJUN_TABLE: [number, number, number][] = [
     [0,63000,58000],[63000,73000,68000],[73000,83000,78000],[83000,93000,88000],
@@ -161,11 +170,10 @@ export const BONUS_TAX_RATE_TABLE: [number, number, number, number, number, numb
     [1146000, Infinity, 0.38798, 0.36756, 0.34714, 0.32672]
 ];
 
-/** * 健康保険 標準賞与額の年度累計上限額 
- * (毎年4月1日から翌年3月31日までの累計)
- */
-export const HEALTH_INS_ANNUAL_LIMIT = 5730000;
-
-/** * 厚生年金保険 標準賞与額の1回あたりの上限額 
- */
-export const PENSION_INS_SINGLE_LIMIT = 1500000;
+// 7. 割増率（法定基準）
+export const OVERTIME_THRESHOLD_DAILY = 8;    // 1日の法定労働時間（これを超えると残業）
+export const OVERTIME_PREMIUM_THRESHOLD = 60;      // 月間残業の割増率が変わるしきい値
+export const OVERTIME_RATE = 1.25;      // 時間外労働
+export const NIGHT_SHIFT_RATE = 0.25;   // 深夜割増分（1.25の内の0.25）
+export const HOLIDAY_WORK_RATE = 1.35;  // 法定休日労働
+export const OVERTIME_PREMIUM_RATE = 1.50;  // 月60時間超の時間外労働（現在は全企業義務化）

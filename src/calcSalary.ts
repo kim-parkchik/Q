@@ -113,7 +113,7 @@ export const calculateSalary = (
         
         // 所定日数（設定があればそれ、なければ平日の数）
         const prescribedDays  = Number(staff.monthly_work_days) || (daysInMonth - weekends);
-        const scheduledHours  = Number(staff.scheduled_work_hours) || 8;
+        const scheduledHours = Number(staff.scheduled_work_hours) || Master.OVERTIME_THRESHOLD_DAILY;
         
         // 時給単価 = 月給 / (所定日数 * 1日の所定時間)
         const hourlyRate = (prescribedDays > 0 && scheduledHours > 0) 
@@ -137,17 +137,17 @@ export const calculateSalary = (
             // 残業代の「足し算」
             const dayOvertime = Math.max(0, h - scheduledHours);
             if (dayOvertime > 0) {
-                const canFitIn25 = Math.max(0, Math.min(dayOvertime, 60 - totalOvertimeHours));
-                const over60 = Math.max(0, dayOvertime - canFitIn25);
+                const canFitInBasic = Math.max(0, Math.min(dayOvertime, Master.OVERTIME_PREMIUM_THRESHOLD - totalOvertimeHours));
+                const overPremiumThreshold = Math.max(0, dayOvertime - canFitInBasic);
                 
-                overtime25Pay += hourlyRate * 1.25 * canFitIn25;
-                overtime50Pay += hourlyRate * 1.50 * over60;
+                overtime25Pay += hourlyRate * Master.OVERTIME_RATE * canFitInBasic;
+                overtime50Pay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * overPremiumThreshold;
                 totalOvertimeHours += dayOvertime;
             }
 
             // 深夜手当の「足し算」
             if (n > 0) {
-                nightPay += hourlyRate * 0.25 * n;
+                nightPay += hourlyRate * Master.NIGHT_SHIFT_RATE * n;
             }
         });
 
@@ -166,16 +166,16 @@ export const calculateSalary = (
             // 時給制の場合は、ここで「時間 × 時給」を積み上げる
             basePay += wage * h;
 
-            const dayOvertime = Math.max(0, h - 8);
+            const dayOvertime = Math.max(0, h - Master.OVERTIME_THRESHOLD_DAILY);
             if (dayOvertime > 0) {
-                const canFitIn25 = Math.max(0, Math.min(dayOvertime, 60 - totalOvertimeHours));
-                const over60 = Math.max(0, dayOvertime - canFitIn25);
-                overtime25Pay += wage * 0.25 * canFitIn25; // 割増分のみ
-                overtime50Pay += wage * 0.50 * over60;    // 割増分のみ
+                const canFitInBasic = Math.max(0, Math.min(dayOvertime, Master.OVERTIME_PREMIUM_THRESHOLD - totalOvertimeHours));
+                const overPremiumThreshold = Math.max(0, dayOvertime - canFitInBasic);
+                overtime25Pay += wage * (Master.OVERTIME_RATE - 1) * canFitInBasic; // 割増分のみ
+                overtime50Pay += wage * (Master.OVERTIME_PREMIUM_RATE - 1) * overPremiumThreshold;    // 割増分のみ
                 totalOvertimeHours += dayOvertime;
             }
             if (n > 0) {
-                nightPay += wage * 0.25 * n;
+                nightPay += wage * Master.NIGHT_SHIFT_RATE * n;
             }
         });
     }

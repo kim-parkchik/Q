@@ -4,12 +4,8 @@ import { useEffect, useState, Fragment } from "react";
 // 🆕 calculateSalary を追加（ファイルパスは作成した場所に合わせて調整してください）
 import { calcDetailedDiff, modernIconBtnStyle, formatHours, generateAttendanceCSV, parseAttendanceCSV } from "./utils";
 import { calculateSalary } from "./calcSalary";
+import { OVERTIME_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_THRESHOLD, OVERTIME_PREMIUM_RATE } from './constants/salaryMaster2026';
 
-// 将来的にDBから読み込む設定値（関数の外でも内でも良いですが、まずはここでOK）
-const PAYROLL_SETTINGS = {
-    OVERTIME_THRESHOLD: 8,      // 何時間を超えたら残業か
-    OVERTIME_RATE: 1.25,        // 残業代の倍率
-};
 
 // 🆕 ニコイチ入力コンポーネント
 function TimeInputPair({ value, onChange }: { value: string, onChange: (val: string) => void }) {
@@ -493,8 +489,8 @@ export default function AttendanceManager({
                     row.bStart||"", row.bEnd||"", row.outTime||"", row.returnTime||"", 
                     Number(calcTotal), Number(calcNight), // 🆕 計算済みの値を使う
                     isMonthly ? 0 : currentStaff.base_wage, 
-                    PAYROLL_SETTINGS.OVERTIME_RATE,
-                    0.25,
+                    OVERTIME_RATE,
+                    NIGHT_SHIFT_RATE,
                     row.workType || "normal",
                     Number(row.paidHours) || 0,
                     row.memo || ""
@@ -622,7 +618,7 @@ export default function AttendanceManager({
     const totalOvertimeHours = calcResult?.totalOvertimeHours || 0;
     const totalPay           = calcResult?.totalEarnings || 0; // 交通費・割増・端数処理すべて込み
     const totalCommute       = calcResult?.commutePay || 0;
-    const over60Hours = Math.max(0, totalOvertimeHours - 60);
+    const over60Hours = Math.max(0, totalOvertimeHours - OVERTIME_PREMIUM_THRESHOLD);
 
     return (
         <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
@@ -1087,7 +1083,10 @@ export default function AttendanceManager({
                                 {formatHours(totalOvertimeHours)}
                             </div>
                             {over60Hours > 0 && (
-                                <div style={{ fontSize: "11px", color: "#ff7675" }}> (うち50%増: {formatHours(over60Hours)}) </div>
+                                <div style={{ fontSize: "11px", color: "#ff7675" }}> 
+                                    {/* 🆕 60 という数字と、50% という数字を定数から算出 */}
+                                    (うち{OVERTIME_PREMIUM_THRESHOLD}h超 [{(OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(over60Hours)}) 
+                                </div>
                             )}
                         </div>
 
