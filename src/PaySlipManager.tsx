@@ -24,12 +24,25 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
     const [allAttendance, setAllAttendance] = useState<any[]>([]);
     const [companySettings, setCompanySettings] = useState<any>(null);
 
-    // 全勤怠データをこの月の分だけ一括取得（「勤怠あり」の判定用）
+    // 全勤怠データをこの月の分だけ一括取得（「勤怠あり」の判定と、合計時間の取得）
     useEffect(() => {
         const monthStr = String(month).padStart(2, '0');
-        db.select<any[]>("SELECT staff_id FROM attendance WHERE work_date LIKE ?", [`${year}-${monthStr}-%`])
-            .then(setAllAttendance);
+        
+        db.select<any[]>(
+            `SELECT 
+                a.staff_id, 
+                SUM(CAST(a.work_hours AS REAL)) as total_h,
+                cp.is_invalid as calendar_invalid -- 🆕 カレンダーパターンの違反フラグ
+            FROM attendance a
+            LEFT JOIN staff s ON a.staff_id = s.id
+            LEFT JOIN calendar_patterns cp ON s.calendar_pattern_id = cp.id
+            WHERE a.work_date LIKE ? 
+            GROUP BY a.staff_id`, 
+            [`${year}-${monthStr}-%`]
+        ).then(setAllAttendance);
+
         db.select<any[]>("SELECT * FROM branches ORDER BY id ASC").then(setBranches);
+        
         db.select<any[]>("SELECT * FROM company WHERE id = 1").then(res => {
             if (res && res.length > 0) setCompanySettings(res[0]);
         });
@@ -112,37 +125,81 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
                     <tbody>
                         {filteredStaff.map(s => {
                             const branch = branches.find(b => b.id === s.branch_id);
-                            const hasAtt = allAttendance.some(a => a.staff_id === s.id);
+                            const attSummary = allAttendance.find(a => a.staff_id === s.id);
+                            
                             const isRetired = !!s.retirement_date;
+                            const hasAtt = !!attSummary;
+                            const totalH = attSummary?.total_h || 0;
+                            const isOver60 = totalH >= 220;
+                            const isCalendarInvalid = attSummary?.calendar_invalid === 1;
+                            const isMonthly = s.wage_type === "monthly";
+
+                            // --- 🆕 修正：isDisabled は法違反のときだけ！ ---
+                            // 月給制で勤怠なしでも、作成自体はできるようにします。
+                            const isDisabled = isCalendarInvalid; 
 
                             return (
-                                <tr key={s.id} style={{ ...trS, opacity: isRetired ? 0.6 : 1 }}>
+                                <tr key={s.id} style={{ 
+                                    ...trS, 
+                                    opacity: isRetired ? 0.6 : 1,
+                                    backgroundColor: isCalendarInvalid ? "#fff0f0" : (isOver60 ? "#fff5f5" : "transparent") 
+                                }}>
+                                    {/* 1. 氏名 */}
                                     <td style={tdS}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                            <span style={idBadgeS}>#{s.id}</span>
-                                            <div style={{ fontWeight: "bold", fontSize: "15px" }}>{s.name}</div>
-                                            {isRetired && <span style={retiredBadgeS}>退職</span>}
+                                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <span style={{ fontSize: "10px", color: "#999", fontFamily: "monospace" }}>ID: {s.id}</span>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                                <div style={{ fontWeight: "bold", fontSize: "15px" }}>{s.name}</div>
+                                                {isRetired && <span style={retiredBadgeS}>退職</span>}
+                                            </div>
                                         </div>
                                     </td>
-                    
+
+                                    {/* 2. 給与条件 */}
                                     <td style={tdS}>
-                                        <div style={{ fontSize: "12px", color: "#666" }}>{s.wage_type === "monthly" ? "月給" : "時給"}</div>
+                                        <div style={{ fontSize: "12px", color: "#666" }}>{s.wage_type === "monthly" ? "月給制" : "時給制"}</div>
                                         <div style={{ fontWeight: "600" }}>¥{Number(s.base_wage).toLocaleString()}</div>
                                     </td>
 
+                                    {/* 3. 所属 */}
                                     <td style={tdS}>
                                         <div style={{ fontSize: "13px" }}>{branch?.name || "未設定"}</div>
                                     </td>
 
+                                    {/* 4. 勤怠（表示をより柔軟に） */}
                                     <td style={tdS}>
-                                        {hasAtt ? 
-                                            <span style={{ color: "#27ae60", fontSize: "18px" }}>●</span> : 
-                                            <span style={{ color: "#ccc", fontSize: "18px" }}>○</span>
-                                        }
+                                        {isCalendarInvalid ? (
+                                            <span style={{ color: "#e74c3c", fontSize: "11px", fontWeight: "bold" }}>⚠️カレンダー法違反</span>
+                                        ) : hasAtt ? (
+                                            <div style={{ display: "flex", flexDirection: "column" }}>
+                                                <span style={{ fontWeight: "bold", color: isOver60 ? "#e74c3c" : "#2c3e50" }}>
+                                                    {totalH.toFixed(1)}h
+                                                </span>
+                                                {isOver60 && <span style={{ fontSize: "10px", color: "#e74c3c" }}>⚠️60h超注意</span>}
+                                            </div>
+                                        ) : (
+                                            // 勤怠がない場合。月給制ならオレンジで注意を促す
+                                            <span style={{ color: isMonthly ? "#e67e22" : "#ccc", fontSize: "12px" }}>
+                                                {isMonthly ? "⚠️勤怠データなし" : "勤怠なし"}
+                                            </span>
+                                        )}
                                     </td>
 
+                                    {/* 5. 操作（ボタンを常に活性化） */}
                                     <td style={{ ...tdS, textAlign: "center" }}>
-                                        <button onClick={() => loadStaffData(s)} style={btnS}>作成</button>
+                                        <button 
+                                            disabled={isDisabled}
+                                            onClick={() => loadStaffData(s)} 
+                                            style={{
+                                                ...btnS,
+                                                // 勤怠なしの月給者の場合は、ボタンの色を少し変えて「確認」を促す
+                                                backgroundColor: isDisabled ? "#ccc" : (!hasAtt && isMonthly ? "#e67e22" : (isOver60 ? "#e74c3c" : "#3498db")),
+                                                cursor: isDisabled ? "not-allowed" : "pointer",
+                                                width: "100px"
+                                            }}
+                                        >
+                                            {isCalendarInvalid ? "要修正" : (!hasAtt && isMonthly ? "確認して作成" : "作成")}
+                                        </button>
                                     </td>
                                 </tr>
                             );

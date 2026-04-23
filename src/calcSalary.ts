@@ -221,7 +221,8 @@ export const saveSalaryResult = async (
     ];
 
     try {
-        await db.run(sql, params);
+        // db.run ではなく db.execute を使います
+        await db.execute(sql, params); 
         return { success: true };
     } catch (error) {
         console.error("Failed to save salary result:", error);
@@ -311,53 +312,65 @@ export const calculateSalary = (
         for (const row of sorted) {
             const h = Number(row.work_hours) || 0;
             const n = Number(row.night_hours) || 0;
+            const type = row.work_type || 'normal';
             totalWorkHours += h;
             totalNightHours += n;
 
-            // ── 1日単位の残業判定 ─────────────────────────────
-            // 所定時間〜法定時間（8h）: 法定内残業（割増なし）
-            const statutoryOvertimeToday = Math.max(0, Math.min(h, Master.LEGAL_WORK_HOURS_DAILY) - scheduledHours);
-            // 8時間超: 法定外残業（割増あり）
-            const legalOvertimeFromDay = Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY);
+            if (type === 'statutory_holiday') {
+                // ── 【法定休日】（日曜日など） ──────────────────────
+                // 1. 休日出勤手当 (1.35倍) ※60h超のカウントには含めない
+                standardOvertimePay += hourlyRate * Master.HOLIDAY_WORK_RATE * h;
 
-            // ── 週40時間超判定 ────────────────────────────────
-            // 1日8h以内でも週40h超になった部分は法定外
-            const wk = getWeekKey(row.work_date, weekStartDay);
-            const used = weeklyLegalOvertimeUsed[wk] ?? 0;
-            const weekTotal = weeklyHours[wk] ?? 0;
-            // この日の労働のうち「週40h超に貢献する部分」
-            // = max(0, min(この日の時間, weekTotal - 40) - used)
-            const weekOverflowFromDay = Math.max(0,
-                Math.min(h, Math.max(0, weekTotal - Master.LEGAL_WORK_HOURS_WEEKLY)) - used
-            );
-            // 日8h超と週40h超で重複しないように
-            const weekOnlyOvertime = Math.max(0, weekOverflowFromDay - legalOvertimeFromDay);
+                // 2. 休日深夜割増 (+0.25倍加算 = 計1.60倍)
+                // すでに下の nightPay で 0.25 分が計算されるため、差分は不要
+                // (もし1.6倍として別に管理したい場合はここで調整)
 
-            // 法定外残業時間合計（日超 + 週超の重複なし分）
-            const legalOvertimeToday = legalOvertimeFromDay + weekOnlyOvertime;
-            weeklyLegalOvertimeUsed[wk] = used + weekOnlyOvertime;
+            } else {
+                // ── 【平日 または 所定休日】（土曜日など） ──────────
+                
+                // 1. 法定外残業の判定（日8h超 または 週40h超）
+                const legalOvertimeFromDay = Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY);
+                const wk = getWeekKey(row.work_date, weekStartDay);
+                const used = weeklyLegalOvertimeUsed[wk] ?? 0;
+                const weekTotal = weeklyHours[wk] ?? 0;
+                const weekOverflowFromDay = Math.max(0,
+                    Math.min(h, Math.max(0, weekTotal - Master.LEGAL_WORK_HOURS_WEEKLY)) - used
+                );
+                const weekOnlyOvertime = Math.max(0, weekOverflowFromDay - legalOvertimeFromDay);
+                weeklyLegalOvertimeUsed[wk] = used + weekOnlyOvertime;
 
-            // 法定内残業（所定超〜8h、かつ週40h超になっていない分）
-            const effectiveStatutoryOvertime = Math.max(0, statutoryOvertimeToday - weekOnlyOvertime);
-            totalStatutoryOvertimeHours += effectiveStatutoryOvertime;
-            statutoryOvertimePay += hourlyRate * effectiveStatutoryOvertime;
+                const legalOvertimeToday = legalOvertimeFromDay + weekOnlyOvertime;
 
-            // --- 月給制ループ内 (修正箇所) ---
-            if (legalOvertimeToday > 0) {
-                // 1. その日の分を一時変数で計算 (外側の standardPremiumHours と名前を分ける)
-                const standardHoursToday = Math.max(0, Math.min(legalOvertimeToday, Master.OVERTIME_PREMIUM_LIMIT_HOURS - totalOvertimeHours));
-                const highHoursToday = Math.max(0, legalOvertimeToday - standardHoursToday);
+                // 2. 法定内残業（1.0倍）の計算
+                const currentScheduled = (type === 'normal') ? scheduledHours : 0;
+                const effectiveStatutoryOvertime = Math.max(0, h - currentScheduled - legalOvertimeToday);
+                
+                totalStatutoryOvertimeHours += effectiveStatutoryOvertime;
+                statutoryOvertimePay += hourlyRate * effectiveStatutoryOvertime;
 
-                // 2. 金額を累積
-                standardOvertimePay += hourlyRate * Master.OVERTIME_RATE * standardHoursToday;
-                highOvertimePay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * highHoursToday;
+                // 3. 法定外残業代（1.25倍 / 1.5倍）の累積
+                if (legalOvertimeToday > 0) {
+                    // 月60時間（Master.OVERTIME_PREMIUM_LIMIT_HOURS）を超えているか判定
+                    const canFitInStandard = Math.max(0, Master.OVERTIME_PREMIUM_LIMIT_HOURS - totalOvertimeHours);
+                    const standardHoursToday = Math.min(legalOvertimeToday, canFitInStandard);
+                    const highHoursToday = Math.max(0, legalOvertimeToday - standardHoursToday);
 
-                // 3. 外側の合計用変数に時間を累積
-                standardPremiumHours += standardHoursToday; 
-                highPremiumHours += highHoursToday;
-                totalOvertimeHours += legalOvertimeToday;
+                    // 1.25倍（または25%増）の計算
+                    standardOvertimePay += hourlyRate * Master.OVERTIME_RATE * standardHoursToday;
+                    // 1.50倍（または50%増）の計算
+                    highOvertimePay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * highHoursToday;
+
+                    standardPremiumHours += standardHoursToday; 
+                    highPremiumHours += highHoursToday;
+                    totalOvertimeHours += legalOvertimeToday; // ここで60hカウントを蓄積
+                }
             }
 
+            // ── 【共通：深夜手当】 ────────────────────────────
+            // 平日、所定休日、法定休日、いずれの場合も「深夜時間」があれば25%増(0.25)を加算
+            // 法定休日の場合：1.35 + 0.25 = 1.60
+            // 平日残業(60h内)の場合：1.25 + 0.25 = 1.50
+            // 平日残業(60h超)の場合：1.50 + 0.25 = 1.75
             nightPay += hourlyRate * Master.NIGHT_SHIFT_RATE * n;
         }
 

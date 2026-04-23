@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import * as Master from './constants/salaryMaster2026';
 import { calculateSalary, saveSalaryResult, PREFECTURES, type SalaryExtras } from './calcSalary';
 
 const fmtH = (num: number) => {
@@ -162,14 +163,38 @@ export default function PayStubModal({ db, staff, attendanceData, year, month, c
                     <table style={tableS}>
                         <thead>
                             <tr style={theadS}>
-                                <th style={thS}>出勤日数</th><th style={thS}>総労働時間</th><th style={thS}>残業時間</th><th style={thS}>深夜時間</th>
+                                <th style={thS}>出勤日数</th>
+                                <th style={thS}>総労働時間</th>
+                                <th style={thS}>法定内残業</th>
+                                <th style={thS}>残業(割増対象)</th>
+                                <th style={thS}>深夜時間</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr>
                                 <td style={tdCtrS}>{salary.workDays} 日</td>
                                 <td style={tdCtrS}>{fmtH(salary.totalWorkHours)}</td>
-                                <td style={tdCtrS}>{fmtH(salary.totalOvertimeHours)}</td>
+                                
+                                {/* 1.0倍分 */}
+                                <td style={tdCtrS}>{fmtH(salary.totalStatutoryOvertimeHours)}</td>
+                                
+                                {/* 割増対象 (25%〜) */}
+                                <td style={tdCtrS}>
+                                    <div>{fmtH(salary.standardPremiumHours + salary.highPremiumHours)}</div>
+                                    
+                                    {/* 60時間を超えた分がある場合のみ、内訳を表示 */}
+                                    {salary.highPremiumHours > 0 && (
+                                        <div style={{ 
+                                            fontSize: '10px', 
+                                            color: '#d35400', 
+                                            marginTop: 2,
+                                            borderTop: '1px dotted #ccc' 
+                                        }}>
+                                            {Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超: {fmtH(salary.highPremiumHours)}
+                                        </div>
+                                    )}
+                                </td>
+                                
                                 <td style={tdCtrS}>{fmtH(salary.totalNightHours)}</td>
                             </tr>
                         </tbody>
@@ -193,10 +218,10 @@ export default function PayStubModal({ db, staff, attendanceData, year, month, c
                                         <tr><td style={tdS}>時間外手当(法定内)</td><td style={rtdS}>¥{salary.statutoryOvertimePay.toLocaleString()}</td></tr>
                                     )}
                                     {salary.standardOvertimePay > 0 && (
-                                        <tr><td style={tdS}>時間外手当(25%割増)</td><td style={rtdS}>¥{salary.standardOvertimePay.toLocaleString()}</td></tr>
+                                        <tr><td style={tdS}>時間外手当({Math.round((Master.OVERTIME_RATE - 1) * 100)}%割増)</td><td style={rtdS}>¥{salary.standardOvertimePay.toLocaleString()}</td></tr>
                                     )}
                                     {salary.highOvertimePay > 0 && (
-                                        <tr><td style={tdS}>時間外手当(50%割増)</td><td style={rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
+                                        <tr><td style={tdS}>時間外手当({Math.round((Master.OVERTIME_PREMIUM_RATE - 1) * 100)}%割増)</td><td style={rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
                                     )}
 
                                     <tr><td style={tdS}>深夜手当</td><td style={rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
