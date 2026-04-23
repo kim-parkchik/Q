@@ -28,6 +28,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
     const [isSearchingZip, setIsSearchingZip] = useState(false);
     const [weekStartDay, setWeekStartDay] = useState(0);
     const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
+    const [originalWeekStartDay, setOriginalWeekStartDay] = useState(0);
 
     // --- 給与規定グループ用ステート ---
     const [payrollGroups, setPayrollGroups] = useState<any[]>([]);
@@ -141,6 +142,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 setCompNum(c.corporate_number || "");
                 setCompRep(c.representative || "");
                 setWeekStartDay(c.week_start_day ?? 0); // 👈 0（日曜）をデフォルトに
+                setOriginalWeekStartDay(c.week_start_day); // 👈 保存用に「元の値」を記憶
                 setCompHealth(c.health_ins_num || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
@@ -160,11 +162,39 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
     useEffect(() => { loadData(); }, [db]);
 
+    const revalidateAllAttendance = async (newStartDay: number) => {
+        try {
+            // 全従業員の未確定勤怠を一括で「要チェック」にする
+            // (ロック機能がある場合は WHERE lock_status = 0 などを追加)
+            await db.execute(
+                `UPDATE attendance 
+                SET is_error = 1, 
+                    error_message = '週の起算日が変更されました。集計結果を再確認してください。'`
+            );
+            console.log("全勤怠データの再検証フラグを立てました。");
+            } catch (e) {
+                console.error("Revalidation Error:", e);
+                alert("勤怠データの再検証中にエラーが発生しました。");
+            }
+        };
+
     const saveCompany = async () => {
         if (!compName.trim()) return alert("会社名/屋号は必須です");
         if (!headPref) return alert("都道府県を選択してください");
         let finalZip = compZip.replace(/[^\d]/g, "");
         if (finalZip.length === 7) finalZip = finalZip.slice(0, 3) + "-" + finalZip.slice(3);
+
+        // --- 1. 起算日の変更があるか事前にチェック ---
+        // (originalWeekStartDay は loadData 時にステートに保存しておいた元の値)
+        const isWeekStartChanged = hasSavedOnce && (weekStartDay !== originalWeekStartDay);
+
+        if (isWeekStartChanged) {
+            const ok = await ask(
+                "週の起算日を変更すると、全ての勤怠データの残業計算がやり直しになります。一部のデータが「要再確認」状態になる可能性がありますが、実行しますか？",
+                { title: '重要：設定の変更', kind: 'warning' }
+            );
+            if (!ok) return; // キャンセルなら保存自体を中止
+        }
 
         setIsSaving(true);
         try {
@@ -177,7 +207,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
                     compHealth, compLabor, 
-                    roundOvertime, roundSocialIns, roundEmpIns, weekStartDay // 👈 追加
+                    roundOvertime, roundSocialIns, roundEmpIns, weekStartDay
                 ]
             );
             await db.execute(
@@ -185,11 +215,21 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 WHERE id = 1`, 
                 [compName, compZip, headPref, compAddr, compPhone, compHealth, compLabor]
             );
+
+            // --- 3. 【重要】カレンダーの再検証ロジックを走らせる ---
+            if (isWeekStartChanged) {
+                // 全従業員の勤怠データを再評価する関数を呼び出す
+                // (この関数は別途定義するか、親から渡す必要があります)
+                await revalidateAllAttendance(weekStartDay); 
+            }
+
             setHasSavedOnce(true);
             await loadData();
+
             if (onSetupComplete) onSetupComplete();
             setTimeout(() => setIsSaving(false), 1000);
             setIsWeekStartEditable(false); // 保存が終わったら編集モードを自動で閉じるのが親切です
+
         } catch (e) { setIsSaving(false); }
     };
 

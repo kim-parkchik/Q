@@ -928,7 +928,8 @@ export default function AttendanceManager({
                                                     }}
                                                     style={{ ...inputStyle, marginTop: "4px", fontSize: "12px", padding: "2px" }}
                                                 >
-                                                    <option value="normal">通常</option>
+                                                    <option value="normal">出勤（平日）</option>
+                                                    <option value="holiday_work">休日出勤</option>
                                                     <option value="paid_full">全休(有給)</option>
                                                     <option value="paid_half">半休(有給)</option>
                                                     <option value="absent">欠勤</option>

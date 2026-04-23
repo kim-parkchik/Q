@@ -33,7 +33,9 @@ export const DB_SCHEMAS = [
   // 3. カレンダーパターン
   `CREATE TABLE IF NOT EXISTS calendar_patterns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    is_invalid INTEGER DEFAULT 0,    -- 🆕 0:正常, 1:法違反(休日不足など)
+    error_message TEXT               -- 🆕 なぜダメなのかの理由（UI表示用）
   );`,
 
   // 4. カレンダー詳細
@@ -119,6 +121,8 @@ export const DB_SCHEMAS = [
     actual_base_wage INTEGER, 
     overtime_rate REAL,
     night_rate REAL,
+    is_error INTEGER DEFAULT 0,    -- 🆕 追加：0:正常, 1:再計算・確認が必要
+    error_message TEXT,            -- 🆕 追加：エラー内容（「起算日変更による再計算待ち」など）
     UNIQUE(staff_id, work_date),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,

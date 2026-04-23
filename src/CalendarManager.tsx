@@ -8,10 +8,11 @@ interface CalendarManagerProps {
     db: Database;
 }
 
-// --- 追加する型定義 ---
+// --- 型定義を更新 ---
 interface CalendarPattern {
     id: number;
     name: string;
+    is_invalid: number; // 👈 追加
 }
 
 const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
@@ -22,8 +23,8 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
     const [companyHolidays, setCompanyHolidays] = useState<Record<string, number>>({});
     const [patterns, setPatterns] = useState<CalendarPattern[]>([]);
     const [currentPatternId, setCurrentPatternId] = useState<number>(1); // 初期値は「標準」
+    const [weekStartDay, setWeekStartDay] = useState(0); // ✨追加
 
-    // ✨ 追加：パターン入力モードの管理
     const [isAddingPattern, setIsAddingPattern] = useState(false);
     const [newPatternName, setNewPatternName] = useState("");
     const [isEditing, setIsEditing] = useState(false);
@@ -33,7 +34,7 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
     const loadPatterns = async () => {
         try {
             // App.tsxで作られているはずなので、selectするだけでOK
-            const res = await db.select<CalendarPattern[]>("SELECT * FROM calendar_patterns ORDER BY id ASC");
+            const res = await db.select<CalendarPattern[]>("SELECT id, name, is_invalid FROM calendar_patterns ORDER BY id ASC");
             setPatterns(res);
             
             // currentPatternId が未設定（初期状態）なら、最初のパターン（標準）を選択
@@ -65,7 +66,8 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
 
     useEffect(() => {
         const init = async () => {
-            const res = await db.select<any[]>("SELECT holiday_csv_url FROM company WHERE id = 1");
+            // ✨ week_start_day も一緒に取得
+            const res = await db.select<any[]>("SELECT holiday_csv_url, week_start_day FROM company WHERE id = 1");
             if (res?.[0]?.holiday_csv_url) setCsvUrl(res[0].holiday_csv_url);
             await loadPatterns();
         };
@@ -76,6 +78,79 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
     useEffect(() => {
         loadAllCalendarData();
     }, [currentPatternId, year]);
+
+    // --- ✨ 統計計算 & 労務バリデーションロジック ---
+    const stats = { workDays: 0, holidayDays: 0 };
+    const invalidWeeks: string[] = [];
+    let currentWeekHolidays = 0;
+    let weekStartDate = "";
+
+    const getDaysInYear = () => {
+        const days = [];
+        for (let m = 0; m < 12; m++) {
+            const date = new Date(year, m, 1);
+            while (date.getMonth() === m) {
+                days.push(new Date(date));
+                date.setDate(date.getDate() + 1);
+            }
+        }
+        return days;
+    };
+
+    getDaysInYear().forEach(d => {
+        const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        
+        // 週の区切りチェック（ここは変更なし）
+        if (d.getDay() === weekStartDay) {
+            if (weekStartDate !== "" && currentWeekHolidays === 0) {
+                invalidWeeks.push(weekStartDate);
+            }
+            weekStartDate = dateKey;
+            currentWeekHolidays = 0;
+        }
+
+        // --- 判定ロジックの修正 ---
+        const isSunOrSat = d.getDay() === 0 || d.getDay() === 6;
+        const setting = companyHolidays[dateKey]; // 個別設定 (0:出勤, 1:休日, undefined:設定なし)
+
+        let isFinallyHoliday = false;
+
+        if (setting !== undefined) {
+            // A. 個別設定がある場合は、それを最優先する
+            isFinallyHoliday = (setting === 1);
+        } else {
+            // B. 個別設定がない場合は、デフォルトのルール（土日のみ）に従う
+            // ※ ここで !!holidays[dateKey] を見ないのがポイント！
+            isFinallyHoliday = isSunOrSat;
+        }
+        // -----------------------
+
+        if (isFinallyHoliday) {
+            stats.holidayDays++;
+            currentWeekHolidays++;
+        } else {
+            stats.workDays++;
+        }
+    });
+    // 最後の週のチェック
+    if (weekStartDate !== "" && currentWeekHolidays === 0) {
+        invalidWeeks.push(weekStartDate);
+    }
+
+    const isLawful = invalidWeeks.length === 0;
+
+    // ✨ 判定結果をDBに自動同期
+    useEffect(() => {
+        const syncStatus = async () => {
+            const errorMsg = isLawful ? "" : `${invalidWeeks.length}箇所の休日不足`;
+            await db.execute(
+                "UPDATE calendar_patterns SET is_invalid = ?, error_message = ? WHERE id = ?",
+                [isLawful ? 0 : 1, errorMsg, currentPatternId]
+            );
+            await loadPatterns();
+        };
+        if (currentPatternId) syncStatus();
+    }, [isLawful, currentPatternId, db]);
 
     // 3. 日付の切り替え（pattern_id を考慮）
     const toggleDay = async (dateKey: string) => {
@@ -104,18 +179,35 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
 
     const processCsvData = async (csvText: string) => {
         const lines = csvText.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l !== "");
+        
+        // パフォーマンス向上のため、ループの外でトランザクション的に処理するのが理想ですが、
+        // まずは確実に動作する個別INSERTで実装します。
         for (let i = 1; i < lines.length; i++) {
             const columns = lines[i].split(",");
             if (columns.length >= 2) {
                 const dateStr = columns[0].replace(/"/g, "").trim();
                 const name = columns[1].replace(/"/g, "").trim();
                 const parts = dateStr.split("/");
+                
                 if (parts.length === 3) {
                     const fDate = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-                    await db.execute("INSERT OR REPLACE INTO holiday_master (holiday_date, name) VALUES (?, ?)", [fDate, name]);
+                    
+                    // 1. 祝日名称マスタを更新（全カレンダー共通の辞書）
+                    await db.execute(
+                        "INSERT OR REPLACE INTO holiday_master (holiday_date, name) VALUES (?, ?)", 
+                        [fDate, name]
+                    );
+
+                    // 2. 【重要】現在選択中のパターンに「休日設定」として流し込む
+                    // これにより、このパターンだけが祝日に「休日(1)」という個別設定を持ちます
+                    await db.execute(
+                        "INSERT OR REPLACE INTO company_calendar (pattern_id, work_date, is_holiday) VALUES (?, ?, 1)",
+                        [currentPatternId, fDate]
+                    );
                 }
             }
         }
+        // データの再読み込みと再計算
         await loadAllCalendarData();
     };
 
@@ -150,18 +242,6 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
         }
         return days;
     };
-
-    // --- 統計計算 ---
-    const stats = { workDays: 0, holidayDays: 0 };
-    for (let m = 0; m < 12; m++) {
-        getDaysInMonth(year, m).forEach(d => {
-            const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            const isDefH = d.getDay() === 0 || d.getDay() === 6 || !!holidays[dateKey];
-            const setting = companyHolidays[dateKey];
-            const isHoliday = (isDefH && setting !== 0) || (setting === 1);
-            isHoliday ? stats.holidayDays++ : stats.workDays++;
-        });
-    }
 
     // --- 新規パターンの保存処理 ---
     const handleSavePattern = async () => {
@@ -286,6 +366,7 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
                     <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
                         {patterns.map((p) => {
                             const isSelected = currentPatternId === p.id;
+                            const isErrorPattern = p.is_invalid === 1; // 👈 エラーフラグをチェック
                             
                             // --- 編集モード表示 ---
                             if (isSelected && isEditing) {
@@ -316,6 +397,8 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
                                             transition: "all 0.2s"
                                         }}
                                     >
+                                        {/* 👇 エラーならアイコンを追加 */}
+                                        {isErrorPattern && <span>⚠️</span>}
                                         {p.name}
                                     </button>
                                     {isSelected && (
@@ -343,7 +426,20 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
                     </div>
                 </div>
 
-                <div style={{ display: "flex", gap: "25px", paddingLeft: "25px", borderLeft: "1px solid #eee", minWidth: "max-content" }}>
+                <div style={{ display: "flex", gap: "25px", paddingLeft: "25px", borderLeft: "1px solid #eee", minWidth: "max-content", alignItems: "center" }}>
+                    {/* 🆕 労務アラートの追加 */}
+                    <div style={{ 
+                        fontSize: "0.8rem", 
+                        padding: "4px 10px", 
+                        borderRadius: "4px", 
+                        backgroundColor: isLawful ? "#e8f8f5" : "#fdedec", 
+                        color: isLawful ? "#27ae60" : "#e74c3c",
+                        fontWeight: "bold",
+                        border: `1px solid ${isLawful ? "#27ae60" : "#e74c3c"}`
+                    }}>
+                        {isLawful ? "✅ 法定休日遵守" : `⚠️ 休日不足 (${invalidWeeks.length}箇所)`}
+                    </div>
+
                     <div style={{ fontSize: "0.85rem", color: "#7f8c8d" }}>稼働日数: <span style={{ fontWeight: "bold", fontSize: "1.2rem", color: "#2c3e50" }}>{stats.workDays}</span> 日</div>
                     <div style={{ fontSize: "0.85rem", color: "#7f8c8d" }}>休日数: <span style={{ fontWeight: "bold", fontSize: "1.2rem", color: "#e74c3c" }}>{stats.holidayDays}</span> 日</div>
                 </div>
@@ -358,12 +454,12 @@ const CalendarManager: React.FC<CalendarManagerProps> = ({ db }) => {
                             {Array.from({ length: new Date(year, m, 1).getDay() }).map((_, i) => <div key={`e-${i}`} />)}
                             {getDaysInMonth(year, m).map((d) => {
                                 const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                                const hName = holidays[dateKey];
-                                const setting = companyHolidays[dateKey];
+                                const hName = holidays[dateKey]; // 祝日名はマスタから取得（表示用）
+                                const setting = companyHolidays[dateKey]; // 個別設定
                                 const isSun = d.getDay() === 0;
                                 const isSat = d.getDay() === 6;
-                                const isDefH = isSun || isSat || !!hName;
-                                const isFinallyHoliday = (isDefH && setting !== 0) || (setting === 1);
+                                // 判定ロジック：個別設定があればそれに従い、なければ土日かどうかだけ見る
+                                const isFinallyHoliday = (setting !== undefined) ? (setting === 1) : (isSun || isSat);
 
                                 let textColor = "#2c3e50";
                                 if (hName || isSun) textColor = "#e74c3c";
