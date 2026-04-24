@@ -1,96 +1,20 @@
-import React, { useEffect, useState } from "react";
-// @ts-ignore
-import Database from "@tauri-apps/plugin-sql";
-import { ask } from "@tauri-apps/plugin-dialog";
+import React from "react";
+import * as S from "./CustomItemManager.styles";
+import { useCustomItemManager } from "./useCustomItemManager";
 
 interface Props {
-    db: Database;
+    db: any; // Database型
     staffList: any[];
 }
 
-interface SalaryItem {
-    id: number;
-    name: string;
-    type: "earning" | "deduction";
-    category: "fixed" | "variable" | "formula";
-}
-
 export default function CustomItemManager({ db, staffList }: Props) {
-    const [items, setItems] = useState<SalaryItem[]>([]);
-    const [selectedStaffId, setSelectedStaffId] = useState<string>("");
-    const [staffValues, setStaffValues] = useState<Record<number, number>>({});
-
-    // 項目追加用
-    const [newItemName, setNewItemName] = useState("");
-    const [newItemType, setNewItemType] = useState<"earning" | "deduction">("earning");
-    const [newItemCategory, setNewItemCategory] = useState<"fixed" | "variable" | "formula">("fixed");
-
-    useEffect(() => {
-        loadMasterItems();
-    }, [db]);
-
-    useEffect(() => {
-        if (selectedStaffId) {
-            loadStaffValues(selectedStaffId);
-        }
-    }, [selectedStaffId]);
-
-    const loadMasterItems = async () => {
-        const res = await db.select<SalaryItem[]>("SELECT * FROM salary_item_master ORDER BY category ASC, id ASC");
-        setItems(res);
-    };
-
-    const loadStaffValues = async (staffId: string) => {
-        const res = await db.select<any[]>(
-            "SELECT item_id, amount FROM staff_salary_values WHERE staff_id = ?",
-            [staffId]
-        );
-        const valueMap: Record<number, number> = {};
-        res.forEach((v) => (valueMap[v.item_id] = v.amount));
-        setStaffValues(valueMap);
-    };
-
-    const addMasterItem = async () => {
-        if (!newItemName.trim()) return;
-        await db.execute(
-            "INSERT INTO salary_item_master (name, type, category) VALUES (?, ?, ?)",
-            [newItemName, newItemType, newItemCategory]
-        );
-        setNewItemName("");
-        loadMasterItems();
-    };
-
-    const deleteMasterItem = async (id: number) => {
-        // 💡 window.confirm ではなく ask を使用
-        const ok = await ask(
-            "この項目を削除しますか？\n（この項目に設定された個人別の金額データもすべて失われます）", 
-            { 
-                title: '項目の削除確認', 
-                kind: 'warning',
-                okLabel: '削除する',
-                cancelLabel: 'キャンセル'
-            }
-        );
-
-        if (!ok) return;
-
-        try {
-            await db.execute("DELETE FROM salary_item_master WHERE id = ?", [id]);
-            loadMasterItems();
-        } catch (e) {
-            console.error(e);
-            alert("削除に失敗しました。この項目が既に使用されている可能性があります。");
-        }
-    };
-
-    const saveAmount = async (itemId: number, amount: number) => {
-        if (!selectedStaffId) return;
-        await db.execute(
-            "INSERT OR REPLACE INTO staff_salary_values (staff_id, item_id, amount) VALUES (?, ?, ?)",
-            [selectedStaffId, itemId, amount]
-        );
-        setStaffValues(prev => ({ ...prev, [itemId]: amount }));
-    };
+    const {
+        activeTab, setActiveTab,
+        items, earnings, deductions, selectedStaffId, setSelectedStaffId, staffValues,
+        newItemName, setNewItemName, newItemType, setNewItemType, newItemCategory, setNewItemCategory,
+        addMasterItem, deleteMasterItem, saveAmount,
+        moveItem // ← 忘れずに受け取る
+    } = useCustomItemManager(db);
 
     const getCategoryLabel = (cat: string) => {
         switch (cat) {
@@ -102,88 +26,215 @@ export default function CustomItemManager({ db, staffList }: Props) {
     };
 
     return (
-        <div style={{ display: "flex", gap: "30px", maxWidth: "1200px", margin: "0 auto" }}>
-      
-            {/* 左：項目マスター管理 */}
-            <div style={{ flex: 1, background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
-                <h3 style={{ marginTop: 0, borderBottom: "2px solid #3498db", paddingBottom: "10px" }}>⚙️ 項目設定</h3>
-                
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px", background: "#f8f9fa", padding: "15px", borderRadius: "8px" }}>
-                    <div style={{ display: "flex", gap: "5px" }}>
-                        <select value={newItemType} onChange={e => setNewItemType(e.target.value as any)} style={inputStyle}>
-                            <option value="earning">支給</option>
-                            <option value="deduction">控除</option>
-                        </select>
-                        <select value={newItemCategory} onChange={e => setNewItemCategory(e.target.value as any)} style={inputStyle}>
-                            <option value="fixed">📌 固定</option>
-                            <option value="variable">📝 変動</option>
-                            <option value="formula">🤖 自動</option>
-                        </select>
-                    </div>
-                    <input 
-                        placeholder="項目名 (例: 役職手当, 欠勤控除)" 
-                        value={newItemName} 
-                        onChange={e => setNewItemName(e.target.value)}
-                        style={inputStyle}
-                    />
-                    <button onClick={addMasterItem} style={btnStyle}>項目を追加</button>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                    {items.map(item => (
-                        <div key={item.id} style={{ ...itemRowStyle, borderLeft: `4px solid ${item.type === 'earning' ? '#3498db' : '#e74c3c'}` }}>
-                            <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: "bold", fontSize: "14px" }}>{item.name}</div>
-                                <div style={{ fontSize: "11px", color: "#666" }}>{getCategoryLabel(item.category)}</div>
-                            </div>
-                            <button onClick={() => deleteMasterItem(item.id)} style={delBtnStyle}>🗑️</button>
-                        </div>
-                    ))}
-                </div>
+        <div style={S.container}>
+            {/* --- タブメニュー --- */}
+            <div style={S.tabContainer}>
+                <button 
+                    onClick={() => setActiveTab("master")} 
+                    style={activeTab === "master" ? S.activeTab : S.tab}
+                >
+                    項目マスター設定
+                </button>
+                <button 
+                    onClick={() => setActiveTab("assignment")} 
+                    style={activeTab === "assignment" ? S.activeTab : S.tab}
+                >
+                    個人別金額設定
+                </button>
             </div>
 
-            {/* 右：個人別設定 */}
-            <div style={{ flex: 1.5, background: "white", padding: "20px", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
-                <h3 style={{ marginTop: 0, borderBottom: "2px solid #2ecc71", paddingBottom: "10px" }}>👤 個人別金額設定</h3>
-            
-                <select value={selectedStaffId} onChange={e => setSelectedStaffId(e.target.value)} style={{ ...inputStyle, width: "100%", marginBottom: "20px" }}>
-                    <option value="">スタッフを選択...</option>
-                    {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-
-                {selectedStaffId && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        {items.map(item => (
-                            <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "15px", padding: "8px", borderBottom: "1px solid #eee" }}>
+            {/* --- コンテンツエリア --- */}
+            <div style={{ width: "100%" }}>
+                {activeTab === "master" ? (
+                    /* タブ1：項目マスター管理 */
+                    <div style={S.card("#3498db")}>
+                        <h3 style={S.header}>⚙️ 項目マスター設定</h3>
+                        
+                        {/* 新規追加エリア（ここは少しリッチな枠で囲む） */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "30px", background: "#f0f7ff", padding: "20px", borderRadius: "10px", border: "1px solid #d0e3ff" }}>
+                            <div style={{ display: "flex", gap: "10px" }}>
                                 <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: item.category === 'formula' ? "normal" : "bold" }}>
-                                        {item.name} {item.category === 'formula' && <span style={{fontSize: '11px', color: '#999'}}>(自動計算)</span>}
+                                    <label style={{ fontSize: "11px", color: "#5d87a1", fontWeight: "bold" }}>タイプ</label>
+                                    <select value={newItemType} onChange={e => setNewItemType(e.target.value as any)} style={{ ...S.input, width: "100%" }}>
+                                        <option value="earning">💰 支給</option>
+                                        <option value="deduction">💸 控除</option>
+                                    </select>
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <label style={{ fontSize: "11px", color: "#5d87a1", fontWeight: "bold" }}>計算区分</label>
+                                    <select value={newItemCategory} onChange={e => setNewItemCategory(e.target.value as any)} style={{ ...S.input, width: "100%" }}>
+                                        <option value="fixed">📌 固定（毎月同額）</option>
+                                        <option value="variable">📝 変動（毎月入力）</option>
+                                        <option value="formula">🤖 自動（数式計算）</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ fontSize: "11px", color: "#5d87a1", fontWeight: "bold" }}>項目名</label>
+                                <input 
+                                    placeholder="例: 役職手当、厚生年金など" 
+                                    value={newItemName} 
+                                    onChange={e => setNewItemName(e.target.value)}
+                                    style={{ ...S.input, width: "100%" }}
+                                />
+                            </div>
+                            <button onClick={addMasterItem} style={{ ...S.primaryBtn, marginTop: "5px" }}>＋ この内容で項目を作成</button>
+                        </div>
+
+                        {/* リスト表示エリア */}
+                        <div style={{ display: "flex", gap: "30px" }}>
+                            
+                            {/* 左：支給カラム */}
+                            <div style={{ flex: 1 }}>
+                                <h4 style={{ color: "#3498db", borderBottom: "2px solid #3498db", paddingBottom: "5px", marginBottom: "15px" }}>💰 支給項目（マスター）</h4>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    {earnings.map((item, index) => (
+                                        <div key={item.id} style={{ ...S.itemRow(item.type), padding: "10px" }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: "bold", fontSize: "14px", color: "#333" }}>{item.name}</div>
+                                                <div style={{ fontSize: "11px", color: "#666", marginTop: "2px" }}>{getCategoryLabel(item.category)}</div>
+                                            </div>
+                                            
+                                            {/* 並び替え・削除アクション */}
+                                            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                                                <div style={{ display: "flex", gap: "4px" }}>
+                                                    <button 
+                                                        onClick={() => moveItem(item.id, 'up')} 
+                                                        disabled={index === 0}
+                                                        style={{ ...S.orderBtn, opacity: index === 0 ? 0.3 : 1 }}
+                                                    >▲</button>
+                                                    <button 
+                                                        onClick={() => moveItem(item.id, 'down')} 
+                                                        disabled={index === earnings.length - 1}
+                                                        style={{ ...S.orderBtn, opacity: index === earnings.length - 1 ? 0.3 : 1 }}
+                                                    >▼</button>
+                                                </div>
+                                                <button onClick={() => deleteMasterItem(item.id)} style={{ ...S.delBtn, color: "#e74c3c", fontSize: "18px" }}>🗑️</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 右：控除カラム */}
+                            <div style={{ flex: 1 }}>
+                                <h4 style={{ color: "#e74c3c", borderBottom: "2px solid #e74c3c", paddingBottom: "5px", marginBottom: "15px" }}>💸 控除項目（マスター）</h4>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                    {deductions.map((item, index) => (
+                                        <div key={item.id} style={{ ...S.itemRow(item.type), padding: "10px" }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: "bold", fontSize: "14px", color: "#333" }}>{item.name}</div>
+                                                <div style={{ fontSize: "11px", color: "#666", marginTop: "2px" }}>{getCategoryLabel(item.category)}</div>
+                                            </div>
+                                            
+                                            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                                                <div style={{ display: "flex", gap: "4px" }}>
+                                                    <button 
+                                                        onClick={() => moveItem(item.id, 'up')} 
+                                                        disabled={index === 0}
+                                                        style={{ ...S.orderBtn, opacity: index === 0 ? 0.3 : 1 }}
+                                                    >▲</button>
+                                                    <button 
+                                                        onClick={() => moveItem(item.id, 'down')} 
+                                                        disabled={index === deductions.length - 1}
+                                                        style={{ ...S.orderBtn, opacity: index === deductions.length - 1 ? 0.3 : 1 }}
+                                                    >▼</button>
+                                                </div>
+                                                <button onClick={() => deleteMasterItem(item.id)} style={{ ...S.delBtn, color: "#e74c3c", fontSize: "18px" }}>🗑️</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                ) : (
+                    /* タブ2：個人別金額設定 */
+                    <div style={S.card("#2ecc71")}>
+                        <h3 style={S.header}>👤 個人別金額設定</h3>
+
+                        {/* スタッフ選択 */}
+                        <div style={{ marginBottom: "20px" }}>
+                            <label style={{ fontSize: "12px", color: "#666", marginBottom: "5px", display: "block" }}>対象スタッフ</label>
+                            <select 
+                                value={selectedStaffId} 
+                                onChange={e => setSelectedStaffId(e.target.value)} 
+                                style={{ ...S.input, width: "100%", fontSize: "16px", fontWeight: "bold" }}
+                            >
+                                <option value="">スタッフを選択してください...</option>
+                                {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
+
+                        {selectedStaffId ? (
+                            <div style={{ display: "flex", gap: "30px" }}>
+                                {/* --- 左カラム：支給 --- */}
+                                <div style={{ flex: 1 }}>
+                                    <h4 style={{ color: "#3498db", borderBottom: "2px solid #3498db", paddingBottom: "5px", marginBottom: "15px" }}>💰 支給項目</h4>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                        {earnings.map(item => (
+                                            <div key={item.id} style={{ ...S.itemRow(item.type), padding: "10px" }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontWeight: "bold", fontSize: "14px" }}>{item.name}</div>
+                                                    <div style={{ fontSize: "11px", color: "#999" }}>{getCategoryLabel(item.category)}</div>
+                                                </div>
+                                                {item.category !== 'formula' ? (
+                                                    <div style={{ display: "flex", alignItems: "center", background: "#f8f9fa", padding: "4px 8px", borderRadius: "4px", border: "1px solid #ddd" }}>
+                                                        <span style={{ marginRight: "5px", color: "#666" }}>¥</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={staffValues[item.id] || ""} 
+                                                            onChange={e => saveAmount(item.id, Number(e.target.value))}
+                                                            style={{ border: "none", background: "none", width: "90px", textAlign: "right", fontSize: "15px", fontWeight: "bold", outline: "none" }}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ color: "#999", fontSize: "12px", fontStyle: "italic" }}>自動算出</div>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
-                                {item.category !== 'formula' ? (
-                                    <div style={{ display: "flex", alignItems: "center" }}>
-                                        <span style={{ marginRight: "5px", color: "#666" }}>¥</span>
-                                        <input 
-                                            type="number" 
-                                            value={staffValues[item.id] || ""} 
-                                            onChange={e => saveAmount(item.id, Number(e.target.value))}
-                                            style={{ ...inputStyle, width: "120px", textAlign: "right" }}
-                                            placeholder="0"
-                                        />
+
+                                {/* --- 右カラム：控除 --- */}
+                                <div style={{ flex: 1 }}>
+                                    <h4 style={{ color: "#e74c3c", borderBottom: "2px solid #e74c3c", paddingBottom: "5px", marginBottom: "15px" }}>💸 控除項目</h4>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                        {deductions.map(item => (
+                                            <div key={item.id} style={{ ...S.itemRow(item.type), padding: "10px" }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontWeight: "bold", fontSize: "14px" }}>{item.name}</div>
+                                                    <div style={{ fontSize: "11px", color: "#999" }}>{getCategoryLabel(item.category)}</div>
+                                                </div>
+                                                {item.category !== 'formula' ? (
+                                                    <div style={{ display: "flex", alignItems: "center", background: "#fdf2f2", padding: "4px 8px", borderRadius: "4px", border: "1px solid #f5c6cb" }}>
+                                                        <span style={{ marginRight: "5px", color: "#666" }}>¥</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={staffValues[item.id] || ""} 
+                                                            onChange={e => saveAmount(item.id, Number(e.target.value))}
+                                                            style={{ border: "none", background: "none", width: "90px", textAlign: "right", fontSize: "15px", fontWeight: "bold", outline: "none" }}
+                                                            placeholder="0"
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div style={{ color: "#999", fontSize: "12px", fontStyle: "italic" }}>自動算出</div>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
-                                ) : (
-                                    <div style={{ color: "#999", fontSize: "13px", fontStyle: "italic" }}>計算エンジンにより自動算出</div>
-                                )}
+                                </div>
                             </div>
-                        ))}
+                        ) : (
+                            <div style={{ textAlign: "center", padding: "40px", color: "#999", backgroundColor: "#f8f9fa", borderRadius: "8px", border: "2px dashed #eee" }}>
+                                スタッフを選択すると、金額の設定ができます
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
         </div>
     );
 }
-
-const inputStyle = { padding: "8px", borderRadius: "4px", border: "1px solid #ddd" };
-const btnStyle = { backgroundColor: "#3498db", color: "white", border: "none", padding: "10px", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" as const };
-const delBtnStyle = { background: "none", border: "none", cursor: "pointer", fontSize: "16px" };
-const itemRowStyle = { display: "flex", alignItems: "center", padding: "8px 12px", backgroundColor: "#fff", border: "1px solid #eee", marginBottom: "4px" };

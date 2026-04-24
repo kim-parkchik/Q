@@ -166,7 +166,8 @@ export const DB_SCHEMAS = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     type TEXT NOT NULL,
-    category TEXT NOT NULL
+    category TEXT NOT NULL, 
+    display_order INTEGER DEFAULT 0
   );`,
 
   // 11. スタッフ個別給与設定

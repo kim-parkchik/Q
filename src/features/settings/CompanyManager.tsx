@@ -445,7 +445,6 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                     </div>
 
                     <section>
-                        <h2 style={{ color: "#2c3e50", marginBottom: "20px", fontSize: "20px" }}>🏢 会社情報</h2>
                         <div style={cardStyle}>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "25px" }}>
                                 
@@ -613,7 +612,6 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 /* --- 2. 保存済みなら「設定タブ」を表示して多機能に切り替え --- */
                 <>
                     <div>
-                        <h2 style={{ color: "#2c3e50", margin: "0 0 15px 0", fontSize: "22px" }}>⚙️ 会社設定</h2>
                         <div style={{ display: "flex", borderBottom: "1px solid #ddd", gap: "5px" }}>
                             <button onClick={() => setActiveSubTab("info")} style={subTabStyle(activeSubTab === "info")}>🏢 基本情報</button>
                             <button onClick={() => setActiveSubTab("payroll")} style={subTabStyle(activeSubTab === "payroll")}>📝 給与規定グループ</button>

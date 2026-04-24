@@ -211,7 +211,7 @@ function App() {
                 onClick={() => isStaffReady && setActiveTab("custom_items")} 
                 style={tabStyle(activeTab === "custom_items", !isStaffReady)}
               >
-                ⚙️ 項目設定
+                ⚙️ 給与項目設定
               </li>
               <li 
                 onClick={() => isStaffReady && setActiveTab("attendance")} 

@@ -492,17 +492,38 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const hourlyConversion = targetWageType === "monthly" ? (targetWage / monthlyAverageHours) : targetWage;
 
     const branchMap = Object.fromEntries(branches.map(b => [b.id, b.name]));
+
+    // 💡 スタッフが一人もいないかどうかの判定（既存の staffList を使用）
+    const isFirstRun = staffList.length === 0;
+
+    // 💡 最初の1人がいない時は、強制的に showForm を true とみなす
+    const isFormVisible = isFirstRun || showForm;
     
     return (
         <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-                <h2 style={{ color: "#2c3e50", margin: 0 }}>👤 従業員詳細管理</h2>
-                <button onClick={() => { setDeletingId(null); if(showForm) clearForm(); setShowForm(!showForm); }} style={{ backgroundColor: showForm ? "#95a5a6" : "#3498db", color: "white", border: "none", padding: "10px 20px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}>
-                    {showForm ? "✖ 閉じる" : "＋ 新規登録"}
-                </button>
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: "20px" }}>
+                {/* 💡 最初の1人が登録済みの場合のみ、開閉ボタンを表示する */}
+                {!isFirstRun && (
+                    <button 
+                        onClick={() => { setDeletingId(null); if(showForm) clearForm(); setShowForm(!showForm); }} 
+                        style={{ backgroundColor: showForm ? "#95a5a6" : "#3498db", color: "white", border: "none", padding: "10px 20px", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}
+                    >
+                        {showForm ? "✖ 閉じる" : "＋ 新規登録"}
+                    </button>
+                )}
             </div>
 
-            {showForm && (
+            {/* 💡 初回登録時は「まずはここから」というメッセージを出すと親切です */}
+            {isFirstRun && (
+                <div style={{ backgroundColor: "#e3f2fd", padding: "15px", borderRadius: "8px", marginBottom: "20px", borderLeft: "5px solid #2196f3" }}>
+                    <p style={{ margin: 0, fontWeight: "bold", color: "#1976d2" }}>
+                        ✨ はじめての登録：まずは一人目の従業員を登録してください。
+                    </p>
+                </div>
+            )}
+
+            {/* showForm ではなく isFormVisible (初回 or 表示中) で判定 */}
+            {isFormVisible && (
                 <section style={{ ...cardStyle, border: editingId ? "2px solid #f1c40f" : "1px solid #3498db" }}>
                     <h3 style={{ marginTop: 0, fontSize: "18px" }}>{editingId ? "📝 従業員情報の編集" : "✨ 新規従業員登録"}</h3>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "25px" }}>
@@ -1190,80 +1211,82 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                 </section>
             )}
 
-            {/* 🆕 検索・絞り込みツールバー */}
-            <div style={{ 
-                display: "flex", 
-                gap: "15px", 
-                marginBottom: "15px", 
-                alignItems: "center",
-                backgroundColor: "#f8fafc",
-                padding: "15px",
-                borderRadius: "8px",
-                border: "1px solid #e2e8f0"
-            }}>
-                {/* キーワード検索 */}
-                <div style={{ flex: 2 }}>
-                    <input 
-                        placeholder="🔍 ID、名前、フリガナで検索..." 
-                        value={searchKeyword}
-                        onChange={e => setSearchKeyword(e.target.value)}
-                        style={{ ...inputStyle, margin: 0 }}
-                    />
-                </div>
+            {/* 💡 スタッフがいて、かつフォームを閉じてる時だけリストを表示 */}
+            {!isFirstRun && !showForm && (
+                <div style={{ 
+                    display: "flex", 
+                    gap: "15px", 
+                    marginBottom: "15px", 
+                    alignItems: "center",
+                    backgroundColor: "#f8fafc",
+                    padding: "15px",
+                    borderRadius: "8px",
+                    border: "1px solid #e2e8f0"
+                }}>
+                    {/* キーワード検索 */}
+                    <div style={{ flex: 2 }}>
+                        <input 
+                            placeholder="🔍 ID、名前、フリガナで検索..." 
+                            value={searchKeyword}
+                            onChange={e => setSearchKeyword(e.target.value)}
+                            style={{ ...inputStyle, margin: 0 }}
+                        />
+                    </div>
 
-                {/* 🆕 店舗絞り込みセレクトボックス */}
-                <div style={{ flex: 1 }}>
-                    <select 
-                        value={filterBranchId} 
-                        onChange={e => setFilterBranchId(e.target.value)}
-                        style={{ ...inputStyle, margin: 0, fontSize: "14px" }}
-                    >
-                        <option value="all">🏢 すべての店舗</option>
-                        {branches.map(b => (
-                            <option key={b.id} value={String(b.id)}>{b.name}</option>
-                        ))}
-                    </select>
-                </div>
+                    {/* 🆕 店舗絞り込みセレクトボックス */}
+                    <div style={{ flex: 1 }}>
+                        <select 
+                            value={filterBranchId} 
+                            onChange={e => setFilterBranchId(e.target.value)}
+                            style={{ ...inputStyle, margin: 0, fontSize: "14px" }}
+                        >
+                            <option value="all">🏢 すべての店舗</option>
+                            {branches.map(b => (
+                                <option key={b.id} value={String(b.id)}>{b.name}</option>
+                            ))}
+                        </select>
+                    </div>
 
-                {/* ステータス絞り込みボタン */}
-                <div style={{ display: "flex", gap: "8px" }}>
-                    {[
-                        { label: "在籍", value: "active", color: "#2ecc71" },
-                        { label: "休職", value: "on_leave", color: "#f1c40f" },
-                        { label: "退職", value: "retired", color: "#e74c3c" }
-                    ].map(opt => {
-                        const isActive = filterStatus.includes(opt.value);
-                        return (
-                            <button
-                                key={opt.value}
-                                onClick={() => setFilterStatus(prev => 
-                                    prev.includes(opt.value) ? prev.filter(v => v !== opt.value) : [...prev, opt.value]
-                                )}
-                                style={{
-                                    padding: "5px 12px",
-                                    borderRadius: "15px",
-                                    border: `1px solid ${opt.color}`,
-                                    backgroundColor: isActive ? opt.color : "white",
-                                    color: isActive ? "white" : opt.color,
-                                    cursor: "pointer",
-                                    fontSize: "12px",
-                                    fontWeight: "bold",
-                                    transition: "0.2s"
-                                }}
-                            >
-                                {opt.label}
-                            </button>
-                        );
-                    })}
-                    <button 
-                        onClick={() => setFilterStatus(["active", "on_leave", "retired"])}
-                        style={{ fontSize: "12px", border: "none", background: "none", color: "#3498db", cursor: "pointer", textDecoration: "underline" }}
-                    >
-                        すべて表示
-                    </button>
+                    {/* ステータス絞り込みボタン */}
+                    <div style={{ display: "flex", gap: "8px" }}>
+                        {[
+                            { label: "在籍", value: "active", color: "#2ecc71" },
+                            { label: "休職", value: "on_leave", color: "#f1c40f" },
+                            { label: "退職", value: "retired", color: "#e74c3c" }
+                        ].map(opt => {
+                            const isActive = filterStatus.includes(opt.value);
+                            return (
+                                <button
+                                    key={opt.value}
+                                    onClick={() => setFilterStatus(prev => 
+                                        prev.includes(opt.value) ? prev.filter(v => v !== opt.value) : [...prev, opt.value]
+                                    )}
+                                    style={{
+                                        padding: "5px 12px",
+                                        borderRadius: "15px",
+                                        border: `1px solid ${opt.color}`,
+                                        backgroundColor: isActive ? opt.color : "white",
+                                        color: isActive ? "white" : opt.color,
+                                        cursor: "pointer",
+                                        fontSize: "12px",
+                                        fontWeight: "bold",
+                                        transition: "0.2s"
+                                    }}
+                                >
+                                    {opt.label}
+                                </button>
+                            );
+                        })}
+                        <button 
+                            onClick={() => setFilterStatus(["active", "on_leave", "retired"])}
+                            style={{ fontSize: "12px", border: "none", background: "none", color: "#3498db", cursor: "pointer", textDecoration: "underline" }}
+                        >
+                            すべて表示
+                        </button>
+                    </div>
                 </div>
-            </div>
-
+            )}
+            {!isFirstRun && !showForm && (
             <section style={cardStyle}>
                 <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                     <thead>
@@ -1310,7 +1333,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                     </thead>
                     <tbody>
                         {sortedAndFilteredList.map(s => {
-                            const branch = branches.find(b => b.id === s.branch_id);
+                            const branchName = branchMap[s.branch_id] || "---";
                             // 🆕 退職者の場合にスタイルを変えるためのフラグ
                             const isRetired = s.status === 'retired';
 
@@ -1341,7 +1364,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                             borderRadius: "12px",
                                             border: "1px solid #d6eaf8"
                                         }}>
-                                            {branch ? branch.name : "---"}
+                                            {branchName}
                                         </div>
                                     </td>
                                     <td style={tdStyle}>{s.wage_type === "monthly" ? "月給" : "時給"} {s.base_wage.toLocaleString()}円</td>
@@ -1392,6 +1415,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                     </tbody>
                 </table>
             </section>
+            )}
         </div>
     );
 }
