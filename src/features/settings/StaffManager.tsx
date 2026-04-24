@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { modernIconBtnStyle, fetchAddressByZip } from "./utils"; // 👈 utilsからインポート
-import * as Master from './constants/salaryMaster2026';
+import { modernIconBtnStyle } from "../../styles/styles";
+import { fetchAddressByZip } from "../../utils/addressUtils";
+import * as Master from '../../constants/salaryMaster2026';
 
 // 選択肢用の定数を作成
 export const HYOJUN_OPTIONS = Master.HYOJUN_TABLE.map(([lo, hi, std], index) => {

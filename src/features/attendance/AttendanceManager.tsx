@@ -1,10 +1,11 @@
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState, Fragment } from "react";
-// 🆕 calculateSalary を追加（ファイルパスは作成した場所に合わせて調整してください）
-import { calcDetailedDiff, modernIconBtnStyle, formatHours, generateAttendanceCSV, parseAttendanceCSV } from "./utils";
-import { calculateSalary } from "./calcSalary";
-import { OVERTIME_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_LIMIT_HOURS, OVERTIME_PREMIUM_RATE } from './constants/salaryMaster2026';
+import { calcDetailedDiff, formatHours } from "../../utils/timeUtils";
+import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
+import { modernIconBtnStyle } from "../../styles/styles";
+import { calculateSalary } from "../../utils/calcSalary";
+import { OVERTIME_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_LIMIT_HOURS, OVERTIME_PREMIUM_RATE } from '../../constants/salaryMaster2026';
 
 
 // 🆕 ニコイチ入力コンポーネント

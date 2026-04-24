@@ -7,8 +7,8 @@
  *  - 所定時間超〜8時間 → 法定内残業（割増義務なし、基本単価のみ）
  *  - 上記どちらかで月60時間超の分 → 割増50%必須
  */
-import { applyRounding } from './utils';
-import * as Master from './constants/salaryMaster2026';
+import { applyRounding } from './payrollUtils';
+import * as Master from '../constants/salaryMaster2026';
 
 
 export interface SalaryExtras {

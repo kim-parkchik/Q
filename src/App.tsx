@@ -1,18 +1,26 @@
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState } from "react";
-import { DB_SCHEMAS } from "./dbSchema";
-import FirstSetupScreen from "./FirstSetupScreen"; // 🆕
-import LoginScreen from "./LoginScreen"; // 🆕
-import CompanyManager from "./CompanyManager";
-import CalendarManager from "./CalendarManager";
-import StaffManager from "./StaffManager";
-import AttendanceManager from "./AttendanceManager";
-import PaySlipManager from "./PaySlipManager";
-import CustomItemManager from "./CustomItemManager";
-import BonusManager from "./BonusManager";
-import PaidLeaveManager from "./PaidLeaveManager";
-import UserManager from "./UserManager";
+import { DB_SCHEMAS } from "./types/dbSchema";
+
+// auth フォルダ
+import FirstSetupScreen from "./features/auth/FirstSetupScreen";
+import LoginScreen from "./features/auth/LoginScreen";
+
+// attendance フォルダ
+import AttendanceManager from "./features/attendance/AttendanceManager";
+import CalendarManager from "./features/attendance/CalendarManager";
+import PaidLeaveManager from "./features/attendance/PaidLeaveManager";
+
+// payroll フォルダ
+import PaySlipManager from "./features/payroll/PaySlipManager";
+import BonusManager from "./features/payroll/BonusManager";
+
+// settings フォルダ
+import CompanyManager from "./features/settings/CompanyManager";
+import StaffManager from "./features/settings/StaffManager";
+import UserManager from "./features/settings/UserManager";
+import CustomItemManager from "./features/settings/CustomItemManager";
 
 export const APP_VERSION = "0.1.0";
 

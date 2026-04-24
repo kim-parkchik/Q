@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from '@tauri-apps/plugin-dialog';
-import { fetchAddressByZip } from "./utils";
+import { fetchAddressByZip } from "../../utils/addressUtils";
 
 interface Props {
     db: Database;

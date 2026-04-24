@@ -12,8 +12,8 @@ import React, { useState, useEffect, useMemo } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
-import * as Master from './constants/salaryMaster2026';
-import { applyRounding } from './utils';
+import * as Master from '../../constants/salaryMaster2026';
+import { applyRounding } from '../../utils/payrollUtils';
 
 interface Props {
     db: Database;

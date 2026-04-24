@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import * as Master from './constants/salaryMaster2026';
-import { calculateSalary, saveSalaryResult, PREFECTURES, type SalaryExtras } from './calcSalary';
+import * as Master from '../../constants/salaryMaster2026';
+import { calculateSalary, saveSalaryResult, PREFECTURES, type SalaryExtras } from '../../utils/calcSalary';
 
 const fmtH = (num: number) => {
     const h = Math.floor(num);
