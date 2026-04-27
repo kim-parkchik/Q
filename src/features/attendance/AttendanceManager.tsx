@@ -202,6 +202,18 @@ export default function AttendanceManager({
         return activeFilters.includes(s.status || "active");
     });
 
+    // ✨ フィルタ変更によって選択中の人がリストから消えたら、選択をリセットする
+    useEffect(() => {
+        if (selectedStaffId) {
+            // 現在選んでいる人が、フィルタ後のリストにまだ存在するか確認
+            const isStillVisible = filteredStaffList.some(s => String(s.id) === String(selectedStaffId));
+            
+            if (!isStillVisible) {
+                setSelectedStaffId(""); // リストから消えたら選択を解除（詳細画面を閉じる）
+            }
+        }
+    }, [filteredStaffList]); // フィルタ結果が変わるたびに実行
+
     // 4. トグル関数
     const toggleFilter = (val: string) => {
         setActiveFilters(prev => 

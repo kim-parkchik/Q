@@ -15,11 +15,20 @@ import {
     UserRound,    // 代表者
     Phone,        // 電話
     CalendarDays, // 週の起算日
-    Save,         // 保存
+    Save,
+    Check,
+    Rocket,         // 保存
     Trash2,       // 削除
-    Edit2,        // 編集
+    AlertTriangle,
+    Pencil,       // 編集
     RotateCcw,    // リセット・戻る
-    Loader2       // ローディング（⌛の代わり）
+    Loader2,      // ローディング（⌛の代わり）
+    AlertCircle,
+    PlusCircle,
+    CheckCircle2,
+    X,
+    Clock,
+    Hash
 } from 'lucide-react';
 import { fetchAddressByZip } from "../../utils/addressUtils";
 
@@ -708,16 +717,39 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                             ...btnStyle, 
                                             width: "100%", 
                                             backgroundColor: isSaving ? "#2ecc71" : (!hasSavedOnce ? "#3498db" : "#34495e"),
-                                            opacity: (isSaving || !compName.trim() || !headPref) ? 0.6 : 1, // 押せないときは少し薄く
-                                            cursor: (isSaving || !compName.trim() || !headPref) ? "not-allowed" : "pointer"
+                                            opacity: (isSaving || !compName.trim() || !headPref) ? 0.6 : 1,
+                                            cursor: (isSaving || !compName.trim() || !headPref) ? "not-allowed" : "pointer",
+                                            // 👇 アイコンと文字を中央に揃える
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            gap: "8px"
                                         }}
                                     >
-                                        {isSaving ? "✅ 保存完了" : (hasSavedOnce ? "💾 会社情報を更新" : "🚀 設定を完了して開始")}
+                                        {isSaving ? (
+                                            <><Check size={18} /> 保存完了</>
+                                        ) : hasSavedOnce ? (
+                                            <><Save size={18} /> 会社情報を更新</>
+                                        ) : (
+                                            <><Rocket size={18} /> 設定を完了して開始</>
+                                        )}
                                     </button>
                                     
                                     {/* 必須項目が漏れている場合のアシスト表示 */}
                                     {(!compName.trim() || !headPref) && (
-                                        <p style={{ fontSize: "12px", color: "#e74c3c", textAlign: "center", marginTop: "8px", fontWeight: "bold" }}>
+                                        <p style={{ 
+                                            fontSize: "12px", 
+                                            color: "#e74c3c", 
+                                            textAlign: "center", 
+                                            marginTop: "8px", 
+                                            fontWeight: "bold",
+                                            // 👇 警告アイコンを添える
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            gap: "4px"
+                                        }}>
+                                            <AlertCircle size={14} />
                                             ※会社名と都道府県を入力すると保存できます
                                         </p>
                                     )}
@@ -953,8 +985,37 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     </div>
 
                                     <div style={{ gridColumn: "1 / 3" }}>
-                                        <button onClick={saveCompany} disabled={isSaving || !compName.trim() || !headPref} style={{ ...btnStyle, width: "100%", backgroundColor: isSaving ? "#2ecc71" : (!hasSavedOnce ? "#3498db" : "#34495e") }}>
-                                            {isSaving ? "✅ 保存完了" : (hasSavedOnce ? "💾 会社情報を更新" : "🚀 設定を完了して開始")}
+                                        <button 
+                                            onClick={saveCompany} 
+                                            disabled={isSaving || !compName.trim() || !headPref} 
+                                            style={{ 
+                                                ...btnStyle, 
+                                                width: "100%", 
+                                                backgroundColor: isSaving ? "#2ecc71" : (!hasSavedOnce ? "#3498db" : "#34495e"),
+                                                // 👇 アイコンと文字を中央に揃える
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                gap: "8px",
+                                                transition: "all 0.2s" // 変化を滑らかに
+                                            }}
+                                        >
+                                            {isSaving ? (
+                                                <>
+                                                    <Loader2 size={18} className="animate-spin" />
+                                                    <span>保存中...</span>
+                                                </>
+                                            ) : hasSavedOnce ? (
+                                                <>
+                                                    <Save size={18} />
+                                                    <span>会社情報を更新</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Rocket size={18} />
+                                                    <span>設定を完了して開始</span>
+                                                </>
+                                            )}
                                         </button>
                                     </div>
                                 </div>
@@ -975,18 +1036,25 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                         }}>
                                             <div style={{ flex: 1 }}>
                                                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                                                    {pg.id === 1 && <span style={{ ...headBadgeStyle, backgroundColor: "#10b981" }}>基本</span>}
+                                                    {pg.id === 1 && (
+                                                        <span style={{ ...headBadgeStyle, backgroundColor: "#10b981", display: "flex", alignItems: "center", gap: "4px" }}>
+                                                            <CheckCircle2 size={12} />基本
+                                                        </span>
+                                                    )}
                                                     <strong>{pg.name}</strong>
                                                 </div>
-                                                <div style={{ fontSize: "12px", color: "#7f8c8d" }}>
-                                                    締日: {pg.closing_day === 99 ? "末日" : `${pg.closing_day}日`} / 
-                                                    支払: {pg.is_next_month ? "翌月" : "当月"} {pg.payment_day === 99 ? "末日" : `${pg.payment_day}日`}
+                                                <div style={{ fontSize: "12px", color: "#7f8c8d", display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
+                                                    <Clock size={12} />
+                                                    <span>
+                                                        締: {pg.closing_day === 99 ? "末日" : `${pg.closing_day}日`} / 
+                                                        払: {pg.is_next_month ? "翌月" : "当月"} {pg.payment_day === 99 ? "末日" : `${pg.payment_day}日`}
+                                                    </span>
                                                 </div>
                                             </div>
                                             
                                             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                                                 {editingPgId === pg.id ? (
-                                                    <span style={editingBadgeStyle}>📝 編集中...</span>
+                                                    <span style={{...editingBadgeStyle, display: "flex", alignItems: "center", gap: "4px"}}><Pencil size={14} />編集中...</span>
                                                 ) : (
                                                     <>
                                                         {/* 他の行を編集中、または他の行を削除待機中は操作不能にする */}
@@ -999,30 +1067,23 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                                         alignItems: "center", 
                                                                         marginRight: "12px" // ★ ここでセット全体を左に押し出します（編集ボタンの横幅分ほど）
                                                                     }}>
-                                                                        <button 
-                                                                            onClick={() => deletePayrollGroup(pg.id)} 
-                                                                            style={{ 
-                                                                                ...deleteBtnStyle, 
-                                                                                backgroundColor: "#e74c3c", 
-                                                                                color: "white",
-                                                                                marginRight: "20px" // ボタン同士の適度な隙間
-                                                                            }}
-                                                                        >
-                                                                            本当に削除
+                                                                        <button onClick={() => deletePayrollGroup(pg.id)} style={{ ...deleteBtnStyle, backgroundColor: "#e74c3c", color: "white", display: "flex", alignItems: "center", gap: "4px" }}>
+                                                                            <AlertTriangle size={14} />本当に削除
                                                                         </button>
-                                                                        <button 
-                                                                            onClick={() => setDeletingPgId(null)} 
-                                                                            style={{ ...editBtnStyle, backgroundColor: "#95a5a6", color: "white" }}
-                                                                        >
-                                                                            取消
+                                                                        <button onClick={() => setDeletingPgId(null)} style={{ ...editBtnStyle, backgroundColor: "#95a5a6", color: "white", display: "flex", alignItems: "center", gap: "4px" }}>
+                                                                            <X size={14} />取消
                                                                         </button>
                                                                     </div>
                                                                 ) : (
                                                                     // 通常状態
                                                                     <>
-                                                                        <button onClick={() => startEditPg(pg)} style={editBtnStyle}>編集</button>
+                                                                        <button onClick={() => startEditPg(pg)} style={{...editBtnStyle, display: "flex", alignItems: "center", gap: "4px"}}>
+                                                                            <Pencil size={14} />編集
+                                                                        </button>
                                                                         {pg.id !== 1 && (
-                                                                            <button onClick={() => setDeletingPgId(pg.id)} style={deleteBtnStyle}>削除</button>
+                                                                            <button onClick={() => setDeletingPgId(pg.id)} style={{...deleteBtnStyle, display: "flex", alignItems: "center", gap: "4px"}}>
+                                                                                <Trash2 size={14} />削除
+                                                                            </button>
                                                                         )}
                                                                     </>
                                                                 )}
@@ -1037,8 +1098,9 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
                                 {/* 右側：追加・編集フォーム */}
                                 <div style={{ ...addBoxStyle, border: editingPgId !== null ? "2px solid #f1c40f" : "1px dashed #cbd5e1" }}>
-                                    <h4 style={{ margin: "0 0 15px 0" }}>
-                                        {editingPgId !== null ? "📝 規定の編集" : "➕ グループの追加"}
+                                    <h4 style={{ margin: "0 0 15px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+                                        {editingPgId !== null ? <Pencil size={20} color="#f1c40f" /> : <PlusCircle size={20} color="#10b981" />}
+                                        {editingPgId !== null ? "規定の編集" : "グループの追加"}
                                     </h4>
                                     
                                     <label style={miniLabelStyle}>グループ名</label>
@@ -1077,13 +1139,47 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     <div style={{ display: "flex", gap: "10px" }}>
                                         <button 
                                             onClick={savePayrollGroup} 
-                                            style={{ ...btnStyle, flex: 1, backgroundColor: editingPgId !== null ? "#f1c40f" : "#10b981", color: editingPgId !== null ? "#000" : "#fff" }}
+                                            // 👇 ここを修正：pgName が空（または空白のみ）の場合は無効化
+                                            disabled={!pgName.trim()} 
+                                            style={{ 
+                                                ...btnStyle, 
+                                                flex: 1, 
+                                                backgroundColor: !pgName.trim() ? "#bdc3c7" : (editingPgId !== null ? "#f1c40f" : "#10b981"), 
+                                                color: editingPgId !== null ? "#000" : "#fff",
+                                                // 👇 無効な時のカーソルも指定しておくと親切です
+                                                cursor: !pgName.trim() ? "not-allowed" : "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                gap: "8px",
+                                                fontSize: "14px"
+                                            }}
                                         >
-                                            {editingPgId !== null ? "更新する" : "登録する"}
+                                            {/* 👇 文言も少し変えると分かりやすくなります */}
+                                            {!pgName.trim() ? (
+                                                "グループ名を入力してください"
+                                            ) : (
+                                                <>
+                                                    {editingPgId !== null ? <CheckCircle2 size={16} /> : <PlusCircle size={16} />}
+                                                    <span>{editingPgId !== null ? "更新する" : "登録する"}</span>
+                                                </>
+                                            )}
                                         </button>
                                         {editingPgId !== null && (
-                                            <button onClick={resetPgForm} style={{ ...btnStyle, flex: 1, backgroundColor: "#ccc" }}>
-                                                取消
+                                            <button 
+                                                onClick={resetPgForm} 
+                                                style={{ 
+                                                    ...btnStyle, 
+                                                    width: "80px", 
+                                                    backgroundColor: "#95a5a6", 
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    gap: "4px"
+                                                }}
+                                            >
+                                                <X size={16} />
+                                                <span>取消</span>
                                             </button>
                                         )}
                                     </div>
@@ -1117,10 +1213,13 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                     </div>
                                                     
                                                     {/* 🏠 住所表示を2段に変更 */}
-                                                    <div style={{ fontSize: "12px", color: "#7f8c8d", lineHeight: "1.5" }}>
-                                                        <div>〒{b.zip_code}</div>
-                                                        <div style={{ wordBreak: "break-all" }}>
-                                                            {b.prefecture}{b.address}
+                                                    <div style={{ fontSize: "12px", color: "#7f8c8d", lineHeight: "1.5", display: "flex", alignItems: "flex-start", gap: "6px", marginTop: "4px" }}>
+                                                        <MapPin size={12} style={{ marginTop: "3px" }} />
+                                                        <div>
+                                                            <div>〒{b.zip_code}</div>
+                                                            <div style={{ wordBreak: "break-all" }}>
+                                                                {b.prefecture}{b.address}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1142,7 +1241,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                     ) : (
                                                         // 🏢 支店の場合：編集・削除ロジック
                                                         editingBranchId === b.id ? (
-                                                            <span style={editingBadgeStyle}>📝 編集中...</span>
+                                                            <span style={editingBadgeStyle}><Pencil size={14} /> 編集中...</span>
                                                         ) : (
                                                             <>
                                                                 {(editingBranchId === null && (deletingBranchId === null || isDeleting)) && (
@@ -1153,16 +1252,16 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                                                     onClick={() => deleteBranch(b.id)} 
                                                                                     style={{ ...deleteBtnStyle, backgroundColor: "#e74c3c", color: "white", marginRight: "20px" }}
                                                                                 >
-                                                                                    本当に削除
+                                                                                    <AlertTriangle size={14} /> 本当に削除
                                                                                 </button>
                                                                                 <button onClick={() => setDeletingBranchId(null)} style={{ ...editBtnStyle, backgroundColor: "#95a5a6", color: "white" }}>
-                                                                                    取消
+                                                                                    <X size={14} />取消
                                                                                 </button>
                                                                             </div>
                                                                         ) : (
                                                                             <>
-                                                                                <button onClick={() => startEditBranch(b)} style={editBtnStyle}>編集</button>
-                                                                                <button onClick={() => setDeletingBranchId(b.id)} style={deleteBtnStyle}>削除</button>
+                                                                                <button onClick={() => startEditBranch(b)} style={editBtnStyle}><Pencil size={14} /> 編集</button>
+                                                                                <button onClick={() => setDeletingBranchId(b.id)} style={deleteBtnStyle}><Trash2 size={14} /> 削除</button>
                                                                             </>
                                                                         )}
                                                                     </>
@@ -1177,7 +1276,10 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                 </div>
                                 {/* 右：追加・編集ボックス */}
                                 <div style={{ ...addBoxStyle, border: editingBranchId !== null ? "2px solid #f1c40f" : "1px dashed #cbd5e1" }}>
-                                    <h4 style={{ margin: "0 0 15px 0" }}>{editingBranchId !== null ? "📝 支店の編集" : "➕ 支店の追加"}</h4>
+                                    <h4 style={{ margin: "0 0 15px 0", display: "flex", alignItems: "center", gap: "8px" }}>
+                                        {editingBranchId !== null ? <Pencil size={20} color="#f1c40f" /> : <PlusCircle size={20} color="#3498db" />}
+                                        {editingBranchId !== null ? "支店の編集" : "支店の追加"}
+                                    </h4>
                                     
                                     <label style={miniLabelStyle}>支店名</label>
                                     <input value={bName} onChange={e => setBName(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} style={{ ...inputStyle, ...inputBottomSpace }} />
@@ -1195,7 +1297,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                             onClick={() => handleZipSearch(bZip, setBZip, setBPref, setBAddr, setIsSearchingBZip)} 
                                             style={{ ...zipBtnStyle, zIndex: 1, borderLeft: "1px solid #ddd" }}
                                         >
-                                            {isSearchingBZip ? "⌛" : "🔍"}
+                                            {isSearchingBZip ? <RotateCcw size={16} className="animate-spin" /> : <Search size={16} />}
                                         </button>
                                     </div>
 
@@ -1236,12 +1338,44 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                             disabled={!bName || !bPref}
                                             style={{ 
                                                 ...addBtnStyle, 
-                                                backgroundColor: (!bName || !bPref) ? "#bdc3c7" : "#2ecc71" 
+                                                backgroundColor: (!bName || !bPref) ? "#bdc3c7" : "#2ecc71",
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                gap: "6px", // アイコンと文字の間隔
+                                                fontSize: "14px", // 文字を少しだけ大きく（もし小さければ）
+                                                padding: "8px 16px"
                                             }}
                                         >
-                                            {(!bName || !bPref) ? "支店名と都道府県を入力" : (editingBranchId !== null ? "更新する" : "支店を追加")}
+                                            {(!bName || !bPref) ? (
+                                                "支店名と都道府県を入力"
+                                            ) : (
+                                                <>
+                                                    {editingBranchId !== null ? <CheckCircle2 size={16} /> : <PlusCircle size={16} />}
+                                                    {editingBranchId !== null ? "更新する" : "支店を追加"}
+                                                </>
+                                            )}
                                         </button>
-                                        {editingBranchId !== null && <button onClick={resetBranchForm} style={{ ...addBtnStyle, backgroundColor: "#95a5a6" }}>取消</button>}
+                                        {/* {editingBranchId !== null && <button onClick={resetBranchForm} style={{ ...addBtnStyle, backgroundColor: "#95a5a6" }}>取消</button>} */}
+                                        {editingBranchId !== null && (
+                                            <button 
+                                                onClick={resetBranchForm} 
+                                                style={{ 
+                                                    ...addBtnStyle, 
+                                                    backgroundColor: "#95a5a6", 
+                                                    width: '80px',
+                                                    // 👇 ここを追加
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    gap: "4px",
+                                                    fontSize: "14px"
+                                                }}
+                                            >
+                                                <X size={16} />
+                                                <span>取消</span>
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -1251,7 +1385,9 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                     {activeSubTab === "rounding" && (
                         <section style={tabContentStyle}>
                             <div style={cardStyle}>
-                                <h3 style={{ marginTop: 0, fontSize: "16px", color: "#34495e" }}>🔢 各計算項目の端数処理ルール</h3>
+                                <h3 style={{ marginTop: 0, fontSize: "16px", color: "#34495e", display: "flex", alignItems: "center", gap: "8px" }}>
+                                    <Hash size={20} color="#3498db" /> 各計算項目の端数処理ルール
+                                </h3>
                                 <p style={{ fontSize: "13px", color: "#7f8c8d", marginBottom: "20px" }}>
                                     法令および就業規則に基づき、1円未満の端数をどのように処理するかを選択してください。
                                 </p>
@@ -1260,8 +1396,10 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     {/* --- 残業代 --- */}
                                     <div style={{ ...roundingRowStyle, gap: "20px" }}>
                                         <div style={{ flex: 1 }}>
-                                            <strong style={{ display: "block", whiteSpace: "nowrap" }}>⏰ 残業代・深夜手当</strong>
-                                            <small style={{ color: "#95a5a6" }}>
+                                            <strong style={{ display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+                                                <Clock size={16} color="#e67e22" /> 残業代・深夜手当
+                                            </strong>
+                                            <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
                                                 ※1ヶ月の合計額に対して適用されます。
                                             </small>
                                         </div>
@@ -1280,8 +1418,12 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     {/* --- 社会保険 --- */}
                                     <div style={{ ...roundingRowStyle, gap: "20px" }}>
                                         <div style={{ flex: 1 }}>
-                                            <strong style={{ display: "block", whiteSpace: "nowrap" }}>🛡️ 社会保険料（個人負担分）</strong>
-                                            <small style={{ color: "#95a5a6" }}>※通貨単位法により、50銭以下切り捨てが一般的です。</small>
+                                            <strong style={{ display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+                                                <ShieldCheck size={16} color="#27ae60" /> 社会保険料（個人負担分）
+                                            </strong>
+                                            <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
+                                                ※通貨単位法により、50銭以下切り捨てが一般的です。
+                                            </small>
                                         </div>
                                         <select 
                                             value={roundSocialIns} 
@@ -1297,8 +1439,12 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     {/* --- 雇用保険 --- */}
                                     <div style={{ ...roundingRowStyle, gap: "20px" }}>
                                         <div style={{ flex: 1 }}>
-                                            <strong style={{ display: "block", whiteSpace: "nowrap" }}>🏗️ 雇用保険料（個人負担分）</strong>
-                                            <small style={{ color: "#95a5a6" }}>※50銭以下切り捨て、51銭以上切り上げルール。</small>
+                                            <strong style={{ display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+                                                <HardHat size={16} color="#2980b9" /> 雇用保険料（個人負担分）
+                                            </strong>
+                                            <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
+                                                ※50銭以下切り捨て、51銭以上切り上げルール。
+                                            </small>
                                         </div>
                                         <select 
                                             value={roundEmpIns} 
@@ -1315,9 +1461,19 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
                                 <button 
                                     onClick={() => alert("端数設定を保存しました（DBへ要保存）")}
-                                    style={{ ...btnStyle, marginTop: "30px", backgroundColor: "#34495e", width: "100%" }}
+                                    style={{ 
+                                        ...btnStyle, 
+                                        marginTop: "30px", 
+                                        backgroundColor: "#34495e", 
+                                        width: "100%",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: "8px"
+                                    }}
                                 >
-                                    💾 端数処理設定を保存
+                                    <Save size={18} />
+                                    <span>端数処理設定を保存</span>
                                 </button>
                             </div>
                         </section>
