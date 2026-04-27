@@ -7,6 +7,15 @@ export function useFirstSetup(db: any, onComplete: () => void) {
     const [passwordConfirm, setPasswordConfirm] = useState("");
     const [error, setError] = useState("");
 
+    // 🆕 ハッシュ化関数（useSystemSettingsと同じもの）
+    const hashPassword = async (password: string) => {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(password);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
@@ -16,10 +25,13 @@ export function useFirstSetup(db: any, onComplete: () => void) {
         if (!displayName.trim()) return setError("表示名を入力してください。");
 
         try {
+            // 🆕 ここでハッシュ化！
+            const hashedPassword = await hashPassword(password);
+
             await db.execute(
                 `INSERT INTO users (login_id, display_name, password_hash, role) 
                  VALUES (?, ?, ?, 'admin')`,
-                [loginId, displayName, password]
+                [loginId, displayName, hashedPassword] // 🆕 ハッシュ化した値を保存
             );
             alert("管理者アカウントを作成しました。ログインしてください。");
             onComplete();

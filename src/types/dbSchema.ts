@@ -1,3 +1,5 @@
+import { HOLIDAY_CSV_URL_DEFAULT } from "../constants/salaryMaster2026";
+
 export const DB_SCHEMAS = [
     // 0. ユーザー管理（ログイン・権限）
   `CREATE TABLE IF NOT EXISTS users (
@@ -27,7 +29,10 @@ export const DB_SCHEMAS = [
     round_emp_ins TEXT DEFAULT 'round',
     week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
     annual_holidays INTEGER DEFAULT 120,
-    holiday_csv_url TEXT DEFAULT 'https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv'
+    holiday_csv_url TEXT DEFAULT '${HOLIDAY_CSV_URL_DEFAULT}',
+    holiday_source TEXT DEFAULT 'url',
+    corporate_search_mode TEXT DEFAULT 'scraping', -- 'scraping' or 'api'
+    gbiz_api_key TEXT DEFAULT ''                   -- APIキー
   );`,
 
   // 2. 拠点（支店）情報
@@ -72,6 +77,7 @@ export const DB_SCHEMAS = [
     name TEXT NOT NULL, 
     furigana TEXT, 
     birthday TEXT, 
+    gender TEXT DEFAULT 'unknown',
     zip_code TEXT, 
     address TEXT, 
     phone TEXT, 

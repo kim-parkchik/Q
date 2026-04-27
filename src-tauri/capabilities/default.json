@@ -8,15 +8,21 @@
     "opener:default",
     "dialog:default",
     "http:default",
-    "fs:allow-read-file",
-    "fs:allow-read-text-file",
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-load",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    "fs:read-all",
+    "fs:write-all",
     {
       "identifier": "http:allow-fetch",
       "allow": [
-        { "url": "https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv" }
+        { "url": "https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv" },
+        { "url": "https://www.houjin-bangou.nta.go.jp/**" },
+        { "url": "https://zipcloud.ibsnet.co.jp/**" }
       ]
     }
   ]

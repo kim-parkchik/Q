@@ -1,7 +1,21 @@
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState } from "react";
+import { 
+  Building2, 
+  Calendar, 
+  CircleUser, 
+  Users, 
+  Palmtree, 
+  Settings, 
+  Timer, 
+  Coins, 
+  FileText, 
+  UserCog, 
+  LogOut 
+} from 'lucide-react';
 import { DB_SCHEMAS } from "./types/dbSchema";
+import { HOLIDAY_CSV_URL_DEFAULT } from "./constants/salaryMaster2026";
 
 // auth フォルダ
 import FirstSetupScreen from "./features/auth/FirstSetupScreen";
@@ -19,22 +33,36 @@ import BonusManager from "./features/payroll/BonusManager";
 // settings フォルダ
 import CompanyManager from "./features/settings/CompanyManager";
 import StaffManager from "./features/settings/StaffManager";
-import UserManager from "./features/settings/UserManager";
+import SystemSettings from "./features/settings/SystemSettings";
 import CustomItemManager from "./features/settings/CustomItemManager";
 
 export const APP_NAME = "Q";
 export const APP_VERSION = "0.1.0";
 
+// 2. TAB_NAMES から絵文字を消してシンプルにします
 const TAB_NAMES: Record<string, string> = {
-  company: "🏢 会社設定",
-  calendar: "📅 会社カレンダー",
-  staff: "👤 従業員詳細管理",
-  paid_leave: "🏖 有給休暇管理",
-  custom_items: "⚙️ 給与項目設定",
-  attendance: "⏱️ 勤怠・月次給与",
-  bonus: "💰 賞与計算",
-  payslip: "📄 明細書出力",
-  user_management: "⚙️ ユーザー管理"
+  company: "会社設定",
+  calendar: "会社カレンダー",
+  staff: "従業員詳細管理",
+  paid_leave: "有給休暇管理",
+  custom_items: "給与項目設定",
+  attendance: "勤怠・月次給与",
+  bonus: "賞与計算",
+  payslip: "明細書出力",
+  user_management: "システム設定"
+};
+
+// 3. アイコンの対応表を定義（あとでループ内で使いやすくするため）
+const TAB_ICONS: Record<string, React.ReactNode> = {
+  company: <Building2 size={18} />,
+  calendar: <Calendar size={18} />,
+  staff: <Users size={18} />,
+  paid_leave: <Palmtree size={18} />,
+  custom_items: <Settings size={18} />,
+  attendance: <Timer size={18} />,
+  bonus: <Coins size={18} />,
+  payslip: <FileText size={18} />,
+  user_management: <UserCog size={18} />
 };
 
 function App() {
@@ -61,7 +89,7 @@ function App() {
   useEffect(() => {
     const init = async () => {
       try {
-        const sqlite = await Database.load("sqlite:hama_kyuyo.db");
+        const sqlite = await Database.load("sqlite:Q.db");
 
         // 1. スキーマ実行
         for (const schema of DB_SCHEMAS) {
@@ -70,6 +98,14 @@ function App() {
         await sqlite.execute("PRAGMA foreign_keys = ON;");
 
         // 2. マスター初期投入
+        // 🆕 会社基本情報の初期レコード（URL含む）を投入
+        const companyCheck = await sqlite.select<any[]>("SELECT id FROM company WHERE id = 1");
+        if (companyCheck.length === 0) {
+          await sqlite.execute(
+            `INSERT INTO company (id, name, holiday_csv_url) VALUES (1, '', ?)`,
+            [HOLIDAY_CSV_URL_DEFAULT] // 定数を使用
+          );
+        }
         const patterns = await sqlite.select<any[]>("SELECT * FROM calendar_patterns WHERE id = 1");
         if (patterns.length === 0) {
           // 確実に id=1 で「標準」を入れる
@@ -187,50 +223,69 @@ function App() {
           fontWeight: "bold", 
           borderBottom: "1px solid #34495e",
           color: "#ecf0f1",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis" // 長い社名を三点リーダーで省略
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          height: "70px" // 高さを固定すると安定します
         }}>
-          {isSetupComplete ? `🏢 ${companyName}` : APP_NAME}
+          {/* セットアップ未完了時はアイコンを黄色にして注意を引く */}
+          <Building2 size={24} color={isSetupComplete ? "#3498db" : "#f1c40f"} />
+          
+          <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <span style={{ 
+              overflow: "hidden", 
+              textOverflow: "ellipsis", 
+              whiteSpace: "nowrap",
+              fontSize: isSetupComplete ? "16px" : "14px",
+              color: isSetupComplete ? "#ecf0f1" : "#f1c40f"
+            }}>
+              {isSetupComplete ? companyName : "初期設定が必要です"}
+            </span>
+          </div>
         </div>
         <ul style={{ listStyle: "none", padding: "10px", margin: 0 }}>
-          <li onClick={() => setActiveTab("company")} style={tabStyle(activeTab === "company")}>🏢 会社設定</li>
-          
+          {/* 共通のリストアイテム描画関数（DRYに書くなら） */}
+          <li onClick={() => setActiveTab("company")} style={tabStyle(activeTab === "company")}>
+             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {TAB_ICONS.company}
+                <span>{TAB_NAMES.company}</span>
+             </div>
+          </li>
           {isSetupComplete && (
             <>
-              <li onClick={() => setActiveTab("calendar")} style={tabStyle(activeTab === "calendar")}>📅 会社カレンダー</li>
-              <li onClick={() => setActiveTab("staff")} style={tabStyle(activeTab === "staff")}>👤 従業員詳細管理</li>
-              {/* --- 以下、従業員登録が必要なメニュー --- */}
-              <li 
-                onClick={() => isStaffReady && setActiveTab("paid_leave")} 
-                style={tabStyle(activeTab === "paid_leave", !isStaffReady)}
-              >
-                🏖 有給休暇管理
+              {/* 各メニューを Lucide アイコンに置き換え */}
+              <li onClick={() => setActiveTab("calendar")} style={tabStyle(activeTab === "calendar")}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {TAB_ICONS.calendar}
+                  <span>{TAB_NAMES.calendar}</span>
+                </div>
               </li>
-              <li 
-                onClick={() => isStaffReady && setActiveTab("custom_items")} 
-                style={tabStyle(activeTab === "custom_items", !isStaffReady)}
-              >
-                ⚙️ 給与項目設定
+              <li onClick={() => setActiveTab("staff")} style={tabStyle(activeTab === "staff")}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {TAB_ICONS.staff}
+                  <span>{TAB_NAMES.staff}</span>
+                </div>
               </li>
-              <li 
-                onClick={() => isStaffReady && setActiveTab("attendance")} 
-                style={tabStyle(activeTab === "attendance", !isStaffReady)}
-              >
-                ⏱️ 勤怠・月次給与
-              </li>
-              <li 
-                onClick={() => isStaffReady && setActiveTab("bonus")} 
-                style={tabStyle(activeTab === "bonus", !isStaffReady)}
-              >
-                💰 賞与計算
-              </li>
-              <li 
-                onClick={() => isStaffReady && setActiveTab("payslip")} 
-                style={tabStyle(activeTab === "payslip", !isStaffReady)}
-              >
-                📄 明細書出力
-              </li>
+
+              {/* 無効化（isStaffReady判定）が必要なメニュー */}
+              {[
+                { id: "paid_leave", key: "paid_leave" },
+                { id: "custom_items", key: "custom_items" },
+                { id: "attendance", key: "attendance" },
+                { id: "bonus", key: "bonus" },
+                { id: "payslip", key: "payslip" },
+              ].map(item => (
+                <li 
+                  key={item.id}
+                  onClick={() => isStaffReady && setActiveTab(item.id)} 
+                  style={tabStyle(activeTab === item.id, !isStaffReady)}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    {TAB_ICONS[item.key]}
+                    <span>{TAB_NAMES[item.key]}</span>
+                  </div>
+                </li>
+              ))}
             </>
           )}
         </ul>
@@ -242,11 +297,11 @@ function App() {
         {/* ⚙️ 管理者専用メニュー */}
         {currentUser.role === 'admin' && (
           <ul style={{ listStyle: "none", padding: "10px", margin: 0, borderTop: "1px solid #34495e" }}>
-            <li 
-              onClick={() => setActiveTab("user_management")} 
-              style={tabStyle(activeTab === "user_management")}
-            >
-              ⚙️ ユーザー管理
+            <li onClick={() => setActiveTab("user_management")} style={tabStyle(activeTab === "user_management")}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {TAB_ICONS.user_management}
+                <span>{TAB_NAMES.user_management}</span>
+              </div>
             </li>
           </ul>
         )}
@@ -285,13 +340,18 @@ function App() {
           flexShrink: 0
         }}>
           {/* 左側：パンくずリスト風の表示 */}
-          <div style={{ fontSize: "16px", color: "#606266", display: "flex", alignItems: "center" }}>
+          <div style={{ fontSize: "16px", color: "#606266", display: "flex", alignItems: "center", gap: "8px" }}>
+            {/* 現在のタブのアイコンをヘッダーにも表示 */}
+            <span style={{ color: "#3498db" }}>{TAB_ICONS[activeTab]}</span>
             <span style={{ fontWeight: "bold", color: "#303133" }}>
               {TAB_NAMES[activeTab] || "ホーム"}
             </span>
           </div>
-          <div style={{ fontSize: "14px", color: "#333", display: "flex", alignItems: "center" }}>
-            <span style={{ marginRight: "15px", fontWeight: "500" }}>👤 {currentUser.display_name} さん</span>
+         <div style={{ fontSize: "14px", color: "#333", display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+               <CircleUser size={16} color="#909399" />
+               <span style={{ fontWeight: "500" }}>{currentUser.display_name} さん</span>
+            </div>
             <button 
               onClick={() => setCurrentUser(null)} 
               style={{ 
@@ -302,11 +362,13 @@ function App() {
                 border: "1px solid #dcdfe6", 
                 borderRadius: "4px", 
                 color: "#606266",
-                transition: "all 0.2s"
+                transition: "all 0.2s",
+                display: "flex", alignItems: "center", gap: "5px"
               }}
               onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#f5f7fa")}
               onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#fff")}
             >
+              <LogOut size={14} />
               ログアウト
             </button>
           </div>
@@ -357,7 +419,7 @@ function App() {
             </>
           )}
           {activeTab === "user_management" && db && (
-            <UserManager db={db} />
+            <SystemSettings db={db} />
           )}
         </main>
       </div>

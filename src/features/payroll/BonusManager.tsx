@@ -361,9 +361,6 @@ export default function BonusManager({ db, staffList }: Props) {
     // ── レンダリング ────────────────────────────────────────────
     return (
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <h2 style={{ color: "#2c3e50", margin: 0 }}>💰 賞与計算・管理</h2>
-            </div>
 
             {/* ── タブナビゲーション ── */}
             <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "2px solid #eee" }}>

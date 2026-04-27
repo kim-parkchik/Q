@@ -113,6 +113,7 @@ export default function AttendanceManager({
     targetMonth,
     setTargetMonth
 }: AttendanceManagerProps) {
+    const [activeTab, setActiveTab] = useState<"csv" | "individual">("individual");
     const [selectedStaffId, setSelectedStaffId] = useState("");
     const [monthlyWorkData, setMonthlyWorkData] = useState<Record<string, any>>({});
     const [companySettings, setCompanySettings] = useState<any>(null);
@@ -630,503 +631,611 @@ export default function AttendanceManager({
     const totalCommute       = calcResult?.commutePay || 0;
     const over60Hours = Math.max(0, totalOvertimeHours - OVERTIME_PREMIUM_LIMIT_HOURS);
 
+    // --- スタイル定義（追加分） ---
+    const tabContainerStyle = {
+        display: "flex",
+        borderBottom: "2px solid #eee",
+        marginBottom: "20px",
+        gap: "10px"
+    };
+
+    const tabButtonStyle = (isActive: boolean) => ({
+        padding: "12px 24px",
+        cursor: "pointer",
+        fontSize: "15px",
+        fontWeight: "bold" as const,
+        border: "none",
+        borderBottom: isActive ? "3px solid #3498db" : "3px solid transparent",
+        backgroundColor: "transparent",
+        color: isActive ? "#3498db" : "#7f8c8d",
+        transition: "0.2s"
+    });
+
     return (
         <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
-            <h2 style={{ color: "#2c3e50" }}>📅 勤務記録・給与集計</h2>
-            {/* ... (中略：年月選択、スタッフ選択) ... */}
-            <div style={{ display: "flex", gap: "20px", alignItems: "center", marginTop: "15px", borderTop: "1px solid #eee", paddingTop: "15px" }}>
-                <div>
-                    <label style={labelStyle}>対象年月</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                        <select value={targetYear} onChange={e => setTargetYear(Number(e.target.value))} style={{ ...inputStyle, width: "100px" }}>
-                            {[2025, 2026, 2027, 2028].map(y => <option key={y} value={y}>{y}年</option>)}
-                        </select>
-                        <select value={targetMonth} onChange={e => setTargetMonth(Number(e.target.value))} style={{ ...inputStyle, width: "80px" }}>
-                            {Array.from({ length: 12 }, (_, i) => (<option key={i + 1} value={i + 1}>{i + 1}月</option>))}
-                        </select>
-                    </div>
-                </div>
-                <button onClick={() => { const d = new Date(); setTargetYear(d.getFullYear()); setTargetMonth(d.getMonth() + 1); }} style={{ ...modernIconBtnStyle("#7f8c8d"), marginTop: "15px" }}>今月に戻る</button>
-                <div style={{ marginLeft: "auto", display: "flex", gap: "10px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <button onClick={handleExportRawCSV} style={modernIconBtnStyle("#7f8c8d")}>
-                            📄 Raw（打刻ログ）
-                        </button>
-                        <button onClick={handleExportFullCSV} style={modernIconBtnStyle("#34495e")}>
-                            📤 Full（詳細データ）
-                        </button>
-                    </div>
-                    <button onClick={handleImportCSV} style={{ ...modernIconBtnStyle("#2980b9"), padding: "0 15px" }}>
-                        📥 CSV取込
-                    </button>
-                </div>
+            {/* 🆕 タブメニュー */}
+            <div style={tabContainerStyle}>
+                <button 
+                    onClick={() => setActiveTab("individual")} 
+                    style={tabButtonStyle(activeTab === "individual")}
+                >
+                    👤 個別編集・集計
+                </button>
+                <button 
+                    onClick={() => setActiveTab("csv")} 
+                    style={tabButtonStyle(activeTab === "csv")}
+                >
+                    📂 一括操作 (CSV)
+                </button>
             </div>
 
-            {/* 🆕 従業員選択・フィルタ・一括保存セクション */}
-            <section style={{ 
-                display: "flex", 
-                justifyContent: "space-between", 
-                alignItems: "stretch", // 高さを揃える
-                gap: "20px", 
-                marginBottom: "25px", 
-                marginTop: "20px"
-            }}>
-                {/* 左側：従業員選択カード（フィルタ機能付き） */}
-                <div style={{ ...cardStyle, flex: "1", margin: 0, borderTop: "4px solid #3498db", display: "flex", flexDirection: "column", gap: "12px" }}>
-                    
-                    {/* フィルタボタン群 */}
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "4px" }}>
-                        <span style={{ fontSize: "12px", fontWeight: "bold", color: "#7f8c8d", marginRight: "4px" }}>表示:</span>
-                        {[
-                            { label: "在籍", value: "active", color: "#2ecc71" },
-                            { label: "休職", value: "on_leave", color: "#f1c40f" },
-                            { label: "退職", value: "retired", color: "#e74c3c" }
-                        ].map(opt => {
-                            const isActive = activeFilters.includes(opt.value);
-                            return (
-                                <button
-                                    key={opt.value}
-                                    onClick={() => 
-                                        setActiveFilters(prev => 
-                                            prev.includes(opt.value) 
-                                                ? prev.filter(v => v !== opt.value) 
-                                                : [...prev, opt.value]
-                                        )
-                                    }
-                                    style={{
-                                        padding: "5px 12px",
-                                        borderRadius: "15px",
-                                        border: `1px solid ${opt.color}`,
-                                        backgroundColor: isActive ? opt.color : "white",
-                                        color: isActive ? "white" : opt.color,
-                                        cursor: "pointer",
-                                        fontSize: "11px",
-                                        fontWeight: "bold",
-                                        transition: "0.2s"
-                                    }}
-                                >
-                                    {opt.label}
+            {/* --- 📂 一括操作 (CSV) タブの内容 --- */}
+            {activeTab === "csv" && (
+                <div style={{ ...cardStyle, borderTop: "4px solid #7f8c8d" }}>
+                    <h3 style={{ marginTop: 0 }}>データの入出力</h3>
+                    <p style={{ fontSize: "13px", color: "#666" }}>
+                        {targetYear}年{targetMonth}月のデータをCSV形式でエクスポート・インポートします。
+                    </p>
+                    <div style={{ display: "flex", gap: "15px", marginTop: "20px" }}>
+                        <div style={{ flex: 1, padding: "15px", border: "1px solid #eee", borderRadius: "8px" }}>
+                            <h4 style={{ marginTop: 0 }}>📤 エクスポート</h4>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                <button onClick={handleExportRawCSV} style={modernIconBtnStyle("#7f8c8d")}>
+                                    📄 打刻ログ（Rawデータ）を出力
                                 </button>
-                            );
-                        })}
-                        <button 
-                            onClick={() => setActiveFilters(["active", "on_leave", "retired"])}
-                            style={{ 
-                                fontSize: "11px", 
-                                border: "none", 
-                                background: "none", 
-                                color: "#3498db", 
-                                cursor: "pointer", 
-                                textDecoration: "underline",
-                                marginLeft: "4px"
-                            }}
-                        >
-                            すべて表示
-                        </button>
-                    </div>
-
-                    {/* 従業員選択プルダウン */}
-                    <div>
-                        <label style={labelStyle}>対象の従業員を選択</label>
-                        <select 
-                            value={selectedStaffId} 
-                            onChange={e => setSelectedStaffId(e.target.value)} 
-                            style={{ ...inputStyle, fontSize: "16px", fontWeight: "bold" }}
-                        >
-                            <option value="">-- {activeFilters.length === 0 ? "表示をオンにしてください" : "従業員を選んでください"} --</option>
-                            {filteredStaffList.map(s => (
-                                <option key={s.id} value={s.id}>
-                                    {s.id}: {s.name} ({s.status === 'active' ? '在籍' : s.status === 'retired' ? '退職' : '休職'})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div style={{ marginTop: "8px", padding: "4px 10px", backgroundColor: "#f8f9fa", borderRadius: "4px", display: "inline-block" }}>
-                        <span style={{ fontSize: "12px", color: "#7f8c8d" }}>現在の有給残：</span>
-                        <span style={{ 
-                            fontWeight: "bold", 
-                            color: remainingPaidLeave <= 0 ? "#e74c3c" : "#2ecc71",
-                            fontSize: "14px"
-                        }}>
-                            {remainingPaidLeave.toFixed(2)} 日
-                        </span>
+                                <button onClick={handleExportFullCSV} style={modernIconBtnStyle("#34495e")}>
+                                    📤 詳細データ（集計済み）を出力
+                                </button>
+                            </div>
+                        </div>
+                        <div style={{ flex: 1, padding: "15px", border: "1px solid #eee", borderRadius: "8px" }}>
+                            <h4 style={{ marginTop: 0 }}>📥 インポート</h4>
+                            <button onClick={handleImportCSV} style={{ ...modernIconBtnStyle("#2980b9"), width: "100%" }}>
+                                📥 CSVファイルを読み込む
+                            </button>
+                            <p style={{ fontSize: "11px", color: "#999", marginTop: "10px" }}>
+                                ※既存の日付データは上書きされますのでご注意ください。
+                            </p>
+                        </div>
                     </div>
                 </div>
-
-                {/* 右側：一括保存ボタン（配置バランスのため位置調整） */}
-                <div style={{ flex: "0 0 auto", display: "flex", alignItems: "flex-end", paddingBottom: "10px" }}>
-                    {selectedStaffId && (
-                        <button 
-                            onClick={saveAllMonthlyData} 
-                            style={{ 
-                                ...btnStyle, 
-                                backgroundColor: "#34495e", 
-                                fontSize: "14px", 
-                                display: "flex", 
-                                alignItems: "center", 
-                                gap: "8px",
-                                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                                height: "fit-content",
-                                padding: "12px 20px"
-                            }}
-                        >
-                            📂 今月の未保存分をすべて保存
-                        </button>
-                    )}
-                </div>
-            </section>
-
-            {selectedStaffId ? (
+            )}
+            {/* --- 👤 個別編集・集計 タブの内容 --- */}
+            {activeTab === "individual" && (
                 <>
-                {/* <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "15px" }}>
-                    <button onClick={saveAllMonthlyData} style={{ ...btnStyle, backgroundColor: "#34495e", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    📂 今月の未保存分をすべて保存
-                    </button>
-                </div> */}
-                <section style={cardStyle}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                        <thead>
-                            <tr style={{ backgroundColor: "#fcfcfc", borderBottom: "2px solid #eee" }}>
-                                <th style={{ ...thStyle, width: "100px" }}>日付</th>
-                                <th style={thStyle}>出勤</th>
-                                <th style={{ ...thStyle, paddingRight: "30px" }}>退勤</th>
-                                <th style={thStyle}>休憩開始</th>
-                                <th style={{ ...thStyle, paddingRight: "30px" }}>休憩終了</th>
-                                <th style={thStyle}>外出</th>
-                                <th style={{ ...thStyle, paddingRight: "30px" }}>戻り</th>
-                                <th style={thStyle}>実働時間</th>
-                                <th style={thStyle}>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {Array.from({ length: new Date(targetYear, targetMonth, 0).getDate() }, (_, i) => {
-                                const day = i + 1;
-                                const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                                const dayOfWeek = new Date(targetYear, targetMonth - 1, day).toLocaleDateString('ja-JP', { weekday: 'short' });
-                                
-                                const rowData = monthlyWorkData[dateStr] || {};
-                                const row = {
-                                    in: rowData.in || "",
-                                    out: rowData.out || "",
-                                    bStart: rowData.bStart || "",
-                                    bEnd: rowData.bEnd || "",
-                                    outTime: rowData.outTime || "",
-                                    returnTime: rowData.returnTime || "",
-                                    workType: rowData.workType || "normal",
-                                    paidHours: rowData.paidHours || 0,
-                                    memo: rowData.memo || "",
-                                    isSaved: rowData.isSaved || false,
-                                    savedHours: Number(rowData.savedHours) || 0,
-                                    nightHours: Number(rowData.night_hours) || 0, // 👈 追加
-                                    csvIn: rowData.csv_entry_time || "--:--",
-                                    csvOut: rowData.csv_exit_time || "--:--",
-                                };
-
-                                const hName = holidays[dateStr];              // 祝日名（あれば）
-                                const cSetting = companyHolidays[dateStr];    // 1:休日, 0:出勤, undefined:設定なし
-                                
-                                const isSun = dayOfWeek === "日";
-                                const isSat = dayOfWeek === "土";
-
-                                // 「赤色」にする条件：社休日設定がある OR (設定がなく、かつ日曜か祝日)
-                                const isRedDay = (cSetting === 1) || (cSetting === undefined && (isSun || !!hName));
-                                // 「青色」にする条件：土曜かつ、赤色（祝日）ではない
-                                const isBlueDay = isSat && !isRedDay; 
-
-                                // 背景色の決定ロジック
-                                const rowBgColor = 
-                                    row.workType === "paid_full" ? "#e8f5e9" : 
-                                    row.workType === "absent" ? "#fff3e0" : 
-                                    isRedDay ? "#fff5f5" : 
-                                    isBlueDay ? "#f5faff" : "#fcfcfc";
-
-                                // 文字色の決定ロジック
-                                const dateTextColor = isRedDay ? "#e74c3c" : isBlueDay ? "#3498db" : "#2c3e50";
-
-                                const isFullyTyped = (t: string) => {
-                                    if (!t || t === ":") return false;
-                                    const [h, m] = t.split(":");
-                                    return h.length === 2 && m.length === 2;
-                                };
-
-                                const hasAnyInput = (t: string) => {
-                                    return t && t !== ":" && t.replace(":", "").length > 0;
-                                };
-
-                                const toMin = (t: string) => {
-                                    const [h, m] = t.split(":").map(Number);
-                                    return h * 60 + m;
-                                };
-
-                                const isEmpty = !hasAnyInput(row.in) && !hasAnyInput(row.out) && 
-                                                !hasAnyInput(row.bStart) && !hasAnyInput(row.bEnd) &&
-                                                !hasAnyInput(row.outTime) && !hasAnyInput(row.returnTime);
-
-                                const isBaseComplete = isFullyTyped(row.in) && isFullyTyped(row.out);
-
-                                // 🆕 ここで定義しておくと矛盾チェックが動きます
-                                const isBreakComplete = isFullyTyped(row.bStart) && isFullyTyped(row.bEnd);
-                                const isOutComplete = isFullyTyped(row.outTime) && isFullyTyped(row.returnTime);
-
-                                const isBreakIncomplete = (hasAnyInput(row.bStart) || hasAnyInput(row.bEnd)) && !isBreakComplete;
-                                const isOutIncomplete = (hasAnyInput(row.outTime) || hasAnyInput(row.returnTime)) && !isOutComplete;
-
-                                // 🆕 48時間制対応の矛盾チェック
-                                let isTimeRangeError = false;
-                                if (isBaseComplete) {
-                                    const start = toMin(row.in);
-                                    const end = toMin(row.out);
-
-                                    // 1. 退勤が出勤より前、または同時ならエラー
-                                    if (end <= start) isTimeRangeError = true;
-
-                                    // 2. 休憩時間のチェック（出勤〜退勤の間に収まっているか）
-                                    if (isBreakComplete) {
-                                        const bS = toMin(row.bStart);
-                                        const bE = toMin(row.bEnd);
-                                        // 休憩開始が出勤より前、休憩終了が退勤より後、または休憩の前後逆転をチェック
-                                        if (bS < start || bE > end || bE <= bS) isTimeRangeError = true;
-                                    }
-
-                                    // 3. 外出時間のチェック（出勤〜退勤の間に収まっているか）
-                                    if (isOutComplete) {
-                                        const oS = toMin(row.outTime);
-                                        const oR = toMin(row.returnTime);
-                                        // 外出開始が出勤より前、戻りが退勤より後、または外出の前後逆転をチェック
-                                        if (oS < start || oR > end || oR <= oS) isTimeRangeError = true;
-                                    }
-                                }
-
-                                // 🆕 isTimeRangeError を条件に追加
-                                const isAllInputValid = isBaseComplete && !isBreakIncomplete && !isOutIncomplete && !isTimeRangeError;
-
-                                // --- 状態判定・計算系（これらが必要！） ---
-                                const hasChange = !row.isSaved;
-
-                                const { total: currentHours } = calcDetailedDiff(
-                                    row.in, row.out, row.bStart, row.bEnd, row.outTime, row.returnTime
-                                );
-
-                                return (
-                                    <Fragment key={dateStr}>
-                                        <tr style={{ 
-                                            // 🆕 計算済みの rowBgColor を使う
-                                            backgroundColor: rowBgColor, 
-                                            borderTop: "3px solid #eee" 
-                                        }}>
-                                            <td rowSpan={3} style={{ ...tdStyle, fontWeight: "bold", borderRight: "1px solid #eee", verticalAlign: "top", width: "100px" }}>
-                                                <div style={{ 
-                                                    fontSize: "14px", 
-                                                    // 🆕 計算済みの dateTextColor を使う
-                                                    color: dateTextColor 
-                                                }}>
-                                                    {day}日 ({dayOfWeek})
-                                                    {/* 🆕 せっかくなので祝日名も日付の下に出しましょう */}
-                                                    {hName && <div style={{ fontSize: "9px", fontWeight: "normal", marginTop: "2px" }}>{hName}</div>}
-                                                </div>
-                                                <select
-                                                    value={row.workType}
-                                                    onChange={e => {
-                                                        const nextType = e.target.value;
-                                                        if ((nextType === "paid_full" || nextType === "paid_half") && remainingPaidLeave <= 0) {
-                                                            alert("有給残日数がありません。");
-                                                            return;
-                                                        }
-                                                        handleCellChange(dateStr, 'workType', nextType);
-                                                    }}
-                                                    style={{ ...inputStyle, marginTop: "4px", fontSize: "12px", padding: "2px" }}
-                                                >
-                                                    <option value="normal">出勤（平日）</option>
-                                                    <option value="holiday_work">休日出勤</option>
-                                                    <option value="paid_full">全休(有給)</option>
-                                                    <option value="paid_half">半休(有給)</option>
-                                                    <option value="absent">欠勤</option>
-                                                </select>
-                                            </td>
-                                            <td style={{ ...tdTightStyle, color: "#94a3b8" }}>
-                                                <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(入)</span>
-                                                {row.csvIn || rowData.csv_entry_time || "--:--"}
-                                            </td>
-                                            <td style={{ ...tdSpacerStyle, color: "#94a3b8" }}>
-                                                <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(出)</span>
-                                                {row.csvOut || rowData.csv_exit_time || "--:--"}
-                                            </td>
-                                            <td colSpan={2} style={{ ...tdTightStyle, fontSize: "11px", color: "#bdc3c7" }}>
-                                                休憩(CSV): {rowData.csv_break_start || "--:--"} ~ {rowData.csv_break_end || "--:--"}
-                                            </td>
-                                            <td colSpan={2} style={{ ...tdTightStyle, fontSize: "11px", color: "#bdc3c7" }}>
-                                                外出(CSV): {rowData.csv_out_time || "--:--"} ~ {rowData.csv_return_time || "--:--"}
-                                            </td>
-                                            <td rowSpan={3} style={{ ...tdStyle, width: "120px", borderLeft: "1px solid #eee", textAlign: "center" }}>
-                                                <div style={{ fontWeight: "bold", color: row.isSaved ? (row.savedHours > 8 ? "#e74c3c" : "#2ecc71") : "#3498db" }}>
-                                                    {row.isSaved ? `${Math.floor(row.savedHours)}h ${Math.round((row.savedHours % 1) * 60)}m` : (isAllInputValid ? `🚀 ${currentHours}h` : "-")}
-                                                </div>
-                                                {row.isSaved && row.nightHours > 0 && (
-                                                    <div style={{ fontSize: "10px", color: "#9b59b6" }}>深夜: {row.nightHours}h</div>
-                                                )}
-                                            </td>
-                                            <td rowSpan={3} style={{ ...tdStyle, textAlign: "center", width: "100px", borderLeft: "1px solid #eee" }}>
-                                                <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "center" }}>
-                                                    
-                                                    {/* 【保存 / 更新】ボタン */}
-                                                    {((isAllInputValid) || row.workType !== "normal") && hasChange && (
-                                                        <button 
-                                                            style={!row.isSaved ? modernIconBtnStyle("#3498db") : modernIconBtnStyle("#27ae60")} 
-                                                            onClick={() => saveAttendance(dateStr)}
-                                                        >
-                                                            {/* 🆕 row.isSaved を見ることで、保存直後に「更新」に変わります */}
-                                                            {!row.isSaved ? "保存" : "更新"}
-                                                        </button>
-                                                    )}
-
-                                                    {/* 【戻る】ボタン */}
-                                                    {/* 🆕 変更があり、かつ元々保存されていたデータがある場合のみ表示 */}
-                                                    {hasChange && row.isSaved && (
-                                                        <button 
-                                                            style={modernIconBtnStyle("#e67e22")} 
-                                                            onClick={() => revertAttendance(dateStr)}
-                                                        >
-                                                            戻る
-                                                        </button>
-                                                    )}
-
-                                                    {/* 🆕 変更がない時は「✅ 保存済」と出すと、ユーザーが安心します */}
-                                                    {row.isSaved && !hasChange && (
-                                                        <span style={{ color: "#2ecc71", fontSize: "11px", fontWeight: "bold" }}>
-                                                            ✅ 保存済
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-
-                                        <tr style={{ 
-                                            backgroundColor: (row.workType === "paid_full" || row.workType === "absent") ? "#f9f9f9" : "#fff",
-                                            opacity: (row.workType === "paid_full" || row.workType === "absent") ? 0.5 : 1,
-                                            pointerEvents: (row.workType === "paid_full" || row.workType === "absent") ? "none" : "auto"
-                                        }}>
-                                            <td style={tdTightStyle}><TimeInputPair value={row.in} onChange={val => handleCellChange(dateStr, 'in', val)} /></td>
-                                            <td style={tdSpacerStyle}><TimeInputPair value={row.out} onChange={val => handleCellChange(dateStr, 'out', val)} /></td>
-                                            <td style={tdTightStyle}><TimeInputPair value={row.bStart} onChange={val => handleCellChange(dateStr, 'bStart', val)} /></td>
-                                            <td style={tdSpacerStyle}><TimeInputPair value={row.bEnd} onChange={val => handleCellChange(dateStr, 'bEnd', val)} /></td>
-                                            <td style={tdTightStyle}><TimeInputPair value={row.outTime} onChange={val => handleCellChange(dateStr, 'outTime', val)} /></td>
-                                            <td style={tdSpacerStyle}>
-                                                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                                                    <TimeInputPair value={row.returnTime} onChange={val => handleCellChange(dateStr, 'returnTime', val)} />
-                                                    <div style={{ textAlign: "center", borderLeft: "1px solid #eee", paddingLeft: "8px", pointerEvents: "auto" }}>
-                                                        <span style={{ fontSize: "9px", display: "block", color: "#7f8c8d" }}>有給h</span>
-                                                        <input type="number" step="0.5" value={row.paidHours} onChange={e => handleCellChange(dateStr, 'paidHours', e.target.value)} style={{ width: "35px", fontSize: "11px", border: "1px solid #ddd" }} />
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        </tr>
-
-                                        <tr style={{ backgroundColor: "#fdfdfd", borderBottom: "1px solid #eee" }}>
-                                            <td colSpan={6} style={{ padding: "6px 12px", pointerEvents: "auto" }}>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "4px", width: "100%" }}>
-                                                    <span style={{ 
-                                                        fontSize: "11px", 
-                                                        color: "#94a3b8", 
-                                                        fontWeight: "bold",
-                                                        whiteSpace: "nowrap", // ✨ これが重要！「備」と「考」を絶対に分かれないようにします
-                                                        flexShrink: 0         // ✨ ラベルが潰されないように死守します
-                                                    }}>
-                                                        備考：
-                                                    </span>
-                                                    <input 
-                                                        type="text" 
-                                                        placeholder="理由、遅刻・早退の内容など" 
-                                                        value={row.memo || ""}
-                                                        onChange={e => handleCellChange(dateStr, 'memo', e.target.value)}
-                                                        style={{ 
-                                                            flex: 1,          // ✨ 残りの横幅をすべて入力欄に割り当てます
-                                                            fontSize: "12px", 
-                                                            border: "none", 
-                                                            borderBottom: "1px dashed #cbd5e1", 
-                                                            background: "transparent", 
-                                                            outline: "none",
-                                                            minWidth: 0       // ✨ inputが親を突き破るのを防ぎます
-                                                        }}
-                                                    />
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </Fragment>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-
+                    {/* ... (中略：年月選択、スタッフ選択) ... */}
                     <div style={{ 
-                        marginTop: "20px", 
-                        padding: "20px", 
-                        backgroundColor: "#2c3e50", 
-                        color: "white", 
-                        borderRadius: "12px",
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr 1fr 1fr 1.5fr", 
-                        gap: "15px"
+                        display: "flex", 
+                        gap: "8px", 
+                        alignItems: "center", // 👈 これが「高さの中心」を合わせる司令塔です
+                        marginTop: "15px",    // 外側の余白
+                        marginBottom: "5px"
                     }}>
                         <div>
-                            <div style={{ fontSize: "12px", color: "#bdc3c7" }}>基本情報</div>
-                            <div style={{ fontSize: "18px", fontWeight: "bold" }}>{attendanceRowsForCalc.length}日 / {formatHours(totalHours)}</div>
-                            {/* 🆕 月給制の場合は本来の額面を小さく表示 */}
-                            {staffInfo?.wage_type === "monthly" && (
-                                <div style={{ fontSize: "11px", color: "#95a5a6" }}>月給: ¥{Number(staffInfo.base_wage).toLocaleString()}</div>
-                            )}
-                        </div>
-                        
-                        <div>
-                            <div style={{ fontSize: "12px", color: "#e74c3c" }}>残業合計 (割増込)</div>
-                            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#e74c3c" }}>
-                                {formatHours(totalOvertimeHours)}
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                                <select value={targetYear} onChange={e => setTargetYear(Number(e.target.value))} style={{ ...inputStyle, width: "100px" }}>
+                                    {[2025, 2026, 2027, 2028].map(y => <option key={y} value={y}>{y}年</option>)}
+                                </select>
+                                <select value={targetMonth} onChange={e => setTargetMonth(Number(e.target.value))} style={{ ...inputStyle, width: "80px" }}>
+                                    {Array.from({ length: 12 }, (_, i) => (<option key={i + 1} value={i + 1}>{i + 1}月</option>))}
+                                </select>
                             </div>
-                            {over60Hours > 0 && (
-                                <div style={{ fontSize: "11px", color: "#ff7675" }}> 
-                                    {/* 🆕 60 という数字と、50% という数字を定数から算出 */}
-                                    (うち{OVERTIME_PREMIUM_LIMIT_HOURS}h超 [{(OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(over60Hours)}) 
-                                </div>
-                            )}
                         </div>
-
-                        <div>
-                            <div style={{ fontSize: "12px", color: "#f1c40f" }}>深夜合計</div>
-                            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#f1c40f" }}>{formatHours(totalNightHours)}</div>
-                        </div>
-
-                        {/* 🆕 欠勤控除がある場合はここを表示、なければ交通費を表示 */}
-                        <div>
-                            {calcResult && calcResult.absenceDeduction > 0 ? (
-                                <>
-                                    <div style={{ fontSize: "12px", color: "#ff7675" }}>欠勤控除</div>
-                                    <div style={{ fontSize: "18px", fontWeight: "bold", color: "#ff7675" }}>
-                                        -¥{calcResult.absenceDeduction.toLocaleString()}
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <div style={{ fontSize: "12px", color: "#bdc3c7" }}>交通費</div>
-                                    <div style={{ fontSize: "18px", fontWeight: "bold" }}>¥{totalCommute.toLocaleString()}</div>
-                                </>
-                            )}
-                        </div>
-
-                        <div style={{ borderLeft: "1px solid #7f8c8d", paddingLeft: "20px", textAlign: "right" }}>
-                            <div style={{ fontSize: "12px", color: "#2ecc71" }}>💰 差引総支給額（概算）</div>
-                            <div style={{ fontSize: "28px", fontWeight: "bold", color: "#2ecc71" }}>
-                                ¥{totalPay.toLocaleString()}
-                            </div>
-                            {/* 🆕 補足: 交通費が含まれていることを明記 */}
-                            <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・控除を反映済</div>
-                        </div>
+                        <button 
+                            onClick={() => { const d = new Date(); setTargetYear(d.getFullYear()); setTargetMonth(d.getMonth() + 1); }} 
+                            style={{ 
+                                ...modernIconBtnStyle("#7f8c8d"), 
+                                height: "32px",       // セレクトボックスと数値を合わせる
+                                margin: "0 0 0 20px",            // 👈 重要：ここにあった marginTop: "15px" を完全に削除
+                                padding: "0 12px",
+                                fontSize: "12px",
+                                display: "inline-flex", // 内部のテキストも中央寄せにするため
+                                alignItems: "center",   // ボタン内のテキストの垂直中央
+                                justifyContent: "center",
+                                border: "1px solid #7f8c8d", // 必要に応じて枠線を明示
+                                boxSizing: "border-box"      // 枠線を含めた高さ計算にする
+                            }}
+                        >
+                            今月に戻る
+                        </button>
                     </div>
-                </section>
+
+                    {/* 🆕 従業員選択・フィルタ・一括保存セクション */}
+                    <section style={{ 
+                        display: "flex", 
+                        justifyContent: "space-between", 
+                        alignItems: "stretch", // 高さを揃える
+                        gap: "20px", 
+                        marginBottom: "10px", 
+                        marginTop: "0"
+                    }}>
+                        {/* 左側：従業員選択カード（フィルタ機能付き） */}
+                        <div style={{ 
+                            ...cardStyle, 
+                            width: "780px",         // 👈 ここを px で固定！(500px + ボタン類 + 余白の合計)
+                            flex: "none",           // 👈 勝手に伸び縮みさせない
+                            boxSizing: "border-box", 
+                            margin: "5px 0",
+                            padding: "12px 20px"
+                        }}>
+                            <div style={{ 
+                                display: "flex", 
+                                alignItems: "center", 
+                                gap: "10px",       // 👈 ボタンとセレクトボックスの距離をギュッと詰める
+                            }}>
+                                {/* 左側：従業員選択セレクトボックス（幅をさらに拡大） */}
+                                <div style={{ width: "500px" }}> 
+                                    <select 
+                                        value={selectedStaffId} 
+                                        onChange={e => setSelectedStaffId(e.target.value)} 
+                                        style={{ 
+                                            ...inputStyle, 
+                                            fontSize: "14px",   // 👈 高さを抑えるため普通のサイズに
+                                            padding: "4px 10px", // 👈 上下パディングを絞って高さを「普通」に
+                                            height: "32px",     // 👈 標準的な高さ
+                                            cursor: "pointer"
+                                        }}
+                                    >
+                                        <option value="">-- 従業員を選択してください --</option>
+                                        {filteredStaffList.map(s => (
+                                            <option key={s.id} value={s.id}>
+                                                [{s.id}] {s.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* 中央：一括保存ボタン（ここが後から出てもレイアウトが崩れないように配置） */}
+                                {/* ※未保存がある時だけ表示されるロジックは維持 */}
+                                {Object.values(monthlyWorkData).some(row => !row.isSaved && (row.in || row.out)) && (
+                                    <button 
+                                        onClick={saveAllMonthlyData} 
+                                        style={{ 
+                                            ...modernIconBtnStyle("#e67e22"), 
+                                            fontSize: "12px", 
+                                            padding: "4px 12px",
+                                            height: "32px",
+                                            whiteSpace: "nowrap"
+                                        }}
+                                    >
+                                        📂 未保存分をすべて保存
+                                    </button>
+                                )}
+
+                                {/* 右側：フィルタボタン群（右端に固定） */}
+                                <div style={{ 
+                                    display: "flex", 
+                                    gap: "8px", 
+                                    alignItems: "center", 
+                                    marginLeft: "auto" 
+                                }}>
+                                    {[
+                                        { label: "在籍", value: "active", color: "#2ecc71" },
+                                        { label: "休職", value: "on_leave", color: "#f1c40f" },
+                                        { label: "退職", value: "retired", color: "#e74c3c" }
+                                    ].map(opt => {
+                                        const isActive = activeFilters.includes(opt.value);
+                                        return (
+                                            <button
+                                                key={opt.value}
+                                                onClick={() => toggleFilter(opt.value)}
+                                                style={{
+                                                    padding: "4px 12px", // 👈 高さを抑えるため上下を4pxに
+                                                    borderRadius: "15px", 
+                                                    border: `1px solid ${opt.color}`,
+                                                    backgroundColor: isActive ? opt.color : "white",
+                                                    color: isActive ? "white" : opt.color,
+                                                    cursor: "pointer",
+                                                    fontSize: "11px",
+                                                    fontWeight: "bold",
+                                                    height: "28px",    // 👈 セレクトボックスより少しだけ低くしてメリハリを
+                                                    transition: "0.2s",
+                                                    whiteSpace: "nowrap"
+                                                }}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        );
+                                    })}
+                                    <button 
+                                        onClick={() => setActiveFilters(["active", "on_leave", "retired"])}
+                                        style={{ 
+                                            fontSize: "11px", 
+                                            border: "none", 
+                                            background: "none", 
+                                            color: "#3498db", 
+                                            cursor: "pointer", 
+                                            textDecoration: "underline",
+                                            marginLeft: "4px"
+                                        }}
+                                    >
+                                        すべて
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 右側：一括保存ボタン（ここを「最初からある前提」にする） */}
+                        <div style={{ 
+                            flex: "0 0 235px",       // 👈 常に 235px の幅を確保する
+                            display: "flex", 
+                            alignItems: "flex-end", 
+                            paddingBottom: "0" 
+                        }}>
+                            {selectedStaffId ? (
+                                <button 
+                                    onClick={saveAllMonthlyData} 
+                                    style={{ 
+                                        ...btnStyle, 
+                                        backgroundColor: "#34495e", 
+                                        fontSize: "14px", 
+                                        display: "flex", 
+                                        alignItems: "center", 
+                                        gap: "8px",
+                                        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                                        width: "100%",      // 親の 280px いっぱいにする
+                                        height: "fit-content",
+                                        padding: "12px 20px"
+                                    }}
+                                >
+                                    📂 今月の未保存分をすべて保存
+                                </button>
+                            ) : (
+                                // ボタンがない時も透明な何かを置いておく必要はありませんが、
+                                // 枠が確保されているので、後からボタンが出ても左側のカードを押し潰しません。
+                                null
+                            )}
+                        </div>
+                    </section>
+
+                    {selectedStaffId ? (
+                        <>
+                        {/* <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "15px" }}>
+                            <button onClick={saveAllMonthlyData} style={{ ...btnStyle, backgroundColor: "#34495e", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                            📂 今月の未保存分をすべて保存
+                            </button>
+                        </div> */}
+                        <section style={cardStyle}>
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead>
+                                    <tr style={{ backgroundColor: "#fcfcfc", borderBottom: "2px solid #eee" }}>
+                                        <th style={{ ...thStyle, width: "100px" }}>日付</th>
+                                        <th style={thStyle}>出勤</th>
+                                        <th style={{ ...thStyle, paddingRight: "30px" }}>退勤</th>
+                                        <th style={thStyle}>休憩開始</th>
+                                        <th style={{ ...thStyle, paddingRight: "30px" }}>休憩終了</th>
+                                        <th style={thStyle}>外出</th>
+                                        <th style={{ ...thStyle, paddingRight: "30px" }}>戻り</th>
+                                        <th style={thStyle}>実働時間</th>
+                                        <th style={thStyle}>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Array.from({ length: new Date(targetYear, targetMonth, 0).getDate() }, (_, i) => {
+                                        const day = i + 1;
+                                        const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                                        const dayOfWeek = new Date(targetYear, targetMonth - 1, day).toLocaleDateString('ja-JP', { weekday: 'short' });
+                                        
+                                        const rowData = monthlyWorkData[dateStr] || {};
+                                        const row = {
+                                            in: rowData.in || "",
+                                            out: rowData.out || "",
+                                            bStart: rowData.bStart || "",
+                                            bEnd: rowData.bEnd || "",
+                                            outTime: rowData.outTime || "",
+                                            returnTime: rowData.returnTime || "",
+                                            workType: rowData.workType || "normal",
+                                            paidHours: rowData.paidHours || 0,
+                                            memo: rowData.memo || "",
+                                            isSaved: rowData.isSaved || false,
+                                            savedHours: Number(rowData.savedHours) || 0,
+                                            nightHours: Number(rowData.night_hours) || 0, // 👈 追加
+                                            csvIn: rowData.csv_entry_time || "--:--",
+                                            csvOut: rowData.csv_exit_time || "--:--",
+                                        };
+
+                                        const hName = holidays[dateStr];              // 祝日名（あれば）
+                                        const cSetting = companyHolidays[dateStr];    // 1:休日, 0:出勤, undefined:設定なし
+                                        
+                                        const isSun = dayOfWeek === "日";
+                                        const isSat = dayOfWeek === "土";
+
+                                        // 「赤色」にする条件：社休日設定がある OR (設定がなく、かつ日曜か祝日)
+                                        const isRedDay = (cSetting === 1) || (cSetting === undefined && (isSun || !!hName));
+                                        // 「青色」にする条件：土曜かつ、赤色（祝日）ではない
+                                        const isBlueDay = isSat && !isRedDay; 
+
+                                        // 背景色の決定ロジック
+                                        const rowBgColor = 
+                                            row.workType === "paid_full" ? "#e8f5e9" : 
+                                            row.workType === "absent" ? "#fff3e0" : 
+                                            isRedDay ? "#fff5f5" : 
+                                            isBlueDay ? "#f5faff" : "#fcfcfc";
+
+                                        // 文字色の決定ロジック
+                                        const dateTextColor = isRedDay ? "#e74c3c" : isBlueDay ? "#3498db" : "#2c3e50";
+
+                                        const isFullyTyped = (t: string) => {
+                                            if (!t || t === ":") return false;
+                                            const [h, m] = t.split(":");
+                                            return h.length === 2 && m.length === 2;
+                                        };
+
+                                        const hasAnyInput = (t: string) => {
+                                            return t && t !== ":" && t.replace(":", "").length > 0;
+                                        };
+
+                                        const toMin = (t: string) => {
+                                            const [h, m] = t.split(":").map(Number);
+                                            return h * 60 + m;
+                                        };
+
+                                        const isEmpty = !hasAnyInput(row.in) && !hasAnyInput(row.out) && 
+                                                        !hasAnyInput(row.bStart) && !hasAnyInput(row.bEnd) &&
+                                                        !hasAnyInput(row.outTime) && !hasAnyInput(row.returnTime);
+
+                                        const isBaseComplete = isFullyTyped(row.in) && isFullyTyped(row.out);
+
+                                        // 🆕 ここで定義しておくと矛盾チェックが動きます
+                                        const isBreakComplete = isFullyTyped(row.bStart) && isFullyTyped(row.bEnd);
+                                        const isOutComplete = isFullyTyped(row.outTime) && isFullyTyped(row.returnTime);
+
+                                        const isBreakIncomplete = (hasAnyInput(row.bStart) || hasAnyInput(row.bEnd)) && !isBreakComplete;
+                                        const isOutIncomplete = (hasAnyInput(row.outTime) || hasAnyInput(row.returnTime)) && !isOutComplete;
+
+                                        // 🆕 48時間制対応の矛盾チェック
+                                        let isTimeRangeError = false;
+                                        if (isBaseComplete) {
+                                            const start = toMin(row.in);
+                                            const end = toMin(row.out);
+
+                                            // 1. 退勤が出勤より前、または同時ならエラー
+                                            if (end <= start) isTimeRangeError = true;
+
+                                            // 2. 休憩時間のチェック（出勤〜退勤の間に収まっているか）
+                                            if (isBreakComplete) {
+                                                const bS = toMin(row.bStart);
+                                                const bE = toMin(row.bEnd);
+                                                // 休憩開始が出勤より前、休憩終了が退勤より後、または休憩の前後逆転をチェック
+                                                if (bS < start || bE > end || bE <= bS) isTimeRangeError = true;
+                                            }
+
+                                            // 3. 外出時間のチェック（出勤〜退勤の間に収まっているか）
+                                            if (isOutComplete) {
+                                                const oS = toMin(row.outTime);
+                                                const oR = toMin(row.returnTime);
+                                                // 外出開始が出勤より前、戻りが退勤より後、または外出の前後逆転をチェック
+                                                if (oS < start || oR > end || oR <= oS) isTimeRangeError = true;
+                                            }
+                                        }
+
+                                        // 🆕 isTimeRangeError を条件に追加
+                                        const isAllInputValid = isBaseComplete && !isBreakIncomplete && !isOutIncomplete && !isTimeRangeError;
+
+                                        // --- 状態判定・計算系（これらが必要！） ---
+                                        const hasChange = !row.isSaved;
+
+                                        const { total: currentHours } = calcDetailedDiff(
+                                            row.in, row.out, row.bStart, row.bEnd, row.outTime, row.returnTime
+                                        );
+
+                                        return (
+                                            <Fragment key={dateStr}>
+                                                <tr style={{ 
+                                                    // 🆕 計算済みの rowBgColor を使う
+                                                    backgroundColor: rowBgColor, 
+                                                    borderTop: "3px solid #eee" 
+                                                }}>
+                                                    <td rowSpan={3} style={{ ...tdStyle, fontWeight: "bold", borderRight: "1px solid #eee", verticalAlign: "top", width: "100px" }}>
+                                                        <div style={{ 
+                                                            fontSize: "14px", 
+                                                            // 🆕 計算済みの dateTextColor を使う
+                                                            color: dateTextColor 
+                                                        }}>
+                                                            {day}日 ({dayOfWeek})
+                                                            {/* 🆕 せっかくなので祝日名も日付の下に出しましょう */}
+                                                            {hName && <div style={{ fontSize: "9px", fontWeight: "normal", marginTop: "2px" }}>{hName}</div>}
+                                                        </div>
+                                                        <select
+                                                            value={row.workType}
+                                                            onChange={e => {
+                                                                const nextType = e.target.value;
+                                                                if ((nextType === "paid_full" || nextType === "paid_half") && remainingPaidLeave <= 0) {
+                                                                    alert("有給残日数がありません。");
+                                                                    return;
+                                                                }
+                                                                handleCellChange(dateStr, 'workType', nextType);
+                                                            }}
+                                                            style={{ ...inputStyle, marginTop: "4px", fontSize: "12px", padding: "2px" }}
+                                                        >
+                                                            <option value="normal">出勤（平日）</option>
+                                                            <option value="holiday_work">休日出勤</option>
+                                                            <option value="paid_full">全休(有給)</option>
+                                                            <option value="paid_half">半休(有給)</option>
+                                                            <option value="absent">欠勤</option>
+                                                        </select>
+                                                    </td>
+                                                    <td style={{ ...tdTightStyle, color: "#94a3b8" }}>
+                                                        <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(入)</span>
+                                                        {row.csvIn || rowData.csv_entry_time || "--:--"}
+                                                    </td>
+                                                    <td style={{ ...tdSpacerStyle, color: "#94a3b8" }}>
+                                                        <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(出)</span>
+                                                        {row.csvOut || rowData.csv_exit_time || "--:--"}
+                                                    </td>
+                                                    <td colSpan={2} style={{ ...tdTightStyle, fontSize: "11px", color: "#bdc3c7" }}>
+                                                        休憩(CSV): {rowData.csv_break_start || "--:--"} ~ {rowData.csv_break_end || "--:--"}
+                                                    </td>
+                                                    <td colSpan={2} style={{ ...tdTightStyle, fontSize: "11px", color: "#bdc3c7" }}>
+                                                        外出(CSV): {rowData.csv_out_time || "--:--"} ~ {rowData.csv_return_time || "--:--"}
+                                                    </td>
+                                                    <td rowSpan={3} style={{ ...tdStyle, width: "120px", borderLeft: "1px solid #eee", textAlign: "center" }}>
+                                                        <div style={{ fontWeight: "bold", color: row.isSaved ? (row.savedHours > 8 ? "#e74c3c" : "#2ecc71") : "#3498db" }}>
+                                                            {row.isSaved ? `${Math.floor(row.savedHours)}h ${Math.round((row.savedHours % 1) * 60)}m` : (isAllInputValid ? `🚀 ${currentHours}h` : "-")}
+                                                        </div>
+                                                        {row.isSaved && row.nightHours > 0 && (
+                                                            <div style={{ fontSize: "10px", color: "#9b59b6" }}>深夜: {row.nightHours}h</div>
+                                                        )}
+                                                    </td>
+                                                    <td rowSpan={3} style={{ ...tdStyle, textAlign: "center", width: "100px", borderLeft: "1px solid #eee" }}>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "center" }}>
+                                                            
+                                                            {/* 【保存 / 更新】ボタン */}
+                                                            {((isAllInputValid) || row.workType !== "normal") && hasChange && (
+                                                                <button 
+                                                                    style={!row.isSaved ? modernIconBtnStyle("#3498db") : modernIconBtnStyle("#27ae60")} 
+                                                                    onClick={() => saveAttendance(dateStr)}
+                                                                >
+                                                                    {/* 🆕 row.isSaved を見ることで、保存直後に「更新」に変わります */}
+                                                                    {!row.isSaved ? "保存" : "更新"}
+                                                                </button>
+                                                            )}
+
+                                                            {/* 【戻る】ボタン */}
+                                                            {/* 🆕 変更があり、かつ元々保存されていたデータがある場合のみ表示 */}
+                                                            {hasChange && row.isSaved && (
+                                                                <button 
+                                                                    style={modernIconBtnStyle("#e67e22")} 
+                                                                    onClick={() => revertAttendance(dateStr)}
+                                                                >
+                                                                    戻る
+                                                                </button>
+                                                            )}
+
+                                                            {/* 🆕 変更がない時は「✅ 保存済」と出すと、ユーザーが安心します */}
+                                                            {row.isSaved && !hasChange && (
+                                                                <span style={{ color: "#2ecc71", fontSize: "11px", fontWeight: "bold" }}>
+                                                                    ✅ 保存済
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+
+                                                <tr style={{ 
+                                                    backgroundColor: (row.workType === "paid_full" || row.workType === "absent") ? "#f9f9f9" : "#fff",
+                                                    opacity: (row.workType === "paid_full" || row.workType === "absent") ? 0.5 : 1,
+                                                    pointerEvents: (row.workType === "paid_full" || row.workType === "absent") ? "none" : "auto"
+                                                }}>
+                                                    <td style={tdTightStyle}><TimeInputPair value={row.in} onChange={val => handleCellChange(dateStr, 'in', val)} /></td>
+                                                    <td style={tdSpacerStyle}><TimeInputPair value={row.out} onChange={val => handleCellChange(dateStr, 'out', val)} /></td>
+                                                    <td style={tdTightStyle}><TimeInputPair value={row.bStart} onChange={val => handleCellChange(dateStr, 'bStart', val)} /></td>
+                                                    <td style={tdSpacerStyle}><TimeInputPair value={row.bEnd} onChange={val => handleCellChange(dateStr, 'bEnd', val)} /></td>
+                                                    <td style={tdTightStyle}><TimeInputPair value={row.outTime} onChange={val => handleCellChange(dateStr, 'outTime', val)} /></td>
+                                                    <td style={tdSpacerStyle}>
+                                                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                                                            <TimeInputPair value={row.returnTime} onChange={val => handleCellChange(dateStr, 'returnTime', val)} />
+                                                            <div style={{ textAlign: "center", borderLeft: "1px solid #eee", paddingLeft: "8px", pointerEvents: "auto" }}>
+                                                                <span style={{ fontSize: "9px", display: "block", color: "#7f8c8d" }}>有給h</span>
+                                                                <input type="number" step="0.5" value={row.paidHours} onChange={e => handleCellChange(dateStr, 'paidHours', e.target.value)} style={{ width: "35px", fontSize: "11px", border: "1px solid #ddd" }} />
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+
+                                                <tr style={{ backgroundColor: "#fdfdfd", borderBottom: "1px solid #eee" }}>
+                                                    <td colSpan={6} style={{ padding: "6px 12px", pointerEvents: "auto" }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: "4px", width: "100%" }}>
+                                                            <span style={{ 
+                                                                fontSize: "11px", 
+                                                                color: "#94a3b8", 
+                                                                fontWeight: "bold",
+                                                                whiteSpace: "nowrap", // ✨ これが重要！「備」と「考」を絶対に分かれないようにします
+                                                                flexShrink: 0         // ✨ ラベルが潰されないように死守します
+                                                            }}>
+                                                                備考：
+                                                            </span>
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="理由、遅刻・早退の内容など" 
+                                                                value={row.memo || ""}
+                                                                onChange={e => handleCellChange(dateStr, 'memo', e.target.value)}
+                                                                style={{ 
+                                                                    flex: 1,          // ✨ 残りの横幅をすべて入力欄に割り当てます
+                                                                    fontSize: "12px", 
+                                                                    border: "none", 
+                                                                    borderBottom: "1px dashed #cbd5e1", 
+                                                                    background: "transparent", 
+                                                                    outline: "none",
+                                                                    minWidth: 0       // ✨ inputが親を突き破るのを防ぎます
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </Fragment>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+
+                            <div style={{ 
+                                marginTop: "20px", 
+                                padding: "20px", 
+                                backgroundColor: "#2c3e50", 
+                                color: "white", 
+                                borderRadius: "12px",
+                                display: "grid",
+                                gridTemplateColumns: "1fr 1fr 1fr 1fr 1.5fr", 
+                                gap: "15px"
+                            }}>
+                                <div>
+                                    <div style={{ fontSize: "12px", color: "#bdc3c7" }}>基本情報</div>
+                                    <div style={{ fontSize: "18px", fontWeight: "bold" }}>{attendanceRowsForCalc.length}日 / {formatHours(totalHours)}</div>
+                                    {/* 🆕 月給制の場合は本来の額面を小さく表示 */}
+                                    {staffInfo?.wage_type === "monthly" && (
+                                        <div style={{ fontSize: "11px", color: "#95a5a6" }}>月給: ¥{Number(staffInfo.base_wage).toLocaleString()}</div>
+                                    )}
+                                </div>
+                                
+                                <div>
+                                    <div style={{ fontSize: "12px", color: "#e74c3c" }}>残業合計 (割増込)</div>
+                                    <div style={{ fontSize: "18px", fontWeight: "bold", color: "#e74c3c" }}>
+                                        {formatHours(totalOvertimeHours)}
+                                    </div>
+                                    {over60Hours > 0 && (
+                                        <div style={{ fontSize: "11px", color: "#ff7675" }}> 
+                                            {/* 🆕 60 という数字と、50% という数字を定数から算出 */}
+                                            (うち{OVERTIME_PREMIUM_LIMIT_HOURS}h超 [{(OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(over60Hours)}) 
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <div style={{ fontSize: "12px", color: "#f1c40f" }}>深夜合計</div>
+                                    <div style={{ fontSize: "18px", fontWeight: "bold", color: "#f1c40f" }}>{formatHours(totalNightHours)}</div>
+                                </div>
+
+                                {/* 🆕 欠勤控除がある場合はここを表示、なければ交通費を表示 */}
+                                <div>
+                                    {calcResult && calcResult.absenceDeduction > 0 ? (
+                                        <>
+                                            <div style={{ fontSize: "12px", color: "#ff7675" }}>欠勤控除</div>
+                                            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#ff7675" }}>
+                                                -¥{calcResult.absenceDeduction.toLocaleString()}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div style={{ fontSize: "12px", color: "#bdc3c7" }}>交通費</div>
+                                            <div style={{ fontSize: "18px", fontWeight: "bold" }}>¥{totalCommute.toLocaleString()}</div>
+                                        </>
+                                    )}
+                                </div>
+
+                                <div style={{ borderLeft: "1px solid #7f8c8d", paddingLeft: "20px", textAlign: "right" }}>
+                                    <div style={{ fontSize: "12px", color: "#2ecc71" }}>💰 差引総支給額（概算）</div>
+                                    <div style={{ fontSize: "28px", fontWeight: "bold", color: "#2ecc71" }}>
+                                        ¥{totalPay.toLocaleString()}
+                                    </div>
+                                    {/* 🆕 補足: 交通費が含まれていることを明記 */}
+                                    <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・控除を反映済</div>
+                                </div>
+                            </div>
+                        </section>
+                        </>
+                    ) : null}
                 </>
-            ) : (
-                <div style={{ ...cardStyle, textAlign: "center", padding: "60px 20px", border: "2px dashed #cbd5e1", color: "#94a3b8" }}>
-                    <div style={{ fontSize: "50px" }}>👤👈</div>
-                    <h3>従業員を選択してください</h3>
-                </div>
             )}
         </div>
     );

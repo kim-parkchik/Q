@@ -62,6 +62,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const [targetName, setTargetName] = useState("");
     const [targetFurigana, setTargetFurigana] = useState("");
     const [targetBirthday, setTargetBirthday] = useState("");
+    const [targetGender, setTargetGender] = useState("");
     
     // --- 連絡先・住所 ---
     const [targetZip, setTargetZip] = useState("");
@@ -301,6 +302,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         setTargetName(s.name);
         setTargetFurigana(s.furigana || "");
         setTargetBirthday(s.birthday || "");
+        setTargetGender(s.gender || "unknown");
         setTargetJoinDate(s.join_date || "");
         setTargetRetirementDate(s.retirement_date || ""); // 🆕
         setTargetStatus(s.status || "active"); // 🆕
@@ -403,7 +405,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         try {
             // SQLに渡すパラメータ配列 (UPDATEとINSERTで共通、最後だけ異なる)
             const baseParams = [
-                targetName, targetFurigana, targetBirthday, targetJoinDate, 
+                targetName, targetFurigana, targetBirthday, targetGender, targetJoinDate, 
                 targetRetirementDate, targetStatus, targetZip, targetAddress, 
                 targetPhone, targetMobile, targetWageType, Number(targetWage), 
                 targetCommuteType, Number(targetCommuteAmount), Number(targetBranchId), 
@@ -423,7 +425,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                 // UPDATE処理
                 await db.execute(
                     `UPDATE staff SET 
-                        name=?, furigana=?, birthday=?, join_date=?, 
+                        name=?, furigana=?, birthday=?, gender=?, join_date=?, 
                         retirement_date=?, status=?, zip_code=?, address=?, 
                         phone=?, mobile=?, wage_type=?, base_wage=?, 
                         commute_type=?, commute_amount=?, branch_id=?, 
@@ -438,7 +440,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                 // INSERT処理
                 await db.execute(
                     `INSERT INTO staff (
-                        name, furigana, birthday, join_date, 
+                        name, furigana, birthday, gender, join_date, 
                         retirement_date, status, zip_code, address, 
                         phone, mobile, wage_type, base_wage, 
                         commute_type, commute_amount, branch_id, 
@@ -446,7 +448,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         scheduled_work_hours, standard_remuneration,
                         work_days, is_executive, is_employment_ins_eligible, 
                         is_overtime_eligible, fixed_overtime_hours, fixed_overtime_allowance, id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [...baseParams, safeId]
                 );
             }
@@ -568,10 +570,31 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                 </div>
                             </div>
 
-                            {/* ✨ 生年月日（背景をなくして他と統一） */}
-                            <div>
-                                <label style={labelStyle}>生年月日</label>
-                                <input type="date" value={targetBirthday} onChange={e => setTargetBirthday(e.target.value)} style={inputStyle} />
+                            <div style={{ display: "flex", gap: "10px" }}>
+                                {/* 生年月日 */}
+                                <div style={{ flex: 1 }}>
+                                    <label style={labelStyle}>生年月日</label>
+                                    <input 
+                                    type="date" 
+                                    value={targetBirthday} 
+                                    onChange={e => setTargetBirthday(e.target.value)} 
+                                    style={inputStyle} 
+                                    />
+                                </div>
+
+                                {/* 性別 */}
+                                <div style={{ flex: 1 }}>
+                                    <label style={labelStyle}>性別</label>
+                                    <select 
+                                    value={targetGender || "unknown"} 
+                                    onChange={e => setTargetGender(e.target.value)} 
+                                    style={inputStyle}
+                                    >
+                                    <option value="unknown">未設定 / 回答しない</option>
+                                    <option value="male">男性</option>
+                                    <option value="female">女性</option>
+                                    </select>
+                                </div>
                             </div>
 
                             {/* 🆕 郵便番号セクションをグループ化 */}
@@ -615,6 +638,22 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                     <label style={labelStyle}>携帯電話</label>
                                     <input placeholder="090-xxxx-xxxx" value={targetMobile} onChange={e => setTargetMobile(e.target.value)} style={inputStyle} />
                                 </div>
+                            </div>
+                            <div style={{ gridColumn: "span 2", marginTop: "5px" }}>
+                                <label style={{ ...labelStyle, color: "#95a5a6" }}>マイナンバー</label>
+                                <input 
+                                    type="text" 
+                                    value="" 
+                                    readOnly 
+                                    placeholder="**** **** **** (現在は入力できません)"
+                                    style={{ 
+                                        ...inputStyle, 
+                                        backgroundColor: "#f5f5f5", 
+                                        color: "#999", 
+                                        cursor: "not-allowed",
+                                        border: "1px solid #eee"
+                                    }} 
+                                />
                             </div>
 
                             <div style={{ marginTop: "10px" }}>

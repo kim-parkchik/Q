@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "hama-kyuyo",
+  "productName": "Q",
   "version": "0.1.0",
-  "identifier": "com.hama.pay",
+  "identifier": "jp.payroll.q",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "hama-kyuyo",
+        "title": "Q",
         "width": 1400,
         "height": 800
       }
