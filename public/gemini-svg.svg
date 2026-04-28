@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <mask id="cutout">
+      <rect width="512" height="512" fill="white"/>
+      <path d="M256 120 C180 120 128 172 128 248 C128 324 180 376 256 376 C332 376 384 324 384 248 C384 172 332 120 256 120 Z M304 312 L344 352 L320 376 L280 336 Z" fill="black" fill-rule="evenodd" />
+    </mask>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="80" fill="#003A8F" mask="url(#cutout)" />
+</svg>

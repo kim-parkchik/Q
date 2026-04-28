@@ -1,6 +1,6 @@
 // @ts-ignore
-import Database from "@tauri-apps/plugin-sql";
-import { useEffect, useState } from "react";
+import pkg from "../package.json";
+import { useApp } from "./useApp";
 import { 
   Building2, 
   Calendar, 
@@ -15,8 +15,6 @@ import {
   LogOut 
 } from 'lucide-react';
 import * as S from "./App.styles";
-import { DB_SCHEMAS } from "./types/dbSchema";
-import { HOLIDAY_CSV_URL_DEFAULT } from "./constants/salaryMaster2026";
 
 // auth フォルダ
 import FirstSetupScreen from "./features/auth/FirstSetupScreen";
@@ -37,8 +35,8 @@ import StaffManager from "./features/settings/StaffManager";
 import SystemSettings from "./features/settings/SystemSettings";
 import CustomItemManager from "./features/settings/CustomItemManager";
 
-export const APP_NAME = "Q";
-export const APP_VERSION = "0.1.0";
+export const APP_NAME = pkg.name.toUpperCase(); // "q" を "Q" にしたい場合は upperCase
+export const APP_VERSION = pkg.version;
 
 // 2. TAB_NAMES から絵文字を消してシンプルにします
 const TAB_NAMES: Record<string, string> = {
@@ -67,135 +65,21 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
 };
 
 function App() {
-  const [db, setDb] = useState<Database | null>(null);
-  const [currentUser, setCurrentUser] = useState<any>(null); // 🆕 ログインユーザー
-  const [staffList, setStaffList] = useState<any[]>([]);
-  // 初期タブを "company" に変更し、セットアップ状態を管理する
-  const [activeTab, setActiveTab] = useState("company");
-  const [isSetupComplete, setIsSetupComplete] = useState(false);
-  const [isLoading, setIsLoading] = useState(true); // ✨ 初期化中フラグを追加
-  const [hasUser, setHasUser] = useState<boolean | null>(null);
-
-  const now = new Date();
-  const [targetYear, setTargetYear] = useState(now.getFullYear());
-  const [targetMonth, setTargetMonth] = useState(now.getMonth() + 1);
-  const isStaffReady = staffList.length > 0; // ✨ 従業員が1人以上いるか
-  const [companyName, setCompanyName] = useState("");
-
-  // スタイルの注入は一度だけ行う
-  useEffect(() => {
-    injectDangerousStyles();
-  }, []);
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const sqlite = await Database.load("sqlite:Q.db");
-
-        // 1. スキーマ実行
-        for (const schema of DB_SCHEMAS) {
-          await sqlite.execute(schema);
-        }
-        await sqlite.execute("PRAGMA foreign_keys = ON;");
-
-        // 2. マスター初期投入
-        // 🆕 会社基本情報の初期レコード（URL含む）を投入
-        const companyCheck = await sqlite.select<any[]>("SELECT id FROM company WHERE id = 1");
-        if (companyCheck.length === 0) {
-          await sqlite.execute(
-            `INSERT INTO company (id, name, holiday_csv_url) VALUES (1, '', ?)`,
-            [HOLIDAY_CSV_URL_DEFAULT] // 定数を使用
-          );
-        }
-        const patterns = await sqlite.select<any[]>("SELECT * FROM calendar_patterns WHERE id = 1");
-        if (patterns.length === 0) {
-          // 確実に id=1 で「標準」を入れる
-          await sqlite.execute("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
-        }
-        // 給与規定グループの初期化
-        const pGroups = await sqlite.select<any[]>("SELECT * FROM payroll_groups WHERE id = 1");
-        if (pGroups.length === 0) {
-          // ID=1: 全社共通（末締め / 当月25日払 / 当月払い）をデフォルトとして作成
-          await sqlite.execute(
-            `INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) 
-            VALUES (1, '全社共通規定', 99, 0, 25)`
-          );
-        }
-        // 本店がなければ作成（最初の1件目として作成）
-        const existingHead = await sqlite.select<any[]>("SELECT * FROM branches");
-        if (existingHead.length === 0) {
-          await sqlite.execute(
-            "INSERT INTO branches (name, prefecture) VALUES ('本店', '')"
-          );
-        }
-
-        // 3. DBインスタンスを先にセット
-        setDb(sqlite);
-
-        const users = await sqlite.select<any[]>("SELECT id FROM users");
-        setHasUser(users.length > 0);
-
-        // 4. セットアップ状態の確認（関数にせず、ここで直接判定）
-        const companyRes = await sqlite.select<any[]>("SELECT name FROM company WHERE id = 1");
-        const branchRes = await sqlite.select<any[]>("SELECT prefecture FROM branches WHERE id = 1");
-
-        // 会社名が存在すれば state に入れる
-        if (companyRes.length > 0 && companyRes[0].name.trim() !== "") {
-          setCompanyName(companyRes[0].name); // ★ ここでセット
-        }
-        
-        const hasName = companyRes.length > 0 && companyRes[0].name.trim() !== "";
-        const hasPref = branchRes.length > 0 && branchRes[0].prefecture !== "";
-        
-        // 判定結果をセット
-        setIsSetupComplete(hasName && hasPref);
-        // タブは初期値が "company" なので、ここでの setActiveTab は省略可能です
-
-        // 5. スタッフリストの取得
-        const resStaff = await sqlite.select<any[]>("SELECT * FROM staff ORDER BY id ASC");
-        setStaffList(resStaff);
-      } catch (error) { 
-        console.error("Database Init Error:", error); 
-      } finally {
-        setIsLoading(false); // 全ての準備が整ってから isLoading を false に
-      }
-    };
-    init();
-  }, []);
-
-  // --- 会社設定側から完了を通知された時の処理 ---
-  const handleSetupComplete = async () => {
-    setIsSetupComplete(true);
-    
-    if (db) {
-      // 最新の会社名を取得して反映
-      const res = await db.select<any[]>("SELECT name FROM company WHERE id = 1");
-      if (res.length > 0) setCompanyName(res[0].name);
-    }
-    
-    await refreshData();
-  };
-
-  const refreshData = async () => {
-    if (!db) return;
-    const resStaff = await db.select<any[]>("SELECT * FROM staff ORDER BY id ASC");
-    setStaffList(resStaff);
-  };
-
-  // タブのスタイルを動的に生成する関数をアップデート
-  const tabStyle = (isActive: boolean, isDisabled: boolean = false) => ({
-    padding: "12px 15px",
-    cursor: isDisabled ? "not-allowed" : "pointer", // 🚫 禁止カーソル
-    borderRadius: "5px",
-    marginBottom: "5px",
-    backgroundColor: isActive ? "#3498db" : "transparent",
-    transition: "all 0.2s",
-    opacity: isDisabled ? 0.4 : 1, // 🌫️ グレーアウト
-    pointerEvents: isDisabled ? ("none" as const) : ("auto" as const), // 物理的にクリック不可に
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between"
-  });
+  const {
+    db,
+    currentUser, setCurrentUser,
+    staffList,
+    activeTab, setActiveTab,
+    isSetupComplete,
+    isLoading,
+    hasUser, setHasUser,
+    companyName,
+    targetYear, setTargetYear,
+    targetMonth, setTargetMonth,
+    isStaffReady,
+    handleSetupComplete,
+    refreshData
+  } = useApp();
 
   if (isLoading) {
     return <div style={{ padding: "20px" }}>起動しています...</div>; // ✨ 起動中のチラつき防止
@@ -234,13 +118,13 @@ function App() {
           {isSetupComplete && (
             <>
               {/* 各メニューを Lucide アイコンに置き換え */}
-              <li onClick={() => setActiveTab("calendar")} style={tabStyle(activeTab === "calendar")}>
+              <li onClick={() => setActiveTab("calendar")} style={S.getTabStyle(activeTab === "calendar")}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   {TAB_ICONS.calendar}
                   <span>{TAB_NAMES.calendar}</span>
                 </div>
               </li>
-              <li onClick={() => setActiveTab("staff")} style={tabStyle(activeTab === "staff")}>
+              <li onClick={() => setActiveTab("staff")} style={S.getTabStyle(activeTab === "staff")}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   {TAB_ICONS.staff}
                   <span>{TAB_NAMES.staff}</span>
@@ -258,7 +142,7 @@ function App() {
                 <li 
                   key={item.id}
                   onClick={() => isStaffReady && setActiveTab(item.id)} 
-                  style={tabStyle(activeTab === item.id, !isStaffReady)}
+                  style={S.getTabStyle(activeTab === item.id, !isStaffReady)}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     {TAB_ICONS[item.key]}
@@ -276,7 +160,7 @@ function App() {
 
         {/* 🆕 システム設定メニュー（adminなら常時、staffなら常時表示） */}
         <ul style={{ listStyle: "none", padding: "10px", margin: 0, borderTop: "1px solid #34495e" }}>
-          <li onClick={() => setActiveTab("user_management")} style={tabStyle(activeTab === "user_management")}>
+          <li onClick={() => setActiveTab("user_management")} style={S.getTabStyle(activeTab === "user_management")}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               {TAB_ICONS.user_management}
               <span>{TAB_NAMES.user_management}</span>
@@ -285,7 +169,7 @@ function App() {
         </ul>
 
         {/* ガイドメッセージの出し分け：marginTop: "auto" を削除 */}
-        <div style={{ padding: "20px", fontSize: "12px", color: "#95a5a6", lineHeight: "1.6" }}>
+        <div style={S.guideBox}>
           {!isSetupComplete ? (
             <>💡 会社名と本店の所在地を設定すると、基本機能が解放されます。</>
           ) : !isStaffReady ? (
@@ -305,24 +189,14 @@ function App() {
               {TAB_NAMES[activeTab] || "ホーム"}
             </span>
           </div>
-         <div style={{ fontSize: "14px", color: "#333", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+         <div style={S.headerRight}>
+            <div style={S.userInfo}>
                <CircleUser size={16} color="#909399" />
                <span style={{ fontWeight: "500" }}>{currentUser.display_name} さん</span>
             </div>
             <button 
               onClick={() => setCurrentUser(null)} 
-              style={{ 
-                padding: "4px 12px", 
-                fontSize: "12px", 
-                cursor: "pointer", 
-                backgroundColor: "#fff", 
-                border: "1px solid #dcdfe6", 
-                borderRadius: "4px", 
-                color: "#606266",
-                transition: "all 0.2s",
-                display: "flex", alignItems: "center", gap: "5px"
-              }}
+              style={S.logoutButton}
               onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#f5f7fa")}
               onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#fff")}
             >
@@ -384,45 +258,5 @@ function App() {
     </div>
   );
 }
-
-// 💀 ヤバいボタン用のアニメーション
-const injectDangerousStyles = () => {
-  if (typeof document === 'undefined') return;
-  // 二重に追加されないようにチェック
-  if (document.getElementById('dangerous-style')) return;
-
-  const style = document.createElement('style');
-  style.id = 'dangerous-style';
-  style.innerHTML = `
-    @keyframes pulse-red {
-      0% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
-      70% { box-shadow: 0 0 0 15px rgba(255, 0, 0, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0); }
-    }
-    @keyframes shake-extreme {
-      0% { transform: translate(1px, 1px); }
-      20% { transform: translate(-2px, -1px); }
-      40% { transform: translate(-2px, 2px); }
-      60% { transform: translate(2px, 1px); }
-      80% { transform: translate(1px, -2px); }
-      100% { transform: translate(-1px, 1px); }
-    }
-    .dangerous-btn {
-      animation: pulse-red 1.2s infinite !important; /* 少し鼓動を速く */
-      background-color: #ff0000 !important;
-      color: white !important;
-      border: 1px solid #b30000 !important;
-      font-weight: 900 !important;
-      text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-    }
-    .dangerous-btn:hover {
-      animation: shake-extreme 0.1s infinite !important; /* 超高速震動 */
-      background-color: #e60000 !important;
-      /* cursor指定を削除しました */
-    }
-  `;
-  document.head.appendChild(style);
-};
-injectDangerousStyles();
 
 export default App;
