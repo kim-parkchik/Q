@@ -1,4 +1,4 @@
-import { HOLIDAY_CSV_URL_DEFAULT } from "../constants/salaryMaster2026";
+import { HOLIDAY_CSV_URL_DEFAULT, PENSION_RATE, CHILD_ALLOWANCE_RATE } from "../constants/salaryMaster2026";
 
 export const DB_SCHEMAS = [
     // 0. ユーザー管理（ログイン・権限）
@@ -27,6 +27,7 @@ export const DB_SCHEMAS = [
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'floor',
     round_emp_ins TEXT DEFAULT 'round',
+    default_emp_ins_type TEXT DEFAULT 'general', -- 🆕 追加：会社全体の雇用保険区分
     week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
     annual_holidays INTEGER DEFAULT 120,
     holiday_csv_url TEXT DEFAULT '${HOLIDAY_CSV_URL_DEFAULT}',
@@ -107,6 +108,7 @@ export const DB_SCHEMAS = [
     resident_tax INTEGER DEFAULT 0,
     standard_remuneration INTEGER DEFAULT 0,
     is_employment_ins_eligible INTEGER DEFAULT 1,
+    employment_insurance_type TEXT,  -- 🆕 追加：個人別の雇用保険区分（NULLなら会社設定に従う）
     health_ins_num TEXT,      -- 健康保険被保険者番号
     pension_num TEXT,         -- 厚生年金整理番号
     employment_ins_num TEXT,  -- 雇用保険被保険者番号
@@ -270,16 +272,26 @@ export const DB_SCHEMAS = [
     is_active INTEGER DEFAULT 1      -- 🆕 1:有効, 0:廃止
   );`,
 
-  // 18. 社会保険規定グループ（健保・年金の料率管理）
+  // 18. 社会保険規定グループ
   `CREATE TABLE IF NOT EXISTS social_insurance_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     type TEXT DEFAULT 'kyokai',      -- 'kyokai', 'union', 'kokuho'
     is_fixed INTEGER DEFAULT 0,      -- 0:料率(標準報酬), 1:定額
-    health_rate REAL DEFAULT 0.0,    -- 健康保険率（kyokai時は無視）
-    care_rate REAL DEFAULT 0.0,      -- 介護保険率（kyokai時は無視）
-    pension_rate REAL DEFAULT 18.3,  -- 厚生年金率（一律だが組合により変動の余地）
-    fixed_amount INTEGER DEFAULT 0,   -- 定額時の金額
-    is_active INTEGER DEFAULT 1      -- 🆕 1:有効, 0:廃止
+    
+    -- ★ 本人負担率（給与から引く分）
+    health_rate REAL DEFAULT 0.0,    
+    care_rate REAL DEFAULT 0.0,      
+    pension_rate REAL DEFAULT ${PENSION_RATE[0]},  -- 厚生年金は折半後(18.3 / 2)の値を保持
+
+    -- ★ 🆕 会社負担率（会社が納付する分：法定福利費の計算用）
+    -- 協会けんぽ以外（組合健保など）で負担割合が折半でない場合に対応
+    comp_health_rate REAL DEFAULT 0.0,
+    comp_care_rate REAL DEFAULT 0.0,
+    comp_pension_rate REAL DEFAULT ${PENSION_RATE[0]},
+    child_allowance_rate REAL DEFAULT ${CHILD_ALLOWANCE_RATE}, -- 🆕 子ども・子育て拠出金（会社全額負担分）
+
+    fixed_amount INTEGER DEFAULT 0,  -- 定額時の金額
+    is_active INTEGER DEFAULT 1
   );`
 ];

@@ -119,9 +119,13 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const [targetPensionNum, setTargetPensionNum] = useState("");          // 厚生年金整理番号
     const [targetEmploymentInsNum, setTargetEmploymentInsNum] = useState(""); // 雇用保険被保険者番号
 
+    const [targetSocialInsGroupId, setTargetSocialInsGroupId] = useState(1); // 🆕 追加
+    const [targetEmpInsType, setTargetEmpInsType] = useState(""); // 🆕 追加 (NULL=会社設定に従う)
+
     // =========================================================
     // 5. 外部データ・計算用マスタ
     // =========================================================
+    const [socialGroups, setSocialGroups] = useState<any[]>([]);
     const [branches, setBranches] = useState<any[]>([]);
     const [branchFilters, setBranchFilters] = useState<string[]>(branches.map(b => b.name));
     const [calendarPatterns, setCalendarPatterns] = useState<CalendarPattern[]>([]);
@@ -221,6 +225,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     useEffect(() => {
         const init = async () => {
             if (!db) return;
+            await fetchSocialGroups();
             await fetchBranches();
             
             // カレンダーパターン一覧を取得
@@ -323,6 +328,8 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         setTargetDependents(s.dependents || 0);
         setTargetResidentTax(s.resident_tax || 0);
         setTargetStandardRemuneration(s.standard_remuneration || 0); // 🆕 追加
+        setTargetSocialInsGroupId(s.social_insurance_group_id || 1);
+        setTargetEmpInsType(s.employment_insurance_type || "");
         setTargetIsExecutive(s.is_executive || 0);
         setTargetIsEmploymentInsEligible(s.is_employment_ins_eligible ?? 1); // 雇用保険はデフォルト1なので??を使用
         setTargetIsOvertimeEligible(s.is_overtime_eligible ?? 1);
@@ -402,14 +409,13 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
             .join(',');
 
         try {
-            // SQLに渡すパラメータ配列 (UPDATEとINSERTで共通、最後だけ異なる)
             const baseParams = [
                 targetName, targetFurigana, targetBirthday, targetGender, targetJoinDate, 
                 targetRetirementDate, targetStatus, targetZip, targetAddress, 
                 targetPhone, targetMobile, targetWageType, Number(targetWage), 
                 targetCommuteType, Number(targetCommuteAmount), Number(targetBranchId), 
                 Number(targetDependents), Number(targetResidentTax), 
-                Number(targetPatternId), // calendar_pattern_id
+                Number(targetPatternId),
                 Number(targetDailyHours),
                 Number(targetStandardRemuneration),
                 workDaysString,
@@ -417,11 +423,13 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                 Number(targetIsEmploymentInsEligible), 
                 Number(targetIsOvertimeEligible),
                 Number(targetFixedOvertimeHours),
-                Number(targetFixedOvertimeAmount)
+                Number(targetFixedOvertimeAmount),
+                // 🆕 追加
+                targetSocialInsGroupId,      // social_insurance_group_id
+                targetEmpInsType || null     // employment_insurance_type
             ];
 
             if (editingId) {
-                // UPDATE処理
                 await db.execute(
                     `UPDATE staff SET 
                         name=?, furigana=?, birthday=?, gender=?, join_date=?, 
@@ -431,12 +439,12 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         dependents=?, resident_tax=?, calendar_pattern_id=?,
                         scheduled_work_hours=?, standard_remuneration=?,
                         work_days=?, is_executive=?, is_employment_ins_eligible=?, 
-                        is_overtime_eligible=?, fixed_overtime_hours=?, fixed_overtime_allowance=?
+                        is_overtime_eligible=?, fixed_overtime_hours=?, fixed_overtime_allowance=?,
+                        social_insurance_group_id=?, employment_insurance_type=? -- 🆕 追加
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
             } else {
-                // INSERT処理
                 await db.execute(
                     `INSERT INTO staff (
                         name, furigana, birthday, gender, join_date, 
@@ -446,8 +454,10 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         dependents, resident_tax, calendar_pattern_id,
                         scheduled_work_hours, standard_remuneration,
                         work_days, is_executive, is_employment_ins_eligible, 
-                        is_overtime_eligible, fixed_overtime_hours, fixed_overtime_allowance, id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        is_overtime_eligible, fixed_overtime_hours, fixed_overtime_allowance,
+                        social_insurance_group_id, employment_insurance_type, -- 🆕 追加
+                        id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // ? は 30個
                     [...baseParams, safeId]
                 );
             }
@@ -476,6 +486,20 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
             setDeletingId(null); // 削除完了後にリセット
         } catch (e) {
             console.error(e);
+        }
+    };
+
+    const fetchSocialGroups = async () => {
+        try {
+            const res = await db.select<any[]>("SELECT id, name FROM social_insurance_groups WHERE is_active = 1 ORDER BY id ASC");
+            setSocialGroups(res);
+            
+            // 新規登録時のデフォルト値をセット（リストが空でない場合）
+            if (!editingId && res.length > 0 && targetSocialInsGroupId === 1) {
+                setTargetSocialInsGroupId(res[0].id);
+            }
+        } catch (e) {
+            console.error("社保規定の取得に失敗:", e);
         }
     };
 
@@ -710,29 +734,59 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                             <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>円</span>
                                         </div>
                                     </div>
-                                    <div style={{ gridColumn: "span 2" }}>
-                                        <label style={labelStyle}>標準報酬月額（社会保険計算用）</label>
-                                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                                            <select
-                                                // 修正ポイント1: 他の項目に合わせて targetStandardRemuneration (などの state) を使う
-                                                // もし state を作っていない場合は、このコンポーネントの流儀に合わせて追加が必要です
-                                                value={targetStandardRemuneration} 
-                                                onChange={(e) => setTargetStandardRemuneration(Number(e.target.value))}
-                                                // 修正ポイント2: 他の項目と同じ inputStyle を適用
-                                                style={{ ...inputStyle, paddingRight: "30px" }} 
-                                            >
-                                                <option value={0}>0: 未加入・対象外</option>
-                                                {HYOJUN_OPTIONS.map(opt => (
-                                                    <option key={opt.value} value={opt.value}>
-                                                        {opt.label}
-                                                    </option>
-                                                ))}
-                                            </select>
+
+
+                                    {/* <div style={{ gridColumn: "span 2" }}> */}
+                                    <div style={{ gridColumn: "span 2", display: "flex", flexDirection: "column", gap: "8px" }}>
+    
+                                        {/* 上段：入力欄 2つを横並びにする */}
+                                        <div style={{ display: "flex", gap: "15px", alignItems: "flex-end" }}>
+                                            
+                                            {/* 左側 4割: 社保規定 */}
+                                            <div style={{ flex: 4 }}>
+                                                <label style={labelStyle}>
+                                                    <Shield size={14} style={{ marginRight: "4px", verticalAlign: "middle" }} />
+                                                    適用する社保規定
+                                                </label>
+                                                <select 
+                                                    value={targetSocialInsGroupId} 
+                                                    onChange={e => setTargetSocialInsGroupId(Number(e.target.value))}
+                                                    style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px"}}
+                                                >
+                                                    <option value={0}>未加入 / 適用除外</option>
+                                                    {socialGroups.map(sg => (
+                                                        <option key={sg.id} value={sg.id}>{sg.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {/* 右側 6割: 標準報酬月額 */}
+                                            <div style={{ flex: 6 }}>
+                                                <label style={labelStyle}>
+                                                    <Banknote size={14} style={{ marginRight: "4px", verticalAlign: "middle" }} />
+                                                    標準報酬月額（社会保険計算用）
+                                                </label>
+                                                <select
+                                                    value={targetStandardRemuneration} 
+                                                    onChange={(e) => setTargetStandardRemuneration(Number(e.target.value))}
+                                                    style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px" }} 
+                                                >
+                                                    <option value={0}>0: 未加入・対象外</option>
+                                                    {HYOJUN_OPTIONS.map(opt => (
+                                                        <option key={opt.value} value={opt.value}>
+                                                            {opt.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
                                         </div>
-                                        {/* marginを 2px 程度に抑え、pタグのデフォルトマージンをリセットする */}
-                                        <p style={{ fontSize: "11px", color: "#64748b", margin: "2px 0 0 12px" }}>
-                                            ※決定通知書に記載されている等級の金額を選択してください。
-                                        </p>
+
+                                        {/* 下段：注釈（自動的に下に配置される） */}
+                                        <div style={{ width: "100%" }}>
+                                            <p style={{ fontSize: "11px", color: "#64748b", margin: "0 0 0 240px" }}>
+                                                ※決定通知書に記載されている等級の金額を選択してください。
+                                            </p>
+                                        </div>
                                     </div>
                                     {/* 🆕 各種被保険者番号 */}
                                     <div style={{ 

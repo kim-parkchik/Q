@@ -30,7 +30,7 @@ import {
     Clock,
     Hash
 } from 'lucide-react';
-import { KENPO_RATES, PENSION_RATE, MASTER_YEAR, MASTER_MONTH } from "../../constants/salaryMaster2026";
+import { KENPO_RATES, KENPO_CARE_RATE, PENSION_RATE, CHILD_ALLOWANCE_RATE, MASTER_YEAR, MASTER_MONTH } from "../../constants/salaryMaster2026";
 import { fetchAddressByZip } from "../../utils/addressUtils";
 
 interface Props {
@@ -82,6 +82,12 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
     const [deletingSgId, setDeletingSgId] = useState<number | null>(null);
     const [previewPref, setPreviewPref] = useState("京都");
     const [showInactive, setShowInactive] = useState(false);
+    // --- 社会保険規定（会社負担分）のState ---
+    const [sgCompHealthRate, setSgCompHealthRate] = useState(0);
+    const [sgCompCareRate, setSgCompCareRate] = useState(0);
+    const [sgCompPensionRate, setSgCompPensionRate] = useState(PENSION_RATE[0]); // デフォルトは折半率
+    const [sgChildAllowanceRate, setSgChildAllowanceRate] = useState(CHILD_ALLOWANCE_RATE);
+    const [sgCompFixedAmount, setSgCompFixedAmount] = useState(0); // 定額時の会社負担用
 
     // --- 支店管理用ステート ---
     const [branches, setBranches] = useState<any[]>([]);
@@ -331,35 +337,79 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
     // 計算用のヘルパー
     const getRates = (pref: string) => {
-        const [healthBase, healthWithCare] = KENPO_RATES[pref];
+        // 1. 都道府県別の料率を取得（見つからない場合は東京をフォールバックに）
+        const rateData = KENPO_RATES[pref] || KENPO_RATES["京都"];
+        
+        // rateData[1] が「総料率」です
+        const healthTotal = rateData[1]; 
+        
+        // 2. 介護保険料率（総額）を取得
+        const careTotal = KENPO_CARE_RATE[1]; 
+        
+        // 3. 厚生年金料率（総額）を取得
+        const pensionTotal = PENSION_RATE[1];
+
         return {
-            healthTotal: (healthBase * 2).toFixed(2),
-            careTotal: ((healthWithCare - healthBase) * 2).toFixed(3),
-            pensionTotal: (PENSION_RATE * 2).toFixed(2)
+            healthTotal: healthTotal.toFixed(2),
+            careTotal: careTotal.toFixed(2),
+            pensionTotal: pensionTotal.toFixed(2)
         };
     };
     const rates = getRates(previewPref);
 
     const saveSocialGroup = async () => {
         if (!sgName.trim()) return alert("規定名を入力してください");
+
+        // パラメータを配列にまとめる（順番が命です！）
+        const params = [
+            sgName,               // name
+            sgType,               // type
+            sgIsFixed,            // is_fixed
+            sgHealthRate,         // health_rate
+            sgCareRate,           // care_rate
+            sgPensionRate,        // pension_rate
+            sgFixedAmount,        // fixed_amount
+            sgCompHealthRate,     // comp_health_rate
+            sgCompCareRate,       // comp_care_rate
+            sgCompPensionRate,    // comp_pension_rate
+            sgChildAllowanceRate, // child_allowance_rate
+            sgCompFixedAmount,    // comp_fixed_amount (新設)
+            1                     // is_active (新規時は常に1)
+        ];
+
         try {
             if (editingSgId !== null) {
+                // --- UPDATE (編集) ---
+                // 最後の ? は WHERE id=? 用の editingSgId
                 await db.execute(
                     `UPDATE social_insurance_groups SET 
-                        name=?, type=?, health_rate=?, care_rate=?, pension_rate=?, 
-                        is_fixed=?, fixed_amount=? WHERE id=?`,
-                    [sgName, sgType, sgHealthRate, sgCareRate, sgPensionRate, sgIsFixed, sgFixedAmount, editingSgId]
+                        name=?, type=?, is_fixed=?, 
+                        health_rate=?, care_rate=?, pension_rate=?, fixed_amount=?,
+                        comp_health_rate=?, comp_care_rate=?, comp_pension_rate=?, 
+                        child_allowance_rate=?, comp_fixed_amount=?, is_active=?
+                    WHERE id=?`,
+                    [...params, editingSgId]
                 );
             } else {
+                // --- INSERT (新規追加) ---
                 await db.execute(
-                    `INSERT INTO social_insurance_groups (name, type, health_rate, care_rate, pension_rate, is_fixed, fixed_amount) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                    [sgName, sgType, sgHealthRate, sgCareRate, sgPensionRate, sgIsFixed, sgFixedAmount]
+                    `INSERT INTO social_insurance_groups (
+                        name, type, is_fixed, 
+                        health_rate, care_rate, pension_rate, fixed_amount,
+                        comp_health_rate, comp_care_rate, comp_pension_rate, 
+                        child_allowance_rate, comp_fixed_amount, is_active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    params
                 );
             }
+
+            alert("規定を保存しました");
             resetSgForm();
             loadData();
-        } catch (e) { alert("保存に失敗しました"); }
+        } catch (e) {
+            console.error(e);
+            alert("保存に失敗しました。カラム名やデータ型を確認してください。");
+        }
     };
 
     const resetSgForm = () => {
@@ -371,6 +421,13 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
         setSgCareRate(0);
         setSgPensionRate(18.3); // 厚生年金は18.3%を初期値にしても良いですね
         setSgFixedAmount(0);
+        setSgCompHealthRate(0);
+        setSgCompCareRate(0);
+        setSgCompPensionRate(PENSION_RATE[0]);
+        setSgChildAllowanceRate(CHILD_ALLOWANCE_RATE);
+        setSgCompFixedAmount(0);
+        
+        setEditingSgId(null);
     };
 
     const startEditSg = (sg: any) => {
@@ -378,6 +435,11 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
         setSgHealthRate(sg.health_rate); setSgCareRate(sg.care_rate);
         setSgPensionRate(sg.pension_rate); setSgIsFixed(sg.is_fixed);
         setSgFixedAmount(sg.fixed_amount);
+        setSgCompHealthRate(sg.comp_health_rate || 0);
+        setSgCompCareRate(sg.comp_care_rate || 0);
+        setSgCompPensionRate(sg.comp_pension_rate || PENSION_RATE[0]);
+        setSgChildAllowanceRate(sg.child_allowance_rate || CHILD_ALLOWANCE_RATE);
+        setSgCompFixedAmount(sg.comp_fixed_amount || 0);
     };
 
     const getPlaceholder = () => {
@@ -1520,16 +1582,46 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                 </select>
                                             </div>
 
+                                            {/* sgIsFixed === 0 (料率計算) の場合の中身を差し替え */}
                                             {sgIsFixed === 0 ? (
-                                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "20px" }}>
-                                                    <div><label style={miniLabelStyle}>健康保険率(%)</label><input type="number" step="0.001" value={sgHealthRate} onChange={e => setSgHealthRate(Number(e.target.value))} style={inputStyle} /></div>
-                                                    <div><label style={miniLabelStyle}>介護保険率(%)</label><input type="number" step="0.001" value={sgCareRate} onChange={e => setSgCareRate(Number(e.target.value))} style={inputStyle} /></div>
-                                                    <div style={{ gridColumn: "1 / 3" }}><label style={miniLabelStyle}>厚生年金率(%)</label><input type="number" step="0.001" value={sgPensionRate} onChange={e => setSgPensionRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                <div style={{ display: "flex", flexDirection: "column", gap: "15px", marginBottom: "20px" }}>
+                                                    
+                                                    {/* 本人負担率セクション */}
+                                                    <div style={{ padding: "10px", backgroundColor: "#f0f7ff", borderRadius: "8px" }}>
+                                                        <span style={{ fontSize: "11px", fontWeight: "bold", color: "#0056b3", display: "block", marginBottom: "8px" }}>👤 本人負担率（給与控除）</span>
+                                                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                                                            <div><label style={miniLabelStyle}>健保(%)</label><input type="number" step="0.001" value={sgHealthRate} onChange={e => setSgHealthRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                            <div><label style={miniLabelStyle}>介護(%)</label><input type="number" step="0.001" value={sgCareRate} onChange={e => setSgCareRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                            <div><label style={miniLabelStyle}>年金(%)</label><input type="number" step="0.001" value={sgPensionRate} onChange={e => setSgPensionRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 会社負担率セクション */}
+                                                    <div style={{ padding: "10px", backgroundColor: "#fff5f5", borderRadius: "8px" }}>
+                                                        <span style={{ fontSize: "11px", fontWeight: "bold", color: "#c0392b", display: "block", marginBottom: "8px" }}>🏢 会社負担率（法定福利費）</span>
+                                                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                                                            <div><label style={miniLabelStyle}>健保(%)</label><input type="number" step="0.001" value={sgCompHealthRate} onChange={e => setSgCompHealthRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                            <div><label style={miniLabelStyle}>介護(%)</label><input type="number" step="0.001" value={sgCompCareRate} onChange={e => setSgCompCareRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                            <div><label style={miniLabelStyle}>年金(%)</label><input type="number" step="0.001" value={sgCompPensionRate} onChange={e => setSgCompPensionRate(Number(e.target.value))} style={inputStyle} /></div>
+                                                        </div>
+                                                        <div style={{ marginTop: "10px" }}>
+                                                            <label style={miniLabelStyle}>子ども・子育て拠出金(%)</label>
+                                                            <input type="number" step="0.001" value={sgChildAllowanceRate} onChange={e => setSgChildAllowanceRate(Number(e.target.value))} style={inputStyle} />
+                                                        </div>
+                                                    </div>
+
                                                 </div>
                                             ) : (
+                                                /* 定額固定の場合（こちらも本人・会社を分けたほうが親切です） */
                                                 <div style={{ marginBottom: "20px" }}>
-                                                    <label style={miniLabelStyle}>月額固定金額(円)</label>
-                                                    <input type="number" value={sgFixedAmount} onChange={e => setSgFixedAmount(Number(e.target.value))} style={inputStyle} />
+                                                    <div style={{ marginBottom: "10px" }}>
+                                                        <label style={miniLabelStyle}>本人負担・月額(円)</label>
+                                                        <input type="number" value={sgFixedAmount} onChange={e => setSgFixedAmount(Number(e.target.value))} style={inputStyle} />
+                                                    </div>
+                                                    <div>
+                                                        <label style={miniLabelStyle}>会社負担・月額(円)</label>
+                                                        <input type="number" value={sgCompFixedAmount} onChange={e => setSgCompFixedAmount(Number(e.target.value))} style={inputStyle} />
+                                                    </div>
                                                 </div>
                                             )}
                                         </>

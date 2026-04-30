@@ -69,7 +69,7 @@ export default function PayStubModal(props: Props) {
           
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14, alignItems: "flex-end" }}>
                         <div>
-                            <div style={{ fontSize: 18, borderBottom: "1.5px solid #000", paddingBottom: 2, paddingRight: 40 }}>{staff.name} 様</div>
+                            <div style={{ fontSize: 18, borderBottom: "1.5px solid #000", paddingBottom: 2, paddingRight: 40 }}>{props.staff.name} 様</div>
                         </div>
                         <div style={{ textAlign: "right", fontSize: 13 }}>
                             <div>{props.year} 年 {props.month} 月分</div>

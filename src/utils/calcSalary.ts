@@ -444,6 +444,7 @@ export const calculateSalary = (
                         + customEarnings;
 
     // ── 社会保険料 ──────────────────────────────────────────────
+    // 1. 標準報酬月額の確定
     const dbHyojun = Number(staff.standard_remuneration) || 0;
     let hyojunHoshu: number;
     if (dbHyojun > 0) {
@@ -453,44 +454,93 @@ export const calculateSalary = (
         hyojunHoshu = getHyojunHoshu(reportable);
     }
 
-    const rates = Master.KENPO_RATES[extras.prefecture] ?? Master.KENPO_RATES["東京"];
+    // 2. 料率の取得と計算
     const nursingTarget = checkNursingCare(staff.birthday || '', targetYear, targetMonth);
-    const healthRate  = nursingTarget ? rates[1] : rates[0];
-    const nursingRate = nursingTarget ? (rates[1] - rates[0]) : 0;
+    const prefRates = Master.KENPO_RATES[extras.prefecture] ?? Master.KENPO_RATES["京都"];
     const sInsType = companySettings?.round_social_ins || 'floor';
 
-    const healthHyojun    = Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN);
-    const healthTotal     = applyRounding(healthHyojun * healthRate  / 100, sInsType);
-    const nursingInsurance = applyRounding(healthHyojun * nursingRate / 100, sInsType);
-    const healthInsurance  = healthTotal - nursingInsurance;
+    // 健康保険（介護なし/ありをインデックスで切り替え）
+    // [0]が介護なし本人, [1]が介護なし総額, [2]が介護あり本人, [3]が介護あり総額
+    const healthInsRate = prefRates[0] ?? 0; 
+    
+    const healthInsurance = applyRounding(
+        (Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN) * healthInsRate) / 100, 
+        sInsType
+    );
 
+    // 介護保険料（nursingTarget が true の時だけ計算）
+    let nursingInsurance = 0;
+    if (nursingTarget) {
+        // Master.KENPO_CARE_RATE[0] (0.80) を使用
+        const careRate = Master.KENPO_CARE_RATE[0] ?? 0;
+        nursingInsurance = applyRounding(
+            (Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN) * careRate) / 100, 
+            sInsType
+        );
+    }
+
+    // 厚生年金
+    // [0]が本人分, [1]が総額
     const pensionHyojun = Math.max(Master.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, Master.PENSION_MAX_HYOJUN));
-    const welfarePension = applyRounding(pensionHyojun * Master.PENSION_RATE / 100, sInsType);
+    const welfarePension = applyRounding((pensionHyojun * Master.PENSION_RATE[0]) / 100, sInsType);
 
-    const empInsurance = applyRounding(totalEarnings * Master.EMP_INS_RATE, companySettings?.round_emp_ins || 'round');
+    // 雇用保険
+    // [0]が本人分, [1]が総額
+    // staff.employment_insurance_type (文字列) を取得。未設定なら 'general'
+    const empInsKey = (staff.employment_insurance_type as Master.EmpInsType) || 'general';
+    // マスターデータから該当する業種の配列を取得
+    // 万が一、変な文字列が入っていても 'general' を参照するようにガード
+    const empRates = Master.LABOR_INSURANCE_RATES[empInsKey] || Master.LABOR_INSURANCE_RATES.general;
+    // [0] が本人負担分
+    const empInsRate = empRates[0];
+    // 計算実行
+    const empInsurance = applyRounding(
+        totalEarnings * empInsRate, 
+        companySettings?.round_emp_ins || 'round'
+    );
 
+    // ── 税金・最終計算 ──────────────────────────────────────────────
     const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
-    const incomeTax   = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0);
+    const incomeTax = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0);
+    const residentTax = Number(extras.residentTax) || 0;
+    const totalDeductions = socialTotal + incomeTax + residentTax + customDeductions;
 
-    const residentTax     = Number(extras.residentTax) || 0;
-    const totalDeductions = healthInsurance + nursingInsurance + welfarePension
-                            + empInsurance + incomeTax + residentTax + customDeductions;
 
     return {
-        workDays, totalWorkHours, totalOvertimeHours, totalNightHours,
+        // --- 勤怠データ ---
+        workDays, 
+        totalWorkHours, 
+        totalOvertimeHours, 
+        totalNightHours,
         totalStatutoryOvertimeHours,
-        standardPremiumHours, // ★追加
-        highPremiumHours,     // ★追加
+        standardPremiumHours, 
+        highPremiumHours,     
+
+        // --- 支給額 (Earnings) ---
         basePay: Math.floor(basePay),
         absenceDeduction,
         statutoryOvertimePay: Math.floor(statutoryOvertimePay),
         standardOvertimePay: Math.floor(standardOvertimePay),
         highOvertimePay: Math.floor(highOvertimePay),
         nightPay: Math.floor(nightPay),
-        commutePay, allowanceAmount, customEarnings, totalEarnings,
-        healthInsurance, nursingInsurance, welfarePension,
-        empInsurance, incomeTax, residentTax, customDeductions,
-        totalDeductions, netPay: totalEarnings - totalDeductions,
-        isNursingCareTarget: nursingTarget, hyojunHoshu,
+        commutePay, 
+        allowanceAmount, 
+        customEarnings, 
+        totalEarnings,
+
+        // --- 控除額 (Deductions) ---
+        healthInsurance, 
+        nursingInsurance, 
+        welfarePension,
+        empInsurance, 
+        incomeTax, 
+        residentTax, 
+        customDeductions,
+        totalDeductions,
+
+        // --- 最終結果・その他情報 ---
+        netPay: totalEarnings - totalDeductions,
+        isNursingCareTarget: nursingTarget,
+        hyojunHoshu,
     };
 };
