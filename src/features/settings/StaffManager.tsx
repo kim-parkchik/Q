@@ -115,6 +115,9 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const [targetResidentTax, setTargetResidentTax] = useState(0);
     const [targetStandardRemuneration, setTargetStandardRemuneration] = useState(0); // 標準報酬月額
     const [targetIsEmploymentInsEligible, setTargetIsEmploymentInsEligible] = useState(1); // 雇用保険
+    const [targetHealthInsNum, setTargetHealthInsNum] = useState("");      // 健康保険被保険者番号
+    const [targetPensionNum, setTargetPensionNum] = useState("");          // 厚生年金整理番号
+    const [targetEmploymentInsNum, setTargetEmploymentInsNum] = useState(""); // 雇用保険被保険者番号
 
     // =========================================================
     // 5. 外部データ・計算用マスタ
@@ -656,7 +659,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                             </div>
 
                             <div style={{ marginTop: "10px" }}>
-                                <h4 style={{ borderLeft: "4px solid #9b59b6", paddingLeft: "10px", margin: "0 0 10px 0", fontSize: "14px" }}>税・社保設定</h4>
+                                <h4 style={{ borderLeft: "4px solid #9b59b6", paddingLeft: "10px", margin: "0 0 10px 0", fontSize: "14px" }}>税・社会保険・労働保険</h4>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                                     {/* --- 🆕 3大フラグ・スイッチ群 --- */}
                                     <div style={{ gridColumn: "span 2", display: "flex", gap: "15px", backgroundColor: "#f8fafc", padding: "10px", borderRadius: "5px", border: "1px solid #e2e8f0" }}>
@@ -718,7 +721,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                                 // 修正ポイント2: 他の項目と同じ inputStyle を適用
                                                 style={{ ...inputStyle, paddingRight: "30px" }} 
                                             >
-                                                <option value={0}>--- 自動計算（未確定） ---</option>
+                                                <option value={0}>0: 未加入・対象外</option>
                                                 {HYOJUN_OPTIONS.map(opt => (
                                                     <option key={opt.value} value={opt.value}>
                                                         {opt.label}
@@ -726,9 +729,86 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                                                 ))}
                                             </select>
                                         </div>
-                                        <p style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                                        {/* marginを 2px 程度に抑え、pタグのデフォルトマージンをリセットする */}
+                                        <p style={{ fontSize: "11px", color: "#64748b", margin: "2px 0 0 12px" }}>
                                             ※決定通知書に記載されている等級の金額を選択してください。
                                         </p>
+                                    </div>
+                                    {/* 🆕 各種被保険者番号 */}
+                                    <div style={{ 
+                                        gridColumn: "span 2", 
+                                        display: "grid", 
+                                        gridTemplateColumns: "1fr 1fr", 
+                                        gap: "10px", 
+                                        marginTop: "6px", 
+                                        borderTop: "1px dashed #e2e8f0", 
+                                        paddingTop: "8px" 
+                                    }}>
+                                        {/* 健康保険 */}
+                                        <div>
+                                            <label style={{ 
+                                                ...labelStyle, 
+                                                color: targetStandardRemuneration > 0 ? "#2c3e50" : "#bdc3c7" 
+                                            }}>
+                                                健康保険 被保険者番号
+                                            </label>
+                                            <input 
+                                                type="text" 
+                                                value={targetStandardRemuneration > 0 ? targetHealthInsNum : ""} 
+                                                onChange={e => setTargetHealthInsNum(e.target.value)} 
+                                                disabled={targetStandardRemuneration === 0} // 👈 0（未加入）なら入力不可
+                                                style={{ 
+                                                    ...inputStyle, 
+                                                    backgroundColor: targetStandardRemuneration > 0 ? "#fff" : "#f1f5f9",
+                                                    cursor: targetStandardRemuneration > 0 ? "text" : "not-allowed" 
+                                                }} 
+                                                placeholder={targetStandardRemuneration > 0 ? "例: 12345" : "社会保険未加入"}
+                                            />
+                                        </div>
+
+                                        {/* 厚生年金 */}
+                                        <div>
+                                            <label style={{ 
+                                                ...labelStyle, 
+                                                color: targetStandardRemuneration > 0 ? "#2c3e50" : "#bdc3c7" 
+                                            }}>
+                                                厚生年金 整理番号
+                                            </label>
+                                            <input 
+                                                type="text" 
+                                                value={targetStandardRemuneration > 0 ? targetPensionNum : ""} 
+                                                onChange={e => setTargetPensionNum(e.target.value)} 
+                                                disabled={targetStandardRemuneration === 0} // 👈 0（未加入）なら入力不可
+                                                style={{ 
+                                                    ...inputStyle, 
+                                                    backgroundColor: targetStandardRemuneration > 0 ? "#fff" : "#f1f5f9",
+                                                    cursor: targetStandardRemuneration > 0 ? "text" : "not-allowed" 
+                                                }} 
+                                                placeholder={targetStandardRemuneration > 0 ? "例: 67890" : "社会保険未加入"}
+                                            />
+                                        </div>
+
+                                        {/* 雇用保険（こちらは既存の targetIsEmploymentInsEligible で制御） */}
+                                        <div style={{ gridColumn: "span 2" }}>
+                                            <label style={{ 
+                                                ...labelStyle, 
+                                                color: targetIsEmploymentInsEligible === 1 ? "#2c3e50" : "#bdc3c7" 
+                                            }}>
+                                                雇用保険 被保険者番号
+                                            </label>
+                                            <input 
+                                                type="text" 
+                                                value={targetIsEmploymentInsEligible === 1 ? targetEmploymentInsNum : ""} 
+                                                onChange={e => setTargetEmploymentInsNum(e.target.value)} 
+                                                disabled={targetIsEmploymentInsEligible === 0} 
+                                                style={{ 
+                                                    ...inputStyle, 
+                                                    backgroundColor: targetIsEmploymentInsEligible === 1 ? "#fff" : "#f1f5f9",
+                                                    cursor: targetIsEmploymentInsEligible === 1 ? "text" : "not-allowed" 
+                                                }} 
+                                                placeholder={targetIsEmploymentInsEligible === 1 ? "例: 1234-567890-1" : "雇用保険未加入"}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
