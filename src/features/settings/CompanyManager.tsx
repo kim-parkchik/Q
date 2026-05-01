@@ -30,7 +30,7 @@ import {
     Clock,
     Hash
 } from 'lucide-react';
-import { KENPO_RATES, KENPO_CARE_RATE, PENSION_RATE, CHILD_ALLOWANCE_RATE, MASTER_YEAR, MASTER_MONTH } from "../../constants/salaryMaster2026";
+import { PREFECTURE_MASTER, KENPO_RATES, KENPO_CARE_RATE, PENSION_RATE, CHILD_ALLOWANCE_RATE, MASTER_YEAR, MASTER_MONTH } from "../../constants/salaryMaster2026";
 import { fetchAddressByZip } from "../../utils/addressUtils";
 
 interface Props {
@@ -246,14 +246,15 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
     useEffect(() => { loadData(); }, [db]);
 
+    const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
     const revalidateAllAttendance = async (newStartDay: number) => {
+        const msg = `週の起算日が【${dayNames[newStartDay]}曜日】に変更されました。集計を再確認してください。`;
         try {
             // 全従業員の未確定勤怠を一括で「要チェック」にする
             // (ロック機能がある場合は WHERE lock_status = 0 などを追加)
             await db.execute(
-                `UPDATE attendance 
-                SET is_error = 1, 
-                    error_message = '週の起算日が変更されました。集計結果を再確認してください。'`
+                `UPDATE attendance SET is_error = 1, error_message = ?`,
+                [msg] // ここで引数を使う！
             );
             console.log("全勤怠データの再検証フラグを立てました。");
         } catch (e) {
@@ -337,7 +338,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
     // 計算用のヘルパー
     const getRates = (pref: string) => {
-        // 1. 都道府県別の料率を取得（見つからない場合は東京をフォールバックに）
+        // 1. 都道府県別の料率を取得（見つからない場合は京都をフォールバックに）
         const rateData = KENPO_RATES[pref] || KENPO_RATES["京都"];
         
         // rateData[1] が「総料率」です
@@ -713,9 +714,8 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                 }
                 setCompZip(foundZip);
 
-                // 都道府県切り出し
-                const prefs = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
-                let detectedPref = prefs.find(p => cleanAddr.startsWith(p)) || "";
+                const found = PREFECTURE_MASTER.find(p => cleanAddr.startsWith(p.name));
+                let detectedPref = found ? found.name : "";
 
                 if (detectedPref) {
                     setHeadPref(detectedPref);
@@ -866,7 +866,11 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                                 }}
                                             >
                                                 <option value="">都道府県 (必須)</option>
-                                                {["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"].map(p => <option key={p} value={p}>{p}</option>)}
+                                                {PREFECTURE_MASTER.map(p => (
+                                                    <option key={p.code} value={p.name}>
+                                                        {p.name}
+                                                    </option>
+                                                ))}
                                             </select>
                                             <input 
                                                 value={compAddr} 
@@ -1116,7 +1120,11 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                             <div style={{ display: "flex", gap: "10px" }}>
                                                 <select value={headPref} onChange={e => setHeadPref(e.target.value)} onFocus={handleFocus} onBlur={(e) => handleBlur(e, !headPref)} style={{ ...inputStyle, width: "160px" }}>
                                                     <option value="">都道府県 (必須)</option>
-                                                    {["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"].map(p => <option key={p} value={p}>{p}</option>)}
+                                                    {PREFECTURE_MASTER.map(p => (
+                                                        <option key={p.code} value={p.name}>
+                                                            {p.name}
+                                                        </option>
+                                                    ))}
                                                 </select>
                                                 <input value={compAddr} onChange={e => setCompAddr(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} placeholder="市区町村・番地" style={{ ...inputStyle, flex: 1 }} />
                                             </div>
@@ -1757,7 +1765,11 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
                                     <select value={bPref} onChange={e => setBPref(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} style={{ ...inputStyle, ...inputBottomSpace }}>
                                         <option value="">都道府県 (必須)</option>
-                                            {["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"].map(p => <option key={p} value={p}>{p}</option>)}
+                                        {PREFECTURE_MASTER.map(p => (
+                                            <option key={p.code} value={p.name}>
+                                                {p.name}
+                                            </option>
+                                        ))}
                                     </select>
 
                                     <input value={bAddr} onChange={e => setBAddr(e.target.value)} onFocus={handleFocus} onBlur={handleBlur} placeholder="市区町村・番地" style={{ ...inputStyle, ...inputBottomSpace }} />
@@ -1914,7 +1926,8 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                 </div>
 
                                 <button 
-                                    onClick={() => alert("端数設定を保存しました（DBへ要保存）")}
+                                    onClick={saveRoundingSettings} // ← 用意してあった関数を呼び出す
+                                    disabled={isSaving}           // 保存中は連打できないようにする
                                     style={{ 
                                         ...btnStyle, 
                                         marginTop: "30px", 
@@ -1923,11 +1936,13 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                         display: "flex",
                                         alignItems: "center",
                                         justifyContent: "center",
-                                        gap: "8px"
+                                        gap: "8px",
+                                        opacity: isSaving ? 0.7 : 1, // 保存中は少し色を薄くする
+                                        cursor: isSaving ? "not-allowed" : "pointer"
                                     }}
                                 >
-                                    <Save size={18} />
-                                    <span>端数処理設定を保存</span>
+                                    {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                                    <span>{isSaving ? "保存中..." : "端数処理設定を保存"}</span>
                                 </button>
                             </div>
                         </section>

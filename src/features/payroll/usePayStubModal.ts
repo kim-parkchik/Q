@@ -18,7 +18,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
         allowanceName: "役職手当",
         allowanceAmount: 0,
         residentTax: Number(staff.resident_tax) || 0,
-        prefecture: staff.prefecture || "東京",
+        prefecture: staff.prefecture || "京都",
         dependents: Number(staff.dependents) || 0,
         customItems: [],
     });

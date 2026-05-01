@@ -117,7 +117,7 @@ export default function AttendanceManager({
     const [selectedStaffId, setSelectedStaffId] = useState("");
     const [monthlyWorkData, setMonthlyWorkData] = useState<Record<string, any>>({});
     const [companySettings, setCompanySettings] = useState<any>(null);
-    const [branchPrefecture, setBranchPrefecture] = useState<string>("東京");
+    const [branchPrefecture, setBranchPrefecture] = useState<string>("京都");
     const [remainingPaidLeave, setRemainingPaidLeave] = useState<number>(0);
     const [holidays, setHolidays] = useState<Record<string, string>>({});
     const [companyHolidays, setCompanyHolidays] = useState<Record<string, number>>({});
@@ -386,7 +386,7 @@ export default function AttendanceManager({
                     [staffForBranch.branch_id]
                 ) as any[];
                 if (branchData?.[0]?.prefecture) {
-                    setBranchPrefecture(branchData[0].prefecture.replace(/[都道府県]$/, "") || "東京");
+                    setBranchPrefecture(branchData[0].prefecture.replace(/[都道府県]$/, "") || "京都");
                 }
             }
 

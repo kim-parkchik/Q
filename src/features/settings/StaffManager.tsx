@@ -296,6 +296,8 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
         setTargetBranchId(1); setTargetDependents(0); setTargetResidentTax(0);
         setTargetStandardRemuneration(0);
         setTargetWorkDays({ mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false });
+        setTargetSocialInsGroupId(1);
+        setTargetEmpInsType("");
         setEditingId(null);
     };
 
@@ -389,7 +391,9 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
             Number(targetIsOvertimeEligible) !== Number(original.is_overtime_eligible ?? 1) ||
             Number(targetFixedOvertimeHours) !== Number(original.fixed_overtime_hours || 0) ||
             Number(targetFixedOvertimeAmount) !== Number(original.fixed_overtime_allowance || 0) ||
-            Number(targetPatternId) !== Number(original.calendar_pattern_id || 0) // カレンダーIDの比較を追加
+            Number(targetPatternId) !== Number(original.calendar_pattern_id || 0) ||
+            Number(targetSocialInsGroupId) !== Number(original.social_insurance_group_id || 1) ||
+            String(targetEmpInsType || "") !== String(original.employment_insurance_type || "")
         );
     };
 
@@ -425,7 +429,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                 Number(targetFixedOvertimeHours),
                 Number(targetFixedOvertimeAmount),
                 // 🆕 追加
-                targetSocialInsGroupId,      // social_insurance_group_id
+                Number(targetSocialInsGroupId),      // social_insurance_group_id
                 targetEmpInsType || null     // employment_insurance_type
             ];
 

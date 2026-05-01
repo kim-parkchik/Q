@@ -62,9 +62,11 @@ export const useApp = () => {
             [PENSION_RATE[1]] // インデックス1（18.30）を直接渡す
           );
         }
-        const existingHead = await sqlite.select<any[]>("SELECT * FROM branches");
-        if (existingHead.length === 0) {
-          await sqlite.execute("INSERT INTO branches (name, prefecture) VALUES ('本店', '')");
+        // 全件数ではなく、ID=1（本社分）があるかを確認する
+        const headCheck = await sqlite.select<any[]>("SELECT id FROM branches WHERE id = 1");
+        if (headCheck.length === 0) {
+          // ID=1 を指定してインサートする
+          await sqlite.execute("INSERT INTO branches (id, name, prefecture) VALUES (1, '本店', '')");
         }
 
         setDb(sqlite);

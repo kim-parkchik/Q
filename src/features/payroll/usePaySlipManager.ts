@@ -65,7 +65,7 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
     // 県名の整形（ヘルパー関数）
     const getPrefecture = (branchId: number): string => {
         const branch = branches.find((b) => b.id === branchId);
-        if (!branch?.prefecture) return "東京";
+        if (!branch?.prefecture) return "京都";
         return branch.prefecture.replace(/[都道府県]$/, "");
     };
 

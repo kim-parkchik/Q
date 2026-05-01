@@ -280,7 +280,7 @@ export default function BonusManager({ db, staffList }: Props) {
     // ── 賞与計算 ──────────────────────────────────────────────
     const getPrefecture = (branchId: number): string => {
         const b = branches.find(b => b.id === branchId);
-        return (b?.prefecture ?? "東京都").replace(/[都道府県]$/, "");
+        return (b?.prefecture ?? "京都府").replace(/[都道府県]$/, "");
     };
 
     const calcBonusForStaff = (staff: any, settingId: number) => {
@@ -296,7 +296,7 @@ export default function BonusManager({ db, staffList }: Props) {
 
         // 健康保険・介護保険（上限573万円チェックは別途必要）
         const pref = getPrefecture(staff.branch_id || 1);
-        const rates = Master.KENPO_RATES[pref] ?? Master.KENPO_RATES["東京"];
+        const rates = Master.KENPO_RATES[pref] ?? Master.KENPO_RATES["京都"];
         const isNursing = staff.birthday ? (() => {
             const b = new Date(staff.birthday);
             const now = new Date();
