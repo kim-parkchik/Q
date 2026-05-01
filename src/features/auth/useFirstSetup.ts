@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 export function useFirstSetup(db: any, onComplete: () => void) {
     const [loginId] = useState("admin");
@@ -25,14 +26,18 @@ export function useFirstSetup(db: any, onComplete: () => void) {
         if (!displayName.trim()) return setError("表示名を入力してください。");
 
         try {
-            // 🆕 ここでハッシュ化！
-            const hashedPassword = await hashPassword(password);
+            // 🆕 Rust 側の hash_password コマンドを呼び出す！
+            // ここでさっき lib.rs に書いた Argon2 が火を吹きます。
+            const hashedPassword = await invoke<string>("hash_password", { 
+                password: password 
+            });
 
             await db.execute(
                 `INSERT INTO users (login_id, display_name, password_hash, role) 
                  VALUES (?, ?, ?, 'admin')`,
-                [loginId, displayName, hashedPassword] // 🆕 ハッシュ化した値を保存
+                [loginId, displayName, hashedPassword] // Argon2のハッシュが保存される
             );
+            
             alert("管理者アカウントを作成しました。ログインしてください。");
             onComplete();
         } catch (err) {

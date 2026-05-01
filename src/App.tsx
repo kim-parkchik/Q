@@ -67,6 +67,9 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
 function App() {
   const {
     db,
+    createNewProject, // 🆕 追加
+    openProject,      // 🆕 追加
+    closeProject,     // 🆕 追加
     currentUser, setCurrentUser,
     staffList,
     activeTab, setActiveTab,
@@ -83,6 +86,40 @@ function App() {
 
   if (isLoading) {
     return <div style={{ padding: "20px" }}>起動しています...</div>; // ✨ 起動中のチラつき防止
+  }
+
+  // --- 🆕 ここを書き換え：DBがまだ選ばれていない時の画面 ---
+  if (!db) {
+    return (
+      <div style={{ 
+        height: "100vh", display: "flex", flexDirection: "column", 
+        justifyContent: "center", alignItems: "center", gap: "20px",
+        backgroundColor: "#f5f7fa" 
+      }}>
+        <div style={{ textAlign: "center", marginBottom: "30px" }}>
+          <img 
+            src="/logo.svg" 
+            alt="App Logo" 
+            style={{ width: "256px", height: "auto" }} 
+          />
+        </div>
+        <div style={{ display: "flex", gap: "15px" }}>
+          <button 
+            onClick={createNewProject} 
+            style={{ padding: "12px 24px", backgroundColor: "#002D62", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+          >
+            新しく会社ファイルを作る
+          </button>
+          <button 
+            onClick={openProject} 
+            style={{ padding: "12px 24px", backgroundColor: "white", border: "1px solid #dcdfe6", borderRadius: "4px", cursor: "pointer" }}
+          >
+            既存のファイルを開く (.qp)
+          </button>
+        </div>
+        <div style={{ color: "#909399", fontSize: "12px" }}>{APP_NAME} ver {APP_VERSION}</div>
+      </div>
+    );
   }
 
   // --- 表示の出し分け ---
@@ -188,13 +225,13 @@ function App() {
                <span style={{ fontWeight: "500" }}>{currentUser.display_name} さん</span>
             </div>
             <button 
-              onClick={() => setCurrentUser(null)} 
+              onClick={closeProject} // 🆕 setCurrentUser(null) から変更！
               style={S.logoutButton}
               onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#f5f7fa")}
               onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#fff")}
             >
               <LogOut size={14} />
-              ログアウト
+              会社を閉じる
             </button>
           </div>
         </header>

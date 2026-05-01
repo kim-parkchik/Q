@@ -7,7 +7,15 @@ export default function LoginScreen({ db, onLoginSuccess }: { db: any, onLoginSu
   return (
     <div style={S.containerStyle}>
       <div style={S.cardStyle}>
-        <h2 style={{ textAlign: "center", marginBottom: "30px", color: "#34495e" }}>Q ログイン</h2>
+        {/* --- ロゴ表示部分 --- */}
+        <div style={{ textAlign: "center", marginBottom: "30px" }}>
+          <img 
+            src="/logo.svg" 
+            alt="App Logo" 
+            style={{ width: "120px", height: "auto" }} 
+          />
+        </div>
+        {/* ------------------ */}
         
         <form onSubmit={handleLogin}>
           <div style={S.inputGroupStyle}>
