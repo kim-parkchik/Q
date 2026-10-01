@@ -315,7 +315,8 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
       }));
       await checkRemainingPaidLeave();
     } catch (e) {
-      alert("保存エラー");
+      console.error("勤怠の確定保存エラー:", e);
+      alert("保存エラー: " + e);
     }
   };
 
@@ -602,6 +603,36 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
     };
     input.click();
   };
+
+  // --- 会社設定と拠点の都道府県を読み込む（給与計算エンジンに必要） ---
+  // ※ リファクタリング時に読み込み処理が抜けていたため復元
+  const loadCompanyAndBranch = useCallback(async () => {
+    if (!db) return;
+    try {
+      const configData = await db.select("SELECT * FROM company WHERE id = 1") as any[];
+      if (configData?.length > 0) setCompanySettings(configData[0]);
+
+      if (selectedStaff?.branch_id) {
+        const branchData = await db.select(
+          "SELECT prefecture FROM branches WHERE id = ?",
+          [selectedStaff.branch_id]
+        ) as any[];
+        const pref = Master.toKenpoPrefName(branchData?.[0]?.prefecture);
+        if (pref) {
+          setBranchPrefecture(pref);
+        } else {
+          console.warn(`拠点の都道府県が未設定または不明です（${branchData?.[0]?.prefecture}）。京都の料率で仮計算します。`);
+          setBranchPrefecture("京都");
+        }
+      }
+    } catch (e) {
+      console.error("Company/branch load error:", e);
+    }
+  }, [db, selectedStaff]);
+
+  useEffect(() => {
+    loadCompanyAndBranch();
+  }, [loadCompanyAndBranch]);
 
   // --- 副次的な副作用 ---
   useEffect(() => {

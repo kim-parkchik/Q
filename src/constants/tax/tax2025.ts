@@ -135,3 +135,12 @@ export const TAX_EXTRA_CONFIG = {
  * ※CompanyManagerで設定する「非課税限度額」のデフォルト値等に使用
  */
 export const DEFAULT_COMMUTING_TAX_FREE_LIMIT = 150000;
+
+export const TAX_2025 = {
+  MASTER_YEAR,
+  MASTER_MONTH,
+  GENSEN_TAX_TABLE,
+  BONUS_TAX_RATE_TABLE,
+  TAX_EXTRA_CONFIG,
+  DEFAULT_COMMUTING_TAX_FREE_LIMIT,
+};

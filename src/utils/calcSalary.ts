@@ -60,13 +60,13 @@ export interface SalaryResult {
   hyojunHoshu: number;
 }
 
-export const PREFECTURES = Object.keys(Master.KENPO_RATES);
+export const PREFECTURES = Object.keys(Master.INSURANCE_2026.KENPO_RATES);
 
 export const getHyojunHoshu = (monthly: number): number => {
-  for (const [lo, hi, std] of Master.HYOJUN_TABLE) {
+  for (const [lo, hi, std] of Master.INSURANCE_2026.HYOJUN_TABLE) {
     if (monthly >= lo && monthly < hi) return std;
   }
-  return Master.HYOJUN_TABLE[Master.HYOJUN_TABLE.length - 1][2];
+  return Master.INSURANCE_2026.HYOJUN_TABLE[Master.INSURANCE_2026.HYOJUN_TABLE.length - 1][2];
 };
 
 const getGensenTax = (taxBase: number, dependents: number): number => {
@@ -77,7 +77,7 @@ const getGensenTax = (taxBase: number, dependents: number): number => {
     const ded  = [0,2110,4140,6180,8210,10250,12280,14320][dep];
     return Math.max(0, base - ded);
   }
-  for (const row of Master.GENSEN_TAX_TABLE) {
+  for (const row of Master.TAX_2026.GENSEN_TAX_TABLE) {
     const [lo, hi, ...taxes] = row;
     if (taxBase >= lo && taxBase < hi) return taxes[dep] ?? 0;
   }
@@ -92,9 +92,9 @@ export const checkNursingCare = (birthday: string, year: number, month: number):
   const targetDate = dayjs(new Date(year, month - 1, 1));
   
   // 40歳に達する月の初日
-  const reach40 = birthDate.add(Master.NURSING_CARE_START_AGE, 'year').startOf('month');
+  const reach40 = birthDate.add(Master.INSURANCE_2026.NURSING_CARE_START_AGE, 'year').startOf('month');
   // 65歳に達する月の初日
-  const reach65 = birthDate.add(Master.NURSING_CARE_END_AGE, 'year').startOf('month');
+  const reach65 = birthDate.add(Master.INSURANCE_2026.NURSING_CARE_END_AGE, 'year').startOf('month');
 
   return targetDate.isSameOrAfter(reach40) && targetDate.isBefore(reach65);
 };
@@ -447,7 +447,7 @@ export const calculateSalary = (
 
   // 2. 料率の取得と計算
   const nursingTarget = checkNursingCare(staff.birthday || '', targetYear, targetMonth);
-  const prefRates = Master.KENPO_RATES[extras.prefecture] ?? Master.KENPO_RATES["京都"];
+  const prefRates = Master.INSURANCE_2026.KENPO_RATES[extras.prefecture] ?? Master.INSURANCE_2026.KENPO_RATES["京都"];
   const sInsType = companySettings?.round_social_ins || 'floor';
 
   // 健康保険（介護なし/ありをインデックスで切り替え）
@@ -455,7 +455,7 @@ export const calculateSalary = (
   const healthInsRate = prefRates[0] ?? 0; 
     
   const healthInsurance = applyRounding(
-    (Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN) * healthInsRate) / 100, 
+    (Math.min(hyojunHoshu, Master.INSURANCE_2026.KENPO_MAX_HYOJUN) * healthInsRate) / 100, 
     sInsType
   );
 
@@ -463,17 +463,17 @@ export const calculateSalary = (
   let nursingInsurance = 0;
   if (nursingTarget) {
     // Master.KENPO_CARE_RATE[0] (0.80) を使用
-    const careRate = Master.KENPO_CARE_RATE[0] ?? 0;
+    const careRate = Master.INSURANCE_2026.KENPO_CARE_RATE[0] ?? 0;
     nursingInsurance = applyRounding(
-      (Math.min(hyojunHoshu, Master.KENPO_MAX_HYOJUN) * careRate) / 100, 
+      (Math.min(hyojunHoshu, Master.INSURANCE_2026.KENPO_MAX_HYOJUN) * careRate) / 100, 
       sInsType
     );
   }
 
   // 厚生年金
   // [0]が本人分, [1]が総額
-  const pensionHyojun = Math.max(Master.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, Master.PENSION_MAX_HYOJUN));
-  const welfarePension = applyRounding((pensionHyojun * Master.PENSION_RATE[0]) / 100, sInsType);
+  const pensionHyojun = Math.max(Master.INSURANCE_2026.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, Master.INSURANCE_2026.PENSION_MAX_HYOJUN));
+  const welfarePension = applyRounding((pensionHyojun * Master.INSURANCE_2026.PENSION_RATE[0]) / 100, sInsType);
 
   // 雇用保険
   // [0]が本人分, [1]が総額
@@ -481,7 +481,7 @@ export const calculateSalary = (
   const empInsKey = (staff.employment_insurance_type as Master.EmpInsType) || 'general';
   // マスターデータから該当する業種の配列を取得
   // 万が一、変な文字列が入っていても 'general' を参照するようにガード
-  const empRates = Master.LABOR_INSURANCE_RATES[empInsKey] || Master.LABOR_INSURANCE_RATES.general;
+  const empRates = Master.INSURANCE_2026.LABOR_INSURANCE_RATES[empInsKey] || Master.INSURANCE_2026.LABOR_INSURANCE_RATES.general;
   // [0] が本人負担分
   const empInsRate = empRates[0];
   // 計算実行

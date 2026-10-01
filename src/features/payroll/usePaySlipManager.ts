@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import * as Master from "../../constants";
 
 export function usePaySlipManager(db: any, staffList: any[], initialYear: number, initialMonth: number) {
   const [year, setYear] = useState(initialYear);
@@ -65,8 +66,9 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
   // 県名の整形（ヘルパー関数）
   const getPrefecture = (branchId: number): string => {
     const branch = branches.find((b) => b.id === branchId);
-    if (!branch?.prefecture) return "京都";
-    return branch.prefecture.replace(/[都道府県]$/, "");
+    const pref = Master.toKenpoPrefName(branch?.prefecture);
+    if (!pref) console.warn(`拠点の都道府県が未設定または不明です（${branch?.prefecture}）。京都の料率で仮計算します。`);
+    return pref ?? "京都";
   };
 
   // 個別スタッフデータのロード（モーダル用）

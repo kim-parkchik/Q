@@ -7,7 +7,7 @@ import { fetchAddressByZip } from "../../utils/addressUtils";
 import * as Master from '../../constants';
 
 // 選択肢用の定数を作成
-export const HYOJUN_OPTIONS = Master.HYOJUN_TABLE.map(([lo, hi, std], index) => {
+export const HYOJUN_OPTIONS = Master.INSURANCE_2026.HYOJUN_TABLE.map(([lo, hi, std], index) => {
     let range = "";
 
     if (index === 0) {

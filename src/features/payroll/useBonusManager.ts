@@ -27,7 +27,7 @@ const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, 
   if (prevMonthTaxBase > 0) {
     const depIndex = Math.min(dependents, 3) + 2;
     let rate = 0;
-    for (const row of Master.BONUS_TAX_RATE_TABLE) {
+    for (const row of Master.TAX_2026.BONUS_TAX_RATE_TABLE) {
       if (prevMonthTaxBase >= row[0] && prevMonthTaxBase < row[1]) {
         rate = row[depIndex];
         break;
@@ -38,7 +38,7 @@ const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, 
   const monthlyAmount = Math.floor(bonusAfterSocial / 6);
   let monthlyTax = 0;
   const depIndex = Math.min(dependents, 3) + 2;
-  for (const row of Master.GENSEN_TAX_TABLE) {
+  for (const row of Master.TAX_2026.GENSEN_TAX_TABLE) {
     if (monthlyAmount >= row[0] && monthlyAmount < row[1]) {
       monthlyTax = row[depIndex];
       break;
@@ -334,8 +334,11 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const hyojunBonus = Math.floor(totalEarnings / 1000) * 1000;
 
     const branch = branches.find(b => b.id === staff.branch_id);
-    const pref = (branch?.prefecture ?? "京都府").replace(/[都道府県]$/, "");
-    const rates = Master.KENPO_RATES[pref] ?? Master.KENPO_RATES["京都"];
+    const pref = Master.toKenpoPrefName(branch?.prefecture) ?? "京都";
+    if (!Master.toKenpoPrefName(branch?.prefecture)) {
+      console.warn(`拠点の都道府県が未設定または不明です（${branch?.prefecture}）。京都の料率で仮計算します。`);
+    }
+    const rates = Master.INSURANCE_2026.KENPO_RATES[pref] ?? Master.INSURANCE_2026.KENPO_RATES["京都"];
 
     const isNursing = (() => {
       if (!staff.birthday || !selectedSetting.payment_date) return false;
@@ -348,17 +351,17 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
     const sInsType = companySettings.round_social_ins || 'floor';
     const currentYearTotal = annualBonusTotals[staff.id] ?? 0;
-    const healthHyojun = Math.min(hyojunBonus, Math.max(0, Master.HEALTH_INS_ANNUAL_LIMIT - currentYearTotal));
+    const healthHyojun = Math.min(hyojunBonus, Math.max(0, Master.INSURANCE_2026.HEALTH_INS_ANNUAL_LIMIT - currentYearTotal));
 
     const healthTotal = applyRounding(healthHyojun * (isNursing ? rates[1] : rates[0]) / 100, sInsType);
     const nursingInsurance = isNursing ? applyRounding(healthHyojun * (rates[1] - rates[0]) / 100, sInsType) : 0;
     const healthInsurance = healthTotal - nursingInsurance;
 
-    const pensionHyojun = Math.min(hyojunBonus, Master.PENSION_INS_SINGLE_LIMIT);
-    const welfarePension = applyRounding((pensionHyojun * Master.PENSION_RATE[0]) / 100, sInsType);
+    const pensionHyojun = Math.min(hyojunBonus, Master.INSURANCE_2026.PENSION_INS_SINGLE_LIMIT);
+    const welfarePension = applyRounding((pensionHyojun * Master.INSURANCE_2026.PENSION_RATE[0]) / 100, sInsType);
 
     const empInsType = staff.employment_insurance_type || companySettings.default_emp_ins_type || 'general';
-    const empRate = Master.LABOR_INSURANCE_RATES[empInsType as keyof typeof Master.LABOR_INSURANCE_RATES] || Master.LABOR_INSURANCE_RATES.general;
+    const empRate = Master.INSURANCE_2026.LABOR_INSURANCE_RATES[empInsType as keyof typeof Master.INSURANCE_2026.LABOR_INSURANCE_RATES] || Master.INSURANCE_2026.LABOR_INSURANCE_RATES.general;
     const empInsurance = applyRounding(totalEarnings * empRate[0], companySettings.round_emp_ins || 'round');
 
     const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;

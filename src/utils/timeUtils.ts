@@ -2,12 +2,13 @@ import dayjs, { Dayjs } from 'dayjs';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 import minMax from 'dayjs/plugin/minMax';
 import * as Master from '../constants';
+import { DEFAULT_BASE_DATE } from "../constants/appConfig";
 
 dayjs.extend(isSameOrBefore);
 dayjs.extend(minMax);
 
 // 時間文字列をDayjsに変換
-export const parseToDayjs = (timeStr: string, baseDate: string = Master.DEFAULT_BASE_DATE): Dayjs => {
+export const parseToDayjs = (timeStr: string, baseDate: string = DEFAULT_BASE_DATE): Dayjs => {
   return dayjs(`${baseDate} ${timeStr}`, 'YYYY-MM-DD HH:mm');
 };
 

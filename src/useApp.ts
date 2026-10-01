@@ -102,7 +102,7 @@ export const useApp = () => {
         await sqlite.execute(
           `INSERT INTO social_insurance_groups (id, name, type, is_fixed, pension_rate, is_active) 
           VALUES (1, '全国健康保険協会（協会けんぽ）', 'kyokai', 0, ?, 1)`,
-          [Master.PENSION_RATE[1]] // インデックス1（18.30）を直接渡す
+          [Master.INSURANCE_2026.PENSION_RATE[1]] // インデックス1（18.30）を直接渡す
         );
       }
       // 🆕 賞与項目マスターの初期投入
