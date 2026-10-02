@@ -9,6 +9,8 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { ask } from '@tauri-apps/plugin-dialog';
 import * as Master from '../../constants';
 import { fetchAddressByZip } from "../../utils/addressUtils";
+import { useToast } from "../../components/Toast";
+import { useMessageDialog } from "../../components/MessageDialog";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -16,6 +18,9 @@ interface UseCompanyManagerArgs {
 }
 
 export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs) {
+    const toast = useToast();
+    const dialog = useMessageDialog();
+
     // --- タブ管理 ---
     const [activeSubTab, setActiveSubTab] = useState<"info" | "branches" | "rounding" | "payroll" | "social">("info");
     const [hasSavedOnce, setHasSavedOnce] = useState(false);
@@ -31,6 +36,9 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [compLabor, setCompLabor] = useState("");   // ✨追加
     const [headPref, setHeadPref] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    // 保存済みの値（変更があったかどうかの判定に使う）
+    const [savedInfo, setSavedInfo] = useState<Record<string, string | number> | null>(null);
+    const [savedRounding, setSavedRounding] = useState<Record<string, string> | null>(null);
     const [isSearchingZip, setIsSearchingZip] = useState(false);
     const [weekStartDay, setWeekStartDay] = useState(0);
     const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
@@ -149,7 +157,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         const cleanZip = zip.replace(/[^\d]/g, "");
         
         if (cleanZip.length !== 7) {
-            alert("郵便番号は7桁で入力してください");
+            dialog.warning("郵便番号は7桁で入力してください");
             return;
         }
 
@@ -166,11 +174,11 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setPref(res.address1);
                 setAddr(res.address2 + res.address3);
             } else {
-                alert("該当する住所が見つかりませんでした");
+                dialog.warning("該当する住所が見つかりませんでした");
             }
         } catch (e) {
             console.error("住所検索エラー:", e);
-            alert("住所検索中にエラーが発生しました");
+            dialog.error("住所検索中にエラーが発生しました");
         } finally {
             // ローディングが速すぎてチカチカするのを防ぐ
             setTimeout(() => setLoading(false), 300);
@@ -202,6 +210,22 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             setBranches(resB);
             const head = resB.find(b => b.id === 1);
             if (head) setHeadPref(head.prefecture || "");
+
+            // 「保存済みの値」を記録（画面の値と比べて、変更があれば保存ボタンを有効にする）
+            if (res.length > 0) {
+                const c = res[0];
+                setSavedInfo({
+                    compName: c.name || "", compZip: c.zip_code || "", compAddr: c.address || "",
+                    compPhone: c.phone || "", compNum: c.corporate_number || "", compRep: c.representative || "",
+                    compHealth: c.health_ins_num || "", compLabor: c.labor_ins_num || "",
+                    weekStartDay: c.week_start_day ?? 0, headPref: head?.prefecture || "",
+                });
+                setSavedRounding({
+                    roundOvertime: c.round_overtime || "round",
+                    roundSocialIns: c.round_social_ins || "floor",
+                    roundEmpIns: c.round_emp_ins || "round",
+                });
+            }
             const resPG = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
             setPayrollGroups(resPG);
             const resSG = await db.select<any[]>("SELECT * FROM social_insurance_groups ORDER BY id ASC");
@@ -224,13 +248,13 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             console.log("全勤怠データの再検証フラグを立てました。");
         } catch (e) {
                 console.error("Revalidation Error:", e);
-                alert("勤怠データの再検証中にエラーが発生しました。");
+                dialog.error("勤怠データの再検証中にエラーが発生しました。");
         }
     };
 
     const saveCompany = async () => {
-        if (!compName.trim()) return alert("会社名/屋号は必須です");
-        if (!headPref) return alert("都道府県を選択してください");
+        if (!compName.trim()) return dialog.warning("会社名/屋号は必須です");
+        if (!headPref) return dialog.warning("都道府県を選択してください");
         let finalZip = compZip.replace(/[^\d]/g, "");
         if (finalZip.length === 7) finalZip = finalZip.slice(0, 3) + "-" + finalZip.slice(3);
 
@@ -248,12 +272,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
 
         setIsSaving(true);
         try {
+            // ※ REPLACE INTO だと行を作り直すため、ここに書いていない列（祝日の取得先・
+            //   バックアップ世代数など）が初期値に戻ってしまう。UPDATE で必要な列だけ更新する。
             await db.execute(
-                `REPLACE INTO company (
-                    id, name, zip_code, address, phone, corporate_number, representative, 
-                    health_ins_num, labor_ins_num, 
-                    round_overtime, round_social_ins, round_emp_ins, week_start_day
-                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                `UPDATE company SET
+                    name = ?, zip_code = ?, address = ?, phone = ?, corporate_number = ?, representative = ?,
+                    health_ins_num = ?, labor_ins_num = ?,
+                    round_overtime = ?, round_social_ins = ?, round_emp_ins = ?, week_start_day = ?
+                WHERE id = 1`,
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
                     compHealth, compLabor, 
@@ -280,7 +306,11 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             setTimeout(() => setIsSaving(false), 1000);
             setIsWeekStartEditable(false); // 保存が終わったら編集モードを自動で閉じるのが親切です
 
-        } catch (e) { setIsSaving(false); }
+        } catch (e) {
+            console.error("Company Save Error:", e);
+            setIsSaving(false);
+            dialog.error("会社情報の保存に失敗しました。");
+        }
     };
 
     // 編集開始
@@ -324,7 +354,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const rates = getRates(previewPref);
 
     const saveSocialGroup = async () => {
-        if (!sgName.trim()) return alert("規定名を入力してください");
+        if (!sgName.trim()) return dialog.warning("規定名を入力してください");
 
         // パラメータを配列にまとめる（順番が命です！）
         const params = [
@@ -343,6 +373,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             1                     // is_active (新規時は常に1)
         ];
 
+        const isEdit = editingSgId !== null;
         try {
             if (editingSgId !== null) {
                 // --- UPDATE (編集) ---
@@ -369,12 +400,12 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 );
             }
 
-            alert("規定を保存しました");
+            toast.success(isEdit ? `「${sgName}」を更新しました` : `「${sgName}」を追加しました`);
             resetSgForm();
             loadData();
         } catch (e) {
             console.error(e);
-            alert("保存に失敗しました。カラム名やデータ型を確認してください。");
+            dialog.error("社会保険規定の保存に失敗しました。");
         }
     };
 
@@ -424,7 +455,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             // 廃止しようとしている場合：使用中チェック
             const usage = await db.select<any[]>("SELECT id FROM staff WHERE social_insurance_group_id = ?", [id]);
             if (usage.length > 0) {
-                alert(`「${currentName}」は現在使用中の従業員がいるため、廃止できません。`);
+                dialog.warning(`「${currentName}」は現在使用中の従業員がいるため、廃止できません。`);
                 return;
             }
             const ok = await ask(
@@ -442,19 +473,19 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             // refreshSocialGroups ではなく、既存の loadData を呼ぶ
             await loadData(); 
             
-            if (nextStatus === 1) {
-                alert(`「${currentName}」を復元しました。`);
-            }
+            toast.success(nextStatus === 1 ? `「${currentName}」を復元しました` : `「${currentName}」を廃止しました`);
         } catch (e) {
             console.error("Status Toggle Error:", e);
-            alert("状態の更新に失敗しました。");
+            dialog.error("状態の更新に失敗しました。");
         }
     };
 
     // 保存処理（新規登録・更新兼用）
     const savePayrollGroup = async () => {
-        if (!pgName) return alert("グループ名を入力してください");
+        if (!pgName) return dialog.warning("グループ名を入力してください");
 
+        const isEdit = editingPgId !== null;
+        const savedName = pgName;
         try {
             if (editingPgId !== null) {
                 // 更新
@@ -471,9 +502,10 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             }
             resetPgForm();
             loadData();
+            toast.success(isEdit ? `「${savedName}」を更新しました` : `「${savedName}」を追加しました`);
         } catch (e) {
             console.error(e);
-            alert("保存に失敗しました");
+            dialog.error("保存に失敗しました");
         }
     };
 
@@ -482,7 +514,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             // 所属人数チェック
             const staffCount = await db.select<any[]>("SELECT COUNT(*) as count FROM staff WHERE payroll_group_id = ?", [id]);
             if ((staffCount[0]?.count || 0) > 0) {
-                alert("この規定には従業員が紐付いているため削除できません。");
+                dialog.warning("この規定には従業員が紐付いているため削除できません。");
                 setDeletingPgId(null);
                 return;
             }
@@ -490,18 +522,21 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             await db.execute("DELETE FROM payroll_groups WHERE id = ?", [id]);
             setDeletingPgId(null);
             loadData();
+            toast.success("給与規定グループを削除しました");
         } catch (e) {
-            alert("削除に失敗しました");
+            dialog.error("削除に失敗しました");
         }
     };
 
     const saveBranch = async () => {
-        if (!bName || !bPref) return alert("名称と都道府県は必須です");
+        if (!bName || !bPref) return dialog.warning("名称と都道府県は必須です");
         
         // 郵便番号の整形（ハイフンありで統一して保存する場合）
         let finalZip = bZip.replace(/[^\d]/g, "");
         if (finalZip.length === 7) finalZip = finalZip.slice(0, 3) + "-" + finalZip.slice(3);
 
+        const isEdit = editingBranchId !== null;
+        const savedName = bName;
         try {
             if (editingBranchId !== null) {
                 await db.execute(
@@ -522,9 +557,10 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             }
             resetBranchForm();
             loadData();
+            toast.success(isEdit ? `「${savedName}」を更新しました` : `「${savedName}」を追加しました`);
         } catch (e) { 
             console.error(e);
-            alert("支店情報の保存に失敗しました。");
+            dialog.error("支店情報の保存に失敗しました。");
         }
     };
 
@@ -569,7 +605,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             } catch (e) { count = 0; }
 
             if (count > 0) {
-                alert(`この支店には現在 ${count} 名の従業員が所属しているため、削除できません。`);
+                dialog.warning(`この支店には現在 ${count} 名の従業員が所属しているため、削除できません。`);
                 setDeletingBranchId(null);
                 return;
             }
@@ -579,10 +615,11 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             
             if (editingBranchId === id) resetBranchForm();
             setDeletingBranchId(null); // 完了後にリセット
+            toast.success("支店を削除しました");
 
         } catch (e) {
             console.error(e);
-            alert("削除に失敗しました。");
+            dialog.error("削除に失敗しました。");
             setDeletingBranchId(null);
         }
     };
@@ -599,11 +636,11 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 WHERE id = 1`,
                 [roundOvertime, roundSocialIns, roundEmpIns]
             );
-            alert("端数処理設定を保存しました");
+            toast.success("端数処理設定を保存しました");
             await loadData(); // 最新状態を再読み込み
         } catch (e) {
             console.error(e);
-            alert("保存に失敗しました");
+            dialog.error("保存に失敗しました");
         } finally {
             setIsSaving(false);
         }
@@ -615,12 +652,12 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         const targetNum = compNum.trim();
 
         if (targetNum.length !== 13) {
-            return alert("法人番号は13桁で入力してください。");
+            return dialog.warning("法人番号は13桁で入力してください。");
         }
 
         // バリデーション実行
         if (!isValidCorporateNumber(targetNum)) {
-            return alert("法人番号の形式（チェックディジット）が正しくありません。入力ミスがないか再度ご確認ください。");
+            return dialog.warning("法人番号の形式（チェックディジット）が正しくありません。入力ミスがないか再度ご確認ください。");
         }
 
         setIsSearchingComp(true);
@@ -693,17 +730,30 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             }
         } catch (e) {
             console.error(e);
-            alert("情報の取得に失敗しました。");
+            dialog.error("情報の取得に失敗しました。");
         } finally {
             setIsSearchingComp(false);
         }
     };
+
+    // 変更があるか（保存ボタンの有効・無効に使う）
+    const currentInfo: Record<string, string | number> = {
+        compName, compZip, compAddr, compPhone, compNum, compRep,
+        compHealth, compLabor, weekStartDay, headPref,
+    };
+    const isInfoDirty = savedInfo === null || Object.keys(currentInfo).some((k) => currentInfo[k] !== savedInfo[k]);
+    const isRoundingDirty = savedRounding === null
+        || roundOvertime !== savedRounding.roundOvertime
+        || roundSocialIns !== savedRounding.roundSocialIns
+        || roundEmpIns !== savedRounding.roundEmpIns;
 
     // データを有効・無効で分ける
     const activeGroups = socialGroups.filter(sg => sg.is_active === 1);
     const inactiveGroups = socialGroups.filter(sg => sg.is_active === 0);
 
     return {
+        isInfoDirty,
+        isRoundingDirty,
         activeSubTab,
         setActiveSubTab,
         hasSavedOnce,

@@ -55,6 +55,7 @@ export default function CompanyInfoTab({ cm }: Props) {
         headPref,
         setHeadPref,
         isSaving,
+        isInfoDirty,
         isSearchingZip,
         setIsSearchingZip,
         weekStartDay,
@@ -274,11 +275,16 @@ export default function CompanyInfoTab({ cm }: Props) {
                     <div style={{ gridColumn: "1 / 3" }}>
                         <button 
                             onClick={saveCompany} 
-                            disabled={isSaving || !compName.trim() || !headPref} 
+                            disabled={isSaving || !compName.trim() || !headPref || !isInfoDirty} 
+                            title={!isInfoDirty ? "変更がないため保存できません" : undefined}
                             style={{ 
                                 ...btnStyle, 
                                 width: "100%", 
-                                backgroundColor: isSaving ? "#2ecc71" : (!hasSavedOnce ? "#3498db" : "#34495e"),
+                                // 保存中は緑、変更なし・必須未入力はグレー、保存できるときは紺
+                                backgroundColor: isSaving ? "#2ecc71"
+                                    : (!isInfoDirty || !compName.trim() || !headPref) ? "#bdc3c7"
+                                    : (!hasSavedOnce ? "#3498db" : "#34495e"),
+                                cursor: (isSaving || !isInfoDirty || !compName.trim() || !headPref) ? "not-allowed" : "pointer",
                                 // 👇 アイコンと文字を中央に揃える
                                 display: "flex",
                                 alignItems: "center",

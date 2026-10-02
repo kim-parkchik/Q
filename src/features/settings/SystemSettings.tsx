@@ -2,6 +2,7 @@ import { useState } from "react";
 import * as S from "./SystemSettings.styles";
 import { useSystemSettings } from "./useSystemSettings";
 import { Users, DatabaseZap, Settings, Calendar, FileUp } from "lucide-react";
+import DevMessagePreview from "../../components/DevMessagePreview";
 
 // propsに currentUser を追加
 export default function SystemSettings({ db, currentUser }: { db: any, currentUser: { login_id: string, role: string } }) {
@@ -484,6 +485,9 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
           </div>
         </div>
       )}
+
+      {/* 開発モードのときだけ表示されるテスト用パネル */}
+      {import.meta.env.DEV && <DevMessagePreview />}
     </div>
   );
 }

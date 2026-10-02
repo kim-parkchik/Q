@@ -26,6 +26,7 @@ interface Props {
 export default function RoundingTab({ cm }: Props) {
     const {
         isSaving,
+        isRoundingDirty,
         roundOvertime,
         setRoundOvertime,
         roundSocialIns,
@@ -114,18 +115,19 @@ export default function RoundingTab({ cm }: Props) {
 
                 <button 
                     onClick={saveRoundingSettings} // ← 用意してあった関数を呼び出す
-                    disabled={isSaving}           // 保存中は連打できないようにする
+                    disabled={isSaving || !isRoundingDirty} // 保存中・変更なしは押せない
+                    title={!isRoundingDirty ? "変更がないため保存できません" : undefined}
                     style={{ 
                         ...btnStyle, 
                         marginTop: "30px", 
-                        backgroundColor: "#34495e", 
+                        backgroundColor: isRoundingDirty || isSaving ? "#34495e" : "#bdc3c7", // 変更なしはグレー
                         width: "100%",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         gap: "8px",
                         opacity: isSaving ? 0.7 : 1, // 保存中は少し色を薄くする
-                        cursor: isSaving ? "not-allowed" : "pointer"
+                        cursor: (isSaving || !isRoundingDirty) ? "not-allowed" : "pointer"
                     }}
                 >
                     {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
