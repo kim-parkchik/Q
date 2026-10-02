@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
-import { ask, save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { saveCsvFile } from "../../utils/fileSaveUtils";
+import { useToast } from "../../components/Toast";
+import { useMessageDialog } from "../../components/MessageDialog";
 import { hashPassword } from "../../utils/authUtils";
 
 export function useSystemSettings(db: any) {
+  const toast = useToast();
+  const dialog = useMessageDialog();
   const [users, setUsers] = useState<any[]>([]);
   const [holidaySource, setHolidaySource] = useState<"url" | "file">("url");
   const [holidayUrl, setHolidayUrl] = useState("読み込み中...");
@@ -106,19 +110,14 @@ export function useSystemSettings(db: any) {
 
   // --- 3. ファイル操作ロジック (UserManagerから移動) ---
   const downloadSampleCsv = async () => {
-    const csvContent = "\uFEFF日付,祝日名\n2026/01/01,元日\n2026/05/03,憲法記念日";
+    const csvContent = "日付,祝日名\n2026/01/01,元日\n2026/05/03,憲法記念日";
     try {
-      const filePath = await save({
-        filters: [{ name: "CSV", extensions: ["csv"] }],
-        defaultPath: "holiday_sample.csv"
-      });
-      if (!filePath) return;
-
-      const data = new TextEncoder().encode(csvContent);
-      await writeFile(filePath, data);
-      alert("サンプルファイルを保存しました。");
+      const saved = await saveCsvFile(csvContent, "holiday_sample.csv");
+      if (!saved) return; // キャンセル
+      toast.success(`「${saved.name}」を保存しました`);
     } catch (e) {
-      alert(`保存に失敗しました。`);
+      console.error(e);
+      dialog.error("サンプルファイルの保存に失敗しました。");
     }
   };
 

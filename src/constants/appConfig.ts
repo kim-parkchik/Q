@@ -13,6 +13,9 @@ export const BACKUP_DIR_NAME = "Backup";
 /** ログファイルを保存するサブディレクトリ名 (必要であれば) */
 export const LOG_DIR_NAME = "Logs";
 
+/** CSVなどの出力ファイルを保存するときの初期フォルダ名（保存先は毎回選べる） */
+export const EXPORT_DIR_NAME = "Export";
+
 /** --- 拡張子の定義 --- */
 /** メインデータベース (Active Project) */
 export const EXT_MAIN = "qp";

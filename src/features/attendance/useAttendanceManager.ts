@@ -3,6 +3,9 @@ import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, calcDetailedDiff } from "../../utils/calcSalary";
 import * as Master from '../../constants';
+import { useToast } from "../../components/Toast";
+import { saveCsvFile } from "../../utils/fileSaveUtils";
+import { useMessageDialog } from "../../components/MessageDialog";
 
 /**
  * 給与計算期間を算出する
@@ -39,6 +42,8 @@ const getPayrollPeriod = (year: number, month: number, closingDay: number) => {
 };
 
 export function useAttendanceManager({ db, staffList, targetYear, setTargetYear, targetMonth, setTargetMonth }: any) {
+  const toast = useToast();
+  const dialog = useMessageDialog();
   const [activeTab, setActiveTab] = useState<"csv" | "individual">("individual");
   const [selectedStaffId, setSelectedStaffId] = useState("");
   const [monthlyWorkData, setMonthlyWorkData] = useState<Record<string, any>>({});
@@ -241,9 +246,17 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
     }));
   };
 
-  const finalizeAttendance = async (date: string) => {
-    if (isClosed) return alert("この月は給与確定済みです。");
-    if (!db || !selectedStaffId || !selectedStaff) return;
+  /**
+   * 1日分の勤怠を確定して保存する
+   * @param quiet true のときは失敗してもダイアログを出さない（一括保存で最後にまとめて知らせるため）
+   * @returns 保存できたら true
+   */
+  const finalizeAttendance = async (date: string, quiet = false): Promise<boolean> => {
+    if (isClosed) {
+      if (!quiet) dialog.warning("この月は給与確定済みのため、変更できません。");
+      return false;
+    }
+    if (!db || !selectedStaffId || !selectedStaff) return false;
     
     const row = monthlyWorkData[date];
 
@@ -314,15 +327,17 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
         [date]: { ...prev[date], is_finalized: 1, savedHours: total, nightHours: night, finalized_at: now } 
       }));
       await checkRemainingPaidLeave();
+      return true;
     } catch (e) {
       console.error("勤怠の確定保存エラー:", e);
-      alert("保存エラー: " + e);
+      if (!quiet) dialog.error(`${date} の勤怠を保存できませんでした。\n${e}`);
+      return false;
     }
   };
 
     // --- 1日のデータをDBの状態に戻す（キャンセル処理） ---
   const unfinalizeAttendance = async (date: string) => {
-    if (isClosed) return alert("給与確定済みの月は解除できません。");
+    if (isClosed) return dialog.warning("給与確定済みの月は、確定を解除できません。");
     if (!db || !selectedStaffId) return;
 
     try {
@@ -339,6 +354,7 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
       }));
     } catch (e) {
       console.error(e);
+      dialog.error(`${date} の確定を解除できませんでした。`);
     }
   };
 
@@ -351,7 +367,7 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
     });
     
     if (targetDates.length === 0) {
-      alert("保存が必要な入力はありません。");
+      toast.info("保存が必要な入力はありません");
       return; 
     }
 
@@ -362,12 +378,19 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
     try {
       if (!db || !selectedStaffId) return;
 
+      let okCount = 0;
+      const failedDates: string[] = [];
       for (const date of targetDates) {
-        await finalizeAttendance(date);
+        if (await finalizeAttendance(date, true)) okCount++;
+        else failedDates.push(date);
       }
-      alert(`${targetDates.length}件保存しました！`);
+      if (failedDates.length === 0) {
+        toast.success(`${okCount}日分の勤怠を確定しました`);
+      } else {
+        dialog.error(`${failedDates.length}日分の保存に失敗しました（${okCount}日分は保存済み）。\n失敗した日: ${failedDates.join(", ")}`);
+      }
     } catch (e) {
-      alert("エラー: " + e);
+      dialog.error(`一括保存中にエラーが発生しました。\n${e}`);
     } finally {
       // 3. 成功しても失敗しても必ず Loading を解除
       setIsLoading(false);
@@ -467,18 +490,6 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
     }
   }, [db, targetYear, targetMonth]);
 
-  // --- 共通のダウンロード処理 ---
-  const downloadCSV = (content: string, filename: string) => {
-    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
-    const blob = new Blob([bom, content], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   // --- 打刻ログのエクスポート ---
   const handleExportRawCSV = async () => {
     if (!db) return;
@@ -495,12 +506,14 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
         ORDER BY staff_id, work_date
       `, [`${monthStr}%`]) as any[];
 
-      if (!data.length) return alert("出力するデータがありません。");
+      if (!data.length) return dialog.warning(`${targetYear}年${targetMonth}月の打刻ログはありません。`);
       const csvContent = generateAttendanceCSV(data);
-      downloadCSV(csvContent, `打刻ログ_${targetYear}年${targetMonth}月.csv`);
+      const saved = await saveCsvFile(csvContent, `打刻ログ_${targetYear}年${targetMonth}月.csv`);
+      if (!saved) return; // 保存先の選択がキャンセルされた
+      toast.success(`「${saved.name}」を保存しました（${data.length}件）`);
     } catch (e) {
       console.error(e);
-      alert("エクスポートに失敗しました。");
+      dialog.error("打刻ログの出力に失敗しました。");
     }
   };
 
@@ -518,7 +531,7 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
         ORDER BY a.staff_id, a.work_date
       `, [startStr, endStr]) as any[];
 
-      if (!data.length) return alert("出力するデータがありません。");
+      if (!data.length) return dialog.warning("この計算期間の勤怠データはありません。");
 
       // CSVに確定状態の列を追加
       const csvData = data.map(row => ({
@@ -530,17 +543,19 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
       const filename = `勤怠詳細_${targetYear}年${targetMonth}月支給分${statusLabel}.csv`;
 
       const csvContent = generateAttendanceCSV(csvData); 
-      downloadCSV(csvContent, filename);
+      const saved = await saveCsvFile(csvContent, filename);
+      if (!saved) return; // 保存先の選択がキャンセルされた
+      toast.success(`「${saved.name}」を保存しました（${data.length}件）`);
     } catch (e) {
       console.error(e);
-      alert("エクスポートに失敗しました。");
+      dialog.error("詳細データの出力に失敗しました。");
     }
   };
 
   // --- CSVインポート ---
   const handleImportCSV = async () => {
     if (isClosed) {
-      alert("この月はすでに給与確定されているため、保存できません。");
+      dialog.warning("この月はすでに給与確定されているため、取り込めません。");
       return;
     }
     const input = document.createElement('input');
@@ -558,12 +573,18 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
           // parseAttendanceCSV の中で trim 処理がされているか確認が必要ですが、
           // ここでは row から値を取り出す際に念のため trim() を検討します。
           const rows = parseAttendanceCSV(text);
-          if (rows.length === 0) return;
+          if (rows.length === 0) {
+            dialog.warning("取り込めるデータがありませんでした。\nCSVの見出し行（スタッフID・日付・出勤・退勤 など）を確認してください。");
+            return;
+          }
 
+          let imported = 0;        // 取り込めた行
+          let skippedFinalized = 0; // 確定済みのため上書きしなかった行
+          let skippedInvalid = 0;   // スタッフIDか日付が空の行
           for (const row of rows) {
             const sId = row["スタッフID"];
             const date = row["日付"];
-            if (!sId || !date) continue;
+            if (!sId || !date) { skippedInvalid++; continue; }
 
             // CSVの日本語ヘッダー名を指定して確実に取得
             const valEntry  = row["出勤"];
@@ -573,7 +594,7 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
             const valOut    = row["外出"];
             const valReturn = row["戻り"];
 
-            await db.execute(
+            const result = await db.execute(
               `INSERT INTO attendance (
                 staff_id, work_date, 
                 csv_entry_time, csv_exit_time, 
@@ -591,12 +612,17 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
               WHERE is_finalized = 0`,
               [sId, date, valEntry || "", valExit || "", valBStart || "", valBEnd || "", valOut || "", valReturn || ""]
             );
+            // 確定済みの日は WHERE is_finalized = 0 で更新されないため、影響行数 0 になる
+            if ((result?.rowsAffected ?? 1) > 0) imported++;
+            else skippedFinalized++;
           }
-          alert("インポートが完了しました。");
           await loadMonthlyData(); 
+          toast.success(`「${file.name}」から${imported}件を取り込みました`);
+          if (skippedFinalized > 0) toast.info(`確定済みの${skippedFinalized}件は上書きしませんでした`);
+          if (skippedInvalid > 0) toast.info(`スタッフIDか日付が空の${skippedInvalid}行は読み飛ばしました`);
         } catch (err) {
           console.error(err);
-          alert("CSV読み込み中にエラーが発生しました。");
+          dialog.error(`CSVの取り込み中にエラーが発生しました。\n${err}`);
         }
       };
       reader.readAsText(file, 'utf-8');
