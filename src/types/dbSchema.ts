@@ -219,6 +219,7 @@ export const DB_SCHEMAS = [
     taxable_amount INTEGER DEFAULT 0,
     health_insurance INTEGER DEFAULT 0,
     nursing_insurance INTEGER DEFAULT 0,
+    child_support INTEGER DEFAULT 0,  -- 子ども・子育て支援金（令和8年4月分から）
     welfare_pension INTEGER DEFAULT 0,
     emp_insurance INTEGER DEFAULT 0,
     social_ins_total INTEGER DEFAULT 0,
@@ -286,6 +287,7 @@ export const DB_SCHEMAS = [
     hyojun_bonus INTEGER,      -- 標準賞与額（1,000円未満切り捨て後）
     health_insurance INTEGER,  -- 健保
     nursing_insurance INTEGER, -- 介護
+    child_support INTEGER,     -- 子ども・子育て支援金
     welfare_pension INTEGER,   -- 厚生年金
     emp_insurance INTEGER,     -- 雇用保険
     income_tax INTEGER,        -- 所得税

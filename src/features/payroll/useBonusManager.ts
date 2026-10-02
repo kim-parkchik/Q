@@ -4,7 +4,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
 import { calcWithholdingTax } from '../../utils/incomeTax';
-import { applyRounding } from '../../utils/payrollUtils';
+import { calcPremium } from '../../utils/socialInsurance';
 
 // --- Types ---
 interface BonusSetting {
@@ -333,7 +333,11 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     if (!Master.toKenpoPrefName(branch?.prefecture)) {
       console.warn(`拠点の都道府県が未設定または不明です（${branch?.prefecture}）。京都の料率で仮計算します。`);
     }
-    const rates = Master.INSURANCE_2026.KENPO_RATES[pref] ?? Master.INSURANCE_2026.KENPO_RATES["京都"];
+    // 賞与を支給する月の料率を使う（健康保険は3月分から、雇用保険は4月から新年度）
+    const payYear = selectedSetting.target_year;
+    const payMonth = selectedSetting.target_month;
+    const ins = Master.getInsuranceMaster(payYear, payMonth);
+    const healthRate = (ins.KENPO_RATES[pref] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
 
     const isNursing = (() => {
       if (!staff.birthday || !selectedSetting.payment_date) return false;
@@ -346,20 +350,27 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
 
     const sInsType = companySettings.round_social_ins || 'floor';
     const currentYearTotal = annualBonusTotals[staff.id] ?? 0;
-    const healthHyojun = Math.min(hyojunBonus, Math.max(0, Master.INSURANCE_2026.HEALTH_INS_ANNUAL_LIMIT - currentYearTotal));
+    // 健康保険・介護保険・子ども・子育て支援金の標準賞与額は、年度（4月〜翌3月）の累計で573万円まで
+    const healthHyojun = Math.min(hyojunBonus, Math.max(0, ins.HEALTH_INS_ANNUAL_LIMIT - currentYearTotal));
 
-    const healthTotal = applyRounding(healthHyojun * (isNursing ? rates[1] : rates[0]) / 100, sInsType);
-    const nursingInsurance = isNursing ? applyRounding(healthHyojun * (rates[1] - rates[0]) / 100, sInsType) : 0;
-    const healthInsurance = healthTotal - nursingInsurance;
+    // 本人負担分 = 標準賞与額 × 料率 ÷ 2（介護保険は「健康保険＋介護保険」でまとめて計算し、健康保険料を引く）
+    const healthInsurance = calcPremium(healthHyojun, healthRate, sInsType);
+    const nursingInsurance = isNursing
+      ? calcPremium(healthHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType) - healthInsurance
+      : 0;
+    const childSupport = Master.isChildSupportMonth(ins, payYear, payMonth) && ins.CHILD_SUPPORT_RATE
+      ? calcPremium(healthHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType)
+      : 0;
 
-    const pensionHyojun = Math.min(hyojunBonus, Master.INSURANCE_2026.PENSION_INS_SINGLE_LIMIT);
-    const welfarePension = applyRounding((pensionHyojun * Master.INSURANCE_2026.PENSION_RATE[0]) / 100, sInsType);
+    // 厚生年金の標準賞与額は1回150万円まで
+    const pensionHyojun = Math.min(hyojunBonus, ins.PENSION_INS_SINGLE_LIMIT);
+    const welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
 
     const empInsType = staff.employment_insurance_type || companySettings.default_emp_ins_type || 'general';
-    const empRate = Master.INSURANCE_2026.LABOR_INSURANCE_RATES[empInsType as keyof typeof Master.INSURANCE_2026.LABOR_INSURANCE_RATES] || Master.INSURANCE_2026.LABOR_INSURANCE_RATES.general;
-    const empInsurance = applyRounding(totalEarnings * empRate[0], companySettings.round_emp_ins || 'round');
+    const empRate = ins.LABOR_INSURANCE_RATES[empInsType as Master.EmpInsType] || ins.LABOR_INSURANCE_RATES.general;
+    const empInsurance = calcPremium(totalEarnings, empRate[0] * 100, companySettings.round_emp_ins || 'round', 1);
 
-    const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
+    const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
     const incomeTax = calcBonusIncomeTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(staff.dependents) || 0, selectedSetting?.target_year ?? new Date().getFullYear());
       
     // 🆕 カスタム控除も有効なものだけ合計
@@ -367,7 +378,7 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     const totalDeductions = socialTotal + incomeTax + customDeductions;
 
     return {
-      totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, welfarePension, 
+      totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, childSupport, welfarePension, 
       empInsurance, incomeTax, customDeductions, totalDeductions,
       netPay: totalEarnings - totalDeductions, isNursing
     };

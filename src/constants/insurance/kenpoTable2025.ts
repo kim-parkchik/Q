@@ -1,0 +1,133 @@
+/**
+ * 令和７年３月分（４月納付分）からの健康保険・厚生年金保険の保険料額表
+ *
+ * ⚠️ このファイルは自動生成です。手で書き換えないでください。
+ * 元データ: 協会けんぽの Excel（insurance-tables/ フォルダ）
+ * 出典    : 全国健康保険協会ホームページ（https://www.kyoukaikenpo.or.jp/g7/cat330/sb3150/r07/r7ryougakuhyou3gatukara/）の保険料額表を加工して作成
+ *           （Excel の表を Q で使える形に変換したもので、協会けんぽが作成したものではありません）
+ * 作り方  : python3 scripts/import_kenpo_table.py <Excel> <年度> <このファイル> <出典URL>
+ * 確認    : 全47都道府県 × 全50等級（2350行）の保険料が Excel の印刷値と一致することを確認済み
+ */
+import type { KenpoTable } from './kenpoTableTypes';
+
+export const KENPO_TABLE_2025: KenpoTable = {
+  title: "令和７年３月分（４月納付分）からの健康保険・厚生年金保険の保険料額表",
+  /** この年度の料率を使い始める月（保険料の対象月） */
+  effectiveFrom: { year: 2025, month: 3 },
+  /** 介護保険料率（%・全国一律） */
+  careRate: 1.59,
+  /** 厚生年金保険料率（%） */
+  pensionRate: 18.3,
+  /** 子ども・子育て支援金率（%・全国一律）。制度がない年度は null */
+  childSupportRate: null,
+  /** 子ども・子育て支援金を徴収し始める月 */
+  childSupportFrom: null,
+  /** 子ども・子育て拠出金率（%・事業主のみ負担） */
+  childCareContributionRate: 0.36,
+  /** 都道府県別の健康保険料率（%・介護保険第2号被保険者に該当しない場合） */
+  healthRates: {
+    "北海道": 10.31,
+    "青森": 9.85,
+    "岩手": 9.62,
+    "宮城": 10.11,
+    "秋田": 10.01,
+    "山形": 9.75,
+    "福島": 9.62,
+    "茨城": 9.67,
+    "栃木": 9.82,
+    "群馬": 9.77,
+    "埼玉": 9.76,
+    "千葉": 9.79,
+    "東京": 9.91,
+    "神奈川": 9.92,
+    "新潟": 9.55,
+    "富山": 9.65,
+    "石川": 9.88,
+    "福井": 9.94,
+    "山梨": 9.89,
+    "長野": 9.69,
+    "岐阜": 9.93,
+    "静岡": 9.8,
+    "愛知": 10.03,
+    "三重": 9.99,
+    "滋賀": 9.97,
+    "京都": 10.03,
+    "大阪": 10.24,
+    "兵庫": 10.16,
+    "奈良": 10.02,
+    "和歌山": 10.19,
+    "鳥取": 9.93,
+    "島根": 9.94,
+    "岡山": 10.17,
+    "広島": 9.97,
+    "山口": 10.36,
+    "徳島": 10.47,
+    "香川": 10.21,
+    "愛媛": 10.18,
+    "高知": 10.13,
+    "福岡": 10.31,
+    "佐賀": 10.78,
+    "長崎": 10.41,
+    "熊本": 10.12,
+    "大分": 10.25,
+    "宮崎": 10.09,
+    "鹿児島": 10.31,
+    "沖縄": 9.44,
+  },
+  /** 標準報酬月額表（健康保険の等級。pensionGrade は厚生年金の等級、範囲外は null） */
+  grades: [
+    { grade: 1, pensionGrade: null, standard: 58000, from: 0, to: 63000 },
+    { grade: 2, pensionGrade: null, standard: 68000, from: 63000, to: 73000 },
+    { grade: 3, pensionGrade: null, standard: 78000, from: 73000, to: 83000 },
+    { grade: 4, pensionGrade: 1, standard: 88000, from: 83000, to: 93000 },
+    { grade: 5, pensionGrade: 2, standard: 98000, from: 93000, to: 101000 },
+    { grade: 6, pensionGrade: 3, standard: 104000, from: 101000, to: 107000 },
+    { grade: 7, pensionGrade: 4, standard: 110000, from: 107000, to: 114000 },
+    { grade: 8, pensionGrade: 5, standard: 118000, from: 114000, to: 122000 },
+    { grade: 9, pensionGrade: 6, standard: 126000, from: 122000, to: 130000 },
+    { grade: 10, pensionGrade: 7, standard: 134000, from: 130000, to: 138000 },
+    { grade: 11, pensionGrade: 8, standard: 142000, from: 138000, to: 146000 },
+    { grade: 12, pensionGrade: 9, standard: 150000, from: 146000, to: 155000 },
+    { grade: 13, pensionGrade: 10, standard: 160000, from: 155000, to: 165000 },
+    { grade: 14, pensionGrade: 11, standard: 170000, from: 165000, to: 175000 },
+    { grade: 15, pensionGrade: 12, standard: 180000, from: 175000, to: 185000 },
+    { grade: 16, pensionGrade: 13, standard: 190000, from: 185000, to: 195000 },
+    { grade: 17, pensionGrade: 14, standard: 200000, from: 195000, to: 210000 },
+    { grade: 18, pensionGrade: 15, standard: 220000, from: 210000, to: 230000 },
+    { grade: 19, pensionGrade: 16, standard: 240000, from: 230000, to: 250000 },
+    { grade: 20, pensionGrade: 17, standard: 260000, from: 250000, to: 270000 },
+    { grade: 21, pensionGrade: 18, standard: 280000, from: 270000, to: 290000 },
+    { grade: 22, pensionGrade: 19, standard: 300000, from: 290000, to: 310000 },
+    { grade: 23, pensionGrade: 20, standard: 320000, from: 310000, to: 330000 },
+    { grade: 24, pensionGrade: 21, standard: 340000, from: 330000, to: 350000 },
+    { grade: 25, pensionGrade: 22, standard: 360000, from: 350000, to: 370000 },
+    { grade: 26, pensionGrade: 23, standard: 380000, from: 370000, to: 395000 },
+    { grade: 27, pensionGrade: 24, standard: 410000, from: 395000, to: 425000 },
+    { grade: 28, pensionGrade: 25, standard: 440000, from: 425000, to: 455000 },
+    { grade: 29, pensionGrade: 26, standard: 470000, from: 455000, to: 485000 },
+    { grade: 30, pensionGrade: 27, standard: 500000, from: 485000, to: 515000 },
+    { grade: 31, pensionGrade: 28, standard: 530000, from: 515000, to: 545000 },
+    { grade: 32, pensionGrade: 29, standard: 560000, from: 545000, to: 575000 },
+    { grade: 33, pensionGrade: 30, standard: 590000, from: 575000, to: 605000 },
+    { grade: 34, pensionGrade: 31, standard: 620000, from: 605000, to: 635000 },
+    { grade: 35, pensionGrade: 32, standard: 650000, from: 635000, to: 665000 },
+    { grade: 36, pensionGrade: null, standard: 680000, from: 665000, to: 695000 },
+    { grade: 37, pensionGrade: null, standard: 710000, from: 695000, to: 730000 },
+    { grade: 38, pensionGrade: null, standard: 750000, from: 730000, to: 770000 },
+    { grade: 39, pensionGrade: null, standard: 790000, from: 770000, to: 810000 },
+    { grade: 40, pensionGrade: null, standard: 830000, from: 810000, to: 855000 },
+    { grade: 41, pensionGrade: null, standard: 880000, from: 855000, to: 905000 },
+    { grade: 42, pensionGrade: null, standard: 930000, from: 905000, to: 955000 },
+    { grade: 43, pensionGrade: null, standard: 980000, from: 955000, to: 1005000 },
+    { grade: 44, pensionGrade: null, standard: 1030000, from: 1005000, to: 1055000 },
+    { grade: 45, pensionGrade: null, standard: 1090000, from: 1055000, to: 1115000 },
+    { grade: 46, pensionGrade: null, standard: 1150000, from: 1115000, to: 1175000 },
+    { grade: 47, pensionGrade: null, standard: 1210000, from: 1175000, to: 1235000 },
+    { grade: 48, pensionGrade: null, standard: 1270000, from: 1235000, to: 1295000 },
+    { grade: 49, pensionGrade: null, standard: 1330000, from: 1295000, to: 1355000 },
+    { grade: 50, pensionGrade: null, standard: 1390000, from: 1355000, to: Infinity },
+  ],
+  /** 厚生年金の標準報酬月額の下限・上限 */
+  pensionMinStandard: 88000,
+  pensionMaxStandard: 650000,
+};

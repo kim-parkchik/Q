@@ -655,6 +655,7 @@ export default function BonusManager({ db, staffList }: Props) {
                     {/* 自動計算控除 */}
                     <th style={{ ...S.th, color: "#c0392b", minWidth: 90 }}>健保</th>
                     <th style={{ ...S.th, color: "#c0392b", minWidth: 80 }}>介護</th>
+                    <th style={{ ...S.th, color: "#c0392b", minWidth: 80 }}>支援金</th>
                     <th style={{ ...S.th, color: "#c0392b", minWidth: 90 }}>厚生年金</th>
                     <th style={{ ...S.th, color: "#c0392b", minWidth: 80 }}>雇用保険</th>
                     <th style={{ ...S.th, color: "#c0392b", minWidth: 80 }}>所得税</th>
@@ -703,6 +704,10 @@ export default function BonusManager({ db, staffList }: Props) {
                         {/* 介護保険（条件付きで色変更） */}
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isNursing ? "#c0392b" : "#bbb" }}>
                           ¥{calc.nursingInsurance.toLocaleString()}
+                        </td>
+                        {/* 子ども・子育て支援金（令和8年4月分から） */}
+                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.childSupport > 0 ? "#666" : "#bbb" }}>
+                          ¥{calc.childSupport.toLocaleString()}
                         </td>
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.welfarePension.toLocaleString()}</td>
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.empInsurance.toLocaleString()}</td>

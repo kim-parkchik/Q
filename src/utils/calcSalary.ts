@@ -10,6 +10,7 @@
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import { applyRounding } from './payrollUtils';
+import { calcPremium } from './socialInsurance';
 import { 
   parseToDayjs, 
   getNightMinutesInPeriod, 
@@ -52,6 +53,8 @@ export interface SalaryResult {
   totalEarnings: number;
   healthInsurance: number;
   nursingInsurance: number;
+  /** 子ども・子育て支援金（令和8年4月分から） */
+  childSupport: number;
   welfarePension: number;
   empInsurance: number;
   incomeTax: number;
@@ -65,11 +68,14 @@ export interface SalaryResult {
 
 export const PREFECTURES = Object.keys(Master.INSURANCE_2026.KENPO_RATES);
 
-export const getHyojunHoshu = (monthly: number): number => {
-  for (const [lo, hi, std] of Master.INSURANCE_2026.HYOJUN_TABLE) {
+export const getHyojunHoshu = (
+  monthly: number,
+  table: [number, number, number][] = Master.INSURANCE_2026.HYOJUN_TABLE
+): number => {
+  for (const [lo, hi, std] of table) {
     if (monthly >= lo && monthly < hi) return std;
   }
-  return Master.INSURANCE_2026.HYOJUN_TABLE[Master.INSURANCE_2026.HYOJUN_TABLE.length - 1][2];
+  return table[table.length - 1][2];
 };
 
 // 源泉所得税（甲欄）：支払った年の月額表、または電算機計算の特例で計算する（詳しくは utils/incomeTax.ts）
@@ -164,17 +170,30 @@ export const saveSalaryResult = async (
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       total_earnings, taxable_amount,
-      health_insurance, nursing_insurance, welfare_pension, emp_insurance,
+      health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
       social_ins_total, income_tax, resident_tax, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
       total_work_hours = excluded.total_work_hours,
       total_overtime_hours = excluded.total_overtime_hours,
+      total_night_hours = excluded.total_night_hours,
       standard_overtime_hours = excluded.standard_overtime_hours,
       high_overtime_hours = excluded.high_overtime_hours,
+      standard_overtime_pay = excluded.standard_overtime_pay,
+      high_overtime_pay = excluded.high_overtime_pay,
+      statutory_overtime_pay = excluded.statutory_overtime_pay,
       total_earnings = excluded.total_earnings,
+      taxable_amount = excluded.taxable_amount,
+      health_insurance = excluded.health_insurance,
+      nursing_insurance = excluded.nursing_insurance,
+      child_support = excluded.child_support,
+      welfare_pension = excluded.welfare_pension,
+      emp_insurance = excluded.emp_insurance,
+      social_ins_total = excluded.social_ins_total,
+      income_tax = excluded.income_tax,
+      resident_tax = excluded.resident_tax,
       net_pay = excluded.net_pay,
       processed_at = DATETIME('now', 'localtime');
   `;
@@ -186,8 +205,8 @@ export const saveSalaryResult = async (
     result.standardPremiumHours, result.highPremiumHours,
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
     result.totalEarnings, (result.totalEarnings - result.commutePay), // 課税対象額（通勤費除く）
-    result.healthInsurance, result.nursingInsurance, result.welfarePension, result.empInsurance,
-    (result.healthInsurance + result.nursingInsurance + result.welfarePension + result.empInsurance),
+    result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
+    (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
     result.incomeTax, result.residentTax, result.netPay
   ];
 
@@ -427,6 +446,10 @@ export const calculateSalary = (
   console.log("CHECK totalEarnings:", totalEarnings);
 
   // ── 社会保険料 ──────────────────────────────────────────────
+  // 保険料の対象月に合った料率（健康保険は3月分から、雇用保険は4月から新年度）
+  // ※ 支給年月を保険料の対象月として扱う（当月徴収）
+  const ins = Master.getInsuranceMaster(targetYear, targetMonth);
+
   // 1. 標準報酬月額の確定
   const dbHyojun = Number(staff.standard_remuneration) || 0;
   let hyojunHoshu: number;
@@ -434,56 +457,42 @@ export const calculateSalary = (
     hyojunHoshu = dbHyojun;
   } else {
     const reportable = Math.floor(basePay + standardOvertimePay + highOvertimePay + nightPay + statutoryOvertimePay + commutePay);
-    hyojunHoshu = getHyojunHoshu(reportable);
+    hyojunHoshu = getHyojunHoshu(reportable, ins.HYOJUN_TABLE);
   }
 
-  // 2. 料率の取得と計算
+  // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
   const nursingTarget = checkNursingCare(staff.birthday || '', targetYear, targetMonth);
-  const prefRates = Master.INSURANCE_2026.KENPO_RATES[extras.prefecture] ?? Master.INSURANCE_2026.KENPO_RATES["京都"];
+  const healthRate = (ins.KENPO_RATES[extras.prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
   const sInsType = companySettings?.round_social_ins || 'floor';
+  const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
-  // 健康保険（介護なし/ありをインデックスで切り替え）
-  // [0]が介護なし本人, [1]が介護なし総額, [2]が介護あり本人, [3]が介護あり総額
-  const healthInsRate = prefRates[0] ?? 0; 
-    
-  const healthInsurance = applyRounding(
-    (Math.min(hyojunHoshu, Master.INSURANCE_2026.KENPO_MAX_HYOJUN) * healthInsRate) / 100, 
-    sInsType
-  );
+  // 健康保険料
+  const healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
 
-  // 介護保険料（nursingTarget が true の時だけ計算）
+  // 介護保険料（40〜64歳）
+  // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
   let nursingInsurance = 0;
   if (nursingTarget) {
-    // Master.KENPO_CARE_RATE[0] (0.80) を使用
-    const careRate = Master.INSURANCE_2026.KENPO_CARE_RATE[0] ?? 0;
-    nursingInsurance = applyRounding(
-      (Math.min(hyojunHoshu, Master.INSURANCE_2026.KENPO_MAX_HYOJUN) * careRate) / 100, 
-      sInsType
-    );
+    const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
+    nursingInsurance = combined - healthInsurance;
   }
 
-  // 厚生年金
-  // [0]が本人分, [1]が総額
-  const pensionHyojun = Math.max(Master.INSURANCE_2026.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, Master.INSURANCE_2026.PENSION_MAX_HYOJUN));
-  const welfarePension = applyRounding((pensionHyojun * Master.INSURANCE_2026.PENSION_RATE[0]) / 100, sInsType);
+  // 子ども・子育て支援金（令和8年4月分から。健康保険と同じ標準報酬月額に支援金率を掛ける）
+  const childSupport = Master.isChildSupportMonth(ins, targetYear, targetMonth) && ins.CHILD_SUPPORT_RATE
+    ? calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType)
+    : 0;
 
-  // 雇用保険
-  // [0]が本人分, [1]が総額
-  // staff.employment_insurance_type (文字列) を取得。未設定なら 'general'
+  // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
+  const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
+  const welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
+
+  // 雇用保険（賃金総額 × 本人負担率。未設定・不明な区分は「一般の事業」）
   const empInsKey = (staff.employment_insurance_type as Master.EmpInsType) || 'general';
-  // マスターデータから該当する業種の配列を取得
-  // 万が一、変な文字列が入っていても 'general' を参照するようにガード
-  const empRates = Master.INSURANCE_2026.LABOR_INSURANCE_RATES[empInsKey] || Master.INSURANCE_2026.LABOR_INSURANCE_RATES.general;
-  // [0] が本人負担分
-  const empInsRate = empRates[0];
-  // 計算実行
-  const empInsurance = applyRounding(
-    totalEarnings * empInsRate, 
-    companySettings?.round_emp_ins || 'round'
-  );
+  const empRates = ins.LABOR_INSURANCE_RATES[empInsKey] || ins.LABOR_INSURANCE_RATES.general;
+  const empInsurance = calcPremium(totalEarnings, empRates[0] * 100, companySettings?.round_emp_ins || 'round', 1);
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
-  const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
+  const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
   const incomeTax = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod);
   const residentTax = Number(extras.residentTax) || 0;
@@ -515,6 +524,7 @@ export const calculateSalary = (
     // --- 控除額 (Deductions) ---
     healthInsurance, 
     nursingInsurance, 
+    childSupport,
     welfarePension,
     empInsurance, 
     incomeTax, 

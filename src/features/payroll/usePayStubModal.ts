@@ -96,7 +96,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     + (salary.standardOvertimePay > 0 ? 1 : 0)
     + (salary.highOvertimePay > 0 ? 1 : 0)
     + 1 + 1 + 1 + customEarningItems.length;
-  const deductionItemsCount = 6 + customDeductionItems.length;
+  const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + customDeductionItems.length;
   const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
 
   // 保存処理

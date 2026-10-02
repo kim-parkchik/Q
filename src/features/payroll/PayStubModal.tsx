@@ -161,6 +161,9 @@ export default function PayStubModal(props: Props) {
                 <tbody>
                   <tr><td style={S.tdS}>健康保険料</td><td style={S.rtdS}>¥{salary.healthInsurance.toLocaleString()}</td></tr>
                   <tr><td style={S.tdS}>介護保険料</td><td style={S.rtdS}>¥{salary.nursingInsurance.toLocaleString()}</td></tr>
+                  {salary.childSupport > 0 && (
+                    <tr><td style={S.tdS}>子ども・子育て支援金</td><td style={S.rtdS}>¥{salary.childSupport.toLocaleString()}</td></tr>
+                  )}
                   <tr><td style={S.tdS}>厚生年金保険料</td><td style={S.rtdS}>¥{salary.welfarePension.toLocaleString()}</td></tr>
                   <tr><td style={S.tdS}>雇用保険料</td><td style={S.rtdS}>¥{salary.empInsurance.toLocaleString()}</td></tr>
                   <tr><td style={S.tdS}>所得税</td><td style={S.rtdS}>¥{salary.incomeTax.toLocaleString()}</td></tr>
