@@ -12,6 +12,12 @@
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
  *   2. 下の MIGRATIONS の末尾に、次の番号で addColumnIfMissing を追加する（既存ファイル用）
  *   ※ 既にある番号の中身は、後から書き換えないこと（どこまで適用したかがずれるため）
+ *
+ * ■ 開発中の方針（まだ一般に配布していない間）
+ *   ・表の定義の正は dbSchema.ts。MIGRATIONS は、変更がたまったら空に戻してよい。
+ *   ・空に戻すと、以前のアプリで開いたテスト用の会社ファイルは開けなくなるので、作り直す。
+ *   ・最初のリリース以降は空に戻さず、番号を積み重ねていく（利用者のファイルを守るため）。
+ *   ・2026-10: 開発中の変更（v1〜v4）を dbSchema.ts に反映済みとして、空に戻した。
  */
 
 /** マイグレーションに必要な最小限のDB操作（tauri-plugin-sql の Database と互換） */
@@ -39,29 +45,7 @@ export const addColumnIfMissing = async (
 };
 
 export const MIGRATIONS: Migration[] = [
-  {
-    version: 1,
-    description: "勤怠の確定機能に必要な列を追加（2026年5月以前に作成したファイル向け）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "attendance", "is_finalized", "INTEGER DEFAULT 0");
-      await addColumnIfMissing(db, "attendance", "finalized_at", "TEXT");
-      await addColumnIfMissing(db, "attendance", "finalized_by", "TEXT");
-    },
-  },
-  {
-    version: 2,
-    description: "社会保険規定に定額時の会社負担額（comp_fixed_amount）の列を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "social_insurance_groups", "comp_fixed_amount", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 3,
-    description: "給与規定グループに源泉所得税の計算方法（月額表／電算機計算の特例）の列を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "tax_calc_method", "TEXT DEFAULT 'table'");
-    },
-  },
+  // 開発中のため空（上の「開発中の方針」を参照）。リリース後の最初の変更を version: 1 として追加する。
 ];
 
 /** 最新のバージョン番号 */
@@ -78,7 +62,9 @@ export const runMigrations = async (db: MigrationDb): Promise<string[]> => {
   // アプリより新しいバージョンで保存されたファイルは、壊さないように触らない
   if (current > LATEST_DB_VERSION) {
     throw new Error(
-      `この会社ファイルは新しいバージョンのQで保存されています（ファイル: v${current} / アプリ: v${LATEST_DB_VERSION}）。Qを更新してから開いてください。`
+      `この会社ファイルは、今のQとは違う形式で保存されています（ファイル: v${current} / アプリ: v${LATEST_DB_VERSION}）。\n` +
+      `新しいバージョンのQで保存したファイルなら、Qを更新してから開いてください。\n` +
+      `開発中に作ったテスト用のファイルなら、新しく作り直してください。`
     );
   }
 

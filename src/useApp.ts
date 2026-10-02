@@ -11,8 +11,10 @@ import { APP_DIR_NAME, BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, 
 import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
 import { runMigrations } from "./utils/migrations";
+import { useMessageDialog } from "./components/MessageDialog";
 
 export const useApp = () => {
+  const dialog = useMessageDialog();
   const [db, setDb] = useState<Database | null>(null);
   const [dbPath, setDbPath] = useState<string | null>(null); // 🆕 今どのファイルを開いているか
   const [isLoading, setIsLoading] = useState(false); // 🆕 ロード中フラグ（最初はfalseでいい）
@@ -167,6 +169,9 @@ export const useApp = () => {
       
     } catch (error) {
       console.error("Database Load Error:", error);
+      dialog.error(
+        `会社ファイルを開けませんでした。\n${error instanceof Error ? error.message : String(error)}`
+      );
     } finally {
       setIsLoading(false);
     }
