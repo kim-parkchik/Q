@@ -55,6 +55,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "social_insurance_groups", "comp_fixed_amount", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 3,
+    description: "給与規定グループに源泉所得税の計算方法（月額表／電算機計算の特例）の列を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "tax_calc_method", "TEXT DEFAULT 'table'");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

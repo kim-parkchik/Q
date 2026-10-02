@@ -305,6 +305,7 @@ export const DB_SCHEMAS = [
     closing_day INTEGER NOT NULL,   -- 1~28 または 99(末日)
     is_next_month INTEGER NOT NULL, -- 0:当月払い, 1:翌月払い
     payment_day INTEGER NOT NULL,    -- 1~31
+    tax_calc_method TEXT DEFAULT 'table', -- 源泉所得税の計算方法 'table':月額表 / 'densanki':電算機計算の特例
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,
 

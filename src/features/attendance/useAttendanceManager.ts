@@ -453,8 +453,9 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
         allowanceAmount: 0, 
         residentTax: 0, 
         prefecture: branchPrefecture, 
-        dependents: 0, 
-        customItems: [] 
+        dependents: Number(selectedStaff.dependents) || 0, 
+        customItems: [],
+        taxMethod: currentGroup?.tax_calc_method,
       }, 
       targetYear, 
       targetMonth, 
@@ -463,7 +464,7 @@ export function useAttendanceManager({ db, staffList, targetYear, setTargetYear,
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {

@@ -15,6 +15,7 @@ import {
   getNightMinutesInPeriod, 
   getWeekKey
 } from './timeUtils';
+import { calcWithholdingTax, type TaxCalcMethod } from './incomeTax';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -27,6 +28,8 @@ export interface SalaryExtras {
   prefecture: string;
   dependents: number;
   customItems: { name: string; amount: number; type: 'earning' | 'deduction' }[];
+  /** 源泉所得税の計算方法（給与規定グループの設定。省略時は月額表） */
+  taxMethod?: TaxCalcMethod;
 }
 
 export interface SalaryResult {
@@ -69,20 +72,9 @@ export const getHyojunHoshu = (monthly: number): number => {
   return Master.INSURANCE_2026.HYOJUN_TABLE[Master.INSURANCE_2026.HYOJUN_TABLE.length - 1][2];
 };
 
-const getGensenTax = (taxBase: number, dependents: number): number => {
-  const dep = Math.min(Math.max(0, dependents), 7);
-  if (taxBase >= 1000000) {
-    const over = taxBase - 1000000;
-    const base = 43180 + Math.floor(over * 0.45);
-    const ded  = [0,2110,4140,6180,8210,10250,12280,14320][dep];
-    return Math.max(0, base - ded);
-  }
-  for (const row of Master.TAX_2026.GENSEN_TAX_TABLE) {
-    const [lo, hi, ...taxes] = row;
-    if (taxBase >= lo && taxBase < hi) return taxes[dep] ?? 0;
-  }
-  return 0;
-};
+// 源泉所得税（甲欄）：支払った年の月額表、または電算機計算の特例で計算する（詳しくは utils/incomeTax.ts）
+const getGensenTax = (taxBase: number, dependents: number, payYear: number, method?: TaxCalcMethod): number =>
+  calcWithholdingTax(taxBase, dependents, payYear, method ?? "table");
 
 // 介護保険対象判定
 export const checkNursingCare = (birthday: string, year: number, month: number): boolean => {
@@ -492,7 +484,8 @@ export const calculateSalary = (
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
   const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
-  const incomeTax = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0);
+  // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
+  const incomeTax = getGensenTax(Math.max(0, totalEarnings - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod);
   const residentTax = Number(extras.residentTax) || 0;
   const totalDeductions = socialTotal + incomeTax + residentTax + customDeductions;
 

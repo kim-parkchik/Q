@@ -61,6 +61,24 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     loadCustomItems();
   }, [db, staff.id]);
 
+  // 源泉所得税の計算方法（給与規定グループの設定）を読み込む
+  useEffect(() => {
+    const loadTaxMethod = async () => {
+      if (!db) return;
+      try {
+        const rows = await db.select(
+          "SELECT tax_calc_method FROM payroll_groups WHERE id = ?",
+          [staff.payroll_group_id || 1]
+        ) as { tax_calc_method?: string }[];
+        const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
+        setExtras(p => ({ ...p, taxMethod: method }));
+      } catch (e) {
+        console.error("税額計算方法の読み込みエラー:", e);
+      }
+    };
+    loadTaxMethod();
+  }, [db, staff.payroll_group_id]);
+
   // 給与計算
   const salary = useMemo(
     () => calculateSalary(staff, attendanceData, extras, year, month, companySettings),

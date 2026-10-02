@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
+import { calcWithholdingTax } from '../../utils/incomeTax';
 import { applyRounding } from '../../utils/payrollUtils';
 
 // --- Types ---
@@ -23,7 +24,7 @@ interface BonusItem {
 }
 
 // 所得税計算ロジックは変更なし（そのまま維持）
-const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, dependents: number): number => {
+const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, dependents: number, payYear: number): number => {
   if (prevMonthTaxBase > 0) {
     const depIndex = Math.min(dependents, 3) + 2;
     let rate = 0;
@@ -35,15 +36,9 @@ const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, 
     }
     return Math.floor(bonusAfterSocial * rate);
   }
+  // 前月の給与がない場合：賞与の6分の1を月額とみなして月額の税額を求め、その6倍にする
   const monthlyAmount = Math.floor(bonusAfterSocial / 6);
-  let monthlyTax = 0;
-  const depIndex = Math.min(dependents, 3) + 2;
-  for (const row of Master.TAX_2026.GENSEN_TAX_TABLE) {
-    if (monthlyAmount >= row[0] && monthlyAmount < row[1]) {
-      monthlyTax = row[depIndex];
-      break;
-    }
-  }
+  const monthlyTax = calcWithholdingTax(monthlyAmount, dependents, payYear, "table");
   return Math.floor(monthlyTax * 6);
 };
 
@@ -365,7 +360,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const empInsurance = applyRounding(totalEarnings * empRate[0], companySettings.round_emp_ins || 'round');
 
     const socialTotal = healthInsurance + nursingInsurance + welfarePension + empInsurance;
-    const incomeTax = calcBonusIncomeTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(staff.dependents) || 0);
+    const incomeTax = calcBonusIncomeTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(staff.dependents) || 0, selectedSetting?.target_year ?? new Date().getFullYear());
       
     // 🆕 カスタム控除も有効なものだけ合計
     const customDeductions = deductionItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);

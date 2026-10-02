@@ -24,6 +24,7 @@ import {
     editingBadgeStyle
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
+import { TAX_CALC_METHOD_LABELS, type TaxCalcMethod } from '../../../utils/incomeTax';
 
 interface Props {
     cm: CompanyManagerState;
@@ -40,6 +41,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgIsNextMonth,
         pgPaymentDay,
         setPgPaymentDay,
+        pgTaxMethod,
+        setPgTaxMethod,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -74,6 +77,9 @@ export default function PayrollGroupTab({ cm }: Props) {
                                     <span>
                                         締: {pg.closing_day === 99 ? "末日" : `${pg.closing_day}日`} / 
                                         払: {pg.is_next_month ? "翌月" : "当月"} {pg.payment_day === 99 ? "末日" : `${pg.payment_day}日`}
+                                    </span>
+                                    <span style={{ marginLeft: "6px", color: "#94a3b8" }}>
+                                        / 所得税: {TAX_CALC_METHOD_LABELS[(pg.tax_calc_method === "densanki" ? "densanki" : "table") as TaxCalcMethod]}
                                     </span>
                                 </div>
                             </div>
@@ -154,13 +160,27 @@ export default function PayrollGroupTab({ cm }: Props) {
                     <select 
                         value={pgPaymentDay} 
                         onChange={e => setPgPaymentDay(Number(e.target.value))} 
-                        style={{ ...inputStyle, marginBottom: "20px" }}
+                        style={{ ...inputStyle, marginBottom: "15px" }}
                     >
                         {[...Array(28)].map((_, i) => (
                             <option key={i+1} value={i+1}>{i+1}日</option>
                         ))}
                         <option value={99}>末日</option>
                     </select>
+
+                    <label style={miniLabelStyle}>源泉所得税の計算方法</label>
+                    <select
+                        value={pgTaxMethod}
+                        onChange={e => setPgTaxMethod(e.target.value as TaxCalcMethod)}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="table">{TAX_CALC_METHOD_LABELS.table}（おすすめ）</option>
+                        <option value="densanki">{TAX_CALC_METHOD_LABELS.densanki}</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        税額表は国税庁の月額表どおりの金額になります。電算機計算の特例はその月の給与から式で計算するため、
+                        数十円〜百円ほど差が出ることがあります（年末調整で精算されます）。
+                    </p>
 
                     <div style={{ display: "flex", gap: "10px" }}>
                         <button 
