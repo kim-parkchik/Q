@@ -8,7 +8,6 @@
  *  - 雇用保険料 = 賞与支給額 × 料率（標準賞与額でなく実額にかける）
  *  - 所得税 = 前月の社会保険料控除後給与 × 係数（賞与用の税率）
  */
-import React from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { 
@@ -92,7 +91,6 @@ export default function BonusManager({ db, staffList }: Props) {
     settings,
     selectedSettingId,
     setSelectedSettingId,
-    selectedSetting,
     // フォーム用State
     settingName, 
     setSettingName, 
@@ -122,7 +120,6 @@ export default function BonusManager({ db, staffList }: Props) {
     cancelEdit,
     addItem,
     deleteItem,
-    updateItemName,
 
     // ── 4. 計算ロジック・値保持 (タブ③: 賞与計算) ──
     activeItemIds,

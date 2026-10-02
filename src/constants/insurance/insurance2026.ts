@@ -97,7 +97,7 @@ export const HYOJUN_TABLE: [number, number, number][] = [
 ];
 
 // スタッフ管理画面で使用する選択肢
-export const HYOJUN_OPTIONS = HYOJUN_TABLE.map(([lo, hi, std], index) => ({
+export const HYOJUN_OPTIONS = HYOJUN_TABLE.map(([, , std], index) => ({
   label: `${index + 1}級：${std.toLocaleString()}円`,
   value: std
 }));

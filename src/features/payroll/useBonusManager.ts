@@ -42,7 +42,7 @@ const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, 
   return Math.floor(monthlyTax * 6);
 };
 
-export const useBonusManager = (db: Database | null, staffList: any[]) => { // 🆕 nullを許容
+export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 🆕 nullを許容
   const [activeTab, setActiveTab] = useState<'list' | 'items' | 'calc'>('list');
   const [settings, setSettings] = useState<BonusSetting[]>([]);
   const [selectedSettingId, setSelectedSettingId] = useState<number | null>(null);

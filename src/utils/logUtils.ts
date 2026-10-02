@@ -12,12 +12,13 @@ import {
   EXT_LOG
 } from "../constants/appConfig";
 
-type LogLevel =
+// ログの種類（今後 writeLog の引数の型として使う予定）
+export type LogLevel =
   | "INFO"
   | "WARN"
   | "ERROR";
 
-type LogCategory =
+export type LogCategory =
   | "system"
   | "auth"
   | "staff"

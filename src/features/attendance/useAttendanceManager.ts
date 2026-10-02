@@ -41,7 +41,7 @@ const getPayrollPeriod = (year: number, month: number, closingDay: number) => {
   };
 };
 
-export function useAttendanceManager({ db, staffList, targetYear, setTargetYear, targetMonth, setTargetMonth }: any) {
+export function useAttendanceManager({ db, staffList, targetYear, targetMonth }: any) {
   const toast = useToast();
   const dialog = useMessageDialog();
   const [activeTab, setActiveTab] = useState<"csv" | "individual">("individual");

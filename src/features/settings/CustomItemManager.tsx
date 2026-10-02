@@ -1,4 +1,3 @@
-import React from "react";
 import { 
   Settings, 
   UserRound, 
@@ -23,7 +22,7 @@ interface Props {
 export default function CustomItemManager({ db, staffList }: Props) {
   const {
     activeTab, setActiveTab,
-    items, earnings, deductions, selectedStaffId, setSelectedStaffId, staffValues,
+    earnings, deductions, selectedStaffId, setSelectedStaffId, staffValues,
     newItemName, setNewItemName, newItemType, setNewItemType, newItemCategory, setNewItemCategory,
     addMasterItem, deleteMasterItem, saveAmount,
     moveItem // ← 忘れずに受け取る

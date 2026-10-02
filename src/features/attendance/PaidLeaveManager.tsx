@@ -44,16 +44,6 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
   const [expiryDate, setExpiryDate] = useState("");
   const [usageHistory, setUsageHistory] = useState<any[]>([]);
 
-  // 選択した社員の付与データを読み込む
-  const loadPaidLeaveData = async (staffId: string) => {
-    if (!staffId) return;
-    const res = await db.select<any[]>(
-      "SELECT * FROM paid_leave_grants WHERE staff_id = ? ORDER BY grant_date DESC",
-      [staffId]
-    );
-    setGrants(res);
-  };
-
   // 付与日が変更されたら、自動で「2年後の前日」を計算してセット（あくまでデフォルト値）
   useEffect(() => {
     const d = new Date(grantDate);
@@ -64,16 +54,7 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
     }
   }, [grantDate]);
 
-  // 履歴を読み込む関数
-  const loadUsageHistory = async (staffId: string) => {
-    const res = await db.select<any[]>(
-      `SELECT * FROM paid_leave_usage WHERE staff_id = ? ORDER BY usage_date DESC`,
-      [staffId]
-    );
-    setUsageHistory(res);
-  };
-
-  // 既存の loadPaidLeaveData の中で履歴も呼ぶように統一して定義
+  // 付与枠と取得履歴をまとめて読み込む
   const loadAllData = async (staffId: string) => {
     if (!staffId) return;
 

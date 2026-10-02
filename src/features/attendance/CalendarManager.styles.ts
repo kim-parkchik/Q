@@ -72,7 +72,7 @@ export const S = {
     boxShadow: "0 2px 10px rgba(0,0,0,0.05)"
   } as CSSProperties,
 
-  patternBtn: (isSelected: boolean, isError: boolean): CSSProperties => ({
+  patternBtn: (isSelected: boolean, _isError: boolean): CSSProperties => ({
     display: "flex",
     alignItems: "center",
     padding: "6px 16px",

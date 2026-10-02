@@ -1,4 +1,3 @@
-import React from 'react';
 import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';

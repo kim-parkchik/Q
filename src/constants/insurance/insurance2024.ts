@@ -87,7 +87,7 @@ export const HYOJUN_TABLE: [number, number, number][] = [
   [1355000, Infinity, 1390000],
 ];
 
-export const HYOJUN_OPTIONS = HYOJUN_TABLE.map(([lo, hi, std], index) => ({
+export const HYOJUN_OPTIONS = HYOJUN_TABLE.map(([, , std], index) => ({
   label: `${index + 1}級：${std.toLocaleString()}円`,
   value: std
 }));

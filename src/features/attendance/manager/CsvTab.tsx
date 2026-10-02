@@ -41,7 +41,7 @@ export default function CsvTab({ am }: Props) {
                 type="date" 
                 value={payrollPeriod?.startStr} 
                 style={{ ...S.input, padding: "4px" }} 
-                onChange={(e) => {/* 必要に応じてカスタム期間用のstateを更新 */}}
+                onChange={() => {/* 必要に応じてカスタム期間用のstateを更新 */}}
               />
               <span>～</span>
               <input 

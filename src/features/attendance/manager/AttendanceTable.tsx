@@ -7,7 +7,6 @@ import { Check, CheckCircle, AlertCircle, Undo2 } from 'lucide-react';
 import dayjs from "dayjs";
 import { S } from '../AttendanceManager.styles';
 import TimeInputPair from './TimeInputPair';
-import { checkHasInput } from './attendanceHelpers';
 import type { AttendanceViewModel } from './types';
 
 interface Props {
@@ -77,7 +76,6 @@ export default function AttendanceTable({ am }: Props) {
           };
 
           // --- 1. 状態判定（シンプルに！） ---
-          const hasInput = checkHasInput(row);
           const isFinalized = row.isFinalized;
 
           // --- 2. 矛盾チェック（エラーメッセージ） ---
