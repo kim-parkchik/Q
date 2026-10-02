@@ -10,6 +10,7 @@ import * as Master from './constants';
 import { APP_DIR_NAME, BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, HOLIDAY_CSV_URL_DEFAULT } from "./constants/appConfig";
 import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
+import { runMigrations } from "./utils/migrations";
 
 export const useApp = () => {
   const [db, setDb] = useState<Database | null>(null);
@@ -78,6 +79,9 @@ export const useApp = () => {
       }
       
       await sqlite.execute("PRAGMA foreign_keys = ON;");
+
+      // 古い会社ファイルに足りない列などを追加する（詳しくは utils/migrations.ts）
+      const appliedMigrations = await runMigrations(sqlite);
 
       // 会社・カレンダー・グループ等の初期投入
       const companyCheck = await sqlite.select<any[]>("SELECT id FROM company WHERE id = 1");
@@ -157,6 +161,9 @@ export const useApp = () => {
         "system",
         `会社ファイルを開きました: ${path}`
       );
+      for (const msg of appliedMigrations) {
+        await writeLog(sqlite, "info", "system", `会社ファイルを更新しました: ${msg}`);
+      }
       
     } catch (error) {
       console.error("Database Load Error:", error);

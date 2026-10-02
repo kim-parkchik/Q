@@ -328,6 +328,7 @@ export const DB_SCHEMAS = [
     child_allowance_rate REAL DEFAULT ${Master.INSURANCE_2026.CHILD_ALLOWANCE_RATE}, -- 子ども・子育て拠出金（会社全額負担分）
 
     fixed_amount INTEGER DEFAULT 0,  -- 定額時の金額
+    comp_fixed_amount INTEGER DEFAULT 0, -- 定額時の会社負担額
     is_active INTEGER DEFAULT 1
   );`,
 

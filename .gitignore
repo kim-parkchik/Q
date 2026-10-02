@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 会社データ（個人情報・マイナンバーを含むため絶対にGitHubへ上げない）
+*.qp
+*.qb
+*.qp-wal
+*.qp-shm
+*.qb-wal
+*.qb-shm
+
+# Claudeアプリからのダウンロード置き場
+Claude outputs/
