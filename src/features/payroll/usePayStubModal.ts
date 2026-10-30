@@ -88,13 +88,17 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   const wageLabel = staff.wage_type === "monthly" ? "月給制" : "時給制";
   const customEarningItems = extras.customItems.filter(i => i.type === 'earning');
   const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
+  // 明細の注記に出す料率の年度（その月の保険料に使ったもの）
+  const insMaster = Master.getInsuranceMaster(year, month);
 
   // 行数計算ロジック
-  const earningItemsCount = 1 
+  const earningItemsCount = 1
     + (salary.absenceDeduction > 0 ? 1 : 0)
     + (salary.statutoryOvertimePay > 0 ? 1 : 0)
     + (salary.standardOvertimePay > 0 ? 1 : 0)
     + (salary.highOvertimePay > 0 ? 1 : 0)
+    + (salary.holidayWorkPay > 0 ? 1 : 0)
+    + (salary.paidLeavePay > 0 ? 1 : 0)
     + 1 + 1 + 1 + customEarningItems.length;
   const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + customDeductionItems.length;
   const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
@@ -123,6 +127,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     earningItemsCount,
     deductionItemsCount,
     targetRows,
+    insMaster,
     fmtH
   };
 }

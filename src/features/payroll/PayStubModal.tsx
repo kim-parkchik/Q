@@ -2,6 +2,7 @@ import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';
 import { PREFECTURES } from '../../utils/calcSalary';
+import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 
 interface Props {
   db: any;
@@ -17,7 +18,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, fmtH
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, fmtH
   } = usePayStubModal(props);
 
   const padRows = (current: number, target: number) =>
@@ -60,6 +61,12 @@ export default function PayStubModal(props: Props) {
               {isSaved ? "✅ 確定済み" : "💾 給与確定"}
             </button>
           </div>
+          {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              {!salary.isSocialInsEnrolled && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
+              {!salary.isEmploymentInsEnrolled && <div>※ 雇用保険は未加入のため控除していません（従業員設定の「雇用保険加入」）。</div>}
+            </div>
+          )}
         </div>
 
         {/* ─── 明細書本体 ─── */}
@@ -72,6 +79,9 @@ export default function PayStubModal(props: Props) {
             </div>
             <div style={{ textAlign: "right", fontSize: 13 }}>
               <div>{props.year} 年 {props.month} 月分</div>
+              {props.staff.periodLabel && (
+                <div style={{ fontSize: 11, color: "#888" }}>勤怠期間 {props.staff.periodLabel}</div>
+              )}
               <div style={{ fontSize: 11, color: "#888" }}>{wageLabel}</div>
             </div>
           </div>
@@ -139,6 +149,12 @@ export default function PayStubModal(props: Props) {
                   {salary.highOvertimePay > 0 && (
                     <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_PREMIUM_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
                   )}
+                  {salary.holidayWorkPay > 0 && (
+                    <tr><td style={S.tdS}>休日出勤手当({Math.round((Master.HOLIDAY_WORK_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.holidayWorkPay.toLocaleString()}</td></tr>
+                  )}
+                  {salary.paidLeavePay > 0 && (
+                    <tr><td style={S.tdS}>有給休暇手当({fmtH(salary.paidLeaveHours)})</td><td style={S.rtdS}>¥{salary.paidLeavePay.toLocaleString()}</td></tr>
+                  )}
 
                   <tr><td style={S.tdS}>深夜手当</td><td style={S.rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
                   <tr><td style={S.tdS}>通勤手当</td><td style={S.rtdS}>¥{salary.commutePay.toLocaleString()}</td></tr>
@@ -186,9 +202,9 @@ export default function PayStubModal(props: Props) {
           </div>
 
           <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
-            ※ 健康保険料は協会けんぽ{extras.prefecture}支部料率（2026年度見込）を適用。
-            厚生年金 18.3%（折半）。雇用保険 0.7%（本人負担分）。
-            所得税は2026年版源泉徴収税額表（甲欄）を適用。住民税は手入力値。
+            ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
+            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{insMaster.LABOR_FISCAL_YEAR}年度の料率で計算。
+            所得税は{props.year}年分の{TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
           </div>
         </div>
       </div>

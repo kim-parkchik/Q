@@ -1,0 +1,185 @@
+/**
+ * 給与計算エンジン（calculateSalary）のテスト
+ * 実行方法: bun test
+ *
+ * 2026年6月（平日22日・土日8日、6月7日が日曜）の勤怠で、実務でよくあるケースを確認する。
+ * 月給 300,000円・所定8時間の人の時間単価は 300,000 ÷ (22日 × 8時間) = 1,704.5454…円。
+ */
+import { describe, expect, test } from "bun:test";
+import { calculateSalary, type SalaryExtras } from "./calcSalary";
+import { calcPremium } from "./socialInsurance";
+import { calcWithholdingTax } from "./incomeTax";
+import { INSURANCE_2026 } from "../constants/insurance";
+
+const LAW = "currency_law";
+const company = { week_start_day: 0, round_overtime: "round", round_social_ins: LAW, round_emp_ins: LAW };
+const extras = (o: Partial<SalaryExtras> = {}): SalaryExtras => ({
+    allowanceName: "", allowanceAmount: 0, residentTax: 0, prefecture: "東京", dependents: 0, customItems: [], ...o,
+});
+
+/** 月給 300,000円・所定8時間・社保加入（標準報酬月額 300,000円）・36歳 */
+const monthly = {
+    wage_type: "monthly", base_wage: 300000, scheduled_work_hours: 8,
+    commute_type: "none", commute_amount: 0, standard_remuneration: 300000, birthday: "1990-06-15",
+};
+/** 時給 1,200円・所定8時間・社保未加入 */
+const hourly = {
+    wage_type: "hourly", base_wage: 1200, scheduled_work_hours: 8,
+    commute_type: "none", commute_amount: 0, standard_remuneration: 0, birthday: "1980-01-10",
+};
+
+const day = (date: string, hours: number, type = "normal", o: Record<string, unknown> = {}) =>
+    ({ work_date: `2026-06-${date}`, work_hours: hours, night_hours: 0, work_type: type, ...o });
+/** 6月8日(月)〜12日(金)に8時間ずつ */
+const weekdays = (o: Record<string, unknown> = {}) => ["08", "09", "10", "11", "12"].map((d) => day(d, 8, "normal", o));
+
+const calc = (staff: any, rows: any[], o: Partial<SalaryExtras> = {}, comp: any = company) =>
+    calculateSalary(staff, rows, extras(o), 2026, 6, comp);
+
+describe("社会保険の加入・未加入", () => {
+    test("標準報酬月額が0（未加入・対象外）の人からは、健康保険・介護保険・支援金・厚生年金を引かない", () => {
+        const rows = Array.from({ length: 12 }, (_, i) => day(String(i + 1).padStart(2, "0"), 4));
+        const r = calc(hourly, rows);
+        expect(r.totalEarnings).toBe(57600);
+        expect(r.isSocialInsEnrolled).toBe(false);
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport, r.welfarePension]).toEqual([0, 0, 0, 0]);
+        // 雇用保険は加入しているので引く（57,600円 × 5/1000）
+        expect(r.empInsurance).toBe(288);
+    });
+    test("社保規定が「未加入 / 適用除外」（NULL）なら、標準報酬月額があっても引かない", () => {
+        const r = calc({ ...monthly, social_insurance_group_id: null }, []);
+        expect(r.isSocialInsEnrolled).toBe(false);
+        expect(r.healthInsurance + r.welfarePension + r.childSupport).toBe(0);
+    });
+    test("加入している人は、標準報酬月額から計算する（毎月の給与からは計算しない）", () => {
+        const r = calc({ ...monthly, social_insurance_group_id: 1 }, []);
+        expect(r.isSocialInsEnrolled).toBe(true);
+        expect(r.healthInsurance).toBe(calcPremium(300000, INSURANCE_2026.KENPO_RATES["東京"][1], LAW));
+        expect(r.welfarePension).toBe(27450); // 300,000 × 18.3% ÷ 2
+        expect(r.childSupport).toBe(345);     // 300,000 × 0.23% ÷ 2
+    });
+});
+
+describe("雇用保険", () => {
+    test("「雇用保険加入」を外した人（役員など）からは引かない", () => {
+        const r = calc({ ...monthly, is_executive: 1, is_employment_ins_eligible: 0 }, []);
+        expect(r.isEmploymentInsEnrolled).toBe(false);
+        expect(r.empInsurance).toBe(0);
+    });
+    test("従業員に区分がなければ会社の区分を使う（建設の事業: 本人 6/1000）", () => {
+        const r = calc(monthly, [], {}, { ...company, default_emp_ins_type: "construction" });
+        expect(r.empInsurance).toBe(1800);
+    });
+    test("従業員の区分は会社の区分より優先する", () => {
+        const r = calc({ ...monthly, employment_insurance_type: "general" }, [], {}, { ...company, default_emp_ins_type: "construction" });
+        expect(r.empInsurance).toBe(1500);
+    });
+});
+
+describe("通勤手当は非課税限度額まで所得税の対象外", () => {
+    test("通勤手当3万円は所得税の計算に入れない", () => {
+        const r = calc({ ...monthly, commute_type: "monthly", commute_amount: 30000 }, []);
+        const social = r.healthInsurance + r.nursingInsurance + r.childSupport + r.welfarePension + r.empInsurance;
+        expect(r.totalEarnings).toBe(330000);
+        expect(r.nonTaxableCommute).toBe(30000);
+        expect(r.taxableAmount).toBe(300000);
+        expect(r.incomeTax).toBe(calcWithholdingTax(300000 - social, 0, 2026, "table"));
+    });
+    test("月15万円を超えた分は課税される", () => {
+        const r = calc({ ...monthly, commute_type: "monthly", commute_amount: 200000 }, []);
+        expect(r.nonTaxableCommute).toBe(150000);
+        expect(r.taxableAmount).toBe(350000);
+    });
+});
+
+describe("法定休日・所定休日の出勤", () => {
+    test("月給：法定休日（日曜）に8時間働くと 1.35倍", () => {
+        const r = calc(monthly, [day("07", 8, "statutory_holiday")]);
+        expect(r.holidayWorkHours).toBe(8);
+        expect(r.holidayWorkPay).toBe(18409); // 1,704.54… × 1.35 × 8
+        expect(r.statutoryOvertimePay + r.standardOvertimePay).toBe(0);
+        expect(r.totalEarnings).toBe(318409);
+    });
+    test("時給：法定休日に8時間働くと、時給分に35%の割増を足す", () => {
+        const r = calc(hourly, [day("07", 8, "statutory_holiday")]);
+        expect(r.basePay).toBe(9600);
+        expect(r.holidayWorkPay).toBe(3360); // 1,200 × 0.35 × 8
+        expect(r.totalEarnings).toBe(12960);
+    });
+    test("月給：所定休日（土曜）の出勤は、週40時間以内なら法定内残業（1.0倍）", () => {
+        const r = calc(monthly, [day("13", 8, "holiday_work")]);
+        expect(r.statutoryOvertimePay).toBe(13636);
+        expect(r.standardOvertimePay).toBe(0);
+    });
+    test("法定休日の労働時間は週40時間に数えない（日曜8時間＋平日5日×8時間は残業なし）", () => {
+        const r = calc(monthly, [day("07", 8, "statutory_holiday"), ...weekdays()]);
+        expect(r.standardPremiumHours).toBe(0);
+        expect(r.standardOvertimePay).toBe(0);
+        expect(r.holidayWorkPay).toBe(18409);
+    });
+});
+
+describe("週40時間を超えた残業", () => {
+    test("月給：平日5日×8時間＋土曜8時間なら、土曜の8時間だけが 1.25倍（二重に払わない）", () => {
+        const r = calc(monthly, [...weekdays(), day("13", 8, "holiday_work")]);
+        expect(r.standardPremiumHours).toBe(8);
+        expect(r.standardOvertimePay).toBe(17045); // 1,704.54… × 1.25 × 8
+        expect(r.statutoryOvertimePay).toBe(0);
+        expect(r.totalEarnings).toBe(317045);
+    });
+    test("時給：40時間に達した後の日（土曜）の時給で割増を払う", () => {
+        const r = calc(hourly, [...weekdays({ actual_base_wage: 1200 }), day("13", 8, "holiday_work", { actual_base_wage: 1500 })]);
+        expect(r.standardPremiumHours).toBe(8);
+        expect(r.standardOvertimePay).toBe(3000); // 1,500 × 0.25 × 8（月曜の時給 1,200円ではない）
+    });
+    test("1日8時間を超えた分は日の残業として数え、週の累計には8時間までを足す", () => {
+        // 月曜10時間（日の残業2時間）＋火〜金8時間＋土曜4時間（週の残業4時間）＝ 残業6時間
+        const rows = [day("08", 10), ...["09", "10", "11", "12"].map((d) => day(d, 8)), day("13", 4, "holiday_work")];
+        const r = calc(monthly, rows);
+        expect(r.standardPremiumHours).toBe(6);
+        expect(r.statutoryOvertimePay).toBe(0);
+    });
+});
+
+describe("有給休暇", () => {
+    test("時給：全休（有給）は所定労働時間分の時給を払う", () => {
+        const r = calc(hourly, [day("01", 0, "paid_full")]);
+        expect(r.paidLeaveHours).toBe(8);
+        expect(r.paidLeavePay).toBe(9600);
+        expect(r.totalEarnings).toBe(9600);
+    });
+    test("時給：半休の日は、働いた時間＋半日分", () => {
+        const r = calc(hourly, [day("01", 4, "paid_half")]);
+        expect(r.basePay).toBe(4800);
+        expect(r.paidLeavePay).toBe(4800);
+    });
+    test("時給：時間単位の有給（2時間）も払う", () => {
+        const r = calc(hourly, [day("01", 6, "normal", { paid_leave_hours: 2 })]);
+        expect(r.basePay).toBe(7200);
+        expect(r.paidLeavePay).toBe(2400);
+    });
+    test("月給：半休の日に残りの半日（4時間）働いても残業にならない", () => {
+        const r = calc(monthly, [day("01", 4, "paid_half")]);
+        expect(r.totalStatutoryOvertimeHours).toBe(0);
+        expect(r.totalEarnings).toBe(300000);
+    });
+    test("月給：半休の日に5時間働くと、1時間が法定内残業", () => {
+        const r = calc(monthly, [day("01", 5, "paid_half")]);
+        expect(r.totalStatutoryOvertimeHours).toBe(1);
+        expect(r.totalEarnings).toBe(301705); // 300,000 + 1,704.54…（四捨五入）
+    });
+});
+
+describe("出勤日数と日額の通勤手当", () => {
+    const daily = { ...hourly, commute_type: "daily", commute_amount: 500 };
+    test("公休の日は出勤日数に数えない", () => {
+        const r = calc(daily, [day("06", 0, "holiday"), day("07", 0, "holiday")]);
+        expect(r.workDays).toBe(0);
+        expect(r.commutePay).toBe(0);
+    });
+    test("働いた日だけを数える（出勤2日＋公休1日 → 2日分）", () => {
+        const r = calc(daily, [day("01", 8), day("02", 8), day("06", 0, "holiday")]);
+        expect(r.workDays).toBe(2);
+        expect(r.commutePay).toBe(1000);
+    });
+});

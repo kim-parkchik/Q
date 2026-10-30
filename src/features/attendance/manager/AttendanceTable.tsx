@@ -181,7 +181,8 @@ export default function AttendanceTable({ am }: Props) {
                       <option value="">（未選択）</option>
                       <option value="normal">出勤（平日）</option>
                       <option value="holiday">公休</option>
-                      <option value="holiday_work">休日出勤</option>
+                      <option value="holiday_work">所定休日出勤</option>
+                      <option value="statutory_holiday">法定休日出勤（35%増）</option>
                       <option value="paid_full">全休(有給)</option>
                       <option value="paid_half">半休(有給)</option>
                       {/* セレクトボックスの中も赤くしておくと親切 */}

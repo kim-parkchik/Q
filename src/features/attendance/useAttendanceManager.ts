@@ -6,40 +6,7 @@ import * as Master from '../../constants';
 import { useToast } from "../../components/Toast";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
-
-/**
- * 給与計算期間を算出する
- * @param year 対象年
- * @param month 対象月（支給月）
- * @param closingDay 締日 (1~28, 99:末日)
- */
-const getPayrollPeriod = (year: number, month: number, closingDay: number) => {
-  let startDate: dayjs.Dayjs;
-  let endDate: dayjs.Dayjs;
-
-  // 1. 基準となる「その月の1日」を作成
-  const baseDate = dayjs(`${year}-${month}-01`);
-
-  if (closingDay === 99 || closingDay === 0) {
-    // 【末日締め】
-    // dayjsの機能でその月の最初と最後をズバリ取得
-    startDate = baseDate.startOf('month');
-    endDate = baseDate.endOf('month');
-  } else {
-    // 【指定日締め（例：15日）】
-    // 終了日：その月の指定日
-    endDate = dayjs(`${year}-${month}-${closingDay}`);
-    // 開始日：前月の締日の翌日
-    // 15日締めなら、先月の15日の「1日後」＝16日
-    startDate = endDate.subtract(1, 'month').add(1, 'day');
-  }
-
-  return {
-    startStr: startDate.format('YYYY-MM-DD'),
-    endStr: endDate.format('YYYY-MM-DD'),
-    displayRange: `${startDate.format('YYYY/MM/DD')} 〜 ${endDate.format('YYYY/MM/DD')}`
-  };
-};
+import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 
 export function useAttendanceManager({ db, staffList, targetYear, targetMonth }: any) {
   const toast = useToast();
@@ -105,22 +72,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     // closing_day がない、または currentGroup が取得できていない場合は処理しない
     if (!currentGroup?.closing_day) return null;
 
-    // 1. 翌月払いフラグを確認 (1 なら 1ヶ月、0 なら 0ヶ月 遡る)
-    const shiftAmount = currentGroup.is_next_month === 1 ? 1 : 0;
-
-    // 2. dayjs を使って、計算のベースとなる年月を割り出す
-    // 例: 5月支給で翌月払い(shift:1)なら 4月、当月払い(shift:0)なら 5月になる
-    const baseDate = dayjs(`${targetYear}-${targetMonth}-01`).subtract(shiftAmount, 'month');
-    
-    const calcYear = baseDate.year();
-    const calcMonth = baseDate.month() + 1;
-
-    // 3. 割り出した「労働月」を元に期間を算出
-    return getPayrollPeriod(
-      calcYear,
-      calcMonth,
-      currentGroup.closing_day
-    );
+    // 翌月払いなら1か月前の勤怠（例: 5月支給・翌月払い → 4月の勤怠）を、締日で区切った期間
+    return getPeriodForPayMonth(currentGroup, targetYear, targetMonth);
   }, [currentGroup, targetYear, targetMonth]);
 
   const dateList = useMemo(() => {
@@ -399,11 +352,6 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
   // --- 給与集計 ---
   const calcResult = useMemo(() => {
-    // 【デバッグ用】ここを追加
-    console.log("DEBUG: selectedStaff", selectedStaff);
-    console.log("DEBUG: wage_type", selectedStaff?.wage_type);
-    console.log("DEBUG: base_wage", selectedStaff?.base_wage);
-    
     // 1. 初期値をエンジン側の戻り値の構造と合わせる
     const defaultResult = {
       totalWorkHours: 0,
@@ -419,9 +367,6 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     if (!selectedStaff || !companySettings) {
       return defaultResult;
     }
-
-    // デバッグログ：ここが 250000 になっているか確認！
-    console.log("SENDING TO ENGINE:", selectedStaff.base_wage);
 
     const attendanceRows = Object.entries(monthlyWorkData)
       .filter(([_, row]) => row.is_finalized === 1)

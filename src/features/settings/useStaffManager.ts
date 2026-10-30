@@ -269,15 +269,25 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         }
     };
 
+    // 新規登録の前に、直前に編集した人の値が残らないよう全項目を初期値に戻す
     const clearForm = () => {
-        setTargetId(""); setTargetName(""); setTargetFurigana(""); setTargetBirthday(""); 
+        setTargetId(""); setTargetName(""); setTargetFurigana(""); setTargetBirthday(""); setTargetGender("");
         setTargetJoinDate(new Date().toISOString().split('T')[0]);
         setTargetRetirementDate("");
         setTargetStatus("active");
-        setTargetZip(""); setTargetAddress(""); setTargetPhone(""); setTargetMobile(""); setTargetCommuteAmount(0);
-        setTargetBranchId(1); setTargetDependents(0); setTargetResidentTax(0);
-        setTargetStandardRemuneration(0);
+        setTargetIsExecutive(0);
+        setTargetZip(""); setTargetAddress(""); setTargetPhone(""); setTargetMobile("");
+        setTargetBranchId(1); setTargetPayrollGroupId(1); setTargetPatternId(1);
         setTargetWorkDays({ mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false });
+        setTargetScheduledIn(""); setTargetHours(8); setTargetMinutes(0);
+        setTargetIsFlex(false); setTargetCoreStart(""); setTargetCoreEnd("");
+        setTargetWageType("hourly"); setTargetWage(1200); setTargetIsOvertimeEligible(1);
+        setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
+        setTargetCommuteType("daily"); setTargetCommuteAmount(0);
+        setTargetDependents(0); setTargetResidentTax(0);
+        setTargetStandardRemuneration(0);
+        setTargetIsEmploymentInsEligible(1);
+        setTargetHealthInsNum(""); setTargetPensionNum(""); setTargetEmploymentInsNum("");
         setTargetSocialInsGroupId(1);
         setTargetEmpInsType("");
         setEditingId(null);
@@ -303,7 +313,12 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteAmount(s.commute_amount);
         setTargetWageType(s.wage_type || "hourly");
         setTargetPatternId(s.calendar_pattern_id || 1);
-        const hoursVal = s.scheduled_work_hours || 8; 
+        setTargetPayrollGroupId(s.payroll_group_id || 1);
+        setTargetScheduledIn(s.scheduled_in || "");
+        setTargetIsFlex(Number(s.is_flex) === 1);
+        setTargetCoreStart(s.core_start || "");
+        setTargetCoreEnd(s.core_end || "");
+        const hoursVal = s.scheduled_work_hours || 8;
         const h = Math.floor(hoursVal);
         const m = Math.round((hoursVal - h) * 60);
         setTargetHours(h);
@@ -312,10 +327,14 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetDependents(s.dependents || 0);
         setTargetResidentTax(s.resident_tax || 0);
         setTargetStandardRemuneration(s.standard_remuneration || 0); // 🆕 追加
-        setTargetSocialInsGroupId(s.social_insurance_group_id || 1);
+        // 社保規定が空（NULL）なら「未加入 / 適用除外」
+        setTargetSocialInsGroupId(s.social_insurance_group_id ?? 0);
         setTargetEmpInsType(s.employment_insurance_type || "");
         setTargetIsExecutive(s.is_executive || 0);
         setTargetIsEmploymentInsEligible(s.is_employment_ins_eligible ?? 1); // 雇用保険はデフォルト1なので??を使用
+        setTargetHealthInsNum(s.health_ins_num || "");
+        setTargetPensionNum(s.pension_num || "");
+        setTargetEmploymentInsNum(s.employment_ins_num || "");
         setTargetIsOvertimeEligible(s.is_overtime_eligible ?? 1);
         setTargetFixedOvertimeHours(s.fixed_overtime_hours || 0);
         setTargetFixedOvertimeAmount(s.fixed_overtime_allowance || 0);
@@ -374,8 +393,16 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetFixedOvertimeHours) !== Number(original.fixed_overtime_hours || 0) ||
             Number(targetFixedOvertimeAmount) !== Number(original.fixed_overtime_allowance || 0) ||
             Number(targetPatternId) !== Number(original.calendar_pattern_id || 0) ||
-            Number(targetSocialInsGroupId) !== Number(original.social_insurance_group_id || 1) ||
-            String(targetEmpInsType || "") !== String(original.employment_insurance_type || "")
+            Number(targetPayrollGroupId) !== Number(original.payroll_group_id || 1) ||
+            Number(targetSocialInsGroupId) !== Number(original.social_insurance_group_id ?? 0) ||
+            String(targetEmpInsType || "") !== String(original.employment_insurance_type || "") ||
+            String(targetHealthInsNum) !== String(original.health_ins_num || "") ||
+            String(targetPensionNum) !== String(original.pension_num || "") ||
+            String(targetEmploymentInsNum) !== String(original.employment_ins_num || "") ||
+            String(targetScheduledIn) !== String(original.scheduled_in || "") ||
+            targetIsFlex !== (Number(original.is_flex) === 1) ||
+            String(targetCoreStart) !== String(original.core_start || "") ||
+            String(targetCoreEnd) !== String(original.core_end || "")
         );
     };
 
@@ -411,39 +438,49 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 Number(targetFixedOvertimeHours),
                 Number(targetFixedOvertimeAmount),
                 // 🆕 追加
-                Number(targetSocialInsGroupId),      // social_insurance_group_id
-                targetEmpInsType || null     // employment_insurance_type
+                // 「未加入 / 適用除外」(0) は NULL で保存する（0 という社保規定は無いので、そのままだと外部キーの制約で保存できない）
+                Number(targetSocialInsGroupId) || null, // social_insurance_group_id
+                targetEmpInsType || null,     // employment_insurance_type
+                Number(targetPayrollGroupId) || 1,
+                targetHealthInsNum, targetPensionNum, targetEmploymentInsNum,
+                targetScheduledIn, targetIsFlex ? 1 : 0, targetCoreStart, targetCoreEnd
             ];
 
             if (editingId) {
                 await db.execute(
-                    `UPDATE staff SET 
-                        name=?, furigana=?, birthday=?, gender=?, join_date=?, 
-                        retirement_date=?, status=?, zip_code=?, address=?, 
-                        phone=?, mobile=?, wage_type=?, base_wage=?, 
-                        commute_type=?, commute_amount=?, branch_id=?, 
+                    `UPDATE staff SET
+                        name=?, furigana=?, birthday=?, gender=?, join_date=?,
+                        retirement_date=?, status=?, zip_code=?, address=?,
+                        phone=?, mobile=?, wage_type=?, base_wage=?,
+                        commute_type=?, commute_amount=?, branch_id=?,
                         dependents=?, resident_tax=?, calendar_pattern_id=?,
                         scheduled_work_hours=?, standard_remuneration=?,
-                        work_days=?, is_executive=?, is_employment_ins_eligible=?, 
+                        work_days=?, is_executive=?, is_employment_ins_eligible=?,
                         is_overtime_eligible=?, fixed_overtime_hours=?, fixed_overtime_allowance=?,
-                        social_insurance_group_id=?, employment_insurance_type=? -- 🆕 追加
+                        social_insurance_group_id=?, employment_insurance_type=?, -- 🆕 追加
+                        payroll_group_id=?,
+                        health_ins_num=?, pension_num=?, employment_ins_num=?,
+                        scheduled_in=?, is_flex=?, core_start=?, core_end=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
             } else {
                 await db.execute(
                     `INSERT INTO staff (
-                        name, furigana, birthday, gender, join_date, 
-                        retirement_date, status, zip_code, address, 
-                        phone, mobile, wage_type, base_wage, 
-                        commute_type, commute_amount, branch_id, 
+                        name, furigana, birthday, gender, join_date,
+                        retirement_date, status, zip_code, address,
+                        phone, mobile, wage_type, base_wage,
+                        commute_type, commute_amount, branch_id,
                         dependents, resident_tax, calendar_pattern_id,
                         scheduled_work_hours, standard_remuneration,
-                        work_days, is_executive, is_employment_ins_eligible, 
+                        work_days, is_executive, is_employment_ins_eligible,
                         is_overtime_eligible, fixed_overtime_hours, fixed_overtime_allowance,
                         social_insurance_group_id, employment_insurance_type, -- 🆕 追加
+                        payroll_group_id,
+                        health_ins_num, pension_num, employment_ins_num,
+                        scheduled_in, is_flex, core_start, core_end,
                         id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, // ? は 30個
+                    ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
                 );
             }

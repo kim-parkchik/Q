@@ -45,8 +45,12 @@ export default function InsuranceSection({ cm }: Props) {
                     <label style={{ fontSize: "12px", display: "flex", alignItems: "center", cursor: "pointer", gap: "6px" }}>
                         <input 
                             type="checkbox" 
-                            checked={targetIsExecutive === 1} 
-                            onChange={e => setTargetIsExecutive(e.target.checked ? 1 : 0)}
+                            checked={targetIsExecutive === 1}
+                            onChange={e => {
+                                setTargetIsExecutive(e.target.checked ? 1 : 0);
+                                // 役員は原則として雇用保険に入れないため、加入を外す（使用人兼務役員なら付け直せる）
+                                if (e.target.checked) setTargetIsEmploymentInsEligible(0);
+                            }}
                         />
                         <UserCheck size={14} color="#64748b" />
                         役員
