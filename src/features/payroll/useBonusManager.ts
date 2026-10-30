@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
-import { calcWithholdingTax } from '../../utils/incomeTax';
+import { calcBonusWithholdingTax } from '../../utils/incomeTax';
 import { calcPremium } from '../../utils/socialInsurance';
 
 // --- Types ---
@@ -22,25 +22,6 @@ interface BonusItem {
   type: 'earning' | 'deduction';
   is_default_active: number; // 🆕 追加
 }
-
-// 所得税計算ロジックは変更なし（そのまま維持）
-const calcBonusIncomeTax = (bonusAfterSocial: number, prevMonthTaxBase: number, dependents: number, payYear: number): number => {
-  if (prevMonthTaxBase > 0) {
-    const depIndex = Math.min(dependents, 3) + 2;
-    let rate = 0;
-    for (const row of Master.TAX_2026.BONUS_TAX_RATE_TABLE) {
-      if (prevMonthTaxBase >= row[0] && prevMonthTaxBase < row[1]) {
-        rate = row[depIndex];
-        break;
-      }
-    }
-    return Math.floor(bonusAfterSocial * rate);
-  }
-  // 前月の給与がない場合：賞与の6分の1を月額とみなして月額の税額を求め、その6倍にする
-  const monthlyAmount = Math.floor(bonusAfterSocial / 6);
-  const monthlyTax = calcWithholdingTax(monthlyAmount, dependents, payYear, "table");
-  return Math.floor(monthlyTax * 6);
-};
 
 export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 🆕 nullを許容
   const [activeTab, setActiveTab] = useState<'list' | 'items' | 'calc'>('list');
@@ -371,7 +352,9 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     const empInsurance = calcPremium(totalEarnings, empRate[0] * 100, companySettings.round_emp_ins || 'round', 1);
 
     const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
-    const incomeTax = calcBonusIncomeTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(staff.dependents) || 0, selectedSetting?.target_year ?? new Date().getFullYear());
+    // 源泉所得税：国税庁の算出率の表（前月の給与がない・賞与が前月の給与の10倍を超えるときは月額表）で計算する
+    // ※ 前月の給与は、前月支給分として確定した給与（非課税の通勤手当を除いた額 − 社会保険料）を使う
+    const incomeTax = calcBonusWithholdingTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(staff.dependents) || 0, payYear);
       
     // 🆕 カスタム控除も有効なものだけ合計
     const customDeductions = deductionItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);

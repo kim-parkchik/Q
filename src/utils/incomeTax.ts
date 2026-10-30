@@ -124,3 +124,55 @@ export const calcWithholdingTax = (
         ? calcMonthlyWithholdingTax(taxBase, dependents, master.DENSANKI)
         : calcMonthlyTaxByTable(taxBase, dependents, master.MONTHLY_TABLE);
 };
+
+// ─────────────────────────────────────────────────────────────
+// 賞与（甲欄）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 賞与の金額に乗ずべき率（%）を「賞与に対する源泉徴収税額の算出率の表」の甲欄から求める
+ * @param prevMonthAfterSocial 前月の社会保険料等控除後の給与等の金額
+ * @param dependents 扶養親族等の数（7人以上は「7人以上」の列）
+ */
+export const calcBonusTaxRate = (
+    prevMonthAfterSocial: number,
+    dependents: number,
+    table: Master.BonusTaxRateTable = Master.TAX_2026.BONUS_TABLE
+): number => {
+    const amount = Math.max(0, Math.floor(prevMonthAfterSocial));
+    const col = table.kou[Math.min(Math.max(0, Math.floor(dependents || 0)), 7)];
+    const row = col.find(([from, to]) => amount >= from && amount < to);
+    if (!row) throw new Error(`賞与の算出率の表に該当する行がありません: ${amount}円`);
+    return row[2];
+};
+
+/**
+ * 賞与の源泉所得税（甲欄）
+ * ・通常：賞与（社会保険料等控除後）× 算出率。1円未満切り捨て
+ *   （率は、前月の社会保険料等控除後の給与と扶養親族等の数で決まる）
+ * ・前月の給与がない（社会保険料等以下の場合を含む）、または賞与が前月の給与の10倍を超える場合は、算出率の表を使わず月額表で計算する
+ *   （算出率の表の備考4）：賞与の6分の1（計算期間が6か月を超えるときは12分の1）を前月の給与に足して月額表の税額を求め、
+ *   前月の給与だけの税額を引いた差額を6倍（12倍）する。前月の給与がなければ「賞与の6分の1の税額 × 6」になる
+ * @param bonusAfterSocial 賞与の金額から社会保険料等を引いた金額
+ * @param prevMonthAfterSocial 前月中の給与（賞与を除く）から社会保険料等を引いた金額
+ * @param payYear 賞与を支払う年（その年の表を使う）
+ * @param periodMonths 賞与の計算期間（月数）。6か月を超えるかどうかだけを使う
+ */
+export const calcBonusWithholdingTax = (
+    bonusAfterSocial: number,
+    prevMonthAfterSocial: number,
+    dependents: number,
+    payYear: number,
+    periodMonths = 6
+): number => {
+    const bonus = Math.max(0, Math.floor(bonusAfterSocial));
+    const prev = Math.max(0, Math.floor(prevMonthAfterSocial));
+    const master = Master.getTaxMaster(payYear);
+
+    if (prev === 0 || bonus > prev * 10) {
+        const n = periodMonths > 6 ? 12 : 6;
+        const monthly = (amount: number) => calcMonthlyTaxByTable(amount, dependents, master.MONTHLY_TABLE);
+        return (monthly(prev + bonus / n) - monthly(prev)) * n;
+    }
+    return addRate(bonus, calcBonusTaxRate(prev, dependents, master.BONUS_TABLE));
+};

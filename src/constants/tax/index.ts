@@ -8,6 +8,7 @@ export type TaxMasterType = typeof TAX_2026;
 // 3. 衝突しないオブジェクト名でそのままエクスポート
 export { TAX_2025, TAX_2026 };
 export type { MonthlyTaxTable } from './monthlyTableTypes';
+export type { BonusTaxRateTable } from './bonusTaxTableTypes';
 
 /**
  * 給与を支払う年に合った源泉徴収のマスターを返す
