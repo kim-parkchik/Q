@@ -18,7 +18,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, flatTaxTotal, fmtH
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, flatTaxTotal, fmtH
   } = usePayStubModal(props);
 
   const padRows = (current: number, target: number) =>
@@ -61,6 +61,11 @@ export default function PayStubModal(props: Props) {
               {isSaved ? "✅ 確定済み" : "💾 給与確定"}
             </button>
           </div>
+          {rateWarnings.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
           {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               {!salary.isSocialInsEnrolled && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
@@ -213,7 +218,7 @@ export default function PayStubModal(props: Props) {
 
           <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
             ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
-            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{insMaster.LABOR_FISCAL_YEAR}年度の料率で計算。
+            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{insMaster.LABOR_FROM.year}年{insMaster.LABOR_FROM.month}月からの料率で計算。
             所得税は{props.year}年分の{TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
           </div>
         </div>

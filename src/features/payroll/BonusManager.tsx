@@ -126,7 +126,8 @@ export default function BonusManager({ db, staffList }: Props) {
     toggleItemActive,
     staffValues,
     saveStaffValue,
-    calcBonusForStaff
+    calcBonusForStaff,
+    rateWarnings
   } = useBonusManager(db, staffList);
 
   // マスター表示用
@@ -617,6 +618,13 @@ export default function BonusManager({ db, staffList }: Props) {
               ))}
             </select>
           </div>
+
+          {/* 料率・税額表が登録されていない年月の注意 */}
+          {rateWarnings.length > 0 && (
+            <div style={{ ...S.card, marginBottom: 16, backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13 }}>
+              {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
 
           {/* 警告メッセージ */}
           {selectedSettingId && items.length === 0 && (

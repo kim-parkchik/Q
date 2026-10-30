@@ -45,6 +45,13 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
 
   const selectedSetting = settings.find(s => s.id === selectedSettingId) ?? null;
+  // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
+  const rateWarnings = selectedSetting
+    ? [
+        ...Master.getInsuranceMaster(selectedSetting.target_year, selectedSetting.target_month).WARNINGS,
+        ...Master.getTaxMasterWarnings(selectedSetting.target_year),
+      ]
+    : [];
 
   // --- Data Fetching ---
   const loadSettings = useCallback(async () => {
@@ -426,5 +433,6 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     // ── 計算・値保持 (Tab 3: calc) ──
     activeItemIds, toggleItemActive,
     staffValues, saveStaffValue, calcBonusForStaff,
+    rateWarnings,
   };
 };

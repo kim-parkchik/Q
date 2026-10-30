@@ -3,22 +3,13 @@
  *
  * 協会けんぽの料率・標準報酬月額表は Excel から自動生成したデータ（kenpoTable20XX.ts）を使い、
  * 計算プログラムが使いやすい形（[本人負担, 合計] の組など）に変換する。
+ * ※ 雇用保険料率は年度の途中で変わることがあるため、別の一覧（laborInsuranceRates.ts）で管理する。
  */
 import type { KenpoTable } from './kenpoTableTypes';
 
-/** 雇用保険料率 [本人負担, 合計]（小数。0.005 = 5/1000） */
-export interface LaborInsuranceRates {
-  general: [number, number];
-  agriculture: [number, number];
-  construction: [number, number];
-}
-
 const half = (rate: number) => Number((rate / 2).toFixed(4));
 
-export const buildInsuranceMaster = (
-  kenpo: KenpoTable,
-  labor: { rates: LaborInsuranceRates; fiscalYear: number; source: string }
-) => {
+export const buildInsuranceMaster = (kenpo: KenpoTable) => {
   const KENPO_RATES: Record<string, [number, number]> = Object.fromEntries(
     Object.entries(kenpo.healthRates).map(([pref, rate]) => [pref, [half(rate), rate]])
   );
@@ -44,10 +35,6 @@ export const buildInsuranceMaster = (
     CHILD_SUPPORT_FROM: kenpo.childSupportFrom,
     /** 子ども・子育て拠出金率（%・事業主のみ） */
     CHILD_ALLOWANCE_RATE: kenpo.childCareContributionRate,
-    /** 雇用保険料率（4月から翌3月までの年度） */
-    LABOR_INSURANCE_RATES: labor.rates,
-    LABOR_FISCAL_YEAR: labor.fiscalYear,
-    LABOR_SOURCE: labor.source,
     /** 標準報酬月額の上限・下限 */
     PENSION_MIN_HYOJUN: kenpo.pensionMinStandard,
     PENSION_MAX_HYOJUN: kenpo.pensionMaxStandard,
@@ -69,4 +56,5 @@ export const buildInsuranceMaster = (
   };
 };
 
-export type InsuranceMasterType = ReturnType<typeof buildInsuranceMaster>;
+/** 協会けんぽの1つの保険料額表から作ったマスター（雇用保険料率は含まない） */
+export type KenpoMasterType = ReturnType<typeof buildInsuranceMaster>;

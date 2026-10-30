@@ -114,6 +114,8 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
   // 明細の注記に出す料率の年度（その月の保険料に使ったもの）
   const insMaster = Master.getInsuranceMaster(year, month);
+  // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
+  const rateWarnings = [...insMaster.WARNINGS, ...Master.getTaxMasterWarnings(year)];
 
   // 行数計算ロジック
   const earningItemsCount = 1
@@ -152,6 +154,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     deductionItemsCount,
     targetRows,
     insMaster,
+    rateWarnings,
     flatTaxTotal,
     fmtH
   };

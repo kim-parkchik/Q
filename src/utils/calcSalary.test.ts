@@ -70,6 +70,10 @@ describe("雇用保険", () => {
         const r = calc(monthly, [], {}, { ...company, default_emp_ins_type: "construction" });
         expect(r.empInsurance).toBe(1800);
     });
+    test("年度の途中で料率が変わった月から新しい料率（2022年9月分 3/1000 → 10月分 5/1000）", () => {
+        expect(calculateSalary(monthly, [], extras(), 2022, 9, company).empInsurance).toBe(900);
+        expect(calculateSalary(monthly, [], extras(), 2022, 10, company).empInsurance).toBe(1500);
+    });
     test("従業員の区分は会社の区分より優先する", () => {
         const r = calc({ ...monthly, employment_insurance_type: "general" }, [], {}, { ...company, default_emp_ins_type: "construction" });
         expect(r.empInsurance).toBe(1500);

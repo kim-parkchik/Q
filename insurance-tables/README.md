@@ -16,16 +16,24 @@
 | 協会けんぽ_保険料額表_令和7年度.xlsx | 令和7年3月分から | https://www.kyoukaikenpo.or.jp/g7/cat330/sb3150/r07/r7ryougakuhyou3gatukara/ |
 | 協会けんぽ_保険料額表_令和6年度.xlsx | 令和6年3月分から | https://www.kyoukaikenpo.or.jp/about/business/insurance_rate/premium_prefectures/r06/ （「都道府県別 XLSファイル」の被保険者の方の分） |
 | 協会けんぽ_保険料額表_令和5年度.xlsx | 令和5年3月分から | https://www.kyoukaikenpo.or.jp/about/business/insurance_rate/premium_prefectures/r05/ （「都道府県別 XLSファイル」の被保険者の方の分） |
+| 協会けんぽ_保険料額表_令和4年度.xlsx | 令和4年3月分から | https://www.kyoukaikenpo.or.jp/about/business/insurance_rate/premium_prefectures/r04/ （「都道府県別 XLSファイル」の被保険者の方の分） |
 
 ※ 協会けんぽのホームページは移転しており、古いURL（/g7/cat330/…）は新しいURL（/about/business/insurance_rate/premium_prefectures/…）に転送されます。
 　過去の年度の表は、新しいURLのページの一覧（平成21年度〜）から入手できます。
 
-雇用保険料率は Excel がないため、厚生労働省の発表資料の数字を `src/constants/insurance/insurance20XX.ts` に
-出典URLつきで記載しています（`bun test` で値を確認しています）。
+雇用保険料率は Excel がないため、厚生労働省の発表資料の数字を `src/constants/insurance/laborInsuranceRates.ts` に
+「何年何月から」と出典URLつきで記載しています（`bun test` で値を確認しています）。
+
+## 料率は「何年何月分から」で切り替わる
+
+料率は、その月までに始まっている最後の表・行を使います（`src/constants/insurance/index.ts` の `getInsuranceMaster`）。
+ふつうは協会けんぽが3月分から、雇用保険が4月からですが、年度の途中で変わることもあります
+（例：雇用保険は令和4年10月に本人負担が変わった、厚生年金は令和2年9月に上の等級が増えた）。
+登録していない月は、いちばん近い料率で計算して、給与明細・賞与の画面に注意を出します。
 
 ## 新しい年度の表を追加するとき
 
-1. 協会けんぽのページから「エクセル版（全都道府県分）」をダウンロードして、このフォルダに置く
+1. 協会けんぽのページから「都道府県別 XLSファイル」（被保険者の方の分）をダウンロードして、このフォルダに置く
 2. データファイルを作る（全47都道府県・全等級の保険料が Excel の印刷値と一致するか自動で確かめます）
 
    ```
@@ -34,8 +42,20 @@
        src/constants/insurance/kenpoTable2027.ts <協会けんぽのページのURL>
    ```
 
-3. `src/constants/insurance/insurance2027.ts` を作り（雇用保険料率は厚生労働省の発表を確認して記入）、
-   `src/constants/insurance/index.ts` の一覧に追加する
-4. `bun test` で確認する
+3. `src/constants/insurance/insurance2027.ts` を作り（他の年と同じ形）、`src/constants/insurance/index.ts` の `KENPO_MASTERS` に追加する
+4. 雇用保険料率は、厚生労働省の発表を確認して `src/constants/insurance/laborInsuranceRates.ts` の末尾に足す
+5. `bun test` で確認する
+
+## 年度の途中で料率が変わったとき
+
+- **協会けんぽの表が年度の途中から変わった**：その月からの表を、年度に月を付けて取り込み（例：`2020-09`）、
+  `KENPO_MASTERS` の正しい位置（古い順）に足す。表題の年・月と違うとエラーで止まります。
+
+  ```
+  python3 scripts/import_kenpo_table.py insurance-tables/協会けんぽ_保険料額表_令和2年9月分から.xlsx 2020-09 \
+      src/constants/insurance/kenpoTable2020_09.ts <協会けんぽのページのURL>
+  ```
+
+- **雇用保険料率が年度の途中から変わった**：`laborInsuranceRates.ts` に、変わった月からの行を1つ足す（令和4年10月の行が例）。
 
 ※ 数字を手やAIで書き写さないこと（以前、AIが作った架空の料率が混ざっていたことがあります）。

@@ -91,7 +91,12 @@ def close(a, b):
 
 
 def main():
-    src, year, out = sys.argv[1], sys.argv[2], sys.argv[3]
+    src, year_arg, out = sys.argv[1], sys.argv[2], sys.argv[3]
+    # 年度は「2026」の形。年度の途中から使う表（例: 令和2年9月分から）は「2020-09」のように月も付ける
+    ym = re.fullmatch(r"(\d{4})(?:-(\d{1,2}))?", year_arg)
+    assert ym, f"年度は 2026 または 2020-09 の形で指定してください: {year_arg}"
+    year = int(ym.group(1))
+    table_name = f"{year}_{int(ym.group(2)):02d}" if ym.group(2) else str(year)
     source_url = sys.argv[4] if len(sys.argv) > 4 else "https://www.kyoukaikenpo.or.jp/g7/cat330/sb3150/"
     wb = openpyxl.load_workbook(src, data_only=True)
     sheets = {name: parse_sheet(wb[name]) for name in wb.sheetnames}
@@ -107,8 +112,12 @@ def main():
     m = re.search(r"拠出金率（([\d.]+)％）", text)
     assert m, "子ども・子育て拠出金率が見つかりません"
     contribution = float(m.group(1))
-    m = re.search(r"([０-９\d]+)年([０-９\d]+)月分（", title)
-    eff_month = int(m.group(2).translate(str.maketrans("０１２３４５６７８９", "0123456789")))
+    m = re.search(r"令和([０-９\d]+)年([０-９\d]+)月分（", title)
+    zen = str.maketrans("０１２３４５６７８９", "0123456789")
+    eff_month = int(m.group(2).translate(zen))
+    assert 2018 + int(m.group(1).translate(zen)) == year, f"表題の年（{title}）と指定した年度 {year} が違います"
+    if ym.group(2):
+        assert int(ym.group(2)) == eff_month, f"表題の月（{eff_month}月分）と指定した月 {ym.group(2)} が違います"
     sup_from = None
     if support:
         m = re.search(r"子ども・子育て支援金率：令和(\d+)年(\d+)月分", text)
@@ -154,7 +163,7 @@ def main():
     L.append(" */")
     L.append("import type { KenpoTable } from './kenpoTableTypes';")
     L.append("")
-    L.append(f"export const KENPO_TABLE_{year}: KenpoTable = {{")
+    L.append(f"export const KENPO_TABLE_{table_name}: KenpoTable = {{")
     L.append(f'  title: "{title}",')
     L.append(f"  /** この年度の料率を使い始める月（保険料の対象月） */")
     L.append(f"  effectiveFrom: {{ year: {year}, month: {eff_month} }},")
