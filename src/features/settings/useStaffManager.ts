@@ -6,6 +6,8 @@ import { useState, useEffect } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { fetchAddressByZip } from "../../utils/addressUtils";
+import { useMessageDialog } from "../../components/MessageDialog";
+import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -19,6 +21,7 @@ interface CalendarPattern {
 }
 
 export function useStaffManager({ db, onDataChange, staffList }: UseStaffManagerArgs) {
+    const dialog = useMessageDialog();
     // =========================================================
     // 1. システム・画面制御状態
     // =========================================================
@@ -503,12 +506,32 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             return;
         }
         
+        const staffId = String(id);
         try {
-            await db.execute("DELETE FROM staff WHERE id = ?", [String(id)]);
+            // 勤怠・給与・賞与・有給の記録がある人は削除しない（法律で保存が必要。削除すると記録も一緒に消える）
+            // 削除できるのは、登録を間違えた人など、まだ記録が何もない人だけ
+            const found: string[] = [];
+            for (const { table, label } of STAFF_RECORD_TABLES) {
+                const rows = await db.select<{ id: number }[]>(`SELECT 1 AS id FROM ${table} WHERE staff_id = ? LIMIT 1`, [staffId]);
+                if (rows.length > 0) found.push(label);
+            }
+            if (found.length > 0) {
+                setDeletingId(null);
+                return dialog.warning(
+                    `この従業員には ${found.join("・")} の記録があるため、削除できません。\n` +
+                    `記録は法律で保存が必要です。辞めた人は「編集」で状態を「退職」にし、退職日を入れてください。`
+                );
+            }
+
+            // 個別の給与項目の設定は従業員と一緒に消えないので、先に消しておく（同じIDで登録し直したときに残らないように）
+            await db.execute("DELETE FROM staff_salary_values WHERE staff_id = ?", [staffId]);
+            await db.execute("DELETE FROM staff WHERE id = ?", [staffId]);
             onDataChange();
             setDeletingId(null); // 削除完了後にリセット
         } catch (e) {
             console.error(e);
+            setDeletingId(null);
+            dialog.error(`従業員を削除できませんでした。\n${e}`);
         }
     };
 

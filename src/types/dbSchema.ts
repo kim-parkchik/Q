@@ -1,6 +1,20 @@
 import { HOLIDAY_CSV_URL_DEFAULT } from "../constants/appConfig";
 import * as Master from '../constants';
 
+/**
+ * 従業員ごとの記録の表（出勤簿・賃金台帳・年次有給休暇管理簿などの元になるもの）
+ * 労働基準法で保存が必要なため、記録が1件でもある従業員は削除できないようにする（退職にして残す）。
+ * ※ これらの表は従業員を消すと一緒に消える（ON DELETE CASCADE）ので、削除そのものを止める。
+ */
+export const STAFF_RECORD_TABLES = [
+  { table: "attendance", label: "勤怠" },
+  { table: "salary_results", label: "給与の確定結果" },
+  { table: "bonus_staff_values", label: "賞与の入力" },
+  { table: "bonus_results", label: "賞与の確定結果" },
+  { table: "paid_leave_grants", label: "有給の付与" },
+  { table: "paid_leave_usage", label: "有給の取得" },
+] as const;
+
 export const DB_SCHEMAS = [
     // 0. ユーザー管理（ログイン・権限）
   `CREATE TABLE IF NOT EXISTS users (
@@ -343,5 +357,14 @@ export const DB_SCHEMAS = [
     category TEXT NOT NULL,
     message TEXT NOT NULL,
     user_name TEXT
-  );`
+  );`,
+
+  // 記録がある従業員の削除を止める（画面の確認をすり抜けても、記録が一緒に消えないようにする）
+  // ※ IF NOT EXISTS のため、中身を変えるときは別の名前で作り直すこと
+  `CREATE TRIGGER IF NOT EXISTS keep_staff_with_records
+    BEFORE DELETE ON staff
+    WHEN ${STAFF_RECORD_TABLES.map(({ table }) => `EXISTS (SELECT 1 FROM ${table} WHERE staff_id = OLD.id)`).join("\n      OR ")}
+  BEGIN
+    SELECT RAISE(ABORT, '勤怠・給与・賞与・有給の記録がある従業員は削除できません。退職にしてください。');
+  END;`
 ];
