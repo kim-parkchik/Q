@@ -31,6 +31,8 @@ export interface SalaryExtras {
   customItems: { name: string; amount: number; type: 'earning' | 'deduction' }[];
   /** 源泉所得税の計算方法（給与規定グループの設定。省略時は月額表） */
   taxMethod?: TaxCalcMethod;
+  /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
+  flatTaxReductionRemaining?: number;
 }
 
 export interface SalaryResult {
@@ -65,7 +67,14 @@ export interface SalaryResult {
   childSupport: number;
   welfarePension: number;
   empInsurance: number;
+  /** 源泉所得税（定額減税を引いた後の、実際に控除する額） */
   incomeTax: number;
+  /** 定額減税を引く前の源泉所得税 */
+  incomeTaxBeforeReduction: number;
+  /** この給与で差し引いた定額減税額 */
+  flatTaxReduction: number;
+  /** この給与のあとに残る定額減税額（次の給与から引く） */
+  flatTaxReductionRemaining: number;
   residentTax: number;
   customDeductions: number;
   totalDeductions: number;
@@ -210,8 +219,8 @@ export const saveSalaryResult = async (
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
-      social_ins_total, income_tax, resident_tax, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      social_ins_total, income_tax, flat_tax_reduction, resident_tax, net_pay
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -232,6 +241,7 @@ export const saveSalaryResult = async (
       emp_insurance = excluded.emp_insurance,
       social_ins_total = excluded.social_ins_total,
       income_tax = excluded.income_tax,
+      flat_tax_reduction = excluded.flat_tax_reduction,
       resident_tax = excluded.resident_tax,
       net_pay = excluded.net_pay,
       processed_at = DATETIME('now', 'localtime');
@@ -246,7 +256,7 @@ export const saveSalaryResult = async (
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
-    result.incomeTax, result.residentTax, result.netPay
+    result.incomeTax, result.flatTaxReduction, result.residentTax, result.netPay
   ];
 
   try {
@@ -530,7 +540,11 @@ export const calculateSalary = (
   const nonTaxableCommute = Math.min(commutePay, Master.getTaxMaster(targetYear).DEFAULT_COMMUTING_TAX_FREE_LIMIT);
   const taxableAmount = totalEarnings - nonTaxableCommute;
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
-  const incomeTax = getGensenTax(Math.max(0, taxableAmount - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod);
+  const incomeTaxBeforeReduction = getGensenTax(Math.max(0, taxableAmount - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod);
+  // 定額減税（令和6年6月〜）：残っている減税額を、源泉所得税を上限に差し引く
+  const reductionBefore = Math.max(0, Math.floor(Number(extras.flatTaxReductionRemaining) || 0));
+  const flatTaxReduction = Math.min(incomeTaxBeforeReduction, reductionBefore);
+  const incomeTax = incomeTaxBeforeReduction - flatTaxReduction;
   const residentTax = Number(extras.residentTax) || 0;
   const totalDeductions = socialTotal + incomeTax + residentTax + customDeductions;
 
@@ -568,9 +582,12 @@ export const calculateSalary = (
     nursingInsurance, 
     childSupport,
     welfarePension,
-    empInsurance, 
-    incomeTax, 
-    residentTax, 
+    empInsurance,
+    incomeTax,
+    incomeTaxBeforeReduction,
+    flatTaxReduction,
+    flatTaxReductionRemaining: reductionBefore - flatTaxReduction,
+    residentTax,
     customDeductions,
     totalDeductions,
 

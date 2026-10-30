@@ -1,6 +1,7 @@
 /**
  * 社会保険マスター（年度別）
  */
+import { INSURANCE_2024 } from './insurance2024';
 import { INSURANCE_2025 } from './insurance2025';
 import { INSURANCE_2026 } from './insurance2026';
 import type { InsuranceMasterType } from './buildInsuranceMaster';
@@ -9,9 +10,9 @@ export type { InsuranceMasterType } from './buildInsuranceMaster';
 export type { KenpoTable, KenpoGrade, YearMonth } from './kenpoTableTypes';
 export type EmpInsType = keyof typeof INSURANCE_2026.LABOR_INSURANCE_RATES;
 
-export { INSURANCE_2025, INSURANCE_2026 };
+export { INSURANCE_2024, INSURANCE_2025, INSURANCE_2026 };
 
-const ALL = [INSURANCE_2025, INSURANCE_2026]; // 古い順
+const ALL = [INSURANCE_2024, INSURANCE_2025, INSURANCE_2026]; // 古い順
 
 /**
  * 保険料の対象月に合ったマスターを返す

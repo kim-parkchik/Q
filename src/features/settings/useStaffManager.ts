@@ -94,6 +94,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetCommuteType, setTargetCommuteType] = useState("daily");
     const [targetCommuteAmount, setTargetCommuteAmount] = useState(0);
     const [targetDependents, setTargetDependents] = useState(0);
+    const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
     const [targetResidentTax, setTargetResidentTax] = useState(0);
     const [targetStandardRemuneration, setTargetStandardRemuneration] = useState(0); // 標準報酬月額
     const [targetIsEmploymentInsEligible, setTargetIsEmploymentInsEligible] = useState(1); // 雇用保険
@@ -287,7 +288,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetWageType("hourly"); setTargetWage(1200); setTargetIsOvertimeEligible(1);
         setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
         setTargetCommuteType("daily"); setTargetCommuteAmount(0);
-        setTargetDependents(0); setTargetResidentTax(0);
+        setTargetDependents(0); setTargetResidentTax(0); setTargetFlatTaxReductionPersons(0);
         setTargetStandardRemuneration(0);
         setTargetIsEmploymentInsEligible(1);
         setTargetHealthInsNum(""); setTargetPensionNum(""); setTargetEmploymentInsNum("");
@@ -328,6 +329,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetMinutes(m);
         setTargetBranchId(s.branch_id || 1);
         setTargetDependents(s.dependents || 0);
+        setTargetFlatTaxReductionPersons(s.flat_tax_reduction_persons || 0);
         setTargetResidentTax(s.resident_tax || 0);
         setTargetStandardRemuneration(s.standard_remuneration || 0); // 🆕 追加
         // 社保規定が空（NULL）なら「未加入 / 適用除外」
@@ -387,6 +389,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetCommuteAmount) !== Number(original.commute_amount) ||
             Number(targetBranchId) !== Number(original.branch_id || 1) ||
             Number(targetDependents) !== Number(original.dependents || 0) ||
+            Number(targetFlatTaxReductionPersons) !== Number(original.flat_tax_reduction_persons || 0) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
             Number(targetStandardRemuneration) !== Number(original.standard_remuneration || 0) ||
@@ -446,7 +449,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetEmpInsType || null,     // employment_insurance_type
                 Number(targetPayrollGroupId) || 1,
                 targetHealthInsNum, targetPensionNum, targetEmploymentInsNum,
-                targetScheduledIn, targetIsFlex ? 1 : 0, targetCoreStart, targetCoreEnd
+                targetScheduledIn, targetIsFlex ? 1 : 0, targetCoreStart, targetCoreEnd,
+                Number(targetFlatTaxReductionPersons) || 0
             ];
 
             if (editingId) {
@@ -463,7 +467,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         social_insurance_group_id=?, employment_insurance_type=?, -- 🆕 追加
                         payroll_group_id=?,
                         health_ins_num=?, pension_num=?, employment_ins_num=?,
-                        scheduled_in=?, is_flex=?, core_start=?, core_end=?
+                        scheduled_in=?, is_flex=?, core_start=?, core_end=?,
+                        flat_tax_reduction_persons=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -482,6 +487,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         payroll_group_id,
                         health_ins_num, pension_num, employment_ins_num,
                         scheduled_in, is_flex, core_start, core_end,
+                        flat_tax_reduction_persons,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -664,6 +670,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteAmount,
         targetDependents,
         setTargetDependents,
+        targetFlatTaxReductionPersons,
+        setTargetFlatTaxReductionPersons,
         targetResidentTax,
         setTargetResidentTax,
         targetStandardRemuneration,

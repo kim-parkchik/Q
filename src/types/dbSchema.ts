@@ -128,6 +128,7 @@ export const DB_SCHEMAS = [
     health_ins_num TEXT,      -- 健康保険被保険者番号
     pension_num TEXT,         -- 厚生年金整理番号
     employment_ins_num TEXT,  -- 雇用保険被保険者番号
+    flat_tax_reduction_persons INTEGER DEFAULT 0, -- 令和6年分 定額減税の人数（本人＋同一生計配偶者＋扶養親族。0なら月次減税をしない）
     my_number TEXT,
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
     FOREIGN KEY (payroll_group_id) REFERENCES payroll_groups(id),
@@ -238,6 +239,7 @@ export const DB_SCHEMAS = [
     emp_insurance INTEGER DEFAULT 0,
     social_ins_total INTEGER DEFAULT 0,
     income_tax INTEGER DEFAULT 0,
+    flat_tax_reduction INTEGER DEFAULT 0, -- 定額減税額（令和6年6月〜12月。income_tax はこれを引いた後の額）
     resident_tax INTEGER DEFAULT 0,
     net_pay INTEGER DEFAULT 0,
     processed_at TEXT DEFAULT (DATETIME('now', 'localtime')), -- いつ確定したか

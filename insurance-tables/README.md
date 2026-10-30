@@ -14,6 +14,10 @@
 |---|---|---|
 | 協会けんぽ_保険料額表_令和8年度.xlsx | 令和8年3月分から（子ども・子育て支援金は4月分から） | https://www.kyoukaikenpo.or.jp/g7/cat330/sb3150/r08/r8ryougakuhyou3gatukara/ |
 | 協会けんぽ_保険料額表_令和7年度.xlsx | 令和7年3月分から | https://www.kyoukaikenpo.or.jp/g7/cat330/sb3150/r07/r7ryougakuhyou3gatukara/ |
+| 協会けんぽ_保険料額表_令和6年度.xlsx | 令和6年3月分から | https://www.kyoukaikenpo.or.jp/about/business/insurance_rate/premium_prefectures/r06/ （「都道府県別 XLSファイル」の被保険者の方の分） |
+
+※ 協会けんぽのホームページは移転しており、古いURL（/g7/cat330/…）は新しいURL（/about/business/insurance_rate/premium_prefectures/…）に転送されます。
+　過去の年度の表は、新しいURLのページの一覧（平成21年度〜）から入手できます。
 
 雇用保険料率は Excel がないため、厚生労働省の発表資料の数字を `src/constants/insurance/insurance20XX.ts` に
 出典URLつきで記載しています（`bun test` で値を確認しています）。

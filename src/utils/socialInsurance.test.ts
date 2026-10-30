@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { calcPremium } from "./socialInsurance";
 import { getHyojunHoshu } from "./calcSalary";
-import { getInsuranceMaster, isChildSupportMonth, INSURANCE_2025, INSURANCE_2026 } from "../constants/insurance";
+import { getInsuranceMaster, isChildSupportMonth, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026 } from "../constants/insurance";
 
 const LAW = "currency_law";
 
@@ -90,7 +90,37 @@ describe("令和7年度（協会けんぽ 令和7年3月分から）の保険料
     });
 });
 
+describe("令和6年度（協会けんぽ 令和6年3月分から）の保険料額表と照合", () => {
+    const m = INSURANCE_2024;
+    const h = (pref: string) => m.KENPO_RATES[pref][1];
+    test("料率", () => {
+        expect(h("東京")).toBe(9.98);
+        expect(m.KENPO_CARE_RATE[1]).toBe(1.6);
+        expect(m.PENSION_RATE[1]).toBe(18.3);
+        expect(m.CHILD_SUPPORT_RATE).toBeNull();
+        // 厚生労働省「令和6年度の雇用保険料率について」
+        expect(m.LABOR_INSURANCE_RATES.general).toEqual([0.006, 0.0155]);
+        expect(m.LABOR_INSURANCE_RATES.agriculture).toEqual([0.007, 0.0175]);
+        expect(m.LABOR_INSURANCE_RATES.construction).toEqual([0.007, 0.0185]);
+    });
+    test("東京・22級 / 北海道・35級", () => {
+        expect(calcPremium(300000, h("東京"), LAW)).toBe(14970);                          // 折半額 14,970
+        expect(calcPremium(300000, h("東京") + m.KENPO_CARE_RATE[1], LAW)).toBe(17370);   // 折半額 17,370
+        expect(calcPremium(300000, m.PENSION_RATE[1], LAW)).toBe(27450);                  // 折半額 27,450
+        expect(calcPremium(650000, h("北海道"), LAW)).toBe(33182);                         // 折半額 33,182.5
+        expect(calcPremium(650000, h("北海道") + m.KENPO_CARE_RATE[1], LAW)).toBe(38382);  // 折半額 38,382.5
+    });
+});
+
 describe("保険料の対象月による切り替え", () => {
+    test("2025年2月分は令和6年度、3月分から令和7年度（協会けんぽ）", () => {
+        expect(getInsuranceMaster(2025, 2).KENPO_RATES["東京"][1]).toBe(9.98);
+        expect(getInsuranceMaster(2025, 3).KENPO_RATES["東京"][1]).toBe(9.91);
+    });
+    test("雇用保険は2025年3月分まで令和6年度（本人 6/1000）、4月から令和7年度（本人 5.5/1000）", () => {
+        expect(getInsuranceMaster(2025, 3).LABOR_INSURANCE_RATES.general[0]).toBe(0.006);
+        expect(getInsuranceMaster(2025, 4).LABOR_INSURANCE_RATES.general[0]).toBe(0.0055);
+    });
     test("2026年2月分は令和7年度、3月分から令和8年度（協会けんぽ）", () => {
         expect(getInsuranceMaster(2026, 2).KENPO_RATES["東京"][1]).toBe(9.91);
         expect(getInsuranceMaster(2026, 3).KENPO_RATES["東京"][1]).toBe(9.85);

@@ -9,6 +9,7 @@ export type TaxMasterType = typeof TAX_2026;
 export { TAX_2025, TAX_2026 };
 export type { MonthlyTaxTable } from './monthlyTableTypes';
 export type { BonusTaxRateTable } from './bonusTaxTableTypes';
+export { FLAT_TAX_REDUCTION_2024 } from './flatTaxReduction';
 
 /**
  * 給与を支払う年に合った源泉徴収のマスターを返す

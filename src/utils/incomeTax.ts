@@ -126,6 +126,30 @@ export const calcWithholdingTax = (
 };
 
 // ─────────────────────────────────────────────────────────────
+// 定額減税（令和6年分・月次減税）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * その人の、その年の月次減税額の合計（月次減税の対象でなければ 0）
+ * 詳しいきまりは constants/tax/flatTaxReduction.ts
+ * @param persons  定額減税の人数（本人＋同一生計配偶者＋扶養親族）
+ * @param joinDate 入社日（YYYY-MM-DD。6月2日以後の入社は月次減税をしない）
+ * @param payYear / payMonth 給与を支払う年月
+ */
+export const flatTaxReductionTotal = (
+    persons: number,
+    joinDate: string | null | undefined,
+    payYear: number,
+    payMonth: number
+): number => {
+    const rule = Master.FLAT_TAX_REDUCTION_2024;
+    const n = Math.max(0, Math.floor(Number(persons) || 0));
+    if (payYear !== rule.YEAR || payMonth < rule.FROM_MONTH || n === 0) return 0;
+    if (joinDate && joinDate > rule.BASE_DATE) return 0;
+    return n * rule.PER_PERSON;
+};
+
+// ─────────────────────────────────────────────────────────────
 // 賞与（甲欄）
 // ─────────────────────────────────────────────────────────────
 

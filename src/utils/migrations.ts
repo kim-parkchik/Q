@@ -45,7 +45,14 @@ export const addColumnIfMissing = async (
 };
 
 export const MIGRATIONS: Migration[] = [
-  // 開発中のため空（上の「開発中の方針」を参照）。リリース後の最初の変更を version: 1 として追加する。
+  {
+    version: 1,
+    description: "令和6年分の定額減税（従業員の対象人数・給与ごとの減税額）を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "flat_tax_reduction_persons", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "salary_results", "flat_tax_reduction", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

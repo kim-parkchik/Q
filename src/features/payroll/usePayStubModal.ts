@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
 import { calculateSalary, saveSalaryResult, type SalaryExtras } from '../../utils/calcSalary';
+import { flatTaxReductionTotal } from '../../utils/incomeTax';
 
 // 型定義
 interface UsePayStubProps {
@@ -79,6 +80,29 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     loadTaxMethod();
   }, [db, staff.payroll_group_id]);
 
+  // 定額減税（令和6年6月〜）：その人の減税額の合計から、前の月までの確定済みの給与で差し引いた額を引いた残り
+  // ※ 前の月の給与を確定してから次の月を確定すること（確定した額をもとに繰り越すため）
+  const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, year, month);
+  useEffect(() => {
+    const loadFlatTaxReduction = async () => {
+      if (!db || flatTaxTotal === 0) {
+        setExtras(p => ({ ...p, flatTaxReductionRemaining: 0 }));
+        return;
+      }
+      try {
+        const rows = await db.select(
+          "SELECT COALESCE(SUM(flat_tax_reduction), 0) AS used FROM salary_results WHERE staff_id = ? AND target_year = ? AND target_month < ?",
+          [staff.id, year, month]
+        ) as { used: number }[];
+        const used = Number(rows?.[0]?.used) || 0;
+        setExtras(p => ({ ...p, flatTaxReductionRemaining: Math.max(0, flatTaxTotal - used) }));
+      } catch (e) {
+        console.error("定額減税の読み込みエラー:", e);
+      }
+    };
+    loadFlatTaxReduction();
+  }, [db, staff.id, year, month, flatTaxTotal]);
+
   // 給与計算
   const salary = useMemo(
     () => calculateSalary(staff, attendanceData, extras, year, month, companySettings),
@@ -128,6 +152,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     deductionItemsCount,
     targetRows,
     insMaster,
+    flatTaxTotal,
     fmtH
   };
 }

@@ -18,7 +18,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, fmtH
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, flatTaxTotal, fmtH
   } = usePayStubModal(props);
 
   const padRows = (current: number, target: number) =>
@@ -193,6 +193,16 @@ export default function PayStubModal(props: Props) {
               </table>
             </div>
           </div>
+
+          {/* 定額減税（令和6年6月〜）：給与支払明細書には月次減税額を書く */}
+          {flatTaxTotal > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              定額減税額（所得税）：¥{salary.flatTaxReduction.toLocaleString()}
+              <span style={{ color: "#666", marginLeft: 12 }}>
+                （減税前の所得税 ¥{salary.incomeTaxBeforeReduction.toLocaleString()}／控除しきれなかった額 ¥{salary.flatTaxReductionRemaining.toLocaleString()}）
+              </span>
+            </div>
+          )}
 
           <div style={{ marginTop: 24, textAlign: "right" }}>
             <div style={{ display: "inline-block", border: "2px solid #000", padding: "12px 28px" }}>
