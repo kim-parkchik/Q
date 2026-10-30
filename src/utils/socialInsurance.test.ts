@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { calcPremium } from "./socialInsurance";
 import { getHyojunHoshu } from "./calcSalary";
-import { getInsuranceMaster, isChildSupportMonth, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026 } from "../constants/insurance";
+import { getInsuranceMaster, isChildSupportMonth, INSURANCE_2023, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026 } from "../constants/insurance";
 
 const LAW = "currency_law";
 
@@ -109,6 +109,32 @@ describe("令和6年度（協会けんぽ 令和6年3月分から）の保険料
         expect(calcPremium(300000, m.PENSION_RATE[1], LAW)).toBe(27450);                  // 折半額 27,450
         expect(calcPremium(650000, h("北海道"), LAW)).toBe(33182);                         // 折半額 33,182.5
         expect(calcPremium(650000, h("北海道") + m.KENPO_CARE_RATE[1], LAW)).toBe(38382);  // 折半額 38,382.5
+    });
+});
+
+describe("令和5年度（協会けんぽ 令和5年3月分から）の保険料額表と照合", () => {
+    const m = INSURANCE_2023;
+    const h = (pref: string) => m.KENPO_RATES[pref][1];
+    test("料率", () => {
+        expect(h("東京")).toBe(10.0);
+        expect(m.KENPO_CARE_RATE[1]).toBe(1.82);
+        expect(m.PENSION_RATE[1]).toBe(18.3);
+        expect(m.CHILD_SUPPORT_RATE).toBeNull();
+        // 厚生労働省「令和6年度の雇用保険料率について」の下段（令和5年度）
+        expect(m.LABOR_INSURANCE_RATES.general).toEqual([0.006, 0.0155]);
+    });
+    test("東京・22級 / 北海道・35級", () => {
+        expect(calcPremium(300000, h("東京"), LAW)).toBe(15000);                          // 折半額 15,000
+        expect(calcPremium(300000, h("東京") + m.KENPO_CARE_RATE[1], LAW)).toBe(17730);   // 折半額 17,730
+        expect(calcPremium(650000, h("北海道"), LAW)).toBe(33442);                         // 折半額 33,442.5
+        // Excel では 39,357.4999… と保存されている（本当は 39,357.5 ちょうど）→ 50銭以下なので 39,357円
+        expect(calcPremium(650000, h("北海道") + m.KENPO_CARE_RATE[1], LAW)).toBe(39357);
+    });
+    test("2024年2月分は令和5年度、3月分から令和6年度（協会けんぽ）", () => {
+        expect(getInsuranceMaster(2024, 2).KENPO_RATES["東京"][1]).toBe(10.0);
+        expect(getInsuranceMaster(2024, 3).KENPO_RATES["東京"][1]).toBe(9.98);
+        expect(getInsuranceMaster(2024, 3).LABOR_FISCAL_YEAR).toBe(2023); // 雇用保険は3月分まで前年度
+        expect(getInsuranceMaster(2024, 4).LABOR_FISCAL_YEAR).toBe(2024);
     });
 });
 
