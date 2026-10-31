@@ -264,6 +264,20 @@ export const checkInsuredOnBonusDate = (
   return !loss || pay.isBefore(loss, 'day');
 };
 
+/**
+ * 月給制の、その月の所定労働日数（欠勤控除・時間単価の計算に使う）
+ * 従業員に月の所定労働日数があればそれを、なければその月の土日を除いた日数を使う
+ */
+export const prescribedWorkDays = (staff: any, year: number, month: number): number => {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  let weekends = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dow = new Date(year, month - 1, d).getDay();
+    if (dow === 0 || dow === 6) weekends++;
+  }
+  return Number(staff.monthly_work_days) || (daysInMonth - weekends);
+};
+
 /* --- 外部から呼び出すメインロジック --- */
 
 /**
@@ -449,15 +463,8 @@ export const calculateSalary = (
     const monthlyWage = Number(rawWage);
     basePay = monthlyWage;
 
-    const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
-    let weekends = 0;
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dow = new Date(targetYear, targetMonth - 1, d).getDay();
-      if (dow === 0 || dow === 6) weekends++;
-    }
-    
     // 所定労働日数の確定
-    const prescribedDays = Number(staff.monthly_work_days) || (daysInMonth - weekends);
+    const prescribedDays = prescribedWorkDays(staff, targetYear, targetMonth);
     
     // 時給単価の計算（残業代などのベース）
     const hourlyRate = (prescribedDays > 0 && scheduledHours > 0)
