@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
 import { calculateSalary, saveSalaryResult, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
+import { countAnnualWorkDays, parseWorkDays } from '../../utils/annualWorkDays';
+import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 
 // 型定義
 interface UsePayStubProps {
@@ -112,6 +114,38 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   const wageLabel = staff.wage_type === "monthly" ? "月給制" : "時給制";
   const customEarningItems = extras.customItems.filter(i => i.type === 'earning');
   const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
+  // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
+  // 月給は「1年間における1月平均所定労働時間」で割る（従業員画面と同じく、会社カレンダーから1年間の所定労働日数を数える）
+  const periodEnd: string = staff.periodEnd || `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+  const dailyHours = Number(staff.scheduled_work_hours) || 0;
+  const [monthlyAverageHours, setMonthlyAverageHours] = useState<number | null>(null);
+  useEffect(() => {
+    const loadAnnualWorkDays = async () => {
+      if (!db || staff.wage_type !== 'monthly') return;
+      try {
+        const patternId = Number(staff.calendar_pattern_id ?? 1);
+        let holidays = new Set<string>();
+        const companyCalendar: Record<string, number> = {};
+        if (patternId !== 0) {
+          const resHolidays = await db.select("SELECT holiday_date FROM holiday_master") as { holiday_date: string }[];
+          holidays = new Set(resHolidays.map(h => h.holiday_date.replace(/\//g, "-")));
+          const resCompany = await db.select("SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?", [patternId]) as { work_date: string; is_holiday: number }[];
+          resCompany.forEach(c => { companyCalendar[c.work_date] = c.is_holiday; });
+        }
+        const days = countAnnualWorkDays(Number(periodEnd.slice(0, 4)), patternId, parseWorkDays(staff.work_days), holidays, companyCalendar);
+        setMonthlyAverageHours(days * dailyHours / 12);
+      } catch (e) {
+        console.error("年間の所定労働日数の読み込みエラー:", e);
+      }
+    };
+    loadAnnualWorkDays();
+  }, [db, staff.wage_type, staff.calendar_pattern_id, staff.work_days, dailyHours, periodEnd]);
+  const minimumWageCheck = checkMinimumWage(
+    Master.toKenpoPrefName(staff.prefecture),
+    periodEnd,
+    baseWagePerHour(staff.wage_type, Number(staff.base_wage) || 0, dailyHours, monthlyAverageHours)
+  );
+
   // 明細の注記に出す料率の年度（その月の保険料に使ったもの）
   const insMaster = Master.getInsuranceMaster(year, month);
   // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
@@ -155,6 +189,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     targetRows,
     insMaster,
     rateWarnings,
+    minimumWageCheck,
     flatTaxTotal,
     fmtH
   };

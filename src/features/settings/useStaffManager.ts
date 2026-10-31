@@ -10,6 +10,7 @@ import { useMessageDialog } from "../../components/MessageDialog";
 import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 import { parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod } from "../../utils/leaveExemption";
 import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
+import { countAnnualWorkDays } from "../../utils/annualWorkDays";
 import {
     latestStandardRemuneration, remunerationHistoryOf, stringifyRemunerationHistory, validateRemunerationHistory,
     type RemunerationEntry,
@@ -157,55 +158,24 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     };
 
     // --- 年間稼働日数を計算する関数 (patternIdを引数に取る) ---
+    // 数え方は utils/annualWorkDays.ts（給与明細の最低賃金のチェックと同じ）
     const calculateDays = async (patternId: number, currentWorkDays: Record<string, boolean>) => {
         if (!db) return;
         const year = new Date().getFullYear(); 
-
-        if (patternId === 0) {
-            let workDays = 0;
-            const date = new Date(year, 0, 1);
-            while (date.getFullYear() === year) {
-                const dayLabels = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-                const dayKey = dayLabels[date.getDay()];
-
-                // ⚠️ ここ！ 外の targetWorkDays ではなく引数の currentWorkDays を使う
-                if (currentWorkDays[dayKey as keyof typeof currentWorkDays]) {
-                    workDays++;
-                }
-                date.setDate(date.getDate() + 1);
-            }
-            setAnnualWorkDays(workDays);
-            return;
-        }
-
-        // --- B. カレンダー設定がある場合 ---
-        // (既存の祝日マスターや company_calendar を参照するロジック)
         try {
-            const resHolidays = await db.select<any[]>("SELECT holiday_date FROM holiday_master");
-            const hSet = new Set(resHolidays.map(h => h.holiday_date.replaceAll("/", "-")));
-
-            // 指定された pattern_id の設定のみを取得
-            const resCompany = await db.select<any[]>(
-                "SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?",
-                [patternId]
-            );
-            const cMap: Record<string, number> = {};
-            resCompany.forEach(c => { cMap[c.work_date] = c.is_holiday; });
-
-            let workDays = 0;
-            for (let m = 0; m < 12; m++) {
-                const date = new Date(year, m, 1);
-                while (date.getMonth() === m) {
-                    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-                    const isDefH = (date.getDay() === 0 || date.getDay() === 6 || hSet.has(dateKey));
-                    const setting = cMap[dateKey];
-                    const isFinallyHoliday = (isDefH && setting !== 0) || (setting === 1);
-                    
-                    if (!isFinallyHoliday) workDays++;
-                    date.setDate(date.getDate() + 1);
-                }
+            let holidays = new Set<string>();
+            const companyCalendar: Record<string, number> = {};
+            if (patternId !== 0) {
+                const resHolidays = await db.select<any[]>("SELECT holiday_date FROM holiday_master");
+                holidays = new Set(resHolidays.map(h => h.holiday_date.replaceAll("/", "-")));
+                // 指定された pattern_id の設定のみを取得
+                const resCompany = await db.select<any[]>(
+                    "SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?",
+                    [patternId]
+                );
+                resCompany.forEach(c => { companyCalendar[c.work_date] = c.is_holiday; });
             }
-            setAnnualWorkDays(workDays);
+            setAnnualWorkDays(countAnnualWorkDays(year, patternId, currentWorkDays, holidays, companyCalendar));
         } catch (e) {
             console.error("日数計算エラー:", e);
         }

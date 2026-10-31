@@ -3,6 +3,7 @@ import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';
 import { PREFECTURES } from '../../utils/calcSalary';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
+import { describeMinimumWage } from '../../utils/minimumWage';
 
 interface Props {
   db: any;
@@ -18,7 +19,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, flatTaxTotal, fmtH
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, flatTaxTotal, fmtH
   } = usePayStubModal(props);
 
   const padRows = (current: number, target: number) =>
@@ -64,6 +65,15 @@ export default function PayStubModal(props: Props) {
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
+          {minimumWageCheck && !minimumWageCheck.ok && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ 基本給を時間あたりにすると {Math.floor(minimumWageCheck.perHour).toLocaleString()}円で、
+              {describeMinimumWage(Master.toKenpoPrefName(props.staff.prefecture) ?? "", minimumWageCheck.minimum)}を下回っています。
+              <div style={{ fontWeight: "normal" }}>
+                （給与の計算期間の終わりの日の最低賃金と比べています。対象になる手当を合わせると上回る場合もあります。通勤手当・家族手当・精皆勤手当・残業代などは含めません）
+              </div>
             </div>
           )}
           {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isInsuredMonth || salary.isLeaveExemptMonth || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (
