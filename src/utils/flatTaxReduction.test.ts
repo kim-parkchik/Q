@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { flatTaxReductionTotal, calcWithholdingTax } from "./incomeTax";
 import { calculateSalary, saveSalaryResult, type SalaryExtras } from "./calcSalary";
-import { runMigrations, LATEST_DB_VERSION, type MigrationDb } from "./migrations";
+import { runMigrations, LATEST_DB_VERSION, MIGRATIONS, type MigrationDb } from "./migrations";
 import { DB_SCHEMAS } from "../types/dbSchema";
 
 describe("減税額の合計", () => {
@@ -83,7 +83,7 @@ describe("給与の源泉所得税から差し引く", () => {
     });
 });
 
-describe("会社ファイルの更新（マイグレーション v1）", () => {
+describe("会社ファイルの更新（マイグレーション）", () => {
     /** bun:sqlite を、アプリの Database と同じ使い方（Promise を返す）に合わせる */
     const wrap = (db: Database): MigrationDb => ({
         execute: async (sql, params = []) => db.prepare(sql).run(...(params as any[])),
@@ -96,10 +96,12 @@ describe("会社ファイルの更新（マイグレーション v1）", () => {
         const db = new Database(":memory:");
         db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER)");
         db.exec("CREATE TABLE salary_results (id INTEGER PRIMARY KEY, staff_id TEXT, income_tax INTEGER)");
+        db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT)");
         db.exec("INSERT INTO staff VALUES ('S001', '山田', 300000)");
 
         const applied = await runMigrations(wrap(db));
-        expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(MIGRATIONS.length);
+        expect(applied[0]).toStartWith("v1:");
         expect(columns(db, "staff")).toContain("flat_tax_reduction_persons");
         expect(columns(db, "salary_results")).toContain("flat_tax_reduction");
         expect(db.query("SELECT flat_tax_reduction_persons AS n FROM staff").get()).toEqual({ n: 0 });
@@ -110,7 +112,19 @@ describe("会社ファイルの更新（マイグレーション v1）", () => {
     test("新しい会社ファイル（列がすでにある）でもエラーにならない", async () => {
         const db = new Database(":memory:");
         for (const s of DB_SCHEMAS) db.exec(s);
-        expect(await runMigrations(wrap(db))).toHaveLength(1);
+        expect(await runMigrations(wrap(db))).toHaveLength(MIGRATIONS.length);
         expect(columns(db, "staff").filter((c) => c === "flat_tax_reduction_persons")).toHaveLength(1);
+        expect(columns(db, "company").filter((c) => c === "is_small_business")).toHaveLength(1);
+    });
+    test("v2: v1 まで更新済みの会社ファイルに「中小企業」の列を追加する（初めはチェックなし）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT)");
+        db.exec("INSERT INTO company VALUES (1, 'テスト株式会社')");
+        db.exec("PRAGMA user_version = 1");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(1);
+        expect(applied[0]).toStartWith("v2:");
+        expect(db.query("SELECT is_small_business AS v FROM company").get()).toEqual({ v: 0 });
     });
 });

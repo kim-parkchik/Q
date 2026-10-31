@@ -145,6 +145,47 @@ describe("週40時間を超えた残業", () => {
     });
 });
 
+describe("月60時間超の割増（中小企業は2023年3月まで25%）", () => {
+    const sme = { ...company, is_small_business: 1 };
+    /** 2023年3月の平日13日に13時間ずつ（1日5時間の残業 × 13日 = 65時間） */
+    const march = ["01", "02", "03", "06", "07", "08", "09", "10", "13", "14", "15", "16", "17"]
+        .map((d) => ({ work_date: `2023-03-${d}`, work_hours: 13, night_hours: 0, work_type: "normal" }));
+    /** 2023年4月3日(月)・4日(火)に13時間ずつ（残業10時間） */
+    const april = ["03", "04"].map((d) => ({ work_date: `2023-04-${d}`, work_hours: 13, night_hours: 0, work_type: "normal" }));
+
+    test("大企業（チェックなし）：2023年3月でも60時間を超えた5時間は50%", () => {
+        const r = calculateSalary(hourly, march, extras(), 2023, 3, company);
+        expect([r.standardPremiumHours, r.highPremiumHours, r.deferredHighPremiumHours]).toEqual([60, 5, 0]);
+        expect(r.standardOvertimePay).toBe(18000); // 1,200 × 0.25 × 60
+        expect(r.highOvertimePay).toBe(3000);      // 1,200 × 0.50 × 5
+    });
+    test("中小企業：2023年3月に働いた分は、60時間を超えても25%", () => {
+        const r = calculateSalary(hourly, march, extras(), 2023, 3, sme);
+        expect([r.standardPremiumHours, r.highPremiumHours, r.deferredHighPremiumHours]).toEqual([65, 0, 5]);
+        expect(r.standardOvertimePay).toBe(19500); // 1,200 × 0.25 × 65
+        expect(r.highOvertimePay).toBe(0);
+    });
+    test("中小企業・月給：2023年3月は60時間超も1.25倍", () => {
+        const r = calculateSalary(monthly, march, extras(), 2023, 3, sme);
+        expect(r.highPremiumHours).toBe(0);
+        expect(r.highOvertimePay).toBe(0);
+        expect(r.standardPremiumHours).toBe(65);
+    });
+    test("中小企業：2023年4月以降に働いた分は50%", () => {
+        // 2023年4月の平日14日に13時間ずつ（残業70時間）
+        const rows = ["03", "04", "05", "06", "07", "10", "11", "12", "13", "14", "17", "18", "19", "20"]
+            .map((d) => ({ work_date: `2023-04-${d}`, work_hours: 13, night_hours: 0, work_type: "normal" }));
+        const r = calculateSalary(hourly, rows, extras(), 2023, 4, sme);
+        expect([r.standardPremiumHours, r.highPremiumHours, r.deferredHighPremiumHours]).toEqual([60, 10, 0]);
+    });
+    test("中小企業：3月と4月をまたぐ期間は、3月分も60時間に数え、4月に働いた分だけ50%", () => {
+        // 3月に65時間（60時間超の5時間は猶予で25%）、4月の10時間は60時間を超えているので50%
+        const r = calculateSalary(hourly, [...march, ...april], extras(), 2023, 4, sme);
+        expect([r.standardPremiumHours, r.highPremiumHours, r.deferredHighPremiumHours]).toEqual([65, 10, 5]);
+        expect(r.highOvertimePay).toBe(6000); // 1,200 × 0.50 × 10
+    });
+});
+
 describe("有給休暇", () => {
     test("時給：全休（有給）は所定労働時間分の時給を払う", () => {
         const r = calc(hourly, [day("01", 0, "paid_full")]);

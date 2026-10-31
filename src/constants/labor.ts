@@ -20,6 +20,12 @@ export const NIGHT_SHIFT_RATE = 0.25;   // 深夜割増分
 export const HOLIDAY_WORK_RATE = 1.35;  // 法定休日労働
 export const OVERTIME_PREMIUM_LIMIT_HOURS = 60; // 月間残業の割増率が変わるしきい値
 export const OVERTIME_PREMIUM_RATE = 1.50;  // 月60時間超の時間外労働
+/**
+ * 中小企業に月60時間超の50%割増が適用され始めた日（それまでは猶予され、60時間を超えても25%）
+ * 「2023年４月１日から労働させた時間について」引き上げの対象（厚生労働省リーフレット
+ * 「月60時間を超える時間外労働の割増賃金率が引き上げられます」 https://www.mhlw.go.jp/content/000930914.pdf ）
+ */
+export const SME_OVERTIME_PREMIUM_FROM = "2023-04-01";
 
 /** 有給休暇・時間単位年休（法定基準） */
 export const PAID_LEAVE_UNIT = 1.0;           // 時間単位年休の最小単位

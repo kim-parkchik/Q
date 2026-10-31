@@ -6,6 +6,7 @@
  *  - 週40時間超 → 法定外残業（割増25%必須）
  *  - 所定時間超〜8時間 → 法定内残業（割増義務なし、基本単価のみ）
  *  - 上記どちらかで月60時間超の分 → 割増50%必須
+ *    （中小企業は2023年3月31日までに働いた分は猶予され25%。会社設定の「中小企業」で切り替える）
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -43,6 +44,7 @@ export interface SalaryResult {
   totalStatutoryOvertimeHours: number; // 法定内残業時間（所定超〜8h）
   standardPremiumHours: number; // ★追加：標準割増（25%）の対象時間
   highPremiumHours: number;     // ★追加：高率割増（50%）の対象時間
+  deferredHighPremiumHours: number; // 月60時間超のうち、中小企業の猶予（2023年3月まで）で25%にした時間（standardPremiumHours の内数）
   holidayWorkHours: number;     // 法定休日の労働時間
   paidLeaveHours: number;       // 有給休暇の時間（時給制で賃金を払う時間）
   basePay: number;
@@ -112,6 +114,25 @@ const paidLeaveHoursOf = (type: string, scheduledHours: number, paidLeaveHours: 
              : type === 'paid_half' ? scheduledHours / 2
              : 0;
   return days + paidLeaveHours;
+};
+
+/**
+ * その日の法定外残業を「25%の時間」と「50%の時間（月60時間超）」に分ける
+ * ・60時間の累計（hoursSoFar）には、猶予の有無にかかわらず、その月のそれまでの法定外残業をすべて数える
+ *   （「起算日からの時間外労働時間数を累計して60時間を超えた時点から」50%）
+ * ・中小企業が2023年3月31日までに働かせた分は、60時間を超えても25%（deferred に数える）
+ */
+export const splitOvertimeHours = (
+  todayHours: number,
+  hoursSoFar: number,
+  workDate: string,
+  isSmallBusiness: boolean
+) => {
+  const over60 = Math.max(0, todayHours - Math.max(0, Master.OVERTIME_PREMIUM_LIMIT_HOURS - hoursSoFar));
+  if (isSmallBusiness && workDate < Master.SME_OVERTIME_PREMIUM_FROM) {
+    return { standard: todayHours, high: 0, deferred: over60 };
+  }
+  return { standard: todayHours - over60, high: over60, deferred: 0 };
 };
 
 export const PREFECTURES = Object.keys(Master.INSURANCE_2026.KENPO_RATES);
@@ -298,8 +319,11 @@ export const calculateSalary = (
   let totalStatutoryOvertimeHours = 0; // 法定内残業の累計
   let standardPremiumHours = 0; // ★追加
   let highPremiumHours = 0;     // ★追加
+  let deferredHighPremiumHours = 0;
   let holidayWorkHours = 0;
   let paidLeaveHours = 0;
+  // 中小企業（2023年3月までの月60時間超の割増が猶予される）
+  const isSmallBusiness = Number(companySettings?.is_small_business) === 1;
 
   // 日付順にソートして処理（週40h超判定の正確性のため）
   const sorted = [...attendanceData].sort((a, b) => a.work_date.localeCompare(b.work_date));
@@ -383,17 +407,16 @@ export const calculateSalary = (
         // 3. 法定外残業代（1.25倍 / 1.5倍）の累積
         if (legalOvertimeToday > 0) {
           // 月60時間（Master.OVERTIME_PREMIUM_LIMIT_HOURS）を超えているか判定
-          const canFitInStandard = Math.max(0, Master.OVERTIME_PREMIUM_LIMIT_HOURS - totalOvertimeHours);
-          const standardHoursToday = Math.min(legalOvertimeToday, canFitInStandard);
-          const highHoursToday = Math.max(0, legalOvertimeToday - standardHoursToday);
+          const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
 
           // 1.25倍（または25%増）の計算
-          standardOvertimePay += hourlyRate * Master.OVERTIME_RATE * standardHoursToday;
+          standardOvertimePay += hourlyRate * Master.OVERTIME_RATE * split.standard;
           // 1.50倍（または50%増）の計算
-          highOvertimePay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * highHoursToday;
+          highOvertimePay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * split.high;
 
-          standardPremiumHours += standardHoursToday; 
-          highPremiumHours += highHoursToday;
+          standardPremiumHours += split.standard;
+          highPremiumHours += split.high;
+          deferredHighPremiumHours += split.deferred;
           totalOvertimeHours += legalOvertimeToday; // ここで60hカウントを蓄積
         }
       }
@@ -440,17 +463,17 @@ export const calculateSalary = (
       const legalOvertimeToday = legalOvertimeFromDay + weekOnlyOvertime;
 
       if (legalOvertimeToday > 0) {
-        // ★ 1. 名前が被らないように「今日（その行）の時間」として計算
-        const standardHoursToday = Math.max(0, Math.min(legalOvertimeToday, Master.OVERTIME_PREMIUM_LIMIT_HOURS - totalOvertimeHours));
-        const highHoursToday = Math.max(0, legalOvertimeToday - standardHoursToday);
+        // ★ 1. 「今日（その行）の時間」を25%と50%（月60時間超）に分ける
+        const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
 
         // ★ 2. 金額を累積
-        standardOvertimePay += wage * (Master.OVERTIME_RATE - 1) * standardHoursToday;
-        highOvertimePay += wage * (Master.OVERTIME_PREMIUM_RATE - 1) * highHoursToday;
+        standardOvertimePay += wage * (Master.OVERTIME_RATE - 1) * split.standard;
+        highOvertimePay += wage * (Master.OVERTIME_PREMIUM_RATE - 1) * split.high;
 
         // ★ 3. 外側の変数（合計時間）に足し込む
-        standardPremiumHours += standardHoursToday;
-        highPremiumHours += highHoursToday;
+        standardPremiumHours += split.standard;
+        highPremiumHours += split.high;
+        deferredHighPremiumHours += split.deferred;
         totalOvertimeHours += legalOvertimeToday;
       }
     }
@@ -558,6 +581,7 @@ export const calculateSalary = (
     totalStatutoryOvertimeHours,
     standardPremiumHours,
     highPremiumHours,
+    deferredHighPremiumHours,
     holidayWorkHours,
     paidLeaveHours,
 

@@ -42,6 +42,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [savedRounding, setSavedRounding] = useState<Record<string, string> | null>(null);
     const [isSearchingZip, setIsSearchingZip] = useState(false);
     const [weekStartDay, setWeekStartDay] = useState(0);
+    // 中小企業か（2023年3月までの月60時間超の割増率の猶予に使う）
+    const [isSmallBusiness, setIsSmallBusiness] = useState(false);
     const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
     const [originalWeekStartDay, setOriginalWeekStartDay] = useState(0);
     const [isSearchingComp, setIsSearchingComp] = useState(false);
@@ -200,6 +202,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setCompRep(c.representative || "");
                 setWeekStartDay(c.week_start_day ?? 0); // 👈 0（日曜）をデフォルトに
                 setOriginalWeekStartDay(c.week_start_day); // 👈 保存用に「元の値」を記憶
+                setIsSmallBusiness(Number(c.is_small_business) === 1);
                 setCompHealth(c.health_ins_num || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
@@ -221,6 +224,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                     compPhone: c.phone || "", compNum: c.corporate_number || "", compRep: c.representative || "",
                     compHealth: c.health_ins_num || "", compLabor: c.labor_ins_num || "",
                     weekStartDay: c.week_start_day ?? 0, headPref: head?.prefecture || "",
+                    isSmallBusiness: Number(c.is_small_business) === 1 ? 1 : 0,
                 });
                 setSavedRounding({
                     roundOvertime: c.round_overtime || "round",
@@ -280,12 +284,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 `UPDATE company SET
                     name = ?, zip_code = ?, address = ?, phone = ?, corporate_number = ?, representative = ?,
                     health_ins_num = ?, labor_ins_num = ?,
-                    round_overtime = ?, round_social_ins = ?, round_emp_ins = ?, week_start_day = ?
+                    round_overtime = ?, round_social_ins = ?, round_emp_ins = ?, week_start_day = ?,
+                    is_small_business = ?
                 WHERE id = 1`,
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
                     compHealth, compLabor, 
-                    roundOvertime, roundSocialIns, roundEmpIns, weekStartDay
+                    roundOvertime, roundSocialIns, roundEmpIns, weekStartDay,
+                    isSmallBusiness ? 1 : 0
                 ]
             );
             await db.execute(
@@ -744,6 +750,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const currentInfo: Record<string, string | number> = {
         compName, compZip, compAddr, compPhone, compNum, compRep,
         compHealth, compLabor, weekStartDay, headPref,
+        isSmallBusiness: isSmallBusiness ? 1 : 0,
     };
     const isInfoDirty = savedInfo === null || Object.keys(currentInfo).some((k) => currentInfo[k] !== savedInfo[k]);
     const isRoundingDirty = savedRounding === null
@@ -788,6 +795,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setWeekStartDay,
         isWeekStartEditable,
         setIsWeekStartEditable,
+        isSmallBusiness,
+        setIsSmallBusiness,
         originalWeekStartDay,
         setOriginalWeekStartDay,
         isSearchingComp,

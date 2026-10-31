@@ -44,6 +44,7 @@ export const DB_SCHEMAS = [
     round_emp_ins TEXT DEFAULT 'round',
     default_emp_ins_type TEXT DEFAULT 'general', -- 会社全体の雇用保険区分
     week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
+    is_small_business INTEGER DEFAULT 0, -- 中小企業（2023年3月までの月60時間超の割増は25%でよかった）
     annual_holidays INTEGER DEFAULT 120,
     holiday_csv_url TEXT DEFAULT '${HOLIDAY_CSV_URL_DEFAULT}',
     holiday_source TEXT DEFAULT 'url',

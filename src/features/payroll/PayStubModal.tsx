@@ -124,6 +124,12 @@ export default function PayStubModal(props: Props) {
                       {Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超: {fmtH(salary.highPremiumHours)}
                     </div>
                   )}
+                  {/* 中小企業の猶予（2023年3月まで）で、60時間超も25%で計算した分 */}
+                  {salary.deferredHighPremiumHours > 0 && (
+                    <div style={{ fontSize: '10px', color: '#7f8c8d', marginTop: 2, borderTop: '1px dotted #ccc' }}>
+                      {Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超（中小企業の猶予で25%）: {fmtH(salary.deferredHighPremiumHours)}
+                    </div>
+                  )}
                 </td>
                               
                 <td style={S.tdCtrS}>{fmtH(salary.totalNightHours)}</td>

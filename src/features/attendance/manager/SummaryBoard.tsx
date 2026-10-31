@@ -46,7 +46,12 @@ export default function SummaryBoard({ am }: Props) {
           </div>
           {(calcResult?.highPremiumHours ?? 0) > 0 && (
             <div style={{ fontSize: "11px", color: "#ff7675" }}> 
-              (うち{Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超 [{(Master.OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(calcResult?.highPremiumHours ?? 0)}) 
+              (うち{Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超 [{(Master.OVERTIME_PREMIUM_RATE - 1) * 100}%増]: {formatHours(calcResult?.highPremiumHours ?? 0)})
+            </div>
+          )}
+          {(calcResult?.deferredHighPremiumHours ?? 0) > 0 && (
+            <div style={{ fontSize: "11px", color: "#95a5a6" }}>
+              (うち{Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超 [中小企業の猶予で{(Master.OVERTIME_RATE - 1) * 100}%増]: {formatHours(calcResult?.deferredHighPremiumHours ?? 0)})
             </div>
           )}
         </div>

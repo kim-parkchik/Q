@@ -53,6 +53,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "flat_tax_reduction", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 2,
+    description: "会社設定に「中小企業」（2023年3月までの月60時間超の割増率の猶予）を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "company", "is_small_business", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

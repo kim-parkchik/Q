@@ -358,6 +358,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       totalOvertimeHours: 0,
       totalNightHours: 0,
       highPremiumHours: 0,
+      deferredHighPremiumHours: 0,
       basePay: 0,         // 🆕 これを追加
       absenceDeduction: 0,
       commutePay: 0,

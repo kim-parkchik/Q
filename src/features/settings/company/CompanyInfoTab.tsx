@@ -62,6 +62,8 @@ export default function CompanyInfoTab({ cm }: Props) {
         setWeekStartDay,
         isWeekStartEditable,
         setIsWeekStartEditable,
+        isSmallBusiness,
+        setIsSmallBusiness,
         isSearchingComp,
         setIsZipFocus,
         handleFocus,
@@ -253,6 +255,57 @@ export default function CompanyInfoTab({ cm }: Props) {
                                 />
                                 設定を変更する
                             </label>
+                        </div>
+                    </div>
+
+                    {/* 中小企業（2023年3月までの月60時間超の割増率の猶予） */}
+                    <div style={{
+                        gridColumn: "1 / 3",
+                        padding: "15px",
+                        backgroundColor: "#f8fafc",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                        marginBottom: "-10px"
+                    }}>
+                        <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                            <input
+                                type="checkbox"
+                                checked={isSmallBusiness}
+                                onChange={e => setIsSmallBusiness(e.target.checked)}
+                            />
+                            <Building2 size={16} color="#3498db" />
+                            中小企業に当たる
+                            <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal" }}>
+                                ※2023年3月までの給与を計算するときだけ使います
+                            </span>
+                        </label>
+                        <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.7, marginTop: "6px" }}>
+                            中小企業は、2023年3月31日までに働いた分の月60時間を超える残業が、50%ではなく25%の割増でよいとされていました。
+                            チェックすると、その期間の分を25%で計算します。2023年4月1日以降に働いた分は、会社の規模にかかわらず50%です。
+                            <div style={{ marginTop: "6px" }}>
+                                次のどちらかに当てはまれば中小企業です（会社全体で判断）。
+                            </div>
+                            <table style={{ borderCollapse: "collapse", marginTop: "4px", fontSize: "12px" }}>
+                                <thead>
+                                    <tr>
+                                        {["業種", "資本金（出資の総額）", "常時使用する労働者数"].map(h => (
+                                            <th key={h} style={{ textAlign: "left", padding: "2px 12px 2px 0", fontWeight: "normal", color: "#94a3b8" }}>{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {[
+                                        ["小売業", "5,000万円以下", "50人以下"],
+                                        ["サービス業", "5,000万円以下", "100人以下"],
+                                        ["卸売業", "1億円以下", "100人以下"],
+                                        ["その他の業種", "3億円以下", "300人以下"],
+                                    ].map(row => (
+                                        <tr key={row[0]}>
+                                            {row.map(v => <td key={v} style={{ padding: "2px 12px 2px 0" }}>{v}</td>)}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
