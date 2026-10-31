@@ -151,17 +151,20 @@ export const getHyojunHoshu = (
 const getGensenTax = (taxBase: number, dependents: number, payYear: number, method?: TaxCalcMethod): number =>
   calcWithholdingTax(taxBase, dependents, payYear, method ?? "table");
 
-// 介護保険対象判定
+// 介護保険の対象（第2号被保険者）かどうか。給与・賞与の両方で使う
+// 40歳に達した日がある月の分から、65歳に達した日がある月の前月分まで保険料がかかる。
+// 年齢に達するのは誕生日の前日（年齢計算ニ関スル法律）なので、1日生まれの人は誕生月の前月が区切りになる
+// （例：1986年4月1日生まれ → 2026年3月31日に40歳に達する → 2026年3月分から）
 export const checkNursingCare = (birthday: string, year: number, month: number): boolean => {
   if (!birthday) return false;
-  
+
   const birthDate = dayjs(birthday);
   const targetDate = dayjs(new Date(year, month - 1, 1));
-  
-  // 40歳に達する月の初日
-  const reach40 = birthDate.add(Master.INSURANCE_2026.NURSING_CARE_START_AGE, 'year').startOf('month');
-  // 65歳に達する月の初日
-  const reach65 = birthDate.add(Master.INSURANCE_2026.NURSING_CARE_END_AGE, 'year').startOf('month');
+
+  // その年齢に達する日（誕生日の前日）がある月の初日
+  const reachMonth = (age: number) => birthDate.add(age, 'year').subtract(1, 'day').startOf('month');
+  const reach40 = reachMonth(Master.INSURANCE_2026.NURSING_CARE_START_AGE);
+  const reach65 = reachMonth(Master.INSURANCE_2026.NURSING_CARE_END_AGE);
 
   return targetDate.isSameOrAfter(reach40) && targetDate.isBefore(reach65);
 };

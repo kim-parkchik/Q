@@ -6,7 +6,7 @@
  * 月給 300,000円・所定8時間の人の時間単価は 300,000 ÷ (22日 × 8時間) = 1,704.5454…円。
  */
 import { describe, expect, test } from "bun:test";
-import { calculateSalary, type SalaryExtras } from "./calcSalary";
+import { calculateSalary, checkNursingCare, type SalaryExtras } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
 import { calcWithholdingTax } from "./incomeTax";
 import { INSURANCE_2026 } from "../constants/insurance";
@@ -65,6 +65,43 @@ describe("厚生年金の上限（2020年9月分から 62万円 → 65万円）"
         const high = { ...monthly, base_wage: 700000, standard_remuneration: 650000 };
         expect(calculateSalary(high, [], extras(), 2020, 8, company).welfarePension).toBe(56730); // 620,000 × 18.3% ÷ 2
         expect(calculateSalary(high, [], extras(), 2020, 9, company).welfarePension).toBe(59475); // 650,000 × 18.3% ÷ 2
+    });
+});
+
+describe("介護保険（40歳に達した月の分から、65歳に達した月の前月分まで。年齢に達するのは誕生日の前日）", () => {
+    test("1日生まれの人は、誕生月の前月から介護保険がかかる", () => {
+        // 1986年4月1日生まれ → 2026年3月31日に40歳に達する
+        expect(checkNursingCare("1986-04-01", 2026, 2)).toBe(false);
+        expect(checkNursingCare("1986-04-01", 2026, 3)).toBe(true);
+    });
+    test("2日以降に生まれた人は、誕生月から介護保険がかかる", () => {
+        // 1986年4月2日生まれ → 2026年4月1日に40歳に達する
+        expect(checkNursingCare("1986-04-02", 2026, 3)).toBe(false);
+        expect(checkNursingCare("1986-04-02", 2026, 4)).toBe(true);
+    });
+    test("65歳に達した日がある月の分からは、かからない", () => {
+        // 1961年4月1日生まれ → 2026年3月31日に65歳に達する → 2月分まで
+        expect(checkNursingCare("1961-04-01", 2026, 2)).toBe(true);
+        expect(checkNursingCare("1961-04-01", 2026, 3)).toBe(false);
+        // 1961年4月2日生まれ → 2026年4月1日に65歳に達する → 3月分まで
+        expect(checkNursingCare("1961-04-02", 2026, 3)).toBe(true);
+        expect(checkNursingCare("1961-04-02", 2026, 4)).toBe(false);
+    });
+    test("2月29日生まれの人は、2月から（うるう年でない年も）", () => {
+        expect(checkNursingCare("1984-02-29", 2024, 1)).toBe(false);
+        expect(checkNursingCare("1984-02-29", 2024, 2)).toBe(true);
+        expect(checkNursingCare("1984-02-29", 2049, 1)).toBe(true);
+        expect(checkNursingCare("1984-02-29", 2049, 2)).toBe(false);
+    });
+    test("生年月日が空なら、かからない", () => {
+        expect(checkNursingCare("", 2026, 6)).toBe(false);
+    });
+    test("給与計算：1986年7月1日生まれの人は、2026年6月分の給与から介護保険料を引く", () => {
+        const r = calc({ ...monthly, birthday: "1986-07-01" }, []);
+        const careRate = INSURANCE_2026.KENPO_RATES["東京"][1] + INSURANCE_2026.KENPO_CARE_RATE[1];
+        expect(r.nursingInsurance).toBeGreaterThan(0);
+        expect(r.nursingInsurance).toBe(calcPremium(300000, careRate, LAW) - r.healthInsurance);
+        expect(calc({ ...monthly, birthday: "1986-07-02" }, []).nursingInsurance).toBe(0);
     });
 });
 

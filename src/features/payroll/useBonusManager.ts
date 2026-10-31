@@ -5,6 +5,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
 import { calcBonusWithholdingTax } from '../../utils/incomeTax';
 import { calcPremium } from '../../utils/socialInsurance';
+import { checkNursingCare } from '../../utils/calcSalary';
 
 // --- Types ---
 interface BonusSetting {
@@ -327,14 +328,8 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     const ins = Master.getInsuranceMaster(payYear, payMonth);
     const healthRate = (ins.KENPO_RATES[pref] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
 
-    const isNursing = (() => {
-      if (!staff.birthday || !selectedSetting.payment_date) return false;
-      const b = new Date(staff.birthday);
-      const base = new Date(selectedSetting.payment_date);
-      let age = base.getFullYear() - b.getFullYear();
-      if (base.getMonth() < b.getMonth() || (base.getMonth() === b.getMonth() && base.getDate() < b.getDate())) age--;
-      return age >= 40 && age < 65;
-    })();
+    // 介護保険は、賞与を支給する月に第2号被保険者かどうかで決まる（支給日の年齢ではない。給与と同じ判定）
+    const isNursing = checkNursingCare(staff.birthday || '', payYear, payMonth);
 
     const sInsType = companySettings.round_social_ins || 'floor';
     const currentYearTotal = annualBonusTotals[staff.id] ?? 0;
