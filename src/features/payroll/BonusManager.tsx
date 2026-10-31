@@ -708,7 +708,7 @@ export default function BonusManager({ db, staffList }: Props) {
                           ¥{calc.totalEarnings.toLocaleString()}
                         </td>
                         {/* 自動計算控除 */}
-                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.healthInsurance.toLocaleString()}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isHealthTarget ? "#666" : "#bbb" }}>¥{calc.healthInsurance.toLocaleString()}</td>
                         {/* 介護保険（条件付きで色変更） */}
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isNursing ? "#c0392b" : "#bbb" }}>
                           ¥{calc.nursingInsurance.toLocaleString()}
@@ -717,8 +717,8 @@ export default function BonusManager({ db, staffList }: Props) {
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.childSupport > 0 ? "#666" : "#bbb" }}>
                           ¥{calc.childSupport.toLocaleString()}
                         </td>
-                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.welfarePension.toLocaleString()}</td>
-                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.empInsurance.toLocaleString()}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isPensionTarget ? "#666" : "#bbb" }}>¥{calc.welfarePension.toLocaleString()}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isEmploymentInsEnrolled ? "#666" : "#bbb" }}>¥{calc.empInsurance.toLocaleString()}</td>
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.incomeTax.toLocaleString()}</td>
                         {/* カスタム控除入力欄 */}
                         {deductionItems.map(item => (
@@ -756,6 +756,7 @@ export default function BonusManager({ db, staffList }: Props) {
           {selectedSettingId && items.length > 0 && (
             <div style={S.footerNote}>
               ※ 標準賞与額 = 支給合計の1,000円未満切り捨て。健保上限573万円、厚生年金上限150万円（1回あたり）。
+              社保・雇用保険に加入していない人と、75歳の誕生月から（健康保険・介護保険・支援金）・70歳に達した月から（厚生年金）の人には、その保険料はかかりません（灰色の欄）。
               所得税は前月課税給与が不明な場合、簡便的に0円ベースで計算（過少になる場合があります）。
               確定後は「賞与支払届」を年金事務所・健康保険組合に提出してください。
             </div>

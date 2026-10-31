@@ -6,7 +6,9 @@
  * 月給 300,000円・所定8時間の人の時間単価は 300,000 ÷ (22日 × 8時間) = 1,704.5454…円。
  */
 import { describe, expect, test } from "bun:test";
-import { calculateSalary, checkNursingCare, type SalaryExtras } from "./calcSalary";
+import {
+    calculateSalary, checkEmploymentInsEnrolled, checkNursingCare, checkSocialInsEnrolled, getInsuranceByAge, type SalaryExtras,
+} from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
 import { calcWithholdingTax } from "./incomeTax";
 import { INSURANCE_2026 } from "../constants/insurance";
@@ -102,6 +104,73 @@ describe("介護保険（40歳に達した月の分から、65歳に達した月
         expect(r.nursingInsurance).toBeGreaterThan(0);
         expect(r.nursingInsurance).toBe(calcPremium(300000, careRate, LAW) - r.healthInsurance);
         expect(calc({ ...monthly, birthday: "1986-07-02" }, []).nursingInsurance).toBe(0);
+    });
+});
+
+// 日本年金機構「厚生年金保険は70歳（70歳の誕生日前日が属する月の前月まで）、健康保険は75歳まで（75歳誕生日当日が属する月の前月まで）」
+// https://www.nenkin.go.jp/section/faq/kounen/jigyonushi/70hiyosha.html
+describe("70歳の厚生年金・75歳の健康保険（資格を失った月の分から保険料はかからない）", () => {
+    test("厚生年金：70歳の誕生日の前日がある月の前月分まで（1日生まれは誕生月の前々月分まで）", () => {
+        // 1956年4月1日生まれ → 2026年3月31日に70歳に達する → 2月分まで
+        expect(getInsuranceByAge("1956-04-01", 2026, 2).pension).toBe(true);
+        expect(getInsuranceByAge("1956-04-01", 2026, 3).pension).toBe(false);
+        // 1956年4月2日生まれ → 2026年4月1日に70歳に達する → 3月分まで
+        expect(getInsuranceByAge("1956-04-02", 2026, 3).pension).toBe(true);
+        expect(getInsuranceByAge("1956-04-02", 2026, 4).pension).toBe(false);
+        // 70歳になっても、健康保険は続く
+        expect(getInsuranceByAge("1956-04-01", 2026, 3).health).toBe(true);
+    });
+    test("健康保険：75歳の誕生日当日がある月の前月分まで（1日生まれも誕生月の前月分まで）", () => {
+        // 1951年4月1日生まれ → 2026年4月1日に後期高齢者医療制度へ → 3月分まで
+        expect(getInsuranceByAge("1951-04-01", 2026, 3).health).toBe(true);
+        expect(getInsuranceByAge("1951-04-01", 2026, 4).health).toBe(false);
+        // 1951年4月15日生まれも、4月分から
+        expect(getInsuranceByAge("1951-04-15", 2026, 3).health).toBe(true);
+        expect(getInsuranceByAge("1951-04-15", 2026, 4).health).toBe(false);
+    });
+    test("2月29日生まれは、うるう年でない年は3月1日が誕生日（70歳は2月28日に達する）", () => {
+        // 1956年2月29日生まれ → 2026年2月28日に70歳に達する → 1月分まで
+        expect(getInsuranceByAge("1956-02-29", 2026, 1).pension).toBe(true);
+        expect(getInsuranceByAge("1956-02-29", 2026, 2).pension).toBe(false);
+        // 1952年2月29日生まれ → 2027年3月1日に後期高齢者医療制度へ → 2月分まで
+        expect(getInsuranceByAge("1952-02-29", 2027, 2).health).toBe(true);
+        expect(getInsuranceByAge("1952-02-29", 2027, 3).health).toBe(false);
+    });
+    test("生年月日が空なら、健康保険・厚生年金ともかかる（介護保険はかからない）", () => {
+        expect(getInsuranceByAge("", 2026, 6)).toEqual({ health: true, nursing: false, pension: true });
+    });
+    test("給与計算：1956年7月1日生まれの人は、2026年6月分から厚生年金を引かない（健康保険は引く）", () => {
+        const r = calc({ ...monthly, birthday: "1956-07-01" }, []);
+        expect(r.welfarePension).toBe(0);
+        expect(r.isPensionAgeTarget).toBe(false);
+        expect(r.healthInsurance).toBe(calcPremium(300000, INSURANCE_2026.KENPO_RATES["東京"][1], LAW));
+        expect(r.childSupport).toBe(345);
+        expect(calc({ ...monthly, birthday: "1956-07-02" }, []).welfarePension).toBe(27450);
+    });
+    test("給与計算：75歳の誕生月（2026年6月）の分からは、健康保険・介護保険・支援金・厚生年金のどれも引かない", () => {
+        const r = calc({ ...monthly, birthday: "1951-06-20" }, []);
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport, r.welfarePension]).toEqual([0, 0, 0, 0]);
+        expect(r.isHealthInsAgeTarget).toBe(false);
+        // 誕生月の前月までは健康保険を引く（厚生年金は70歳を過ぎているので引かない）
+        const before = calc({ ...monthly, birthday: "1951-07-01" }, []);
+        expect(before.healthInsurance).toBeGreaterThan(0);
+        expect(before.welfarePension).toBe(0);
+        // 雇用保険は年齢に関係なく引く
+        expect(r.empInsurance).toBe(before.empInsurance);
+    });
+});
+
+describe("社会保険・雇用保険に加入しているか（給与・賞与で同じ判定）", () => {
+    test("標準報酬月額が0、または社保規定が「未加入 / 適用除外」なら、社会保険に加入していない", () => {
+        expect(checkSocialInsEnrolled({ standard_remuneration: 300000 })).toBe(true);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 300000, social_insurance_group_id: 1 })).toBe(true);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 0, social_insurance_group_id: 1 })).toBe(false);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 300000, social_insurance_group_id: null })).toBe(false);
+    });
+    test("「雇用保険加入」を外した人（役員など）は、雇用保険に加入していない", () => {
+        expect(checkEmploymentInsEnrolled({})).toBe(true);
+        expect(checkEmploymentInsEnrolled({ is_employment_ins_eligible: 1 })).toBe(true);
+        expect(checkEmploymentInsEnrolled({ is_employment_ins_eligible: 0 })).toBe(false);
     });
 });
 

@@ -5,7 +5,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
 import { calcBonusWithholdingTax } from '../../utils/incomeTax';
 import { calcPremium } from '../../utils/socialInsurance';
-import { checkNursingCare } from '../../utils/calcSalary';
+import { checkEmploymentInsEnrolled, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 
 // --- Types ---
 interface BonusSetting {
@@ -328,8 +328,15 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     const ins = Master.getInsuranceMaster(payYear, payMonth);
     const healthRate = (ins.KENPO_RATES[pref] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
 
-    // 介護保険は、賞与を支給する月に第2号被保険者かどうかで決まる（支給日の年齢ではない。給与と同じ判定）
-    const isNursing = checkNursingCare(staff.birthday || '', payYear, payMonth);
+    // 社会保険・雇用保険に加入していない人からは引かない（給与と同じ判定）
+    const isSocialInsEnrolled = checkSocialInsEnrolled(staff);
+    const isEmploymentInsEnrolled = checkEmploymentInsEnrolled(staff);
+    // 年齢による対象は、賞与を支給する月で決まる（支給日の年齢ではない。給与と同じ判定）
+    // 資格を失った月（75歳の誕生月・70歳に達した月）に支払った賞与には、その保険料がかからない
+    const byAge = getInsuranceByAge(staff.birthday || '', payYear, payMonth);
+    const isHealthTarget = isSocialInsEnrolled && byAge.health;
+    const isPensionTarget = isSocialInsEnrolled && byAge.pension;
+    const isNursing = isHealthTarget && byAge.nursing;
 
     const sInsType = companySettings.round_social_ins || 'floor';
     const currentYearTotal = annualBonusTotals[staff.id] ?? 0;
@@ -337,21 +344,23 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     const healthHyojun = Math.min(hyojunBonus, Math.max(0, ins.HEALTH_INS_ANNUAL_LIMIT - currentYearTotal));
 
     // 本人負担分 = 標準賞与額 × 料率 ÷ 2（介護保険は「健康保険＋介護保険」でまとめて計算し、健康保険料を引く）
-    const healthInsurance = calcPremium(healthHyojun, healthRate, sInsType);
+    const healthInsurance = isHealthTarget ? calcPremium(healthHyojun, healthRate, sInsType) : 0;
     const nursingInsurance = isNursing
       ? calcPremium(healthHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType) - healthInsurance
       : 0;
-    const childSupport = Master.isChildSupportMonth(ins, payYear, payMonth) && ins.CHILD_SUPPORT_RATE
+    const childSupport = isHealthTarget && Master.isChildSupportMonth(ins, payYear, payMonth) && ins.CHILD_SUPPORT_RATE
       ? calcPremium(healthHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType)
       : 0;
 
     // 厚生年金の標準賞与額は1回150万円まで
     const pensionHyojun = Math.min(hyojunBonus, ins.PENSION_INS_SINGLE_LIMIT);
-    const welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
+    const welfarePension = isPensionTarget ? calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType) : 0;
 
     const empInsType = staff.employment_insurance_type || companySettings.default_emp_ins_type || 'general';
     const empRate = ins.LABOR_INSURANCE_RATES[empInsType as Master.EmpInsType] || ins.LABOR_INSURANCE_RATES.general;
-    const empInsurance = calcPremium(totalEarnings, empRate[0] * 100, companySettings.round_emp_ins || 'round', 1);
+    const empInsurance = isEmploymentInsEnrolled
+      ? calcPremium(totalEarnings, empRate[0] * 100, companySettings.round_emp_ins || 'round', 1)
+      : 0;
 
     const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
     // 源泉所得税：国税庁の算出率の表（前月の給与がない・賞与が前月の給与の10倍を超えるときは月額表）で計算する
@@ -365,7 +374,7 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     return {
       totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, childSupport, welfarePension, 
       empInsurance, incomeTax, customDeductions, totalDeductions,
-      netPay: totalEarnings - totalDeductions, isNursing
+      netPay: totalEarnings - totalDeductions, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled
     };
   };
 

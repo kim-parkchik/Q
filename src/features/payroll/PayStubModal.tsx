@@ -66,9 +66,11 @@ export default function PayStubModal(props: Props) {
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
             </div>
           )}
-          {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled) && (
+          {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               {!salary.isSocialInsEnrolled && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
+              {salary.isSocialInsEnrolled && !salary.isHealthInsAgeTarget && <div>※ 75歳の誕生月の分から、健康保険料・子ども・子育て支援金はかかりません（後期高齢者医療制度へ移るため）。</div>}
+              {salary.isSocialInsEnrolled && !salary.isPensionAgeTarget && <div>※ 70歳に達した月（誕生日の前日がある月）の分から、厚生年金保険料はかかりません（70歳以上被用者）。</div>}
               {!salary.isEmploymentInsEnrolled && <div>※ 雇用保険は未加入のため控除していません（従業員設定の「雇用保険加入」）。</div>}
             </div>
           )}

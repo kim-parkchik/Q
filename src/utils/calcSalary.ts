@@ -82,6 +82,10 @@ export interface SalaryResult {
   totalDeductions: number;
   netPay: number;
   isNursingCareTarget: boolean;
+  /** 年齢で健康保険の対象か（75歳の誕生月の分からは false） */
+  isHealthInsAgeTarget: boolean;
+  /** 年齢で厚生年金の対象か（70歳に達した月の分からは false） */
+  isPensionAgeTarget: boolean;
   hyojunHoshu: number;
   /** 健康保険・厚生年金に加入しているか（標準報酬月額が未設定・社保規定が「未加入」なら false） */
   isSocialInsEnrolled: boolean;
@@ -151,23 +155,51 @@ export const getHyojunHoshu = (
 const getGensenTax = (taxBase: number, dependents: number, payYear: number, method?: TaxCalcMethod): number =>
   calcWithholdingTax(taxBase, dependents, payYear, method ?? "table");
 
-// 介護保険の対象（第2号被保険者）かどうか。給与・賞与の両方で使う
-// 40歳に達した日がある月の分から、65歳に達した日がある月の前月分まで保険料がかかる。
-// 年齢に達するのは誕生日の前日（年齢計算ニ関スル法律）なので、1日生まれの人は誕生月の前月が区切りになる
-// （例：1986年4月1日生まれ → 2026年3月31日に40歳に達する → 2026年3月分から）
-export const checkNursingCare = (birthday: string, year: number, month: number): boolean => {
-  if (!birthday) return false;
-
-  const birthDate = dayjs(birthday);
-  const targetDate = dayjs(new Date(year, month - 1, 1));
-
-  // その年齢に達する日（誕生日の前日）がある月の初日
-  const reachMonth = (age: number) => birthDate.add(age, 'year').subtract(1, 'day').startOf('month');
-  const reach40 = reachMonth(Master.INSURANCE_2026.NURSING_CARE_START_AGE);
-  const reach65 = reachMonth(Master.INSURANCE_2026.NURSING_CARE_END_AGE);
-
-  return targetDate.isSameOrAfter(reach40) && targetDate.isBefore(reach65);
+/** その年齢になる誕生日（2月29日生まれで、うるう年でない年は3月1日） */
+const birthdayAt = (birthday: string, age: number) => {
+  const b = dayjs(birthday);
+  return dayjs(new Date(b.year() + age, b.month(), b.date()));
 };
+/** その年齢に達する日（誕生日の前日。年齢計算ニ関スル法律）がある月の初日 */
+const monthReachingAge = (birthday: string, age: number) =>
+  birthdayAt(birthday, age).subtract(1, 'day').startOf('month');
+
+/**
+ * 年齢で決まる、その月の分の社会保険料がかかるかどうか（給与・賞与の両方で使う）
+ * 資格を失った月の分の保険料はかからず、その月に支払った賞与にもかからない。
+ * ・健康保険（子ども・子育て支援金も）：75歳の誕生日当日に後期高齢者医療制度へ移って資格を失う → 誕生日がある月の前月分まで
+ * ・介護保険：40歳に達した日がある月の分から、65歳に達した日がある月の前月分まで
+ * ・厚生年金：70歳に達した日（誕生日の前日）に資格を失う → その日がある月の前月分まで（その後は70歳以上被用者）
+ * 年齢に達するのは誕生日の前日なので、1日生まれの人は誕生月の前月が区切りになる
+ * （例：1986年4月1日生まれ → 2026年3月31日に40歳に達する → 2026年3月分から介護保険）
+ * 出典：日本年金機構 https://www.nenkin.go.jp/section/faq/kounen/jigyonushi/70hiyosha.html
+ *      （「厚生年金保険は70歳（70歳の誕生日前日が属する月の前月まで）、健康保険は75歳まで（75歳誕生日当日が属する月の前月まで）」）
+ *       賞与：https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html （資格喪失月に支払われた賞与は保険料賦課の対象とならない）
+ */
+export const getInsuranceByAge = (birthday: string, year: number, month: number) => {
+  if (!birthday) return { health: true, nursing: false, pension: true };
+  const target = dayjs(new Date(year, month - 1, 1));
+  return {
+    health: target.isBefore(birthdayAt(birthday, Master.INSURANCE_2026.HEALTH_INS_END_AGE).startOf('month')),
+    nursing: target.isSameOrAfter(monthReachingAge(birthday, Master.INSURANCE_2026.NURSING_CARE_START_AGE))
+      && target.isBefore(monthReachingAge(birthday, Master.INSURANCE_2026.NURSING_CARE_END_AGE)),
+    pension: target.isBefore(monthReachingAge(birthday, Master.INSURANCE_2026.PENSION_END_AGE)),
+  };
+};
+
+/** 介護保険の対象（第2号被保険者）かどうか */
+export const checkNursingCare = (birthday: string, year: number, month: number): boolean =>
+  getInsuranceByAge(birthday, year, month).nursing;
+
+/** 健康保険・厚生年金に加入しているか（標準報酬月額が0＝未加入・対象外、または社保規定が「未加入 / 適用除外」なら加入していない） */
+export const checkSocialInsEnrolled = (staff: any): boolean => {
+  const socialGroupId = staff.social_insurance_group_id;
+  return (Number(staff.standard_remuneration) || 0) > 0 && (socialGroupId === undefined || Number(socialGroupId) > 0);
+};
+
+/** 雇用保険に加入しているか（従業員画面の「雇用保険加入」を外した人＝役員など は加入していない） */
+export const checkEmploymentInsEnrolled = (staff: any): boolean =>
+  Number(staff.is_employment_ins_eligible ?? 1) !== 0;
 
 /* --- 外部から呼び出すメインロジック --- */
 
@@ -516,25 +548,24 @@ export const calculateSalary = (
   // 1. 加入しているかと標準報酬月額
   // 従業員画面で「標準報酬月額 0：未加入・対象外」または社保規定「未加入 / 適用除外」を選んだ人からは控除しない
   // （標準報酬月額は資格取得時・算定基礎・月変で決まり、毎月の給与からは計算しない）
-  const dbHyojun = Number(staff.standard_remuneration) || 0;
-  const socialGroupId = staff.social_insurance_group_id;
-  const isSocialInsEnrolled = dbHyojun > 0 && (socialGroupId === undefined || Number(socialGroupId) > 0);
-  const hyojunHoshu = isSocialInsEnrolled ? dbHyojun : 0;
+  const isSocialInsEnrolled = checkSocialInsEnrolled(staff);
+  const hyojunHoshu = isSocialInsEnrolled ? Number(staff.standard_remuneration) : 0;
 
   // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
-  const nursingTarget = checkNursingCare(staff.birthday || '', targetYear, targetMonth);
+  // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
+  const byAge = getInsuranceByAge(staff.birthday || '', targetYear, targetMonth);
   const healthRate = (ins.KENPO_RATES[extras.prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
   const sInsType = companySettings?.round_social_ins || 'floor';
   const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
   let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
-  if (isSocialInsEnrolled) {
+  if (isSocialInsEnrolled && byAge.health) {
     // 健康保険料
     healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
 
     // 介護保険料（40〜64歳）
     // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
-    if (nursingTarget) {
+    if (byAge.nursing) {
       const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
       nursingInsurance = combined - healthInsurance;
     }
@@ -543,7 +574,8 @@ export const calculateSalary = (
     if (Master.isChildSupportMonth(ins, targetYear, targetMonth) && ins.CHILD_SUPPORT_RATE) {
       childSupport = calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType);
     }
-
+  }
+  if (isSocialInsEnrolled && byAge.pension) {
     // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
     const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
     welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
@@ -552,7 +584,7 @@ export const calculateSalary = (
   // 雇用保険（賃金総額 × 本人負担率）
   // 従業員画面の「雇用保険加入」を外した人（役員など）からは控除しない
   // 区分は 従業員の設定 → 会社の設定 → 「一般の事業」 の順に決める
-  const isEmploymentInsEnrolled = Number(staff.is_employment_ins_eligible ?? 1) !== 0;
+  const isEmploymentInsEnrolled = checkEmploymentInsEnrolled(staff);
   const empInsKey = (staff.employment_insurance_type || companySettings?.default_emp_ins_type || 'general') as Master.EmpInsType;
   const empRates = ins.LABOR_INSURANCE_RATES[empInsKey] || ins.LABOR_INSURANCE_RATES.general;
   const empInsurance = isEmploymentInsEnrolled
@@ -620,7 +652,9 @@ export const calculateSalary = (
 
     // --- 最終結果・その他情報 ---
     netPay: totalEarnings - totalDeductions,
-    isNursingCareTarget: nursingTarget,
+    isNursingCareTarget: byAge.nursing,
+    isHealthInsAgeTarget: byAge.health,
+    isPensionAgeTarget: byAge.pension,
     hyojunHoshu,
     isSocialInsEnrolled,
     isEmploymentInsEnrolled,

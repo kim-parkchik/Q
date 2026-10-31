@@ -46,6 +46,10 @@ export const buildInsuranceMaster = (kenpo: KenpoTable) => {
     /** 介護保険第2号被保険者の年齢 */
     NURSING_CARE_START_AGE: 40,
     NURSING_CARE_END_AGE: 65,
+    /** 厚生年金の資格を失う年齢（70歳に達した日） */
+    PENSION_END_AGE: 70,
+    /** 健康保険の資格を失う年齢（75歳の誕生日に後期高齢者医療制度へ移る） */
+    HEALTH_INS_END_AGE: 75,
     /** 標準報酬月額表 [報酬月額(以上), 報酬月額(未満), 標準報酬月額] */
     HYOJUN_TABLE,
     /** 画面の選択肢 */
