@@ -5,7 +5,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
 import { calcBonusWithholdingTax } from '../../utils/incomeTax';
 import { calcPremium } from '../../utils/socialInsurance';
-import { checkEmploymentInsEnrolled, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
+import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 
 // --- Types ---
 interface BonusSetting {
@@ -24,7 +24,7 @@ interface BonusItem {
   is_default_active: number; // 🆕 追加
 }
 
-export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 🆕 nullを許容
+export const useBonusManager = (db: Database | null, staffList: any[]) => { // 🆕 nullを許容
   const [activeTab, setActiveTab] = useState<'list' | 'items' | 'calc'>('list');
   const [settings, setSettings] = useState<BonusSetting[]>([]);
   const [selectedSettingId, setSelectedSettingId] = useState<number | null>(null);
@@ -53,6 +53,11 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
         ...Master.getTaxMasterWarnings(selectedSetting.target_year),
       ]
     : [];
+  // 賞与の一覧に出す人：支給する月より前に退職した人は出さない（その月に退職する人は、月末退職なら保険料がかかるので出す）
+  const payMonthStart = selectedSetting
+    ? `${selectedSetting.target_year}-${String(selectedSetting.target_month).padStart(2, '0')}-01`
+    : '';
+  const bonusStaffList = staffList.filter(s => !s.retirement_date || s.retirement_date >= payMonthStart);
 
   // --- Data Fetching ---
   const loadSettings = useCallback(async () => {
@@ -334,8 +339,11 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     // 年齢による対象は、賞与を支給する月で決まる（支給日の年齢ではない。給与と同じ判定）
     // 資格を失った月（75歳の誕生月・70歳に達した月）に支払った賞与には、その保険料がかからない
     const byAge = getInsuranceByAge(staff.birthday || '', payYear, payMonth);
-    const isHealthTarget = isSocialInsEnrolled && byAge.health;
-    const isPensionTarget = isSocialInsEnrolled && byAge.pension;
+    // 入社日より前・資格喪失日（退職日の翌日）がある月に支払った賞与には、どの社会保険料もかからない（支給日で判定する）
+    const payDate = selectedSetting.payment_date || `${payYear}-${String(payMonth).padStart(2, '0')}-01`;
+    const isInsured = isSocialInsEnrolled && checkInsuredOnBonusDate(staff.join_date, staff.retirement_date, payDate);
+    const isHealthTarget = isInsured && byAge.health;
+    const isPensionTarget = isInsured && byAge.pension;
     const isNursing = isHealthTarget && byAge.nursing;
 
     const sInsType = companySettings.round_social_ins || 'floor';
@@ -437,6 +445,7 @@ export const useBonusManager = (db: Database | null, _staffList: any[]) => { // 
     // ── 計算・値保持 (Tab 3: calc) ──
     activeItemIds, toggleItemActive,
     staffValues, saveStaffValue, calcBonusForStaff,
+    bonusStaffList,
     rateWarnings,
   };
 };

@@ -7,7 +7,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-    calculateSalary, checkEmploymentInsEnrolled, checkNursingCare, checkSocialInsEnrolled, getInsuranceByAge, type SalaryExtras,
+    calculateSalary, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
+    getInsuranceByAge, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
 import { calcWithholdingTax } from "./incomeTax";
@@ -157,6 +158,71 @@ describe("70歳の厚生年金・75歳の健康保険（資格を失った月の
         expect(before.welfarePension).toBe(0);
         // 雇用保険は年齢に関係なく引く
         expect(r.empInsurance).toBe(before.empInsurance);
+    });
+});
+
+describe("入社月・退職月の社会保険料（資格取得日＝入社日、資格喪失日＝退職日の翌日）", () => {
+    // 出典：日本年金機構 https://www.nenkin.go.jp/section/faq/kounen/hihokensha/20140902-01.html
+    test("入社した月の分からかかる（月の途中で入社しても、その月の分がかかる）", () => {
+        expect(checkInsuredMonth("2026-04-15", "", 2026, 3)).toBe(false);
+        expect(checkInsuredMonth("2026-04-15", "", 2026, 4)).toBe(true);
+        expect(checkInsuredMonth("2026-04-15", null, 2026, 5)).toBe(true);
+    });
+    test("月末に退職した人は、退職した月の分までかかる（3月31日退職 → 資格喪失日は4月1日）", () => {
+        expect(checkInsuredMonth("2020-04-01", "2026-03-31", 2026, 3)).toBe(true);
+        expect(checkInsuredMonth("2020-04-01", "2026-03-31", 2026, 4)).toBe(false);
+    });
+    test("月の途中で退職した人は、退職した月の分はかからない（資格喪失日がある月の前月分まで）", () => {
+        expect(checkInsuredMonth("2020-04-01", "2026-03-15", 2026, 2)).toBe(true);
+        expect(checkInsuredMonth("2020-04-01", "2026-03-15", 2026, 3)).toBe(false);
+        // 3月30日退職 → 資格喪失日は3月31日（3月）
+        expect(checkInsuredMonth("2020-04-01", "2026-03-30", 2026, 3)).toBe(false);
+    });
+    test("入社した月に退職した（同月得喪）ときは、その月の分がかかる", () => {
+        expect(checkInsuredMonth("2026-04-10", "2026-04-20", 2026, 3)).toBe(false);
+        expect(checkInsuredMonth("2026-04-10", "2026-04-20", 2026, 4)).toBe(true);
+        expect(checkInsuredMonth("2026-04-10", "2026-04-20", 2026, 5)).toBe(false);
+        // 3月31日入社・4月20日退職は同月得喪ではない（前月から続けて加入）→ 4月分はかからない
+        expect(checkInsuredMonth("2026-03-31", "2026-04-20", 2026, 3)).toBe(true);
+        expect(checkInsuredMonth("2026-03-31", "2026-04-20", 2026, 4)).toBe(false);
+    });
+    test("入社日・退職日が空なら、どの月もかかる", () => {
+        expect(checkInsuredMonth("", "", 2026, 6)).toBe(true);
+        expect(checkInsuredMonth(undefined, undefined, 2026, 6)).toBe(true);
+    });
+    // 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html 留意事項(6)
+    test("賞与：入社日以後に支払った賞与にかかり、入社日より前に支払った賞与にはかからない", () => {
+        expect(checkInsuredOnBonusDate("2026-06-01", "", "2026-06-10")).toBe(true);
+        expect(checkInsuredOnBonusDate("2026-06-10", "", "2026-06-10")).toBe(true);
+        expect(checkInsuredOnBonusDate("2026-06-15", "", "2026-06-10")).toBe(false);
+    });
+    test("賞与：退職した月に支払った賞与にはかからない（月末に退職する人を除く）", () => {
+        expect(checkInsuredOnBonusDate("2020-04-01", "2026-06-20", "2026-06-10")).toBe(false);
+        expect(checkInsuredOnBonusDate("2020-04-01", "2026-06-30", "2026-06-10")).toBe(true);
+        expect(checkInsuredOnBonusDate("2020-04-01", "2026-07-15", "2026-06-10")).toBe(true);
+    });
+    test("賞与：同月得喪のときは、入社日から退職日までに支払った賞与にかかる", () => {
+        expect(checkInsuredOnBonusDate("2026-06-01", "2026-06-20", "2026-06-10")).toBe(true);
+        expect(checkInsuredOnBonusDate("2026-06-01", "2026-06-20", "2026-06-20")).toBe(true);
+        expect(checkInsuredOnBonusDate("2026-06-01", "2026-06-20", "2026-06-25")).toBe(false);
+    });
+    test("給与計算：2026年6月15日退職の人は、6月分の社会保険料を引かない（雇用保険は引く）", () => {
+        const r = calc({ ...monthly, join_date: "2020-04-01", retirement_date: "2026-06-15" }, []);
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport, r.welfarePension]).toEqual([0, 0, 0, 0]);
+        expect(r.isInsuredMonth).toBe(false);
+        expect(r.empInsurance).toBe(calc(monthly, []).empInsurance);
+    });
+    test("給与計算：2026年6月30日退職・6月入社の人は、6月分の社会保険料を引く", () => {
+        const full = calc(monthly, []);
+        for (const dates of [
+            { join_date: "2020-04-01", retirement_date: "2026-06-30" },
+            { join_date: "2026-06-15", retirement_date: "" },
+        ]) {
+            const r = calc({ ...monthly, ...dates }, []);
+            expect(r.isInsuredMonth).toBe(true);
+            expect([r.healthInsurance, r.childSupport, r.welfarePension])
+                .toEqual([full.healthInsurance, full.childSupport, full.welfarePension]);
+        }
     });
 });
 

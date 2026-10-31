@@ -127,6 +127,7 @@ export default function BonusManager({ db, staffList }: Props) {
     staffValues,
     saveStaffValue,
     calcBonusForStaff,
+    bonusStaffList,
     rateWarnings
   } = useBonusManager(db, staffList);
 
@@ -676,7 +677,7 @@ export default function BonusManager({ db, staffList }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {staffList.filter(s => !s.retirement_date).map(staff => {
+                  {bonusStaffList.map(staff => {
                     const calc = calcBonusForStaff(staff);
                     
                     // 1. calc が null（賞与設定が未選択など）の場合は、この行を表示しない
@@ -757,6 +758,7 @@ export default function BonusManager({ db, staffList }: Props) {
             <div style={S.footerNote}>
               ※ 標準賞与額 = 支給合計の1,000円未満切り捨て。健保上限573万円、厚生年金上限150万円（1回あたり）。
               社保・雇用保険に加入していない人と、75歳の誕生月から（健康保険・介護保険・支援金）・70歳に達した月から（厚生年金）の人には、その保険料はかかりません（灰色の欄）。
+              入社日より前に支払う賞与と、退職した月に支払う賞与（月末退職を除く）にも、社会保険料はかかりません（雇用保険料はかかります）。
               所得税は前月課税給与が不明な場合、簡便的に0円ベースで計算（過少になる場合があります）。
               確定後は「賞与支払届」を年金事務所・健康保険組合に提出してください。
             </div>

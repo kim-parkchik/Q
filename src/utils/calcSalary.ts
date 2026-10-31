@@ -86,6 +86,8 @@ export interface SalaryResult {
   isHealthInsAgeTarget: boolean;
   /** 年齢で厚生年金の対象か（70歳に達した月の分からは false） */
   isPensionAgeTarget: boolean;
+  /** 入社日・退職日で、その月の分の社会保険料がかかるか（入社前の月・資格喪失日がある月の分からは false） */
+  isInsuredMonth: boolean;
   hyojunHoshu: number;
   /** 健康保険・厚生年金に加入しているか（標準報酬月額が未設定・社保規定が「未加入」なら false） */
   isSocialInsEnrolled: boolean;
@@ -200,6 +202,58 @@ export const checkSocialInsEnrolled = (staff: any): boolean => {
 /** 雇用保険に加入しているか（従業員画面の「雇用保険加入」を外した人＝役員など は加入していない） */
 export const checkEmploymentInsEnrolled = (staff: any): boolean =>
   Number(staff.is_employment_ins_eligible ?? 1) !== 0;
+
+/** 資格喪失日（退職日の翌日）。退職日が空なら null */
+const lossDateOf = (retirementDate?: string | null) =>
+  retirementDate ? dayjs(retirementDate).add(1, 'day') : null;
+
+/**
+ * 入社日・退職日で決まる、その月の分の健康保険・厚生年金（介護保険・子ども・子育て支援金も）がかかるかどうか
+ * ・資格取得日は入社日、資格喪失日は退職日の翌日
+ * ・保険料は、資格取得日がある月の分から、資格喪失日がある月の前月分までかかる（日割りはしない）
+ *   → 月の途中で退職した人は、退職した月の分はかからない。月末に退職した人は、退職した月の分までかかる
+ * ・入社した月に退職した（同月得喪）ときは、その月の分がかかる
+ *   （厚生年金は、その月にほかの厚生年金・国民年金に入ると、あとで年金事務所から会社へ還付される）
+ * 出典：日本年金機構 https://www.nenkin.go.jp/section/faq/kounen/hihokensha/20140902-01.html
+ *       https://www.nenkin.go.jp/service/kounen/hokenryo/nofu/20120330-01.html
+ *       健康保険法156条3項（前月から引き続き被保険者である者が資格を喪失した月の分は算定しない）
+ */
+export const checkInsuredMonth = (
+  joinDate: string | null | undefined,
+  retirementDate: string | null | undefined,
+  year: number,
+  month: number,
+): boolean => {
+  const target = dayjs(new Date(year, month - 1, 1));
+  const joinMonth = joinDate ? dayjs(joinDate).startOf('month') : null;
+  if (joinMonth && target.isBefore(joinMonth)) return false;
+  const loss = lossDateOf(retirementDate);
+  if (!loss) return true;
+  const lossMonth = loss.startOf('month');
+  if (target.isBefore(lossMonth)) return true;
+  // 資格喪失日がある月は、同月得喪のときだけかかる
+  return target.isSame(lossMonth) && !!joinMonth && joinMonth.isSame(lossMonth);
+};
+
+/**
+ * 入社日・退職日で決まる、その日に支払う賞与に健康保険・厚生年金（介護保険・子ども・子育て支援金も）がかかるかどうか
+ * ・資格取得日（入社日）以後に支払った賞与にかかる
+ * ・資格喪失日（退職日の翌日）がある月に支払った賞与にはかからない（月末に退職した人は、退職した月の賞与にもかかる）
+ * ・入社した月に退職した（同月得喪）ときは、入社日から退職日までに支払った賞与にかかる
+ * 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html （留意事項(6)）
+ */
+export const checkInsuredOnBonusDate = (
+  joinDate: string | null | undefined,
+  retirementDate: string | null | undefined,
+  payDate: string,
+): boolean => {
+  const pay = dayjs(payDate);
+  if (joinDate && pay.isBefore(dayjs(joinDate), 'day')) return false;
+  if (!checkInsuredMonth(joinDate, retirementDate, pay.year(), pay.month() + 1)) return false;
+  // 同月得喪の月でも、資格喪失日より後に支払った賞与にはかからない
+  const loss = lossDateOf(retirementDate);
+  return !loss || pay.isBefore(loss, 'day');
+};
 
 /* --- 外部から呼び出すメインロジック --- */
 
@@ -554,12 +608,14 @@ export const calculateSalary = (
   // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
   // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
   const byAge = getInsuranceByAge(staff.birthday || '', targetYear, targetMonth);
+  // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
+  const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, targetYear, targetMonth);
   const healthRate = (ins.KENPO_RATES[extras.prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
   const sInsType = companySettings?.round_social_ins || 'floor';
   const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
   let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
-  if (isSocialInsEnrolled && byAge.health) {
+  if (isSocialInsEnrolled && isInsuredMonth && byAge.health) {
     // 健康保険料
     healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
 
@@ -575,7 +631,7 @@ export const calculateSalary = (
       childSupport = calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType);
     }
   }
-  if (isSocialInsEnrolled && byAge.pension) {
+  if (isSocialInsEnrolled && isInsuredMonth && byAge.pension) {
     // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
     const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
     welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
@@ -655,6 +711,7 @@ export const calculateSalary = (
     isNursingCareTarget: byAge.nursing,
     isHealthInsAgeTarget: byAge.health,
     isPensionAgeTarget: byAge.pension,
+    isInsuredMonth,
     hyojunHoshu,
     isSocialInsEnrolled,
     isEmploymentInsEnrolled,
