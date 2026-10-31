@@ -31,9 +31,20 @@ export interface LaborInsurancePeriod {
 
 export const LABOR_INSURANCE_PERIODS: LaborInsurancePeriod[] = [
   {
-    // 令和3年4月〜令和4年3月（「令和4年度の雇用保険料率について」の表の下段「３年度」）
+    // 令和2年4月〜令和3年3月（「令和3年度の雇用保険料率について」の表の下段「２年度」）
+    // ※ 令和2年3月までは、4月1日に64歳以上の人の保険料が免除されていた（Q はこの免除に対応していないので、ここより前は登録しない）
+    from: { year: 2020, month: 4 },
+    source: "https://www.mhlw.go.jp/content/000739455.pdf",
+    rates: {
+      general:      [0.003, 0.009],  // 一般の事業: 本人 3/1000、合計 9/1000
+      agriculture:  [0.004, 0.011],  // 農林水産・清酒製造: 本人 4/1000、合計 11/1000
+      construction: [0.004, 0.012],  // 建設の事業: 本人 4/1000、合計 12/1000
+    },
+  },
+  {
+    // 令和3年4月〜令和4年3月（「令和3年度の雇用保険料率について」の表の上段。令和2年度から変更なし）
     from: { year: 2021, month: 4 },
-    source: "https://www.mhlw.go.jp/content/000921550.pdf",
+    source: "https://www.mhlw.go.jp/content/000739455.pdf",
     rates: {
       general:      [0.003, 0.009],  // 一般の事業: 本人 3/1000、合計 9/1000
       agriculture:  [0.004, 0.011],  // 農林水産・清酒製造: 本人 4/1000、合計 11/1000

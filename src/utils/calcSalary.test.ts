@@ -60,6 +60,14 @@ describe("社会保険の加入・未加入", () => {
     });
 });
 
+describe("厚生年金の上限（2020年9月分から 62万円 → 65万円）", () => {
+    test("標準報酬月額 65万円の人は、2020年8月分は62万円で、9月分から65万円で計算する", () => {
+        const high = { ...monthly, base_wage: 700000, standard_remuneration: 650000 };
+        expect(calculateSalary(high, [], extras(), 2020, 8, company).welfarePension).toBe(56730); // 620,000 × 18.3% ÷ 2
+        expect(calculateSalary(high, [], extras(), 2020, 9, company).welfarePension).toBe(59475); // 650,000 × 18.3% ÷ 2
+    });
+});
+
 describe("雇用保険", () => {
     test("「雇用保険加入」を外した人（役員など）からは引かない", () => {
         const r = calc({ ...monthly, is_executive: 1, is_employment_ins_eligible: 0 }, []);
@@ -73,6 +81,9 @@ describe("雇用保険", () => {
     test("年度の途中で料率が変わった月から新しい料率（2022年9月分 3/1000 → 10月分 5/1000）", () => {
         expect(calculateSalary(monthly, [], extras(), 2022, 9, company).empInsurance).toBe(900);
         expect(calculateSalary(monthly, [], extras(), 2022, 10, company).empInsurance).toBe(1500);
+    });
+    test("2020年3月分までの雇用保険料率は登録していない（4月からの料率で計算し、注意を出す）", () => {
+        expect(calculateSalary(monthly, [], extras(), 2020, 3, company).empInsurance).toBe(900); // 300,000 × 3/1000
     });
     test("従業員の区分は会社の区分より優先する", () => {
         const r = calc({ ...monthly, employment_insurance_type: "general" }, [], {}, { ...company, default_emp_ins_type: "construction" });

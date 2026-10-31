@@ -11,6 +11,10 @@
  *   翌月徴収の会社に対応するには、会社設定で1か月ずらす仕組みが必要（今後の課題）。
  * ※ 登録している範囲より前・後の月は、いちばん近い料率で計算し、WARNINGS に注意を入れる。
  */
+import { INSURANCE_2020 } from './insurance2020';
+import { INSURANCE_2020_04 } from './insurance2020_04';
+import { INSURANCE_2020_09 } from './insurance2020_09';
+import { INSURANCE_2021 } from './insurance2021';
 import { INSURANCE_2022 } from './insurance2022';
 import { INSURANCE_2023 } from './insurance2023';
 import { INSURANCE_2024 } from './insurance2024';
@@ -25,10 +29,19 @@ export type { KenpoTable, KenpoGrade, YearMonth } from './kenpoTableTypes';
 export type { EmpInsType, LaborInsuranceRates, LaborInsurancePeriod } from './laborInsuranceRates';
 export { LABOR_INSURANCE_PERIODS } from './laborInsuranceRates';
 
-export { INSURANCE_2022, INSURANCE_2023, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026 };
+export {
+  INSURANCE_2020, INSURANCE_2020_04, INSURANCE_2020_09, INSURANCE_2021,
+  INSURANCE_2022, INSURANCE_2023, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026,
+};
 
-/** 協会けんぽの保険料額表（使い始める月の古い順） */
-const KENPO_MASTERS = [INSURANCE_2022, INSURANCE_2023, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026];
+/**
+ * 協会けんぽの保険料額表（使い始める月の古い順）
+ * 令和2年度は、4月分（子ども・子育て拠出金率）と9月分（厚生年金の上限等級）でも表が変わった
+ */
+const KENPO_MASTERS = [
+  INSURANCE_2020, INSURANCE_2020_04, INSURANCE_2020_09, INSURANCE_2021,
+  INSURANCE_2022, INSURANCE_2023, INSURANCE_2024, INSURANCE_2025, INSURANCE_2026,
+];
 
 /** その月に使う社会保険マスター（健康保険・介護保険・厚生年金 ＋ 雇用保険） */
 export type InsuranceMasterType = KenpoMasterType & {
