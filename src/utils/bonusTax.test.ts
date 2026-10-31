@@ -1,12 +1,12 @@
 /**
- * 賞与の源泉所得税（甲欄）のテスト
+ * 賞与の源泉所得税のテスト（甲欄・乙欄）
  * 実行方法: bun test
  *
  * 期待値は国税庁「賞与に対する源泉徴収税額の算出率の表」（tax-tables/ の Excel）から引用。
  * 表は扶養親族等の数ごとに、率が変わる金額の区切りが違う（例: 令和8年分の6.126%は、0人なら26万〜30.9万円、2人なら32.1万〜37.7万円）。
  */
 import { describe, expect, test } from "bun:test";
-import { calcBonusTaxRate, calcBonusWithholdingTax, calcMonthlyTaxByTable } from "./incomeTax";
+import { calcBonusOtsuTaxRate, calcBonusTaxRate, calcBonusWithholdingTax, calcMonthlyOtsuTaxByTable, calcMonthlyTaxByTable } from "./incomeTax";
 import { TAX_2025, TAX_2026 } from "../constants/tax";
 
 describe("令和8年分 算出率の表（甲欄）との照合", () => {
@@ -81,5 +81,36 @@ describe("賞与の源泉所得税の計算", () => {
         expect(calcBonusWithholdingTax(1200000, 100000, 0, 2026)).toBe(expected);
         // ちょうど10倍なら算出率の表（10万円・0人 → 4.084%）
         expect(calcBonusWithholdingTax(1000000, 100000, 0, 2026)).toBe(40840);
+    });
+});
+
+describe("賞与の源泉所得税（乙欄）", () => {
+    // 出典：国税庁 タックスアンサー No.2523（扶養控除等申告書を出していない人は算出率の表の乙欄）
+    const t = TAX_2026.BONUS_TABLE;
+    test("乙欄の率は前月の給与だけで決まる（令和8年分: 224千円未満 10.21%、224千円から 20.42%）", () => {
+        expect(calcBonusOtsuTaxRate(0, t)).toBe(10.21);
+        expect(calcBonusOtsuTaxRate(223999, t)).toBe(10.21);
+        expect(calcBonusOtsuTaxRate(224000, t)).toBe(20.42);
+        expect(calcBonusOtsuTaxRate(300000, t)).toBe(30.63);
+        expect(calcBonusOtsuTaxRate(1118000, t)).toBe(45.945);
+    });
+    test("通常：賞与 × 乙欄の率（1円未満切り捨て）。扶養人数で率は変わらない", () => {
+        expect(calcBonusWithholdingTax(500000, 300000, 0, 2026, 6, "otsu")).toBe(Math.floor(500000 * 0.3063));
+        expect(calcBonusWithholdingTax(500000, 300000, 2, 2026, 6, "otsu")).toBe(Math.floor(500000 * 0.3063));
+    });
+    test("前月の給与がない：賞与の6分の1を月額表の乙欄に当てはめて6倍", () => {
+        // 600,000 ÷ 6 = 100,000円（105,000円未満なので 3.063%）→ 3,063円 × 6
+        expect(calcBonusWithholdingTax(600000, 0, 0, 2026, 6, "otsu")).toBe(3063 * 6);
+    });
+    test("前月の給与の10倍を超える：（賞与の6分の1＋前月の給与）の乙欄の税額 − 前月の給与の乙欄の税額 を6倍", () => {
+        const T = TAX_2026.MONTHLY_TABLE;
+        const expected = (calcMonthlyOtsuTaxByTable(300000, 0, T) - calcMonthlyOtsuTaxByTable(100000, 0, T)) * 6;
+        expect(calcBonusWithholdingTax(1200000, 100000, 0, 2026, 6, "otsu")).toBe(expected);
+        // 月額表を使うときは、従たる給与の申告書の扶養親族等1人1,610円も引いて計算する
+        expect(calcBonusWithholdingTax(600000, 0, 1, 2026, 6, "otsu")).toBe(Math.max(0, 3063 - 1610) * 6);
+    });
+    test("令和7年分（2025年）の乙欄の率を使う", () => {
+        expect(calcBonusWithholdingTax(500000, 223000, 0, 2025, 6, "otsu")).toBe(Math.floor(500000 * 0.2042));
+        expect(calcBonusWithholdingTax(500000, 223000, 0, 2026, 6, "otsu")).toBe(Math.floor(500000 * 0.1021));
     });
 });

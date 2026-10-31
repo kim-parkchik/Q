@@ -17,7 +17,7 @@ import {
   getNightMinutesInPeriod, 
   getWeekKey
 } from './timeUtils';
-import { calcWithholdingTax, type TaxCalcMethod } from './incomeTax';
+import { calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
 import { checkLeaveExemptMonth, parseLeavePeriods } from './leaveExemption';
 import * as Master from '../constants';
 
@@ -74,6 +74,8 @@ export interface SalaryResult {
   incomeTax: number;
   /** 定額減税を引く前の源泉所得税 */
   incomeTaxBeforeReduction: number;
+  /** 源泉所得税の欄（甲欄・乙欄） */
+  taxColumn: TaxColumn;
   /** この給与で差し引いた定額減税額 */
   flatTaxReduction: number;
   /** この給与のあとに残る定額減税額（次の給与から引く） */
@@ -156,9 +158,9 @@ export const getHyojunHoshu = (
   return table[table.length - 1][2];
 };
 
-// 源泉所得税（甲欄）：支払った年の月額表、または電算機計算の特例で計算する（詳しくは utils/incomeTax.ts）
-const getGensenTax = (taxBase: number, dependents: number, payYear: number, method?: TaxCalcMethod): number =>
-  calcWithholdingTax(taxBase, dependents, payYear, method ?? "table");
+// 源泉所得税：甲欄は支払った年の月額表、または電算機計算の特例で、乙欄は月額表で計算する（詳しくは utils/incomeTax.ts）
+const getGensenTax = (taxBase: number, dependents: number, payYear: number, method: TaxCalcMethod | undefined, column: TaxColumn): number =>
+  calcWithholdingTax(taxBase, dependents, payYear, method ?? "table", column);
 
 /** その年齢になる誕生日（2月29日生まれで、うるう年でない年は3月1日） */
 const birthdayAt = (birthday: string, age: number) => {
@@ -660,7 +662,9 @@ export const calculateSalary = (
   const nonTaxableCommute = Math.min(commutePay, Master.getTaxMaster(targetYear).DEFAULT_COMMUTING_TAX_FREE_LIMIT);
   const taxableAmount = totalEarnings - nonTaxableCommute;
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
-  const incomeTaxBeforeReduction = getGensenTax(Math.max(0, taxableAmount - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod);
+  // 扶養控除等申告書を出していない人は乙欄（扶養人数は「従たる給与についての扶養控除等申告書」の人数）
+  const taxColumn = toTaxColumn(staff.tax_column);
+  const incomeTaxBeforeReduction = getGensenTax(Math.max(0, taxableAmount - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod, taxColumn);
   // 定額減税（令和6年6月〜）：残っている減税額を、源泉所得税を上限に差し引く
   const reductionBefore = Math.max(0, Math.floor(Number(extras.flatTaxReductionRemaining) || 0));
   const flatTaxReduction = Math.min(incomeTaxBeforeReduction, reductionBefore);
@@ -706,6 +710,7 @@ export const calculateSalary = (
     empInsurance,
     incomeTax,
     incomeTaxBeforeReduction,
+    taxColumn,
     flatTaxReduction,
     flatTaxReductionRemaining: reductionBefore - flatTaxReduction,
     residentTax,

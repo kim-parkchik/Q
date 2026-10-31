@@ -67,6 +67,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "leave_periods", "TEXT");
     },
   },
+  {
+    version: 4,
+    description: "従業員に源泉所得税の欄（甲欄・乙欄）を追加（今までの人は甲欄）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "tax_column", "TEXT DEFAULT 'kou'");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

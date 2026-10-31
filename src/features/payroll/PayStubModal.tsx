@@ -229,7 +229,7 @@ export default function PayStubModal(props: Props) {
           <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
             ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
             厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{insMaster.LABOR_FROM.year}年{insMaster.LABOR_FROM.month}月からの料率で計算。
-            所得税は{props.year}年分の{TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
+            所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
           </div>
         </div>
       </div>

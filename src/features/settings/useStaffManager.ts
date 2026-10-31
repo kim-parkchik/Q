@@ -9,6 +9,7 @@ import { fetchAddressByZip } from "../../utils/addressUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 import { parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod } from "../../utils/leaveExemption";
+import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -97,6 +98,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetDependents, setTargetDependents] = useState(0);
     const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
     const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 産休・育休の期間（社会保険料の免除）
+    const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄）
     const [targetResidentTax, setTargetResidentTax] = useState(0);
     const [targetStandardRemuneration, setTargetStandardRemuneration] = useState(0); // 標準報酬月額
     const [targetIsEmploymentInsEligible, setTargetIsEmploymentInsEligible] = useState(1); // 雇用保険
@@ -292,6 +294,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteType("daily"); setTargetCommuteAmount(0);
         setTargetDependents(0); setTargetResidentTax(0); setTargetFlatTaxReductionPersons(0);
         setTargetLeavePeriods([]);
+        setTargetTaxColumn("kou");
         setTargetStandardRemuneration(0);
         setTargetIsEmploymentInsEligible(1);
         setTargetHealthInsNum(""); setTargetPensionNum(""); setTargetEmploymentInsNum("");
@@ -334,6 +337,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetDependents(s.dependents || 0);
         setTargetFlatTaxReductionPersons(s.flat_tax_reduction_persons || 0);
         setTargetLeavePeriods(parseLeavePeriods(s.leave_periods));
+        setTargetTaxColumn(toTaxColumn(s.tax_column));
         setTargetResidentTax(s.resident_tax || 0);
         setTargetStandardRemuneration(s.standard_remuneration || 0); // 🆕 追加
         // 社保規定が空（NULL）なら「未加入 / 適用除外」
@@ -395,6 +399,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetDependents) !== Number(original.dependents || 0) ||
             Number(targetFlatTaxReductionPersons) !== Number(original.flat_tax_reduction_persons || 0) ||
             stringifyLeavePeriods(targetLeavePeriods) !== stringifyLeavePeriods(parseLeavePeriods(original.leave_periods)) ||
+            targetTaxColumn !== toTaxColumn(original.tax_column) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
             Number(targetStandardRemuneration) !== Number(original.standard_remuneration || 0) ||
@@ -459,7 +464,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetHealthInsNum, targetPensionNum, targetEmploymentInsNum,
                 targetScheduledIn, targetIsFlex ? 1 : 0, targetCoreStart, targetCoreEnd,
                 Number(targetFlatTaxReductionPersons) || 0,
-                stringifyLeavePeriods(targetLeavePeriods) || null
+                stringifyLeavePeriods(targetLeavePeriods) || null,
+                targetTaxColumn
             ];
 
             if (editingId) {
@@ -477,7 +483,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         payroll_group_id=?,
                         health_ins_num=?, pension_num=?, employment_ins_num=?,
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
-                        flat_tax_reduction_persons=?, leave_periods=?
+                        flat_tax_reduction_persons=?, leave_periods=?, tax_column=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -496,7 +502,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         payroll_group_id,
                         health_ins_num, pension_num, employment_ins_num,
                         scheduled_in, is_flex, core_start, core_end,
-                        flat_tax_reduction_persons, leave_periods,
+                        flat_tax_reduction_persons, leave_periods, tax_column,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -684,6 +690,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         targetLeavePeriods,
         setTargetLeavePeriods,
         isLeavePeriodsValid,
+        targetTaxColumn,
+        setTargetTaxColumn,
         targetResidentTax,
         setTargetResidentTax,
         targetStandardRemuneration,

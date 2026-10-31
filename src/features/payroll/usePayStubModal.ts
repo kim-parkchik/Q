@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
 import { calculateSalary, saveSalaryResult, type SalaryExtras } from '../../utils/calcSalary';
-import { flatTaxReductionTotal } from '../../utils/incomeTax';
+import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 
 // 型定義
 interface UsePayStubProps {
@@ -82,7 +82,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
 
   // 定額減税（令和6年6月〜）：その人の減税額の合計から、前の月までの確定済みの給与で差し引いた額を引いた残り
   // ※ 前の月の給与を確定してから次の月を確定すること（確定した額をもとに繰り越すため）
-  const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, year, month);
+  const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, year, month, toTaxColumn(staff.tax_column));
   useEffect(() => {
     const loadFlatTaxReduction = async () => {
       if (!db || flatTaxTotal === 0) {

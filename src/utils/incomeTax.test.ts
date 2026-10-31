@@ -1,5 +1,5 @@
 /**
- * 源泉所得税（月額・甲欄）のテスト
+ * 源泉所得税（月額）のテスト（甲欄・乙欄）
  * 実行方法: bun test
  *
  * 前半は「電算機計算の特例」（式）、後半は「月額表」（国税庁の表）の確認。
@@ -9,7 +9,7 @@
  * （電算機計算の特例として認められている差）。そのため「ぴったり一致」と「±30円以内」を使い分ける。
  */
 import { describe, expect, test } from "bun:test";
-import { calcMonthlyWithholdingTax, calcEmploymentDeduction, calcBasicDeduction, calcMonthlyTaxByTable, calcWithholdingTax } from "./incomeTax";
+import { calcMonthlyWithholdingTax, calcEmploymentDeduction, calcBasicDeduction, calcMonthlyTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
 import { TAX_2025, TAX_2026, getTaxMaster } from "../constants/tax";
 
 const near = (actual: number, expected: number, tolerance = 30) =>
@@ -211,5 +211,72 @@ describe("計算方法と年の切り替え（給与計算から呼ぶ入口）"
     test("支払った年の表を使う", () => {
         expect(calcWithholdingTax(100000, 0, 2025)).toBeGreaterThan(0); // 令和7年分: 88,000円から課税
         expect(calcWithholdingTax(100000, 0, 2026)).toBe(0);            // 令和8年分: 105,000円から課税
+    });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 乙欄（扶養控除等申告書を出していない人）
+//   期待値は月額表データ（国税庁の Excel から自動生成。src/constants/tax/monthlyTable20XX.ts）の乙欄の値と、
+//   Excel に書かれた乙欄の計算式（表の最初の金額未満・74万円以上）。
+//   扶養親族等1人1,610円の控除は、国税庁 タックスアンサー No.2520 による。
+// ─────────────────────────────────────────────────────────────
+describe("月額表（令和8年分）乙欄", () => {
+    const T = TAX_2026.MONTHLY_TABLE;
+    const otsu = (a: number, dep = 0) => calcMonthlyOtsuTaxByTable(a, dep, T);
+    test("表の金額の幅ごとに、乙欄の税額を使う", () => {
+        expect(otsu(105000)).toBe(3800);
+        expect(otsu(201500)).toBe(20400);
+        expect(otsu(501500)).toBe(145700);
+        expect(otsu(739999)).toBe(257700);
+    });
+    test("105,000円未満は、給与の3.063%（1円未満切り捨て）", () => {
+        expect(otsu(100000)).toBe(3063);
+        expect(otsu(88888)).toBe(Math.floor(88888 * 0.03063));
+        expect(otsu(0)).toBe(0);
+    });
+    test("74万円以上は「259,200円＋74万円を超えた金額の40.84%」、171万円以上は「655,400円＋超えた金額の45.945%」", () => {
+        expect(otsu(740000)).toBe(259200);
+        expect(otsu(800000)).toBe(259200 + Math.floor(60000 * 0.4084));
+        expect(otsu(1710000)).toBe(655400);
+        expect(otsu(2000000)).toBe(655400 + Math.floor((290000 * 45945) / 100000));
+    });
+    test("従たる給与についての扶養控除等申告書があれば、扶養親族等1人につき1,610円を引く", () => {
+        expect(otsu(201500, 1)).toBe(20400 - 1610);
+        expect(otsu(201500, 2)).toBe(20400 - 3220);
+        expect(otsu(50000, 1)).toBe(0); // マイナスにはならない
+    });
+    test("甲欄より税額が多い（同じ給与・扶養0人）", () => {
+        for (const a of [105000, 200000, 300000, 500000, 740000, 1000000]) {
+            expect(otsu(a)).toBeGreaterThan(calcMonthlyTaxByTable(a, 0, T));
+        }
+    });
+    test("給与が増えれば税額は減らない（0〜400万円を1,000円刻みで確認）", () => {
+        let prev = 0;
+        for (let a = 0; a <= 4000000; a += 1000) {
+            const tax = otsu(a);
+            expect(tax).toBeGreaterThanOrEqual(prev);
+            prev = tax;
+        }
+    });
+    test("乙欄は、電算機計算の特例を選んでいても月額表で計算する", () => {
+        expect(calcWithholdingTax(300000, 0, 2026, "densanki", "otsu")).toBe(otsu(300000));
+        expect(calcWithholdingTax(300000, 0, 2026, "table", "otsu")).toBe(otsu(300000));
+    });
+});
+
+describe("月額表（令和7年分・2025年）乙欄", () => {
+    const T = TAX_2025.MONTHLY_TABLE;
+    const otsu = (a: number, dep = 0) => calcMonthlyOtsuTaxByTable(a, dep, T);
+    test("88,000円未満は給与の3.063%、88,000円から表の税額", () => {
+        expect(otsu(87999)).toBe(Math.floor(87999 * 0.03063));
+        expect(otsu(88000)).toBe(3200);
+    });
+    test("74万円以上は「259,800円＋超えた金額の40.84%」、170万円以上は「651,900円＋超えた金額の45.945%」", () => {
+        expect(otsu(740000)).toBe(259800);
+        expect(otsu(1700000)).toBe(651900);
+    });
+    test("支払った年の表を使う", () => {
+        expect(calcWithholdingTax(740000, 0, 2025, "table", "otsu")).toBe(259800);
+        expect(calcWithholdingTax(740000, 0, 2026, "table", "otsu")).toBe(259200);
     });
 });

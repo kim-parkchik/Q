@@ -29,6 +29,10 @@ describe("減税額の合計", () => {
     test("人数が0（未設定）なら減税しない", () => {
         expect(flatTaxReductionTotal(0, "2020-04-01", 2024, 6)).toBe(0);
     });
+    test("乙欄の人（扶養控除等申告書を出していない人）は月次減税しない", () => {
+        expect(flatTaxReductionTotal(3, "2020-04-01", 2024, 6, "otsu")).toBe(0);
+        expect(flatTaxReductionTotal(3, "2020-04-01", 2024, 6, "kou")).toBe(90000);
+    });
 });
 
 describe("給与の源泉所得税から差し引く", () => {
@@ -116,6 +120,7 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(columns(db, "staff").filter((c) => c === "flat_tax_reduction_persons")).toHaveLength(1);
         expect(columns(db, "company").filter((c) => c === "is_small_business")).toHaveLength(1);
         expect(columns(db, "staff").filter((c) => c === "leave_periods")).toHaveLength(1);
+        expect(columns(db, "staff").filter((c) => c === "tax_column")).toHaveLength(1);
     });
     test("v2: v1 まで更新済みの会社ファイルに「中小企業」の列を追加する（初めはチェックなし）", async () => {
         const db = new Database(":memory:");
@@ -139,5 +144,16 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied).toHaveLength(MIGRATIONS.length - 2);
         expect(applied[0]).toStartWith("v3:");
         expect(db.query("SELECT leave_periods AS v FROM staff").get()).toEqual({ v: null });
+    });
+    test("v4: v3 まで更新済みの会社ファイルに、源泉所得税の欄の列を追加する（今までの人は甲欄）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER)");
+        db.exec("INSERT INTO staff VALUES ('S001', '山田', 300000)");
+        db.exec("PRAGMA user_version = 3");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 3);
+        expect(applied[0]).toStartWith("v4:");
+        expect(db.query("SELECT tax_column AS v FROM staff").get()).toEqual({ v: "kou" });
     });
 });

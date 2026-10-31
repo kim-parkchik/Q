@@ -11,8 +11,9 @@ import {
     getInsuranceByAge, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
-import { calcWithholdingTax } from "./incomeTax";
+import { calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
 import { INSURANCE_2026 } from "../constants/insurance";
+import { TAX_2026 } from "../constants/tax";
 
 const LAW = "currency_law";
 const company = { week_start_day: 0, round_overtime: "round", round_social_ins: LAW, round_emp_ins: LAW };
@@ -239,6 +240,28 @@ describe("産休・育休中の社会保険料の免除（決まりは leaveExem
         const r = calc({ ...monthly, leave_periods }, []);
         expect(r.isLeaveExemptMonth).toBe(false);
         expect(r.healthInsurance).toBe(calc(monthly, []).healthInsurance);
+    });
+});
+
+describe("源泉所得税の乙欄", () => {
+    test("給与計算：乙欄の人は、社会保険料等を引いた給与を月額表の乙欄に当てはめる", () => {
+        const kou = calc(monthly, []);
+        const r = calc({ ...monthly, tax_column: "otsu" }, []);
+        const taxBase = r.totalEarnings - (r.healthInsurance + r.nursingInsurance + r.childSupport + r.welfarePension + r.empInsurance);
+        expect(r.taxColumn).toBe("otsu");
+        expect(r.incomeTax).toBe(calcMonthlyOtsuTaxByTable(taxBase, 0, TAX_2026.MONTHLY_TABLE));
+        expect(r.incomeTax).toBeGreaterThan(kou.incomeTax);
+        expect(kou.taxColumn).toBe("kou");
+    });
+    test("給与計算：乙欄の扶養人数は、従たる給与の申告書の人数として1人1,610円を引く", () => {
+        const r0 = calc({ ...monthly, tax_column: "otsu" }, []);
+        const r2 = calc({ ...monthly, tax_column: "otsu" }, [], { dependents: 2 });
+        expect(r0.incomeTax - r2.incomeTax).toBe(3220);
+    });
+    test("給与計算：電算機計算の特例を選んでいても、乙欄は月額表で計算する", () => {
+        const table = calc({ ...monthly, tax_column: "otsu" }, [], { taxMethod: "table" });
+        const densanki = calc({ ...monthly, tax_column: "otsu" }, [], { taxMethod: "densanki" });
+        expect(densanki.incomeTax).toBe(table.incomeTax);
     });
 });
 

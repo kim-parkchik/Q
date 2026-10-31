@@ -1,11 +1,16 @@
 /**
- * 源泉所得税（給与・甲欄）の計算
+ * 源泉所得税（給与・賞与）の計算
  *
- * 計算方法は2つから選べる（市販の給与ソフトと同じ）。
+ * 甲欄の計算方法は2つから選べる（市販の給与ソフトと同じ）。
  *   - "table"    : 国税庁の月額表どおり（初期値）。手計算や税理士の確認と1円も違わない。
  *   - "densanki" : 電算機計算の特例の式。その月の給与そのものから計算する。
  * 両者には数十〜百円程度の差が出ることがあるが、どちらも正しい方法として認められており、
  * 差は年末調整で精算される。
+ *
+ * 「給与所得者の扶養控除等申告書」を出していない人（ほかの会社が主たる給与の人など）は乙欄で計算する。
+ * 乙欄はいつも月額表で計算する（電算機計算の特例は甲欄の式）。
+ * 出典：国税庁 タックスアンサー No.2520 https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2520.htm
+ *       No.2523 https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2523.htm
  */
 import * as Master from "../constants";
 
@@ -97,11 +102,55 @@ export const calcMonthlyTaxByTable = (
     return Math.max(0, tax - extra);
 };
 
+/**
+ * 月額表（乙欄）で税額を求める
+ * ・表の最初の金額未満は、給与 × 3.063%（率は月額表から読んだもの）
+ * ・表の最後（例: 740,000円）以上は「基準の税額 ＋ 超えた金額 × 率」
+ * ・「従たる給与についての扶養控除等申告書」が出ていれば、扶養親族等1人につき1,610円を引く
+ *   （タックスアンサー No.2520。7人を超える1人ごとの額と同じ金額なので、月額表から読んだ値を使う）
+ * 1円未満は切り捨て、マイナスにはならない
+ * @param taxBase    その月の社会保険料等控除後の給与等の金額
+ * @param dependents 従たる給与についての扶養控除等申告書に書かれた扶養親族等の数（出ていなければ 0）
+ */
+export const calcMonthlyOtsuTaxByTable = (
+    taxBase: number,
+    dependents: number,
+    table: Master.MonthlyTaxTable = Master.TAX_2026.MONTHLY_TABLE
+): number => {
+    const amount = Math.max(0, Math.floor(taxBase));
+    const deps = Math.max(0, Math.floor(dependents || 0));
+
+    let tax: number;
+    const row = table.rows.find(([from, to]) => amount >= from && amount < to);
+    if (row) {
+        tax = row[10];
+    } else if (amount < table.rows[0][0]) {
+        if (table.otsuLowRate === null) throw new Error("月額表に、乙欄の最初の金額未満の率がありません");
+        tax = addRate(amount, table.otsuLowRate);
+    } else {
+        const anchor = [...table.otsuHigh].reverse().find((a) => amount >= a.amount);
+        if (!anchor) throw new Error(`月額表（乙欄）に該当する行がありません: ${amount}円`);
+        tax = anchor.base + addRate(amount - anchor.amount, anchor.rate);
+    }
+    return Math.max(0, tax - deps * table.perExtraDependent);
+};
+
 // ─────────────────────────────────────────────────────────────
 // 計算方法と年を指定して求める（給与計算からはこれを使う）
 // ─────────────────────────────────────────────────────────────
 
 export type TaxCalcMethod = "table" | "densanki";
+
+/** 源泉所得税の欄。kou: 甲欄（扶養控除等申告書を出している） / otsu: 乙欄（出していない） */
+export type TaxColumn = "kou" | "otsu";
+
+export const TAX_COLUMN_LABELS: Record<TaxColumn, string> = {
+    kou: "甲欄",
+    otsu: "乙欄",
+};
+
+/** 従業員の tax_column を読む（空や知らない値は甲欄） */
+export const toTaxColumn = (value: unknown): TaxColumn => (value === "otsu" ? "otsu" : "kou");
 
 export const TAX_CALC_METHOD_LABELS: Record<TaxCalcMethod, string> = {
     table: "税額表（月額表）",
@@ -109,17 +158,20 @@ export const TAX_CALC_METHOD_LABELS: Record<TaxCalcMethod, string> = {
 };
 
 /**
- * 月額の源泉所得税（甲欄）
+ * 月額の源泉所得税
  * @param payYear 支払った年（その年の税額表・式を使う）
- * @param method  "table"（月額表・初期値） または "densanki"（電算機計算の特例）
+ * @param method  甲欄の計算方法。"table"（月額表・初期値） または "densanki"（電算機計算の特例）
+ * @param column  "kou"（甲欄・初期値） または "otsu"（乙欄。いつも月額表で計算する）
  */
 export const calcWithholdingTax = (
     taxBase: number,
     dependents: number,
     payYear: number,
-    method: TaxCalcMethod = "table"
+    method: TaxCalcMethod = "table",
+    column: TaxColumn = "kou"
 ): number => {
     const master = Master.getTaxMaster(payYear);
+    if (column === "otsu") return calcMonthlyOtsuTaxByTable(taxBase, dependents, master.MONTHLY_TABLE);
     return method === "densanki"
         ? calcMonthlyWithholdingTax(taxBase, dependents, master.DENSANKI)
         : calcMonthlyTaxByTable(taxBase, dependents, master.MONTHLY_TABLE);
@@ -135,22 +187,25 @@ export const calcWithholdingTax = (
  * @param persons  定額減税の人数（本人＋同一生計配偶者＋扶養親族）
  * @param joinDate 入社日（YYYY-MM-DD。6月2日以後の入社は月次減税をしない）
  * @param payYear / payMonth 給与を支払う年月
+ * @param column   乙欄の人は月次減税をしない
  */
 export const flatTaxReductionTotal = (
     persons: number,
     joinDate: string | null | undefined,
     payYear: number,
-    payMonth: number
+    payMonth: number,
+    column: TaxColumn = "kou"
 ): number => {
     const rule = Master.FLAT_TAX_REDUCTION_2024;
     const n = Math.max(0, Math.floor(Number(persons) || 0));
+    if (column !== "kou") return 0;
     if (payYear !== rule.YEAR || payMonth < rule.FROM_MONTH || n === 0) return 0;
     if (joinDate && joinDate > rule.BASE_DATE) return 0;
     return n * rule.PER_PERSON;
 };
 
 // ─────────────────────────────────────────────────────────────
-// 賞与（甲欄）
+// 賞与
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -170,24 +225,38 @@ export const calcBonusTaxRate = (
     return row[2];
 };
 
+/** 賞与の金額に乗ずべき率（%）を、算出率の表の乙欄から求める（扶養親族等の数で率は変わらない） */
+export const calcBonusOtsuTaxRate = (
+    prevMonthAfterSocial: number,
+    table: Master.BonusTaxRateTable = Master.TAX_2026.BONUS_TABLE
+): number => {
+    const amount = Math.max(0, Math.floor(prevMonthAfterSocial));
+    const row = table.otsu.find(([from, to]) => amount >= from && amount < to);
+    if (!row) throw new Error(`賞与の算出率の表（乙欄）に該当する行がありません: ${amount}円`);
+    return row[2];
+};
+
 /**
- * 賞与の源泉所得税（甲欄）
+ * 賞与の源泉所得税
  * ・通常：賞与（社会保険料等控除後）× 算出率。1円未満切り捨て
- *   （率は、前月の社会保険料等控除後の給与と扶養親族等の数で決まる）
+ *   （甲欄の率は、前月の社会保険料等控除後の給与と扶養親族等の数で決まる。乙欄の率は前月の給与だけで決まる）
  * ・前月の給与がない（社会保険料等以下の場合を含む）、または賞与が前月の給与の10倍を超える場合は、算出率の表を使わず月額表で計算する
  *   （算出率の表の備考4）：賞与の6分の1（計算期間が6か月を超えるときは12分の1）を前月の給与に足して月額表の税額を求め、
  *   前月の給与だけの税額を引いた差額を6倍（12倍）する。前月の給与がなければ「賞与の6分の1の税額 × 6」になる
+ *   乙欄の人は月額表の乙欄を使う（従たる給与についての扶養控除等申告書があれば、1人1,610円を引いた税額で計算する）
  * @param bonusAfterSocial 賞与の金額から社会保険料等を引いた金額
  * @param prevMonthAfterSocial 前月中の給与（賞与を除く）から社会保険料等を引いた金額
  * @param payYear 賞与を支払う年（その年の表を使う）
  * @param periodMonths 賞与の計算期間（月数）。6か月を超えるかどうかだけを使う
+ * @param column "kou"（甲欄・初期値） または "otsu"（乙欄）
  */
 export const calcBonusWithholdingTax = (
     bonusAfterSocial: number,
     prevMonthAfterSocial: number,
     dependents: number,
     payYear: number,
-    periodMonths = 6
+    periodMonths = 6,
+    column: TaxColumn = "kou"
 ): number => {
     const bonus = Math.max(0, Math.floor(bonusAfterSocial));
     const prev = Math.max(0, Math.floor(prevMonthAfterSocial));
@@ -195,8 +264,13 @@ export const calcBonusWithholdingTax = (
 
     if (prev === 0 || bonus > prev * 10) {
         const n = periodMonths > 6 ? 12 : 6;
-        const monthly = (amount: number) => calcMonthlyTaxByTable(amount, dependents, master.MONTHLY_TABLE);
+        const monthly = (amount: number) => column === "otsu"
+            ? calcMonthlyOtsuTaxByTable(amount, dependents, master.MONTHLY_TABLE)
+            : calcMonthlyTaxByTable(amount, dependents, master.MONTHLY_TABLE);
         return (monthly(prev + bonus / n) - monthly(prev)) * n;
     }
-    return addRate(bonus, calcBonusTaxRate(prev, dependents, master.BONUS_TABLE));
+    const rate = column === "otsu"
+        ? calcBonusOtsuTaxRate(prev, master.BONUS_TABLE)
+        : calcBonusTaxRate(prev, dependents, master.BONUS_TABLE);
+    return addRate(bonus, rate);
 };

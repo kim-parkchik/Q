@@ -6,6 +6,7 @@ import { UserCheck, Shield, Timer, Banknote } from 'lucide-react';
 import { HYOJUN_OPTIONS } from './staffOptions';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
+import { toTaxColumn } from '../../../utils/incomeTax';
 
 interface Props {
     cm: StaffManagerState;
@@ -23,6 +24,8 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetResidentTax,
         targetFlatTaxReductionPersons,
         setTargetFlatTaxReductionPersons,
+        targetTaxColumn,
+        setTargetTaxColumn,
         targetStandardRemuneration,
         setTargetStandardRemuneration,
         targetIsEmploymentInsEligible,
@@ -78,9 +81,23 @@ export default function InsuranceSection({ cm }: Props) {
                         残業代対象
                     </label>
                 </div>
+                {/* 源泉所得税の欄：扶養控除等申告書を出していない人（ほかの会社が主たる給与の人など）は乙欄 */}
+                <div style={{ gridColumn: "span 2" }}>
+                    <label style={labelStyle}>源泉所得税の欄</label>
+                    <select value={targetTaxColumn} onChange={e => setTargetTaxColumn(toTaxColumn(e.target.value))} style={{ ...inputStyle, fontSize: "12px" }}>
+                        <option value="kou">甲欄（「扶養控除等申告書」を出している）</option>
+                        <option value="otsu">乙欄（出していない・ほかの会社が主たる給与）</option>
+                    </select>
+                    {targetTaxColumn === "otsu" && (
+                        <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0" }}>
+                            乙欄の人の扶養人数は、「従たる給与についての扶養控除等申告書」に書かれた人数です（出ていなければ0）。乙欄の人は年末調整をせず、定額減税（令和6年分）の月次減税もしません。
+                        </p>
+                    )}
+                </div>
+
                 {/* 🆕 扶養人数（1fr） */}
                 <div>
-                    <label style={labelStyle}>扶養人数</label>
+                    <label style={labelStyle}>{targetTaxColumn === "otsu" ? "扶養人数（従たる給与の申告書）" : "扶養人数"}</label>
                     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                         <input type="number" value={targetDependents} onChange={e => setTargetDependents(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "30px", textAlign: "right" }} />
                         <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>人</span>
