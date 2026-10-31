@@ -265,12 +265,34 @@ describe("源泉所得税の乙欄", () => {
     });
 });
 
+describe("標準報酬月額の履歴（決まりは standardRemuneration.test.ts）", () => {
+    const standard_remuneration_history = JSON.stringify([
+        { from: "", amount: 280000, reason: "shutoku" },
+        { from: "2026-07", amount: 300000, reason: "zuiji" },
+    ]);
+    test("給与計算：その月の分の標準報酬月額で保険料を計算する（6月分は改定前の28万円）", () => {
+        const r = calc({ ...monthly, standard_remuneration: 300000, standard_remuneration_history }, []);
+        expect(r.hyojunHoshu).toBe(280000);
+        expect(r.healthInsurance).toBe(calcPremium(280000, INSURANCE_2026.KENPO_RATES["東京"][1], LAW));
+    });
+    test("給与計算：改定した月の分からは新しい標準報酬月額（7月分は30万円）", () => {
+        const r = calculateSalary({ ...monthly, standard_remuneration: 300000, standard_remuneration_history }, [], extras(), 2026, 7, company);
+        expect(r.hyojunHoshu).toBe(300000);
+    });
+    test("その月の標準報酬月額が0（未加入）なら、その月の社会保険料は引かない", () => {
+        const history = JSON.stringify([{ from: "", amount: 0, reason: "shutoku" }, { from: "2026-07", amount: 300000, reason: "shutoku" }]);
+        const june = calc({ ...monthly, standard_remuneration: 300000, standard_remuneration_history: history }, []);
+        expect(june.isSocialInsEnrolled).toBe(false);
+        expect(june.healthInsurance).toBe(0);
+    });
+});
+
 describe("社会保険・雇用保険に加入しているか（給与・賞与で同じ判定）", () => {
     test("標準報酬月額が0、または社保規定が「未加入 / 適用除外」なら、社会保険に加入していない", () => {
-        expect(checkSocialInsEnrolled({ standard_remuneration: 300000 })).toBe(true);
-        expect(checkSocialInsEnrolled({ standard_remuneration: 300000, social_insurance_group_id: 1 })).toBe(true);
-        expect(checkSocialInsEnrolled({ standard_remuneration: 0, social_insurance_group_id: 1 })).toBe(false);
-        expect(checkSocialInsEnrolled({ standard_remuneration: 300000, social_insurance_group_id: null })).toBe(false);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 300000 }, 2026, 6)).toBe(true);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 300000, social_insurance_group_id: 1 }, 2026, 6)).toBe(true);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 0, social_insurance_group_id: 1 }, 2026, 6)).toBe(false);
+        expect(checkSocialInsEnrolled({ standard_remuneration: 300000, social_insurance_group_id: null }, 2026, 6)).toBe(false);
     });
     test("「雇用保険加入」を外した人（役員など）は、雇用保険に加入していない", () => {
         expect(checkEmploymentInsEnrolled({})).toBe(true);

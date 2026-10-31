@@ -2,8 +2,8 @@
  * 「税・社会保険・労働保険」：加入区分・標準報酬月額・扶養人数・各種番号
  * （StaffManager.tsx から分割）
  */
-import { UserCheck, Shield, Timer, Banknote } from 'lucide-react';
-import { HYOJUN_OPTIONS } from './staffOptions';
+import { UserCheck, Shield, Timer } from 'lucide-react';
+import RemunerationHistory from './RemunerationHistory';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { toTaxColumn } from '../../../utils/incomeTax';
@@ -27,7 +27,6 @@ export default function InsuranceSection({ cm }: Props) {
         targetTaxColumn,
         setTargetTaxColumn,
         targetStandardRemuneration,
-        setTargetStandardRemuneration,
         targetIsEmploymentInsEligible,
         setTargetIsEmploymentInsEligible,
         targetHealthInsNum,
@@ -126,57 +125,26 @@ export default function InsuranceSection({ cm }: Props) {
                 </div>
 
 
-                {/* <div style={{ gridColumn: "span 2" }}> */}
-                <div style={{ gridColumn: "span 2", display: "flex", flexDirection: "column", gap: "8px" }}>
-
-                    {/* 上段：入力欄 2つを横並びにする */}
-                    <div style={{ display: "flex", gap: "15px", alignItems: "flex-end" }}>
-                        
-                        {/* 左側 4割: 社保規定 */}
-                        <div style={{ flex: 4 }}>
-                            <label style={labelStyle}>
-                                <Shield size={14} style={{ marginRight: "4px", verticalAlign: "middle" }} />
-                                適用する社保規定
-                            </label>
-                            <select 
-                                value={targetSocialInsGroupId} 
-                                onChange={e => setTargetSocialInsGroupId(Number(e.target.value))}
-                                style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px"}}
-                            >
-                                <option value={0}>未加入 / 適用除外</option>
-                                {socialGroups.map(sg => (
-                                    <option key={sg.id} value={sg.id}>{sg.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* 右側 6割: 標準報酬月額 */}
-                        <div style={{ flex: 6 }}>
-                            <label style={labelStyle}>
-                                <Banknote size={14} style={{ marginRight: "4px", verticalAlign: "middle" }} />
-                                標準報酬月額（社会保険計算用）
-                            </label>
-                            <select
-                                value={targetStandardRemuneration} 
-                                onChange={(e) => setTargetStandardRemuneration(Number(e.target.value))}
-                                style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px" }} 
-                            >
-                                <option value={0}>0: 未加入・対象外</option>
-                                {HYOJUN_OPTIONS.map(opt => (
-                                    <option key={opt.value} value={opt.value}>
-                                        {opt.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                {/* 社保規定と、標準報酬月額の履歴 */}
+                <div style={{ gridColumn: "span 2", display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div>
+                        <label style={labelStyle}>
+                            <Shield size={14} style={{ marginRight: "4px", verticalAlign: "middle" }} />
+                            適用する社保規定
+                        </label>
+                        <select 
+                            value={targetSocialInsGroupId} 
+                            onChange={e => setTargetSocialInsGroupId(Number(e.target.value))}
+                            style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px"}}
+                        >
+                            <option value={0}>未加入 / 適用除外</option>
+                            {socialGroups.map(sg => (
+                                <option key={sg.id} value={sg.id}>{sg.name}</option>
+                            ))}
+                        </select>
                     </div>
 
-                    {/* 下段：注釈（自動的に下に配置される） */}
-                    <div style={{ width: "100%" }}>
-                        <p style={{ fontSize: "11px", color: "#64748b", margin: "0 0 0 240px" }}>
-                            ※決定通知書に記載されている等級の金額を選択してください。
-                        </p>
-                    </div>
+                    <RemunerationHistory cm={cm} />
                 </div>
                 {/* 🆕 各種被保険者番号 */}
                 <div style={{ 

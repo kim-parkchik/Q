@@ -10,6 +10,10 @@ import { useMessageDialog } from "../../components/MessageDialog";
 import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 import { parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod } from "../../utils/leaveExemption";
 import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
+import {
+    latestStandardRemuneration, remunerationHistoryOf, stringifyRemunerationHistory, validateRemunerationHistory,
+    type RemunerationEntry,
+} from "../../utils/standardRemuneration";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -100,7 +104,10 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 産休・育休の期間（社会保険料の免除）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄）
     const [targetResidentTax, setTargetResidentTax] = useState(0);
-    const [targetStandardRemuneration, setTargetStandardRemuneration] = useState(0); // 標準報酬月額
+    // 標準報酬月額の履歴（何年何月分から・いくら）。最初の1件は「入社したときから」
+    const [targetRemunerationHistory, setTargetRemunerationHistory] = useState<RemunerationEntry[]>([{ from: "", amount: 0, reason: "shutoku" }]);
+    const targetStandardRemuneration = latestStandardRemuneration(targetRemunerationHistory); // いちばん新しい標準報酬月額
+    const remunerationHistoryError = validateRemunerationHistory(targetRemunerationHistory);
     const [targetIsEmploymentInsEligible, setTargetIsEmploymentInsEligible] = useState(1); // 雇用保険
     const [targetHealthInsNum, setTargetHealthInsNum] = useState("");      // 健康保険被保険者番号
     const [targetPensionNum, setTargetPensionNum] = useState("");          // 厚生年金整理番号
@@ -295,7 +302,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetDependents(0); setTargetResidentTax(0); setTargetFlatTaxReductionPersons(0);
         setTargetLeavePeriods([]);
         setTargetTaxColumn("kou");
-        setTargetStandardRemuneration(0);
+        setTargetRemunerationHistory([{ from: "", amount: 0, reason: "shutoku" }]);
         setTargetIsEmploymentInsEligible(1);
         setTargetHealthInsNum(""); setTargetPensionNum(""); setTargetEmploymentInsNum("");
         setTargetSocialInsGroupId(1);
@@ -339,7 +346,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetLeavePeriods(parseLeavePeriods(s.leave_periods));
         setTargetTaxColumn(toTaxColumn(s.tax_column));
         setTargetResidentTax(s.resident_tax || 0);
-        setTargetStandardRemuneration(s.standard_remuneration || 0); // 🆕 追加
+        setTargetRemunerationHistory(remunerationHistoryOf(s));
         // 社保規定が空（NULL）なら「未加入 / 適用除外」
         setTargetSocialInsGroupId(s.social_insurance_group_id ?? 0);
         setTargetEmpInsType(s.employment_insurance_type || "");
@@ -402,7 +409,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             targetTaxColumn !== toTaxColumn(original.tax_column) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
-            Number(targetStandardRemuneration) !== Number(original.standard_remuneration || 0) ||
+            stringifyRemunerationHistory(targetRemunerationHistory) !== stringifyRemunerationHistory(remunerationHistoryOf(original)) ||
             Number(targetIsExecutive) !== Number(original.is_executive || 0) ||
             Number(targetIsEmploymentInsEligible) !== Number(original.is_employment_ins_eligible ?? 1) ||
             Number(targetIsOvertimeEligible) !== Number(original.is_overtime_eligible ?? 1) ||
@@ -427,7 +434,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     const canSave = () => {
         const hasRequiredFields = targetId.trim() !== "" && targetName.trim() !== "";
-        return hasRequiredFields && isLeavePeriodsValid && !isIdDuplicated() && isChanged() && !isSaving;
+        return hasRequiredFields && isLeavePeriodsValid && !remunerationHistoryError && !isIdDuplicated() && isChanged() && !isSaving;
     };
 
     const saveStaff = async () => {
@@ -465,7 +472,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetScheduledIn, targetIsFlex ? 1 : 0, targetCoreStart, targetCoreEnd,
                 Number(targetFlatTaxReductionPersons) || 0,
                 stringifyLeavePeriods(targetLeavePeriods) || null,
-                targetTaxColumn
+                targetTaxColumn,
+                stringifyRemunerationHistory(targetRemunerationHistory)
             ];
 
             if (editingId) {
@@ -483,7 +491,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         payroll_group_id=?,
                         health_ins_num=?, pension_num=?, employment_ins_num=?,
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
-                        flat_tax_reduction_persons=?, leave_periods=?, tax_column=?
+                        flat_tax_reduction_persons=?, leave_periods=?, tax_column=?,
+                        standard_remuneration_history=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -503,6 +512,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         health_ins_num, pension_num, employment_ins_num,
                         scheduled_in, is_flex, core_start, core_end,
                         flat_tax_reduction_persons, leave_periods, tax_column,
+                        standard_remuneration_history,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -695,7 +705,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         targetResidentTax,
         setTargetResidentTax,
         targetStandardRemuneration,
-        setTargetStandardRemuneration,
+        targetRemunerationHistory,
+        setTargetRemunerationHistory,
+        remunerationHistoryError,
         targetIsEmploymentInsEligible,
         setTargetIsEmploymentInsEligible,
         targetHealthInsNum,

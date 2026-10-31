@@ -19,6 +19,7 @@ import {
 } from './timeUtils';
 import { calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
 import { checkLeaveExemptMonth, parseLeavePeriods } from './leaveExemption';
+import { getStandardRemuneration } from './standardRemuneration';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -198,10 +199,13 @@ export const getInsuranceByAge = (birthday: string, year: number, month: number)
 export const checkNursingCare = (birthday: string, year: number, month: number): boolean =>
   getInsuranceByAge(birthday, year, month).nursing;
 
-/** 健康保険・厚生年金に加入しているか（標準報酬月額が0＝未加入・対象外、または社保規定が「未加入 / 適用除外」なら加入していない） */
-export const checkSocialInsEnrolled = (staff: any): boolean => {
+/**
+ * 健康保険・厚生年金に加入しているか
+ * （その月の標準報酬月額が0＝未加入・対象外、または社保規定が「未加入 / 適用除外」なら加入していない）
+ */
+export const checkSocialInsEnrolled = (staff: any, year: number, month: number): boolean => {
   const socialGroupId = staff.social_insurance_group_id;
-  return (Number(staff.standard_remuneration) || 0) > 0 && (socialGroupId === undefined || Number(socialGroupId) > 0);
+  return getStandardRemuneration(staff, year, month) > 0 && (socialGroupId === undefined || Number(socialGroupId) > 0);
 };
 
 /** 雇用保険に加入しているか（従業員画面の「雇用保険加入」を外した人＝役員など は加入していない） */
@@ -607,8 +611,9 @@ export const calculateSalary = (
   // 1. 加入しているかと標準報酬月額
   // 従業員画面で「標準報酬月額 0：未加入・対象外」または社保規定「未加入 / 適用除外」を選んだ人からは控除しない
   // （標準報酬月額は資格取得時・算定基礎・月変で決まり、毎月の給与からは計算しない）
-  const isSocialInsEnrolled = checkSocialInsEnrolled(staff);
-  const hyojunHoshu = isSocialInsEnrolled ? Number(staff.standard_remuneration) : 0;
+  // 標準報酬月額は、その月の分に使う値（履歴から。詳しくは utils/standardRemuneration.ts）
+  const isSocialInsEnrolled = checkSocialInsEnrolled(staff, targetYear, targetMonth);
+  const hyojunHoshu = isSocialInsEnrolled ? getStandardRemuneration(staff, targetYear, targetMonth) : 0;
 
   // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
   // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる

@@ -74,6 +74,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "tax_column", "TEXT DEFAULT 'kou'");
     },
   },
+  {
+    version: 5,
+    description: "従業員に標準報酬月額の履歴（何年何月分から・いくら）を追加（今までの値は入社したときからの1件として扱う）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "standard_remuneration_history", "TEXT");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

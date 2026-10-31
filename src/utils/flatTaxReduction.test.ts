@@ -121,6 +121,7 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(columns(db, "company").filter((c) => c === "is_small_business")).toHaveLength(1);
         expect(columns(db, "staff").filter((c) => c === "leave_periods")).toHaveLength(1);
         expect(columns(db, "staff").filter((c) => c === "tax_column")).toHaveLength(1);
+        expect(columns(db, "staff").filter((c) => c === "standard_remuneration_history")).toHaveLength(1);
     });
     test("v2: v1 まで更新済みの会社ファイルに「中小企業」の列を追加する（初めはチェックなし）", async () => {
         const db = new Database(":memory:");
@@ -155,5 +156,17 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied).toHaveLength(MIGRATIONS.length - 3);
         expect(applied[0]).toStartWith("v4:");
         expect(db.query("SELECT tax_column AS v FROM staff").get()).toEqual({ v: "kou" });
+    });
+    test("v5: v4 まで更新済みの会社ファイルに、標準報酬月額の履歴の列を追加する（初めは空）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER, standard_remuneration INTEGER)");
+        db.exec("INSERT INTO staff VALUES ('S001', '山田', 300000, 300000)");
+        db.exec("PRAGMA user_version = 4");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 4);
+        expect(applied[0]).toStartWith("v5:");
+        expect(db.query("SELECT standard_remuneration_history AS h, standard_remuneration AS s FROM staff").get())
+            .toEqual({ h: null, s: 300000 });
     });
 });

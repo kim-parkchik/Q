@@ -335,7 +335,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const healthRate = (ins.KENPO_RATES[pref] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
 
     // 社会保険・雇用保険に加入していない人からは引かない（給与と同じ判定）
-    const isSocialInsEnrolled = checkSocialInsEnrolled(staff);
+    const isSocialInsEnrolled = checkSocialInsEnrolled(staff, payYear, payMonth);
     const isEmploymentInsEnrolled = checkEmploymentInsEnrolled(staff);
     // 年齢による対象は、賞与を支給する月で決まる（支給日の年齢ではない。給与と同じ判定）
     // 資格を失った月（75歳の誕生月・70歳に達した月）に支払った賞与には、その保険料がかからない
