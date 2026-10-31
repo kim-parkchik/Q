@@ -113,7 +113,7 @@ describe("算定基礎届の対象", () => {
 describe("確定した給与と勤怠から、1人ずつの値を作る", () => {
     const endOfMonth = { id: 1, closing_day: 99, is_next_month: 0 };       // 末締め・当月払い
     const close20Next = { id: 2, closing_day: 20, is_next_month: 1 };      // 20日締め・翌月払い
-    const salary = (staff_id: string, target_month: number, total_earnings: number) => ({ staff_id, target_month, total_earnings });
+    const salary = (staff_id: string, target_month: number, total_earnings: number) => ({ staff_id, target_year: 2026, target_month, total_earnings });
     const monthly = { wage_type: "monthly", standard_remuneration: 300000, join_date: "2020-04-01", payroll_group_id: 1 };
 
     test("月給制・末締め当月払い：4〜6月の暦日数と、確定した給与の総支給額", () => {

@@ -49,7 +49,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
       try {
         const groups = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
         const salaries = await db.select<any[]>(
-          "SELECT staff_id, target_month, total_earnings FROM salary_results WHERE target_year = ? AND target_month IN (4, 5, 6)",
+          "SELECT staff_id, target_year, target_month, total_earnings FROM salary_results WHERE target_year = ? AND target_month IN (4, 5, 6)",
           [year]
         );
         // 4〜6月に支払う給与の計算期間（給与規定グループごとに違う）をすべて含む範囲の、確定した勤怠

@@ -163,18 +163,75 @@ export interface SanteiInput {
   registered: number | null;
 }
 
+/** 確定した給与（支払った年月ごと） */
+export interface SalaryRecord {
+  staff_id: string;
+  target_year: number;
+  target_month: number;
+  total_earnings: number;
+  /** 確定したときの基本給（時給制は時給） */
+  applied_base_wage?: number | null;
+}
+
+/** 確定した勤怠（支払基礎日数を数えるのに使う項目） */
+export interface AttendanceRecord {
+  staff_id: string;
+  work_date: string;
+  work_type?: string;
+  work_hours?: number | string;
+}
+
+/**
+ * その月に支払った給与の、支払基礎日数・報酬・途中入社かどうか
+ * @returns figures: 確定した給与がなければ days・amount は null / unfinalized: 入社後なのに給与を確定していない
+ */
+export const monthFigures = (
+  staff: any,
+  year: number,
+  month: number,
+  group: PayrollGroupForPeriod | undefined,
+  salaries: SalaryRecord[],
+  attendance: AttendanceRecord[],
+): { figures: SanteiMonth; unfinalized: boolean; baseWage: number | null } => {
+  const period = group ? getPeriodForPayMonth(group, year, month) : null;
+  const salary = salaries.find((s) =>
+    String(s.staff_id) === String(staff.id) && Number(s.target_year) === year && Number(s.target_month) === month);
+  if (!salary || !period) {
+    // 計算期間が終わる前に入社している（給与があるはずの）月だけ、未確定として知らせる
+    const unfinalized = !!period && (!staff.join_date || staff.join_date <= period.endStr);
+    return { figures: { month, days: null, amount: null, partialJoin: false }, unfinalized, baseWage: null };
+  }
+  const rows = attendance.filter((a) =>
+    String(a.staff_id) === String(staff.id) && a.work_date >= period.startStr && a.work_date <= period.endStr);
+  return {
+    figures: {
+      month,
+      days: paymentBasisDays(staff.wage_type, period, rows, prescribedWorkDays(staff, year, month)),
+      amount: Number(salary.total_earnings) || 0,
+      // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
+      partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,
+    },
+    unfinalized: false,
+    baseWage: salary.applied_base_wage === null || salary.applied_base_wage === undefined ? null : Number(salary.applied_base_wage),
+  };
+};
+
+/** 従業員の給与規定グループ（なければ最初のグループ） */
+export const groupOf = <G extends PayrollGroupForPeriod & { id: number }>(staff: any, groups: G[]): G | undefined =>
+  groups.find((g) => g.id === (staff.payroll_group_id || 1)) ?? groups[0];
+
 /**
  * 従業員・確定した給与・確定した勤怠から、算定基礎の1人ずつの値を作る
  * @param groups     給与規定グループ（締日・当月払い／翌月払い）
- * @param salaries   その年の4〜6月に支払った給与の確定結果
+ * @param salaries   確定した給与（その年の4〜6月に支払ったものを含む）
  * @param attendance 確定した勤怠（4〜6月に支払う給与の計算期間を含むもの）
  */
 export const buildSanteiInputs = (
   staffList: any[],
   year: number,
   groups: (PayrollGroupForPeriod & { id: number })[],
-  salaries: { staff_id: string; target_month: number; total_earnings: number }[],
-  attendance: { staff_id: string; work_date: string; work_type?: string; work_hours?: number | string }[],
+  salaries: SalaryRecord[],
+  attendance: AttendanceRecord[],
 ): SanteiInput[] => {
   const inputs: SanteiInput[] = [];
   for (const staff of staffList) {
@@ -184,29 +241,13 @@ export const buildSanteiInputs = (
     const hasRevision = history.some((e) =>
       (e.reason === 'zuiji' || e.reason === 'kyugyo') && e.from >= `${year}-07` && e.from <= `${year}-09`);
     const exclusion = santeiExclusionReason(staff, year, checkSocialInsEnrolled(staff, year, 7), hasRevision);
-    const group = groups.find((g) => g.id === (staff.payroll_group_id || 1)) ?? groups[0];
-    const unfinalizedMonths: number[] = [];
-    const months: SanteiMonth[] = SANTEI_MONTHS.map((month) => {
-      const period = group ? getPeriodForPayMonth(group, year, month) : null;
-      const salary = salaries.find((s) => String(s.staff_id) === String(staff.id) && Number(s.target_month) === month);
-      if (!salary || !period) {
-        // 計算期間が終わる前に入社している（給与があるはずの）月だけ、未確定として知らせる
-        if (period && (!staff.join_date || staff.join_date <= period.endStr)) unfinalizedMonths.push(month);
-        return { month, days: null, amount: null, partialJoin: false };
-      }
-      const rows = attendance.filter((a) =>
-        String(a.staff_id) === String(staff.id) && a.work_date >= period.startStr && a.work_date <= period.endStr);
-      return {
-        month,
-        days: paymentBasisDays(staff.wage_type, period, rows, prescribedWorkDays(staff, year, month)),
-        amount: Number(salary.total_earnings) || 0,
-        // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
-        partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,
-      };
-    });
+    const group = groupOf(staff, groups);
+    const figures = SANTEI_MONTHS.map((month) => monthFigures(staff, year, month, group, salaries, attendance));
     const registered = history.find((e) => e.from === `${year}-09` && e.reason === 'teiji');
     inputs.push({
-      staff, exclusion, previous: getStandardRemuneration(staff, year, 8), months, unfinalizedMonths,
+      staff, exclusion, previous: getStandardRemuneration(staff, year, 8),
+      months: figures.map((f) => f.figures),
+      unfinalizedMonths: figures.filter((f) => f.unfinalized).map((f) => f.figures.month),
       registered: registered ? registered.amount : null,
     });
   }

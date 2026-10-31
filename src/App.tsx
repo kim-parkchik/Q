@@ -12,6 +12,7 @@ import {
   Timer, 
   Coins, 
   ClipboardList, 
+  TrendingUp, 
   FileText, 
   UserCog, 
   LogOut 
@@ -31,6 +32,7 @@ import PaidLeaveManager from "./features/attendance/PaidLeaveManager";
 import PaySlipManager from "./features/payroll/PaySlipManager";
 import BonusManager from "./features/payroll/BonusManager";
 import SanteiManager from "./features/payroll/SanteiManager";
+import ZuijiManager from "./features/payroll/ZuijiManager";
 
 // settings フォルダ
 import CompanyManager from "./features/settings/CompanyManager";
@@ -51,6 +53,7 @@ const TAB_NAMES: Record<string, string> = {
   attendance: "勤怠・月次給与",
   bonus: "賞与計算",
   santei: "算定基礎（定時決定）",
+  zuiji: "月変（随時改定）",
   payslip: "明細書出力",
   user_management: "システム設定"
 };
@@ -65,6 +68,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   attendance: <Timer size={18} />,
   bonus: <Coins size={18} />,
   santei: <ClipboardList size={18} />,
+  zuiji: <TrendingUp size={18} />,
   payslip: <FileText size={18} />,
   user_management: <UserCog size={18} />
 };
@@ -213,10 +217,11 @@ function App() {
             "attendance", 
             "bonus", 
             "santei",
+            "zuiji",
             "payslip"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "payslip"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -324,6 +329,9 @@ function App() {
               )}
               {activeTab === "santei" && db && (
                 <SanteiManager db={db} staffList={staffList} onDataChange={refreshData} />
+              )}
+              {activeTab === "zuiji" && db && (
+                <ZuijiManager db={db} staffList={staffList} onDataChange={refreshData} />
               )}
               {activeTab === "payslip" && db && (
                 <PaySlipManager 
