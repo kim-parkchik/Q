@@ -115,16 +115,29 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(await runMigrations(wrap(db))).toHaveLength(MIGRATIONS.length);
         expect(columns(db, "staff").filter((c) => c === "flat_tax_reduction_persons")).toHaveLength(1);
         expect(columns(db, "company").filter((c) => c === "is_small_business")).toHaveLength(1);
+        expect(columns(db, "staff").filter((c) => c === "leave_periods")).toHaveLength(1);
     });
     test("v2: v1 まで更新済みの会社ファイルに「中小企業」の列を追加する（初めはチェックなし）", async () => {
         const db = new Database(":memory:");
         db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT)");
         db.exec("INSERT INTO company VALUES (1, 'テスト株式会社')");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER)"); // v3 以降で使う
         db.exec("PRAGMA user_version = 1");
 
         const applied = await runMigrations(wrap(db));
-        expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(MIGRATIONS.length - 1);
         expect(applied[0]).toStartWith("v2:");
         expect(db.query("SELECT is_small_business AS v FROM company").get()).toEqual({ v: 0 });
+    });
+    test("v3: v2 まで更新済みの会社ファイルに、従業員の産休・育休の期間の列を追加する（初めは空）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER)");
+        db.exec("INSERT INTO staff VALUES ('S001', '山田', 300000)");
+        db.exec("PRAGMA user_version = 2");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 2);
+        expect(applied[0]).toStartWith("v3:");
+        expect(db.query("SELECT leave_periods AS v FROM staff").get()).toEqual({ v: null });
     });
 });

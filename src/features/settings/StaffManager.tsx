@@ -4,6 +4,7 @@ import { useStaffManager } from "./useStaffManager";
 import { cardStyle, btnStyle } from './StaffManager.styles';
 import BasicInfoSection from "./staff/BasicInfoSection";
 import InsuranceSection from "./staff/InsuranceSection";
+import LeaveSection from "./staff/LeaveSection";
 import EmploymentSection from "./staff/EmploymentSection";
 import WageSection from "./staff/WageSection";
 import WorkPatternSection from "./staff/WorkPatternSection";
@@ -53,6 +54,8 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                             <BasicInfoSection cm={cm} />
 
                             <InsuranceSection cm={cm} />
+
+                            <LeaveSection cm={cm} />
                         </div>
 
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>

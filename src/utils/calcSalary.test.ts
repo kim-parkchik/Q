@@ -226,6 +226,22 @@ describe("入社月・退職月の社会保険料（資格取得日＝入社日�
     });
 });
 
+describe("産休・育休中の社会保険料の免除（決まりは leaveExemption.test.ts）", () => {
+    test("給与計算：育休で免除になる月（2026年6月）は、どの社会保険料も引かない（雇用保険は引く）", () => {
+        const leave_periods = JSON.stringify([{ type: "childcare", start: "2026-05-20", end: "2027-03-31" }]);
+        const r = calc({ ...monthly, birthday: "1980-06-15", leave_periods }, []);
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport, r.welfarePension]).toEqual([0, 0, 0, 0]);
+        expect(r.isLeaveExemptMonth).toBe(true);
+        expect(r.empInsurance).toBe(calc(monthly, []).empInsurance);
+    });
+    test("給与計算：育休が終わった月（終了日の翌日がある月）からは、また引く", () => {
+        const leave_periods = JSON.stringify([{ type: "childcare", start: "2025-08-01", end: "2026-06-10" }]);
+        const r = calc({ ...monthly, leave_periods }, []);
+        expect(r.isLeaveExemptMonth).toBe(false);
+        expect(r.healthInsurance).toBe(calc(monthly, []).healthInsurance);
+    });
+});
+
 describe("社会保険・雇用保険に加入しているか（給与・賞与で同じ判定）", () => {
     test("標準報酬月額が0、または社保規定が「未加入 / 適用除外」なら、社会保険に加入していない", () => {
         expect(checkSocialInsEnrolled({ standard_remuneration: 300000 })).toBe(true);

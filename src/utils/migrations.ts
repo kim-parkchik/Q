@@ -60,6 +60,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "company", "is_small_business", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 3,
+    description: "従業員に産休・育休の期間（社会保険料の免除）を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "leave_periods", "TEXT");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

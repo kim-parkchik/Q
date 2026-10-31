@@ -18,6 +18,7 @@ import {
   getWeekKey
 } from './timeUtils';
 import { calcWithholdingTax, type TaxCalcMethod } from './incomeTax';
+import { checkLeaveExemptMonth, parseLeavePeriods } from './leaveExemption';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -88,6 +89,8 @@ export interface SalaryResult {
   isPensionAgeTarget: boolean;
   /** 入社日・退職日で、その月の分の社会保険料がかかるか（入社前の月・資格喪失日がある月の分からは false） */
   isInsuredMonth: boolean;
+  /** 産休・育休で、その月の分の社会保険料が免除されるか */
+  isLeaveExemptMonth: boolean;
   hyojunHoshu: number;
   /** 健康保険・厚生年金に加入しているか（標準報酬月額が未設定・社保規定が「未加入」なら false） */
   isSocialInsEnrolled: boolean;
@@ -610,12 +613,15 @@ export const calculateSalary = (
   const byAge = getInsuranceByAge(staff.birthday || '', targetYear, targetMonth);
   // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
   const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, targetYear, targetMonth);
+  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts）
+  const isLeaveExemptMonth = checkLeaveExemptMonth(parseLeavePeriods(staff.leave_periods), targetYear, targetMonth);
+  const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
   const healthRate = (ins.KENPO_RATES[extras.prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
   const sInsType = companySettings?.round_social_ins || 'floor';
   const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
   let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
-  if (isSocialInsEnrolled && isInsuredMonth && byAge.health) {
+  if (isSocialInsMonth && byAge.health) {
     // 健康保険料
     healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
 
@@ -631,7 +637,7 @@ export const calculateSalary = (
       childSupport = calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType);
     }
   }
-  if (isSocialInsEnrolled && isInsuredMonth && byAge.pension) {
+  if (isSocialInsMonth && byAge.pension) {
     // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
     const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
     welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
@@ -712,6 +718,7 @@ export const calculateSalary = (
     isHealthInsAgeTarget: byAge.health,
     isPensionAgeTarget: byAge.pension,
     isInsuredMonth,
+    isLeaveExemptMonth,
     hyojunHoshu,
     isSocialInsEnrolled,
     isEmploymentInsEnrolled,
