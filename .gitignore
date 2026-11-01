@@ -33,3 +33,6 @@ dist-ssr
 
 # Claudeアプリからのダウンロード置き場
 Claude outputs/
+
+# 年末調整の元データ（国税庁の PDF。大きいので GitHub には上げない。入手元とハッシュは nencho-tables/README.md）
+nencho-tables/*.pdf
