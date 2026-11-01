@@ -36,6 +36,8 @@ export interface SalaryExtras {
   taxMethod?: TaxCalcMethod;
   /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
   flatTaxReductionRemaining?: number;
+  /** この給与で精算する年末調整の過不足額（＋なら還付、−なら徴収。なければ 0） */
+  yearEndSettlement?: number;
 }
 
 export interface SalaryResult {
@@ -84,6 +86,8 @@ export interface SalaryResult {
   residentTax: number;
   customDeductions: number;
   totalDeductions: number;
+  /** この給与で精算した年末調整の過不足額（＋還付／−徴収）。差引支給額に含む */
+  yearEndSettlement: number;
   netPay: number;
   isNursingCareTarget: boolean;
   /** 年齢で健康保険の対象か（75歳の誕生月の分からは false） */
@@ -352,8 +356,8 @@ export const saveSalaryResult = async (
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
-      social_ins_total, income_tax, flat_tax_reduction, resident_tax, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -376,6 +380,7 @@ export const saveSalaryResult = async (
       income_tax = excluded.income_tax,
       flat_tax_reduction = excluded.flat_tax_reduction,
       resident_tax = excluded.resident_tax,
+      year_end_adjustment = excluded.year_end_adjustment,
       net_pay = excluded.net_pay,
       processed_at = DATETIME('now', 'localtime');
   `;
@@ -389,7 +394,7 @@ export const saveSalaryResult = async (
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
-    result.incomeTax, result.flatTaxReduction, result.residentTax, result.netPay
+    result.incomeTax, result.flatTaxReduction, result.residentTax, result.yearEndSettlement, result.netPay
   ];
 
   try {
@@ -683,6 +688,7 @@ export const calculateSalary = (
   const incomeTax = incomeTaxBeforeReduction - flatTaxReduction;
   const residentTax = Number(extras.residentTax) || 0;
   const totalDeductions = socialTotal + incomeTax + residentTax + customDeductions;
+  const yearEndSettlement = Math.trunc(Number(extras.yearEndSettlement) || 0);
 
 
   return {
@@ -730,7 +736,9 @@ export const calculateSalary = (
     totalDeductions,
 
     // --- 最終結果・その他情報 ---
-    netPay: totalEarnings - totalDeductions,
+    // 年末調整の過不足額は、還付なら足し、徴収なら引く（所得税・社会保険料の計算には関係しない）
+    yearEndSettlement,
+    netPay: totalEarnings - totalDeductions + yearEndSettlement,
     isNursingCareTarget: byAge.nursing,
     isHealthInsAgeTarget: byAge.health,
     isPensionAgeTarget: byAge.pension,

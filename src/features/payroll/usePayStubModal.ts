@@ -105,6 +105,30 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     loadFlatTaxReduction();
   }, [db, staff.id, year, month, flatTaxTotal]);
 
+  // 年末調整の過不足額：この月に支払う給与で精算すると決めた年末調整があれば、その過不足額を載せる
+  // （精算する給与を決めていなければ、その年の12月に支払う給与で精算する）
+  const [yearEndYear, setYearEndYear] = useState<number | null>(null);
+  useEffect(() => {
+    const loadYearEnd = async () => {
+      if (!db) return;
+      try {
+        const rows = await db.select(
+          `SELECT year, result FROM year_end_adjustments
+           WHERE staff_id = ? AND COALESCE(settle_year, year) = ? AND COALESCE(settle_month, 12) = ?`,
+          [staff.id, year, month]
+        ) as { year: number; result: string | null }[];
+        const row = rows?.[0];
+        let difference = 0;
+        try { difference = row?.result ? Number(JSON.parse(row.result).difference) || 0 : 0; } catch { difference = 0; }
+        setYearEndYear(row ? Number(row.year) : null);
+        setExtras(p => ({ ...p, yearEndSettlement: difference }));
+      } catch (e) {
+        console.error("年末調整の読み込みエラー:", e);
+      }
+    };
+    loadYearEnd();
+  }, [db, staff.id, year, month]);
+
   // 給与計算
   const salary = useMemo(
     () => calculateSalary(staff, attendanceData, extras, year, month, companySettings),
@@ -190,6 +214,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     insMaster,
     rateWarnings,
     minimumWageCheck,
+    yearEndYear,
     flatTaxTotal,
     fmtH
   };

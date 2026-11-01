@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { NENCHO_2026 } from "../constants/nencho";
 import { calcNencho } from "./nencho";
 import {
-    ageAtYearEnd, buildNenchoInput, classifyDependent, dependentIncomeLimit, emptyDeclaration, nenchoExclusion, parseDeclaration,
+    ageAtYearEnd, buildNenchoInput, classifyDependent, dependentIncomeLimit, emptyDeclaration, nenchoExclusion, parseDeclaration, settlementStatusOf,
     sumYearTotals, validateDeclaration, type DeclaredDependent, type NenchoDeclaration,
 } from "./nenchoDeclaration";
 
@@ -159,5 +159,14 @@ describe("年末調整の対象", () => {
     test("乙欄の人・11月までに退職した人は対象外", () => {
         expect(nenchoExclusion({ tax_column: "otsu" }, 2026)).toContain("乙欄");
         expect(nenchoExclusion({ retirement_date: "2026-11-30" }, 2026)).toContain("退職");
+    });
+});
+
+describe("過不足額の精算の状況", () => {
+    test("精算する給与が確定済みで同じ過不足額なら精算済み、違えば確定し直し、未確定なら精算前", () => {
+        expect(settlementStatusOf(115270, 115270)).toBe("done");
+        expect(settlementStatusOf(115270, 0)).toBe("redo");
+        expect(settlementStatusOf(-5000, null)).toBe("pending");
+        expect(settlementStatusOf(0, 0)).toBe("done"); // 過不足なしなら、確定するだけでよい
     });
 });

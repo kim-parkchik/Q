@@ -32,7 +32,10 @@ interface Migration {
   up: (db: MigrationDb) => Promise<void>;
 }
 
-/** 列が無い場合だけ追加する（新規ファイルでは CREATE TABLE 時点で列があるので何もしない） */
+/**
+ * 列が無い場合だけ追加する（新規ファイルでは CREATE TABLE 時点で列があるので何もしない）
+ * 表そのものが無いときも何もしない（アプリは先に表を作るので、そのときに列も作られる）
+ */
 export const addColumnIfMissing = async (
   db: MigrationDb,
   table: string,
@@ -40,7 +43,7 @@ export const addColumnIfMissing = async (
   definition: string
 ) => {
   const cols = await db.select<{ name: string }[]>(`PRAGMA table_info(${table})`);
-  if (cols.some((c) => c.name === column)) return;
+  if (cols.length === 0 || cols.some((c) => c.name === column)) return;
   await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 };
 
@@ -79,6 +82,15 @@ export const MIGRATIONS: Migration[] = [
     description: "従業員に標準報酬月額の履歴（何年何月分から・いくら）を追加（今までの値は入社したときからの1件として扱う）",
     up: async (db) => {
       await addColumnIfMissing(db, "staff", "standard_remuneration_history", "TEXT");
+    },
+  },
+  {
+    version: 6,
+    description: "年末調整の過不足額の精算（精算する給与の年月と、給与の確定結果の精算額）を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "year_end_adjustments", "settle_year", "INTEGER");
+      await addColumnIfMissing(db, "year_end_adjustments", "settle_month", "INTEGER");
+      await addColumnIfMissing(db, "salary_results", "year_end_adjustment", "INTEGER DEFAULT 0");
     },
   },
 ];

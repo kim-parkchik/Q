@@ -19,7 +19,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, flatTaxTotal, fmtH
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH
   } = usePayStubModal(props);
 
   const padRows = (current: number, target: number) =>
@@ -214,6 +214,13 @@ export default function PayStubModal(props: Props) {
                   ))}
                   {padRows(deductionItemsCount, targetRows)}
                   <tr style={S.totalRowS}><td style={S.tdS}>控除合計</td><td style={S.rtdS}>¥{salary.totalDeductions.toLocaleString()}</td></tr>
+                  {/* 年末調整の過不足額（控除合計には入れず、差引支給額で精算する） */}
+                  {salary.yearEndSettlement !== 0 && (
+                    <tr>
+                      <td style={S.tdS}>年末調整（{yearEndYear}年分）{salary.yearEndSettlement > 0 ? "還付" : "徴収"}</td>
+                      <td style={S.rtdS}>{salary.yearEndSettlement > 0 ? "+" : "−"}¥{Math.abs(salary.yearEndSettlement).toLocaleString()}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -229,6 +236,11 @@ export default function PayStubModal(props: Props) {
             </div>
           )}
 
+          {salary.yearEndSettlement < 0 && salary.netPay < 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, color: "#b91c1c" }}>
+              ⚠ 年末調整の不足額を引くと、差引支払額がマイナスになります。引ききれない分は、その後に支払う給与から順に徴収します。
+            </div>
+          )}
           <div style={{ marginTop: 24, textAlign: "right" }}>
             <div style={{ display: "inline-block", border: "2px solid #000", padding: "12px 28px" }}>
               <span>差引支払額：</span>

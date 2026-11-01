@@ -169,4 +169,23 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(db.query("SELECT standard_remuneration_history AS h, standard_remuneration AS s FROM staff").get())
             .toEqual({ h: null, s: 300000 });
     });
+    test("v6: v5 まで更新済みの会社ファイルに、年末調整の精算の列を追加する（表がまだなければ何もしない）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE salary_results (id INTEGER PRIMARY KEY, staff_id TEXT, net_pay INTEGER)");
+        db.exec("CREATE TABLE year_end_adjustments (staff_id TEXT, year INTEGER, declaration TEXT, result TEXT)");
+        db.exec("INSERT INTO salary_results VALUES (1, 'S001', 250000)");
+        db.exec("PRAGMA user_version = 5");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied[0]).toStartWith("v6:");
+        expect(columns(db, "salary_results")).toContain("year_end_adjustment");
+        expect(columns(db, "year_end_adjustments")).toEqual(expect.arrayContaining(["settle_year", "settle_month"]));
+        expect(db.query("SELECT year_end_adjustment AS v FROM salary_results").get()).toEqual({ v: 0 });
+
+        // 年末調整の表がまだない古いファイル（アプリは先に表を作るので、実際には起きない）でも止まらない
+        const old = new Database(":memory:");
+        old.exec("CREATE TABLE salary_results (id INTEGER PRIMARY KEY)");
+        old.exec("PRAGMA user_version = 5");
+        expect(await runMigrations(wrap(old))).toHaveLength(MIGRATIONS.length - 5);
+    });
 });

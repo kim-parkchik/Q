@@ -245,6 +245,7 @@ export const DB_SCHEMAS = [
     income_tax INTEGER DEFAULT 0,
     flat_tax_reduction INTEGER DEFAULT 0, -- 定額減税額（令和6年6月〜12月。income_tax はこれを引いた後の額）
     resident_tax INTEGER DEFAULT 0,
+    year_end_adjustment INTEGER DEFAULT 0, -- この給与で精算した年末調整の過不足額（＋還付／−徴収）。net_pay に含む
     net_pay INTEGER DEFAULT 0,
     processed_at TEXT DEFAULT (DATETIME('now', 'localtime')), -- いつ確定したか
     UNIQUE(staff_id, target_year, target_month),
@@ -362,6 +363,8 @@ export const DB_SCHEMAS = [
     year INTEGER NOT NULL,
     declaration TEXT,              -- 申告書の内容（JSON）
     result TEXT,                   -- 保存したときの計算結果（JSON）
+    settle_year INTEGER,           -- 過不足額を精算する給与の支払年月（空なら、その年の12月）
+    settle_month INTEGER,
     updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     PRIMARY KEY (staff_id, year),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE

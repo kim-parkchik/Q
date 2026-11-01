@@ -4,7 +4,7 @@
  */
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { NENCHO_YEARS, useNenchoManager } from "./useNenchoManager";
+import { NENCHO_YEARS, settleOptions, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
 import NenchoDeclarationForm from "./NenchoDeclarationForm";
 import NenchoResultPanel from "./NenchoResultPanel";
 
@@ -31,7 +31,9 @@ export default function NenchoManager({ db, staffList }: Props) {
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 }}>
           従業員から提出された申告書の内容を入れると、その年に確定した給与・賞与の合計から年税額を計算し、源泉徴収した税額との過不足を出します。
           計算は国税庁「令和8年分 年末調整のしかた」の表と計算式によります（令和8年度税制改正の基礎控除の引上げなどを含みます）。
-          令和7年分以前は、表を用意していないため計算できません。過不足額の精算と源泉徴収票は、まだ作っていません。
+          令和7年分以前は、表を用意していないため計算できません。源泉徴収票は、まだ作っていません。
+          <br />過不足額の精算の手順：①その年最後（12月）の給与を、いつもどおり確定する → ②ここで申告書を入れて保存する →
+          ③12月の給与明細を開き直すと過不足額（還付・徴収）が載るので、もう一度確定する（12月の給与の税額計算を省略しない方法）。
         </p>
       </div>
 
@@ -55,7 +57,8 @@ export default function NenchoManager({ db, staffList }: Props) {
                 <div style={{ fontSize: 11, color: r.exclusion ? "#94a3b8" : diff === undefined ? "#b45309" : "#64748b" }}>
                   {r.exclusion ? "対象外"
                     : diff === undefined ? "未入力"
-                    : diff >= 0 ? `保存済み・還付 ${yen(diff)}` : `保存済み・徴収 ${yen(-diff)}`}
+                    : diff >= 0 ? `還付 ${yen(diff)}` : `徴収 ${yen(-diff)}`}
+                  {r.saved && !r.exclusion && <span style={{ color: statusColor(r) }}>・{statusLabel(r)}</span>}
                 </div>
               </button>
             );
@@ -76,6 +79,21 @@ export default function NenchoManager({ db, staffList }: Props) {
             </div>
             <div style={{ ...card, position: "sticky", top: 16 }}>
               {z.result && <NenchoResultPanel r={z.result} />}
+              <div style={{ marginTop: 12 }}>
+                <label style={{ fontSize: 11, color: "#64748b", display: "block", marginBottom: 2 }}>過不足額を精算する給与</label>
+                <select
+                  value={`${z.settle.year}-${z.settle.month}`}
+                  onChange={(e) => { const [y, m] = e.target.value.split("-").map(Number); z.setSettle({ year: y, month: m }); }}
+                  style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}
+                >
+                  {settleOptions(z.year).map((o) => <option key={`${o.year}-${o.month}`} value={`${o.year}-${o.month}`}>{o.year}年{o.month}月に支払う給与</option>)}
+                </select>
+              </div>
+              {z.selected.saved && (
+                <div style={{ fontSize: 12, marginTop: 8, color: statusColor(z.selected), lineHeight: 1.6 }}>
+                  {statusMessage(z.selected)}
+                </div>
+              )}
               {z.errors.map((e) => <div key={e} style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{e}</div>)}
               <button
                 onClick={z.save}
@@ -97,3 +115,20 @@ export default function NenchoManager({ db, staffList }: Props) {
     </div>
   );
 }
+
+/** 一覧に出す、精算の状況 */
+const statusLabel = (r: NenchoStaffRow) =>
+  r.stale ? "計算し直しが必要" : r.settlement === "done" ? "精算済み" : r.settlement === "redo" ? "明細の確定し直しが必要" : "精算前";
+
+const statusColor = (r: NenchoStaffRow) =>
+  r.stale || r.settlement === "redo" ? "#b91c1c" : r.settlement === "done" ? "#16a34a" : "#b45309";
+
+/** 選んだ人の、精算の状況と次にすること */
+const statusMessage = (r: NenchoStaffRow) => {
+  const s = r.saved!;
+  const when = `${s.settleYear}年${s.settleMonth}月に支払う給与`;
+  if (r.stale) return "⚠ 保存した後に、確定した給与・賞与が変わりました。内容を確かめて、もう一度保存してください。";
+  if (r.settlement === "done") return `✓ ${when}で精算済みです（給与明細に過不足額が載っています）。`;
+  if (r.settlement === "redo") return `⚠ ${when}は、過不足額を載せずに確定されています。給与明細を開き直して、もう一度確定してください。`;
+  return `${when}を確定すると、給与明細に過不足額が載ります。`;
+};

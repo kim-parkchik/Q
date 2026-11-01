@@ -282,3 +282,15 @@ export const nenchoExclusion = (staff: { tax_column?: unknown; retirement_date?:
   if (staff.retirement_date && staff.retirement_date < `${year}-12-01`) return "年の途中で退職した人は、年末調整をしません（本人が確定申告します）";
   return null;
 };
+
+/**
+ * 過不足額の精算の状況
+ * ・done: 精算する給与を確定済みで、過不足額が載っている
+ * ・redo: 精算する給与を確定済みだが、載っている過不足額が違う（給与明細を開き直して確定し直す）
+ * ・pending: 精算する給与をまだ確定していない
+ * @param settledAmount 精算する給与の確定結果に載っている過不足額（まだ確定していなければ null）
+ */
+export type SettlementStatus = "done" | "redo" | "pending";
+
+export const settlementStatusOf = (difference: number, settledAmount: number | null): SettlementStatus =>
+  settledAmount === null ? "pending" : settledAmount === difference ? "done" : "redo";

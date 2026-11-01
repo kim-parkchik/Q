@@ -6,14 +6,16 @@
  * 月給 300,000円・所定8時間の人の時間単価は 300,000 ÷ (22日 × 8時間) = 1,704.5454…円。
  */
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import {
-    calculateSalary, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
+    calculateSalary, saveSalaryResult, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
     getInsuranceByAge, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
 import { calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
 import { INSURANCE_2026 } from "../constants/insurance";
 import { TAX_2026 } from "../constants/tax";
+import { DB_SCHEMAS } from "../types/dbSchema";
 
 const LAW = "currency_law";
 const company = { week_start_day: 0, round_overtime: "round", round_social_ins: LAW, round_emp_ins: LAW };
@@ -284,6 +286,32 @@ describe("標準報酬月額の履歴（決まりは standardRemuneration.test.t
         const june = calc({ ...monthly, standard_remuneration: 300000, standard_remuneration_history: history }, []);
         expect(june.isSocialInsEnrolled).toBe(false);
         expect(june.healthInsurance).toBe(0);
+    });
+});
+
+describe("年末調整の過不足額の精算（12月の給与で）", () => {
+    test("還付は差引支給額に足し、徴収は引く。所得税・控除合計は変わらない", () => {
+        const base = calc(monthly, []);
+        const refund = calc(monthly, [], { yearEndSettlement: 115270 });
+        const collect = calc(monthly, [], { yearEndSettlement: -5000 });
+        expect(refund.yearEndSettlement).toBe(115270);
+        expect(refund.netPay).toBe(base.netPay + 115270);
+        expect(collect.netPay).toBe(base.netPay - 5000);
+        expect([refund.incomeTax, refund.totalDeductions]).toEqual([base.incomeTax, base.totalDeductions]);
+        expect(base.yearEndSettlement).toBe(0);
+    });
+    test("確定した給与の結果に、精算した過不足額が保存され、差引支給額に含まれる", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
+        db.exec("INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) VALUES (1, '全社', 99, 0, 25)");
+        db.exec("INSERT INTO social_insurance_groups (id, name) VALUES (1, '協会けんぽ')");
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const r = calculateSalary(monthly, [], extras({ yearEndSettlement: 115270 }), 2026, 12, company);
+        expect(await saveSalaryResult(asyncDb, "S001", 2026, 12, r, monthly)).toEqual({ success: true });
+        expect(db.query("SELECT year_end_adjustment, net_pay FROM salary_results").get())
+            .toEqual({ year_end_adjustment: 115270, net_pay: r.netPay });
     });
 });
 
