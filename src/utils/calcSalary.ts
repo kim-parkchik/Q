@@ -15,6 +15,14 @@
  *  出典：厚生労働省「固定残業代を支払うこととすれば、残業や休日勤務をさせても別途に残業代を支払わなくてよいでしょうか？」
  *        https://www.startup-roudou.mhlw.go.jp/qa/zigyonushi/chingin/q11.html
  *        （医療法人康心会事件 最判平29.7.7、平29.7.31 基発0731第27号：固定残業代が37条で計算した額を下回るときは差額を払う）
+ *
+ * 残業代の対象外（従業員画面の「残業代対象」を外した人。管理監督者など）:
+ *  - 労働基準法41条の人（管理監督者・機密の事務を取り扱う者・許可を受けた監視断続的労働の従事者など）は、
+ *    労働時間・休日の規定が当てはまらないので、時間外労働（法定内残業を含む）・休日労働の割増賃金を払わない
+ *  - 深夜労働の割増賃金（25%）は払う（41条で外れるのは労働時間・休憩・休日の規定だけ）
+ *  - 時給制の人の、働いた時間の時給（1.0倍）はそのまま払う
+ *  出典：労働基準法41条（e-Gov法令検索 https://laws.e-gov.go.jp/law/322AC0000000049）
+ *        厚生労働省「労働基準法における管理監督者の範囲の適正化のために」https://www.mhlw.go.jp/bunya/roudoukijun/dl/kanri.pdf
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -71,6 +79,8 @@ export interface SalaryResult {
   fixedOvertimeHours: number;
   /** 時間外労働の割増賃金（法定の計算額）が固定残業代を超えた差額（固定残業代の超過分として払う） */
   fixedOvertimeExcess: number;
+  /** 残業代の対象か（false なら、時間外・休日の割増賃金を払わず、深夜の割増賃金だけ払う） */
+  isOvertimeEligible: boolean;
   nightPay: number;
   paidLeavePay: number;           // 有給休暇の賃金（時給制）
   commutePay: number;
@@ -607,6 +617,16 @@ export const calculateSalary = (
     }
   }
 
+  // ── 残業代の対象外（管理監督者など。労働基準法41条）────────────────────
+  // 時間外（法定内残業を含む）・休日労働の手当は払わない。時間は記録のため残し、深夜の割増賃金は払う
+  const isOvertimeEligible = Number(staff.is_overtime_eligible ?? 1) !== 0;
+  if (!isOvertimeEligible) {
+    statutoryOvertimePay = 0;
+    standardOvertimePay = 0;
+    highOvertimePay = 0;
+    holidayWorkPay = 0;
+  }
+
   // ── 通勤手当・任意手当 ──────────────────────────────────────
   const commutePay = staff.commute_type === 'daily'   ? (Number(staff.commute_amount) || 0) * workDays
                   : staff.commute_type === 'monthly' ? (Number(staff.commute_amount) || 0) : 0;
@@ -747,6 +767,7 @@ export const calculateSalary = (
     fixedOvertimeAllowance,
     fixedOvertimeHours,
     fixedOvertimeExcess,
+    isOvertimeEligible,
     nightPay: Math.floor(nightPay),
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,

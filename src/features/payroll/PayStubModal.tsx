@@ -238,6 +238,13 @@ export default function PayStubModal(props: Props) {
             </div>
           </div>
 
+          {/* 残業代の対象外（管理監督者など） */}
+          {!salary.isOvertimeEligible && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              残業代の対象外（管理監督者など）のため、時間外労働・休日労働の手当は支給しません。深夜手当は支給します。
+            </div>
+          )}
+
           {/* 固定残業代：法定の割増賃金と比べた結果 */}
           {salary.fixedOvertimeAllowance > 0 && (
             <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>

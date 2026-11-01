@@ -52,8 +52,12 @@ export default function InsuranceSection({ cm }: Props) {
                             checked={targetIsExecutive === 1}
                             onChange={e => {
                                 setTargetIsExecutive(e.target.checked ? 1 : 0);
-                                // 役員は原則として雇用保険に入れないため、加入を外す（使用人兼務役員なら付け直せる）
-                                if (e.target.checked) setTargetIsEmploymentInsEligible(0);
+                                // 役員は原則として雇用保険に入れず、労働基準法の労働者でもないので、加入と残業代の対象を外す
+                                // （使用人兼務役員なら付け直せる）
+                                if (e.target.checked) {
+                                    setTargetIsEmploymentInsEligible(0);
+                                    setTargetIsOvertimeEligible(0);
+                                }
                             }}
                         />
                         <UserCheck size={14} color="#64748b" />
@@ -80,6 +84,13 @@ export default function InsuranceSection({ cm }: Props) {
                         残業代対象
                     </label>
                 </div>
+                {targetIsOvertimeEligible !== 1 && (
+                    <p style={{ gridColumn: "span 2", fontSize: "11px", color: "#64748b", margin: "-4px 0 0 0", lineHeight: 1.6 }}>
+                        残業代の対象外：時間外労働（法定内残業を含む）・休日労働の手当を払いません。深夜（22時〜5時）の割増賃金は払います。
+                        外してよいのは、労働基準法41条で労働時間・休日の決まりが当てはまらない人（管理監督者・機密の事務を取り扱う人・
+                        労働基準監督署の許可を受けた監視断続的労働の人）と、役員だけです。管理監督者かどうかは、肩書ではなく、職務の内容・責任と権限・勤務の仕方・待遇の実態で決まります。
+                    </p>
+                )}
                 {/* 源泉所得税の欄：扶養控除等申告書を出していない人（ほかの会社が主たる給与の人など）は乙欄 */}
                 <div style={{ gridColumn: "span 2" }}>
                     <label style={labelStyle}>源泉所得税の欄</label>

@@ -465,6 +465,43 @@ describe("固定残業代（月給制。時間外労働の割増賃金に当て�
     });
 });
 
+describe("残業代の対象外（管理監督者など。労働基準法41条）", () => {
+    // 平日5日×8時間（月曜は深夜2時間）＋土曜8時間（週40時間超）＋日曜の法定休日8時間
+    const rows = [
+        ...weekdays().map((r, i) => (i === 0 ? { ...r, night_hours: 2 } : r)),
+        day("13", 8, "holiday_work"),
+        day("14", 8, "statutory_holiday"),
+    ];
+
+    test("月給：時間外・休日労働の手当は払わず、深夜の割増賃金だけ払う（時間は記録に残す）", () => {
+        const r = calc({ ...monthly, is_overtime_eligible: 0 }, rows);
+        expect(r.isOvertimeEligible).toBe(false);
+        expect([r.standardOvertimePay, r.highOvertimePay, r.holidayWorkPay, r.statutoryOvertimePay]).toEqual([0, 0, 0, 0]);
+        expect(r.standardPremiumHours).toBe(8);
+        expect(r.holidayWorkHours).toBe(8);
+        expect(r.nightPay).toBe(852); // 1,704.54… × 0.25 × 2
+        expect(r.totalEarnings).toBe(300000 + 852);
+    });
+    test("月給・所定7時間：法定内残業の手当も払わない", () => {
+        const r = calc({ ...monthly, scheduled_work_hours: 7, is_overtime_eligible: 0 }, weekdays());
+        expect(r.totalStatutoryOvertimeHours).toBe(5);
+        expect(r.statutoryOvertimePay).toBe(0);
+        expect(r.totalEarnings).toBe(300000);
+    });
+    test("時給：働いた時間の時給（1.0倍）と深夜の割増賃金は払い、時間外・休日の割増分は払わない", () => {
+        const wage = (rs: any[]) => rs.map((r) => ({ ...r, actual_base_wage: 1200 }));
+        const r = calc({ ...hourly, is_overtime_eligible: 0 }, wage(rows));
+        expect(r.basePay).toBe(1200 * 56); // 7日 × 8時間
+        expect([r.standardOvertimePay, r.holidayWorkPay]).toEqual([0, 0]);
+        expect(r.nightPay).toBe(600); // 1,200 × 0.25 × 2
+        expect(r.totalEarnings).toBe(1200 * 56 + 600);
+    });
+    test("設定がない（古いデータ）・チェックありの人は、今までどおり残業代の対象", () => {
+        expect(calc(monthly, rows).isOvertimeEligible).toBe(true);
+        expect(calc({ ...monthly, is_overtime_eligible: 1 }, rows).holidayWorkPay).toBeGreaterThan(0);
+    });
+});
+
 describe("月60時間超の割増（中小企業は2023年3月まで25%）", () => {
     const sme = { ...company, is_small_business: 1 };
     /** 2023年3月の平日13日に13時間ずつ（1日5時間の残業 × 13日 = 65時間） */
