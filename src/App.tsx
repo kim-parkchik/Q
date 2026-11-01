@@ -15,6 +15,7 @@ import {
   TrendingUp, 
   Calculator, 
   FileText, 
+  FileSpreadsheet, 
   UserCog, 
   LogOut 
 } from 'lucide-react';
@@ -35,6 +36,7 @@ import BonusManager from "./features/payroll/BonusManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
 import NenchoManager from "./features/nencho/NenchoManager";
+import WithholdingSlipManager from "./features/nencho/WithholdingSlipManager";
 
 // settings フォルダ
 import CompanyManager from "./features/settings/CompanyManager";
@@ -57,6 +59,7 @@ const TAB_NAMES: Record<string, string> = {
   santei: "算定基礎（定時決定）",
   zuiji: "月変（随時改定）",
   nencho: "年末調整",
+  gensen: "源泉徴収票",
   payslip: "明細書出力",
   user_management: "システム設定"
 };
@@ -73,6 +76,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   santei: <ClipboardList size={18} />,
   zuiji: <TrendingUp size={18} />,
   nencho: <Calculator size={18} />,
+  gensen: <FileSpreadsheet size={18} />,
   payslip: <FileText size={18} />,
   user_management: <UserCog size={18} />
 };
@@ -223,10 +227,11 @@ function App() {
             "santei",
             "zuiji",
             "nencho",
+            "gensen",
             "payslip"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "nencho", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "nencho", "gensen", "payslip"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -340,6 +345,9 @@ function App() {
               )}
               {activeTab === "nencho" && db && (
                 <NenchoManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "gensen" && db && (
+                <WithholdingSlipManager db={db} staffList={staffList} />
               )}
               {activeTab === "payslip" && db && (
                 <PaySlipManager 

@@ -97,7 +97,7 @@ describe("設例（令和8年分 年末調整のしかた）を申告書の形�
         expect(r.difference).toBe(115270);
     });
     test("前の勤め先の給与・社会保険料・源泉税は、合計に足す", () => {
-        const withPrev = buildNenchoInput({ ...decl, previousJob: { salary: 1000000, socialInsurance: 150000, withheldTax: 20000 } }, totals, 2026, m);
+        const withPrev = buildNenchoInput({ ...decl, previousJob: { ...decl.previousJob, salary: 1000000, socialInsurance: 150000, withheldTax: 20000 } }, totals, 2026, m);
         expect(withPrev.salaryTotal).toBe(9970000);
         expect(withPrev.socialInsuranceFromPay).toBe(1536102);
         expect(withPrev.withheldTax).toBe(176670);

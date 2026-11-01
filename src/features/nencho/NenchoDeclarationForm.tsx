@@ -3,12 +3,13 @@
  * （扶養控除等申告書・基礎控除申告書・配偶者控除等申告書・保険料控除申告書・住宅借入金等特別控除申告書・前の勤め先の源泉徴収票）
  */
 import { Plus, Trash2 } from "lucide-react";
-import type { NenchoMaster } from "../../constants/nencho";
+import { getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
 import {
   DEPENDENT_KIND_LABELS, ageAtYearEnd, classifyDependent,
-  type DeclaredDependent, type DisabilityKind, type DependentKind, type NenchoDeclaration, type YearTotals,
+  type DeclaredDependent, type DisabilityKind, type DependentKind, type HousingLoan, type NenchoDeclaration, type YearTotals,
 } from "../../utils/nenchoDeclaration";
 import { specificRelativeDeduction } from "../../utils/nencho";
+import { housingLoanKindDescription } from "../../utils/withholdingSlip";
 
 interface Props {
   year: number;
@@ -65,6 +66,9 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
   const setPrev = (patch: Partial<NenchoDeclaration["previousJob"]>) => set({ previousJob: { ...draft.previousJob, ...patch } });
   const setDependent = (i: number, patch: Partial<DeclaredDependent>) =>
     set({ dependents: draft.dependents.map((d, k) => (k === i ? { ...d, ...patch } : d)) });
+  const setLoan = (i: number, patch: Partial<HousingLoan>) =>
+    set({ housingLoans: draft.housingLoans.map((h, k) => (k === i ? { ...h, ...patch } : h)) });
+  const housingLoanKinds = getWithholdingSlipMaster(year)?.housingLoanKinds ?? [];
   const missingMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter((mo) => !totals.salaryMonths.includes(mo));
   const reiwa = year - 2018;
 
@@ -93,6 +97,14 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           <NumField title="社会保険料等の金額" value={draft.previousJob.socialInsurance} onChange={(v) => setPrev({ socialInsurance: v })} />
           <NumField title="源泉徴収税額" value={draft.previousJob.withheldTax} onChange={(v) => setPrev({ withheldTax: v })} />
         </div>
+        {draft.previousJob.salary > 0 && (
+          <div style={{ ...grid(3), marginTop: 8 }}>
+            <div><label style={label}>前の勤め先の名称</label><input value={draft.previousJob.payerName} onChange={(e) => setPrev({ payerName: e.target.value })} style={input} /></div>
+            <div><label style={label}>前の勤め先の所在地</label><input value={draft.previousJob.payerAddress} onChange={(e) => setPrev({ payerAddress: e.target.value })} style={input} /></div>
+            <div><label style={label}>前の勤め先を退職した日</label><input type="date" value={draft.previousJob.retiredOn} onChange={(e) => setPrev({ retiredOn: e.target.value })} style={input} /></div>
+          </div>
+        )}
+        {draft.previousJob.salary > 0 && <p style={note}>名称・所在地・退職日は、源泉徴収票の摘要欄に書きます。</p>}
       </div>
 
       {/* 本人 */}
@@ -135,8 +147,9 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           配偶者控除・配偶者特別控除を受ける（または同一生計配偶者が障害者）
         </label>
         {draft.spouse && (
-          <div style={{ ...grid(5), marginTop: 8 }}>
+          <div style={{ ...grid(6), marginTop: 8 }}>
             <div><label style={label}>氏名</label><input value={draft.spouse.name} onChange={(e) => set({ spouse: { ...draft.spouse!, name: e.target.value } })} style={input} /></div>
+            <div><label style={label}>フリガナ</label><input value={draft.spouse.furigana ?? ""} onChange={(e) => set({ spouse: { ...draft.spouse!, furigana: e.target.value } })} style={input} /></div>
             <div><label style={label}>生年月日</label><input type="date" value={draft.spouse.birthday} onChange={(e) => set({ spouse: { ...draft.spouse!, birthday: e.target.value } })} style={input} /></div>
             <NumField title="合計所得金額（見積額）" value={draft.spouse.totalIncome} onChange={(v) => set({ spouse: { ...draft.spouse!, totalIncome: v } })} />
             <div><label style={label}>障害者</label><DisabilitySelect value={draft.spouse.disability} onChange={(v) => set({ spouse: { ...draft.spouse!, disability: v } })} /></div>
@@ -163,8 +176,9 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           const age = ageAtYearEnd(d.birthday, year);
           return (
             <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginBottom: 8 }}>
-              <div style={{ ...grid(4) }}>
+              <div style={{ ...grid(5) }}>
                 <div><label style={label}>氏名</label><input value={d.name} onChange={(e) => setDependent(i, { name: e.target.value })} style={input} /></div>
+                <div><label style={label}>フリガナ</label><input value={d.furigana ?? ""} onChange={(e) => setDependent(i, { furigana: e.target.value })} style={input} /></div>
                 <div><label style={label}>続柄</label><input value={d.relation} placeholder="子・父・母など" onChange={(e) => setDependent(i, { relation: e.target.value })} style={input} /></div>
                 <div><label style={label}>生年月日</label><input type="date" value={d.birthday} onChange={(e) => setDependent(i, { birthday: e.target.value })} style={input} /></div>
                 <NumField title="合計所得金額（見積額）" value={d.totalIncome} onChange={(v) => setDependent(i, { totalIncome: v })} />
@@ -214,13 +228,17 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           <NumField title="新個人年金保険料" value={draft.insurance.lifePensionNew} onChange={(v) => setIns({ lifePensionNew: v })} />
           <NumField title="旧個人年金保険料" value={draft.insurance.lifePensionOld} onChange={(v) => setIns({ lifePensionOld: v })} />
         </div>
-        <div style={{ ...grid(4), marginTop: 8 }}>
+        <div style={{ ...grid(5), marginTop: 8 }}>
           <NumField title="地震保険料" value={draft.insurance.earthquake} onChange={(v) => setIns({ earthquake: v })} />
           <NumField title="旧長期損害保険料" value={draft.insurance.oldLongTerm} onChange={(v) => setIns({ oldLongTerm: v })} />
           <NumField title="社会保険料（申告分）" value={draft.insurance.socialInsurance} onChange={(v) => setIns({ socialInsurance: v })} />
+          <NumField title="うち国民年金保険料等" value={draft.insurance.nationalPension} onChange={(v) => setIns({ nationalPension: v })} />
           <NumField title="小規模企業共済等掛金" value={draft.insurance.smallBusinessMutualAid} onChange={(v) => setIns({ smallBusinessMutualAid: v })} />
         </div>
-        <p style={note}>新は平成24年1月1日以後、旧は平成23年12月31日以前に結んだ契約です。社会保険料（申告分）は、国民年金・国民健康保険など給与から引いていないものです。</p>
+        <p style={note}>
+          新は平成24年1月1日以後、旧は平成23年12月31日以前に結んだ契約です。社会保険料（申告分）は、国民年金・国民健康保険など給与から引いていないものです。
+          そのうち国民年金の保険料・国民年金基金の掛金は「うち国民年金保険料等」にも入れてください（源泉徴収票に書きます）。
+        </p>
       </div>
 
       {/* 住宅ローン */}
@@ -229,6 +247,41 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
         <div style={{ maxWidth: 240 }}>
           <NumField title="控除額（申告書で計算した金額）" value={draft.housingLoanCredit} onChange={(v) => set({ housingLoanCredit: v })} />
         </div>
+        {draft.housingLoanCredit > 0 && (
+          <div style={{ marginTop: 8 }}>
+            {draft.housingLoans.map((h, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr 160px auto", gap: 8, alignItems: "end", marginBottom: 6 }}>
+                <div><label style={label}>{i + 1}つ目：居住開始年月日</label><input type="date" value={h.residenceStart} onChange={(e) => setLoan(i, { residenceStart: e.target.value })} style={input} /></div>
+                <div>
+                  <label style={label}>住宅借入金等特別控除区分</label>
+                  <select value={h.kindCode} onChange={(e) => setLoan(i, { kindCode: e.target.value })} style={input}>
+                    <option value="">選んでください</option>
+                    {housingLoanKinds.map((k) => <option key={k.code} value={k.code}>{housingLoanKindDescription(k.label)}</option>)}
+                  </select>
+                </div>
+                <NumField title="住宅借入金等年末残高" value={h.yearEndBalance} onChange={(v) => setLoan(i, { yearEndBalance: v })} />
+                <button
+                  type="button" title="消す"
+                  onClick={() => set({ housingLoans: draft.housingLoans.filter((_, k) => k !== i) })}
+                  style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: 6, cursor: "pointer", color: "#94a3b8" }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => set({ housingLoans: [...draft.housingLoans, { residenceStart: "", kindCode: "", yearEndBalance: 0 }] })}
+              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "1px dashed #cbd5e1", borderRadius: 6, padding: "6px 12px", cursor: "pointer", fontSize: 12, color: "#475569" }}
+            >
+              <Plus size={14} /> 住宅の取得等を追加
+            </button>
+            <p style={note}>
+              源泉徴収票の「住宅借入金等特別控除の額の内訳」に書きます。居住開始年月日と区分は、申告書（控除証明書）を見て入れてください。
+              区分の（特）（特特）（特特特）は、居住開始が令和5年1月1日以後の住宅にはありません。年末残高は、2つ以上の控除を受けるときに書きます。
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

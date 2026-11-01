@@ -2,15 +2,17 @@
 
 ## 出典・利用条件
 
-国税庁「令和8年分 年末調整のしかた」（https://www.nta.go.jp/publication/pamph/gensen/nencho2026/01.htm）の PDF です。
+国税庁「令和8年分 年末調整のしかた」（https://www.nta.go.jp/publication/pamph/gensen/nencho2026/01.htm）と、
+「令和8年分 給与所得の源泉徴収票等の法定調書の作成と提出の手引」（https://www.nta.go.jp/publication/pamph/hotei/tebiki2026/index.htm）の PDF です。
 国税庁ホームページのコンテンツは、[国税庁の利用規約](https://www.nta.go.jp/chuijiko/copy.htm)（公共データ利用規約に準拠）により、
 出典を記載すれば複製・加工・再配布（商用を含む）ができます。
 
 - `src/constants/nencho/nencho2026.ts` は、これらの PDF の表と計算式を加工して作成したものです。
+- `src/constants/nencho/gensen2026.ts` は、手引の第2章（源泉徴収票の記載要領）の区分などを加工して作成したものです。
 - これらのファイルは Q 本体のライセンス（AGPL-3.0）ではなく、国税庁の利用規約に従います。
 - Q は国税庁が作成・保証するものではありません。
 
-**PDF は大きい（合わせて約10MB）ので、GitHub には上げていません（.gitignore）。** データを作り直すときは、下の表の入手元から取ってきて、ハッシュが同じか確かめてください（2026年11月1日に取得）。
+**PDF は大きい（合わせて約17MB）ので、GitHub には上げていません（.gitignore）。** データを作り直すときは、下の表の入手元から取ってきて、ハッシュが同じか確かめてください（2026年11月1日に取得）。
 
 | ファイル | 内容 | 使い方 | SHA-256 |
 |---|---|---|---|
@@ -19,6 +21,8 @@
 | [204.pdf](https://www.nta.go.jp/publication/pamph/gensen/nencho2026/pdf/204.pdf) | 電子計算機等による年末調整（年調給与額・給与所得控除後の金額の計算式・年調年税額） | 読み取る | `421bb95afd3e12193e8011e11af389f656f5d47b6a178c429e659f6da01b62f7` |
 | [107.pdf](https://www.nta.go.jp/publication/pamph/gensen/nencho2026/pdf/107.pdf) | 保険料控除申告書の受理と内容の確認（生命保険料・地震保険料の計算式） | 読み取る | `38907ac31a3a50e00b724feaec9d3d185434d3c79357edeb5fa3bbaf1b4ff4a3` |
 | [110rei.pdf](https://www.nta.go.jp/publication/pamph/gensen/nencho2026/pdf/110rei.pdf) | 設例（年末調整の計算例） | 所得金額調整控除の計算式を読み取る。設例はテストの期待値にする | `4e11985a39aae71bfe4a3f733d4359c14c9407aa59968c2a90430cedf34c8c63` |
+| tebiki-02.pdf（[02.pdf](https://www.nta.go.jp/publication/pamph/hotei/tebiki2026/PDF/02.pdf)。令和8年9月18日の訂正版） | 手引 第2章 給与所得の源泉徴収票（記載要領・記載例1〜4） | 区分（特定親族・住宅借入金等特別控除）・未成年者などの生年月日・摘要の文を読み取る。記載例はテストの期待値にする | `15960b2fe6c35fe1ff1fa5a965277bbeaf2d9a724b0831c8d6677bd72aaa2612` |
+| tebiki-seigo.pdf（[seigo.pdf](https://www.nta.go.jp/publication/pamph/hotei/tebiki2026/PDF/seigo.pdf)） | 手引の正誤表 | 読むだけ（第2章の訂正は、記載要領の前書きの（注）の追加と、摘要欄の「災害者」の書き方の字句。どちらも PDF は訂正版） | `233da6d7852cc4ed6ff3daf2101c8166378ee05874f5b32a63157714dbb0b1e0` |
 
 ## データの作り方
 
@@ -32,5 +36,14 @@ python3 -I scripts/import_nencho_tables.py nencho-tables 2026 src/constants/nenc
 - 204.pdf の計算式で「給与所得控除後の給与等の金額の表」の全行を作り、114.pdf の表の数字と一つ残らず一致しなければ止まります。
 - 国税庁の様式が変わって読み取れないときも止まります（中途半端なデータは作りません）。
 - 作ったあとは `bun test` で、設例（110rei.pdf）の年税額・過不足額と一致するか確かめます。
+
+源泉徴収票の区分は、次で作ります（tebiki-02.pdf は名前を変えて保存したもの）。
+
+```
+python3 -I scripts/import_gensen_codes.py nencho-tables/tebiki-02.pdf 2026 src/constants/nencho/gensen2026.ts
+```
+
+- 住宅借入金等特別控除区分（14種類）・特定親族特別控除の額の区分（9行）・居住者の区分・未成年者と16歳未満の生年月日の境目・生命保険料控除の特例の摘要の文を、PDF の文字から読み取ります。数が合わない・様式が変わったときは止まります。
+- `bun test` で、特定親族の区分の金額・所得の範囲が「年末調整のしかた」の表（別の PDF）と同じか、手引の記載例1〜3の源泉徴収票の金額と一致するかを確かめます。
 
 ※ 数字を手やAIで書き写さないこと。

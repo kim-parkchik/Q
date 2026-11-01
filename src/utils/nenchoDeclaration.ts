@@ -23,6 +23,8 @@ export type DisabilityKind = "none" | "general" | "special";
 
 export interface DeclaredPerson {
   name: string;
+  /** フリガナ（源泉徴収票に書く。なくてもよい） */
+  furigana?: string;
   /** 生年月日（YYYY-MM-DD） */
   birthday: string;
   /** その年の合計所得金額の見積額 */
@@ -61,13 +63,26 @@ export interface NenchoDeclaration {
     oldLongTerm: number;
     /** 申告した社会保険料（国民年金・国民健康保険など、給与から引いていないもの） */
     socialInsurance: number;
+    /** 申告した社会保険料のうち、国民年金保険料・国民年金基金の掛金（源泉徴収票の「国民年金保険料等の金額」） */
+    nationalPension: number;
     /** 小規模企業共済等掛金（iDeCo など） */
     smallBusinessMutualAid: number;
   };
   /** 住宅借入金等特別控除申告書の控除額 */
   housingLoanCredit: number;
-  /** 前の勤め先の給与（その年に転職した人。前の勤め先の源泉徴収票の金額） */
-  previousJob: { salary: number; socialInsurance: number; withheldTax: number };
+  /** 住宅借入金等特別控除の内訳（住宅の取得等ごと。源泉徴収票の「住宅借入金等特別控除の額の内訳」） */
+  housingLoans: HousingLoan[];
+  /** 前の勤め先の給与（その年に転職した人。前の勤め先の源泉徴収票の金額と、源泉徴収票の摘要欄に書く支払者・退職日） */
+  previousJob: { salary: number; socialInsurance: number; withheldTax: number; payerName: string; payerAddress: string; retiredOn: string };
+}
+
+export interface HousingLoan {
+  /** 居住開始年月日（YYYY-MM-DD） */
+  residenceStart: string;
+  /** 住宅借入金等特別控除区分（税務署提出用の数字。constants/nencho の housingLoanKinds） */
+  kindCode: string;
+  /** 住宅借入金等年末残高 */
+  yearEndBalance: number;
 }
 
 export const emptyDeclaration = (): NenchoDeclaration => ({
@@ -76,10 +91,11 @@ export const emptyDeclaration = (): NenchoDeclaration => ({
   dependents: [],
   insurance: {
     lifeGeneralNew: 0, lifeGeneralOld: 0, lifeMedical: 0, lifePensionNew: 0, lifePensionOld: 0,
-    earthquake: 0, oldLongTerm: 0, socialInsurance: 0, smallBusinessMutualAid: 0,
+    earthquake: 0, oldLongTerm: 0, socialInsurance: 0, nationalPension: 0, smallBusinessMutualAid: 0,
   },
   housingLoanCredit: 0,
-  previousJob: { salary: 0, socialInsurance: 0, withheldTax: 0 },
+  housingLoans: [],
+  previousJob: { salary: 0, socialInsurance: 0, withheldTax: 0, payerName: "", payerAddress: "", retiredOn: "" },
 });
 
 /** 保存した申告書（JSON）を読む。足りない項目は空の値で埋める */
@@ -94,6 +110,7 @@ export const parseDeclaration = (json: unknown): NenchoDeclaration => {
       dependents: Array.isArray(d?.dependents) ? d.dependents : [],
       insurance: { ...base.insurance, ...(d?.insurance ?? {}) },
       housingLoanCredit: Number(d?.housingLoanCredit) || 0,
+      housingLoans: Array.isArray(d?.housingLoans) ? d.housingLoans : [],
       previousJob: { ...base.previousJob, ...(d?.previousJob ?? {}) },
     };
   } catch {
@@ -267,6 +284,12 @@ export const validateDeclaration = (decl: NenchoDeclaration): string[] => {
   if (decl.spouse && ageAtYearEnd(decl.spouse.birthday, 2000) === null) errors.push("配偶者の生年月日を入れてください");
   decl.dependents.forEach((d, i) => {
     if (!d.birthday) errors.push(`扶養親族${i + 1}人目（${d.name || "名前なし"}）の生年月日を入れてください`);
+  });
+  if (decl.insurance.nationalPension > decl.insurance.socialInsurance) {
+    errors.push("国民年金保険料等の金額は、社会保険料（申告分）のうちの金額です。社会保険料（申告分）以下にしてください");
+  }
+  decl.housingLoans.forEach((h, i) => {
+    if (!h.residenceStart || !h.kindCode) errors.push(`住宅借入金等特別控除の${i + 1}つ目の居住開始年月日と区分を入れてください`);
   });
   return errors;
 };

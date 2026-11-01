@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { getNenchoMaster } from "../../constants/nencho";
+import { getNenchoMaster, type NenchoMaster } from "../../constants/nencho";
 import { calcNencho, type NenchoResult } from "../../utils/nencho";
 import {
   buildNenchoInput, nenchoExclusion, parseDeclaration, settlementStatusOf, sumYearTotals, validateDeclaration,
@@ -35,12 +35,72 @@ export interface NenchoStaffRow {
 /** 精算する給与の候補：その年の12月、または翌年1月に支払う給与 */
 export const settleOptions = (year: number) => [{ year, month: 12 }, { year: year + 1, month: 1 }];
 
+/** 年末調整・源泉徴収票の画面で使う、その年の確定した給与・賞与と保存した年末調整 */
+export interface NenchoData { salaries: any[]; bonuses: any[]; saved: any[]; settled: any[] }
+
+export const EMPTY_NENCHO_DATA: NenchoData = { salaries: [], bonuses: [], saved: [], settled: [] };
+
+export async function loadNenchoData(db: Database, year: number): Promise<NenchoData> {
+  const salaries = await db.select<any[]>(
+    "SELECT staff_id, target_month, taxable_amount, social_ins_total, income_tax FROM salary_results WHERE target_year = ?",
+    [year]
+  );
+  const bonuses = await db.select<any[]>(
+    `SELECT r.* FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id WHERE s.target_year = ?`,
+    [year]
+  );
+  const saved = await db.select<any[]>("SELECT * FROM year_end_adjustments WHERE year = ?", [year]);
+  // 精算する給与（その年の12月・翌年1月）の確定結果に載っている過不足額
+  const settled = await db.select<any[]>(
+    `SELECT staff_id, target_year, target_month, year_end_adjustment FROM salary_results
+     WHERE (target_year = ? AND target_month = 12) OR (target_year = ? AND target_month = 1)`,
+    [year, year + 1]
+  );
+  return { salaries, bonuses, saved, settled };
+}
+
+/** その年に在籍した人ごとに、1年分の集計・保存した年末調整・精算の状況をまとめる */
+export const buildNenchoRows = (staffList: any[], data: NenchoData, year: number, master: NenchoMaster | null): NenchoStaffRow[] => staffList
+  // その年に在籍していない人は出さない
+  .filter((s) => !(s.join_date && s.join_date > `${year}-12-31`) && !(s.retirement_date && s.retirement_date < `${year}-01-01`))
+  .map((staff) => {
+    const sid = String(staff.id);
+    const savedRow = data.saved.find((r) => String(r.staff_id) === sid);
+    let result: NenchoResult | null = null;
+    try { result = savedRow?.result ? JSON.parse(savedRow.result) : null; } catch { result = null; }
+    const totals = sumYearTotals(
+      data.salaries.filter((r) => String(r.staff_id) === sid),
+      data.bonuses.filter((r) => String(r.staff_id) === sid),
+    );
+    const declaration = parseDeclaration(savedRow?.declaration);
+    const settleYear = Number(savedRow?.settle_year) || year;
+    const settleMonth = Number(savedRow?.settle_month) || 12;
+    // 保存した申告書のまま、いまの給与・賞与で計算し直すと過不足額が変わるか
+    const stale = !!(savedRow && result && master
+      && calcNencho(buildNenchoInput(declaration, totals, year, master), master).difference !== result.difference);
+    const settledRow = data.settled.find((r) =>
+      String(r.staff_id) === sid && Number(r.target_year) === settleYear && Number(r.target_month) === settleMonth);
+    const settlement: SettlementStatus | null = !savedRow || !result ? null
+      : settlementStatusOf(result.difference, settledRow ? Number(settledRow.year_end_adjustment) || 0 : null);
+    return {
+      staff,
+      exclusion: nenchoExclusion(staff, year),
+      note: staff.retirement_date && staff.retirement_date <= `${year}-12-31`
+        ? "12月中に退職する人は、その年最後の給与を支払った後に年末調整をします"
+        : null,
+      totals,
+      saved: savedRow ? { declaration, result, updatedAt: savedRow.updated_at, settleYear, settleMonth } : null,
+      stale,
+      settlement,
+    };
+  });
+
 export function useNenchoManager(db: Database, staffList: any[]) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const [year, setYear] = useState(NENCHO_YEARS[NENCHO_YEARS.length - 1] ?? new Date().getFullYear());
   const master = getNenchoMaster(year);
-  const [data, setData] = useState<{ salaries: any[]; bonuses: any[]; saved: any[]; settled: any[] }>({ salaries: [], bonuses: [], saved: [], settled: [] });
+  const [data, setData] = useState<NenchoData>(EMPTY_NENCHO_DATA);
   const [settle, setSettle] = useState<{ year: number; month: number }>({ year, month: 12 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<NenchoDeclaration | null>(null);
@@ -51,22 +111,7 @@ export function useNenchoManager(db: Database, staffList: any[]) {
     if (!db) return;
     setIsLoading(true);
     try {
-      const salaries = await db.select<any[]>(
-        "SELECT staff_id, target_month, taxable_amount, social_ins_total, income_tax FROM salary_results WHERE target_year = ?",
-        [year]
-      );
-      const bonuses = await db.select<any[]>(
-        `SELECT r.* FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id WHERE s.target_year = ?`,
-        [year]
-      );
-      const saved = await db.select<any[]>("SELECT * FROM year_end_adjustments WHERE year = ?", [year]);
-      // 精算する給与（その年の12月・翌年1月）の確定結果に載っている過不足額
-      const settled = await db.select<any[]>(
-        `SELECT staff_id, target_year, target_month, year_end_adjustment FROM salary_results
-         WHERE (target_year = ? AND target_month = 12) OR (target_year = ? AND target_month = 1)`,
-        [year, year + 1]
-      );
-      setData({ salaries, bonuses, saved, settled });
+      setData(await loadNenchoData(db, year));
     } catch (e) {
       console.error("年末調整のデータの読み込みに失敗しました:", e);
       dialog.error(`年末調整のデータを読み込めませんでした。\n${e}`);
@@ -82,40 +127,7 @@ export function useNenchoManager(db: Database, staffList: any[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, year]);
 
-  const rows: NenchoStaffRow[] = useMemo(() => staffList
-    // その年に在籍していない人は出さない
-    .filter((s) => !(s.join_date && s.join_date > `${year}-12-31`) && !(s.retirement_date && s.retirement_date < `${year}-01-01`))
-    .map((staff) => {
-      const sid = String(staff.id);
-      const savedRow = data.saved.find((r) => String(r.staff_id) === sid);
-      let result: NenchoResult | null = null;
-      try { result = savedRow?.result ? JSON.parse(savedRow.result) : null; } catch { result = null; }
-      const totals = sumYearTotals(
-        data.salaries.filter((r) => String(r.staff_id) === sid),
-        data.bonuses.filter((r) => String(r.staff_id) === sid),
-      );
-      const declaration = parseDeclaration(savedRow?.declaration);
-      const settleYear = Number(savedRow?.settle_year) || year;
-      const settleMonth = Number(savedRow?.settle_month) || 12;
-      // 保存した申告書のまま、いまの給与・賞与で計算し直すと過不足額が変わるか
-      const stale = !!(savedRow && result && master
-        && calcNencho(buildNenchoInput(declaration, totals, year, master), master).difference !== result.difference);
-      const settledRow = data.settled.find((r) =>
-        String(r.staff_id) === sid && Number(r.target_year) === settleYear && Number(r.target_month) === settleMonth);
-      const settlement: SettlementStatus | null = !savedRow || !result ? null
-        : settlementStatusOf(result.difference, settledRow ? Number(settledRow.year_end_adjustment) || 0 : null);
-      return {
-        staff,
-        exclusion: nenchoExclusion(staff, year),
-        note: staff.retirement_date && staff.retirement_date <= `${year}-12-31`
-          ? "12月中に退職する人は、その年最後の給与を支払った後に年末調整をします"
-          : null,
-        totals,
-        saved: savedRow ? { declaration, result, updatedAt: savedRow.updated_at, settleYear, settleMonth } : null,
-        stale,
-        settlement,
-      };
-    }), [staffList, data, year, master]);
+  const rows: NenchoStaffRow[] = useMemo(() => buildNenchoRows(staffList, data, year, master), [staffList, data, year, master]);
 
   const selected = rows.find((r) => String(r.staff.id) === selectedId) ?? null;
 
