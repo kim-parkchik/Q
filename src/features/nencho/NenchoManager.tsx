@@ -1,0 +1,99 @@
+/**
+ * 年末調整（令和8年分から）
+ * 左：従業員の一覧（対象かどうか・保存した過不足額）、右：申告書の内容の入力と、年税額・過不足額
+ */
+// @ts-ignore
+import Database from "@tauri-apps/plugin-sql";
+import { NENCHO_YEARS, useNenchoManager } from "./useNenchoManager";
+import NenchoDeclarationForm from "./NenchoDeclarationForm";
+import NenchoResultPanel from "./NenchoResultPanel";
+
+interface Props {
+  db: Database;
+  staffList: any[];
+}
+
+const card: React.CSSProperties = { backgroundColor: "white", padding: 16, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", marginBottom: 16 };
+const yen = (n: number) => `${n.toLocaleString()}円`;
+
+export default function NenchoManager({ db, staffList }: Props) {
+  const z = useNenchoManager(db, staffList);
+
+  return (
+    <div style={{ maxWidth: 1300, margin: "0 auto" }}>
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <select value={z.year} onChange={(e) => z.setYear(Number(e.target.value))} style={{ padding: "8px 10px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14 }}>
+            {NENCHO_YEARS.map((y) => <option key={y} value={y}>{y}年分（令和{y - 2018}年分）</option>)}
+          </select>
+          {z.isLoading && <span style={{ fontSize: 12, color: "#64748b" }}>読み込み中…</span>}
+        </div>
+        <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 }}>
+          従業員から提出された申告書の内容を入れると、その年に確定した給与・賞与の合計から年税額を計算し、源泉徴収した税額との過不足を出します。
+          計算は国税庁「令和8年分 年末調整のしかた」の表と計算式によります（令和8年度税制改正の基礎控除の引上げなどを含みます）。
+          令和7年分以前は、表を用意していないため計算できません。過不足額の精算と源泉徴収票は、まだ作っていません。
+        </p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
+        {/* 従業員の一覧 */}
+        <div style={{ ...card, padding: 8 }}>
+          {z.rows.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8", padding: 8 }}>{z.year}年に在籍した人がいません</div>}
+          {z.rows.map((r) => {
+            const active = z.selected && String(z.selected.staff.id) === String(r.staff.id);
+            const diff = r.saved?.result?.difference;
+            return (
+              <button
+                key={r.staff.id}
+                onClick={() => z.select(String(r.staff.id))}
+                style={{
+                  display: "block", width: "100%", textAlign: "left", border: "none", borderRadius: 6, padding: "8px 10px", marginBottom: 2,
+                  cursor: "pointer", backgroundColor: active ? "#eff6ff" : "transparent",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: "bold", color: r.exclusion ? "#94a3b8" : "#1e293b" }}>{r.staff.name}</div>
+                <div style={{ fontSize: 11, color: r.exclusion ? "#94a3b8" : diff === undefined ? "#b45309" : "#64748b" }}>
+                  {r.exclusion ? "対象外"
+                    : diff === undefined ? "未入力"
+                    : diff >= 0 ? `保存済み・還付 ${yen(diff)}` : `保存済み・徴収 ${yen(-diff)}`}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 選んだ人 */}
+        {!z.selected ? (
+          <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>左の一覧から従業員を選んでください。</div>
+        ) : z.selected.exclusion ? (
+          <div style={{ ...card, fontSize: 13, color: "#b45309" }}>{z.selected.staff.name}さん：{z.selected.exclusion}</div>
+        ) : z.master && z.draft && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
+            <div style={card}>
+              <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 10 }}>{z.selected.staff.name}さん（{z.year}年分）</div>
+              {z.selected.note && <p style={{ fontSize: 12, color: "#b45309", margin: "0 0 10px 0" }}>※ {z.selected.note}</p>}
+              <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} />
+            </div>
+            <div style={{ ...card, position: "sticky", top: 16 }}>
+              {z.result && <NenchoResultPanel r={z.result} />}
+              {z.errors.map((e) => <div key={e} style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{e}</div>)}
+              <button
+                onClick={z.save}
+                disabled={z.isSaving || z.errors.length > 0}
+                style={{
+                  width: "100%", marginTop: 12, padding: "10px", border: "none", borderRadius: 8, fontWeight: "bold", color: "white",
+                  cursor: z.errors.length > 0 ? "not-allowed" : "pointer", backgroundColor: z.errors.length > 0 ? "#cbd5e1" : "#2563eb",
+                }}
+              >
+                {z.isSaving ? "保存中…" : "申告書の内容と計算結果を保存"}
+              </button>
+              {z.selected.saved && (
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 6, textAlign: "center" }}>最後に保存：{z.selected.saved.updatedAt}</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

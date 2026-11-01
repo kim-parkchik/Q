@@ -427,6 +427,43 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     await loadItems();
   };
 
+  /**
+   * 選んでいる賞与を確定する：1人ずつの計算結果を bonus_results に保存する（年末調整の1年分の集計に使う）
+   * 確定し直すと、前の結果を消して保存し直す
+   */
+  const finalizeBonus = async () => {
+    if (!db || !selectedSetting) return;
+    const rows = bonusStaffList
+      .map(staff => ({ staff, calc: calcBonusForStaff(staff) }))
+      .filter((r): r is { staff: any; calc: NonNullable<ReturnType<typeof calcBonusForStaff>> } => !!r.calc && r.calc.totalEarnings > 0);
+    const ok = await ask(
+      `「${selectedSetting.name}」を確定します（支給がある${rows.length}人）。\n` +
+      `確定した賞与は、年末調整の1年分の集計に入ります。金額を直したときは、もう一度確定してください。`,
+      { title: '賞与の確定', kind: 'info' }
+    );
+    if (!ok) return;
+    try {
+      await db.execute("BEGIN");
+      await db.execute("DELETE FROM bonus_results WHERE bonus_setting_id = ?", [selectedSetting.id]);
+      for (const { staff, calc } of rows) {
+        await db.execute(
+          `INSERT INTO bonus_results (bonus_setting_id, staff_id, total_earnings, hyojun_bonus, health_insurance, nursing_insurance,
+             child_support, welfare_pension, emp_insurance, income_tax, custom_deductions, net_pay, is_nursing)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [selectedSetting.id, staff.id, calc.totalEarnings, calc.hyojunBonus, calc.healthInsurance, calc.nursingInsurance,
+           calc.childSupport, calc.welfarePension, calc.empInsurance, calc.incomeTax, calc.customDeductions, calc.netPay, calc.isNursing ? 1 : 0]
+        );
+      }
+      await db.execute("UPDATE bonus_settings SET is_closed = 1 WHERE id = ?", [selectedSetting.id]);
+      await db.execute("COMMIT");
+      await loadSettings();
+    } catch (e) {
+      await db.execute("ROLLBACK");
+      console.error("賞与の確定に失敗しました:", e);
+      alert("賞与の確定に失敗しました: " + e);
+    }
+  };
+
   return {
     // ── 全体・表示制御 ──
     activeTab, setActiveTab,
@@ -451,6 +488,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     activeItemIds, toggleItemActive,
     staffValues, saveStaffValue, calcBonusForStaff,
     bonusStaffList,
+    finalizeBonus,
     rateWarnings,
   };
 };

@@ -356,6 +356,17 @@ export const DB_SCHEMAS = [
   );`,
 
   // log
+  // 年末調整（1人・1年分の申告書の内容と、保存したときの計算結果。詳しくは utils/nenchoDeclaration.ts・utils/nencho.ts）
+  `CREATE TABLE IF NOT EXISTS year_end_adjustments (
+    staff_id TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    declaration TEXT,              -- 申告書の内容（JSON）
+    result TEXT,                   -- 保存したときの計算結果（JSON）
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    PRIMARY KEY (staff_id, year),
+    FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
   `CREATE TABLE IF NOT EXISTS app_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,

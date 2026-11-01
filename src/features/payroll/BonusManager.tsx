@@ -128,8 +128,10 @@ export default function BonusManager({ db, staffList }: Props) {
     saveStaffValue,
     calcBonusForStaff,
     bonusStaffList,
+    finalizeBonus,
     rateWarnings
   } = useBonusManager(db, staffList);
+  const selectedSetting = settings.find(s => s.id === selectedSettingId);
 
   // マスター表示用
   const masterEarningItems = items.filter(i => i.type === 'earning');
@@ -618,6 +620,21 @@ export default function BonusManager({ db, staffList }: Props) {
                 </option>
               ))}
             </select>
+            {selectedSetting && items.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                <button
+                  onClick={finalizeBonus}
+                  style={{ padding: "8px 16px", border: "none", borderRadius: 6, color: "white", fontWeight: "bold", cursor: "pointer", backgroundColor: selectedSetting.is_closed ? "#64748b" : "#16a34a" }}
+                >
+                  {selectedSetting.is_closed ? "確定し直す" : "この賞与を確定"}
+                </button>
+                <span style={{ fontSize: 12, color: "#64748b" }}>
+                  {selectedSetting.is_closed
+                    ? "確定済みです。金額を直したときは、もう一度確定してください（年末調整の集計に使います）。"
+                    : "確定すると、年末調整の1年分の集計に入ります。"}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* 料率・税額表が登録されていない年月の注意 */}
