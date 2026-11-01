@@ -171,6 +171,8 @@ export interface SalaryRecord {
   total_earnings: number;
   /** 確定したときの基本給（時給制は時給） */
   applied_base_wage?: number | null;
+  /** 確定したときの固定残業代（なしは 0。固定残業代を保存する前（DB v7 より前）に確定した給与は null） */
+  fixed_overtime_allowance?: number | null;
 }
 
 /** 確定した勤怠（支払基礎日数を数えるのに使う項目） */

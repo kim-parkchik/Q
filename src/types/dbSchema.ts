@@ -230,9 +230,11 @@ export const DB_SCHEMAS = [
     -- ★ 追加：標準と高率を分けて保存
     standard_overtime_hours REAL,    -- 標準割増の対象時間
     high_overtime_hours REAL,        -- 高率割増の対象時間
-    standard_overtime_pay INTEGER,   -- 標準割増の支給額
-    high_overtime_pay INTEGER,       -- 高率割増の支給額
+    standard_overtime_pay INTEGER,   -- 標準割増の支給額（固定残業代がある人は、法定の計算額）
+    high_overtime_pay INTEGER,       -- 高率割増の支給額（固定残業代がある人は、法定の計算額）
     statutory_overtime_pay INTEGER,  -- 法定内残業の支給額（割増なし）
+    fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0。DB v7 より前に確定した給与は空）
+    fixed_overtime_excess INTEGER DEFAULT 0,    -- 時間外労働の割増賃金が固定残業代を超えた差額（超過分として払った額）
 
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,

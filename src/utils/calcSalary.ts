@@ -7,6 +7,14 @@
  *  - 所定時間超〜8時間 → 法定内残業（割増義務なし、基本単価のみ）
  *  - 上記どちらかで月60時間超の分 → 割増50%必須
  *    （中小企業は2023年3月31日までに働いた分は猶予され25%。会社設定の「中小企業」で切り替える）
+ *
+ * 固定残業代（月給制の人だけ）:
+ *  - 時間外労働（1日8時間・週40時間超）の割増賃金に当てる定額の手当として、時間外労働の有無にかかわらず払う
+ *  - 労働基準法37条で計算した時間外労働の割増賃金（25%・月60時間超は50%）が固定残業代を超えたら、差額を「超過分」として足して払う
+ *  - 法定内残業・休日労働・深夜労働の手当は、固定残業代とは別に払う
+ *  出典：厚生労働省「固定残業代を支払うこととすれば、残業や休日勤務をさせても別途に残業代を支払わなくてよいでしょうか？」
+ *        https://www.startup-roudou.mhlw.go.jp/qa/zigyonushi/chingin/q11.html
+ *        （医療法人康心会事件 最判平29.7.7、平29.7.31 基発0731第27号：固定残業代が37条で計算した額を下回るときは差額を払う）
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -57,6 +65,12 @@ export interface SalaryResult {
   standardOvertimePay: number;
   highOvertimePay: number;
   holidayWorkPay: number;         // 法定休日労働の手当（35%増）
+  /** 固定残業代（月給制で設定がある人。なければ 0）。standardOvertimePay・highOvertimePay は、これに当てる法定の計算額になる */
+  fixedOvertimeAllowance: number;
+  /** 固定残業代が何時間分か（表示用） */
+  fixedOvertimeHours: number;
+  /** 時間外労働の割増賃金（法定の計算額）が固定残業代を超えた差額（固定残業代の超過分として払う） */
+  fixedOvertimeExcess: number;
   nightPay: number;
   paidLeavePay: number;           // 有給休暇の賃金（時給制）
   commutePay: number;
@@ -354,10 +368,11 @@ export const saveSalaryResult = async (
       total_work_hours, total_overtime_hours, total_night_hours,
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
+      fixed_overtime_allowance, fixed_overtime_excess,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -369,6 +384,8 @@ export const saveSalaryResult = async (
       standard_overtime_pay = excluded.standard_overtime_pay,
       high_overtime_pay = excluded.high_overtime_pay,
       statutory_overtime_pay = excluded.statutory_overtime_pay,
+      fixed_overtime_allowance = excluded.fixed_overtime_allowance,
+      fixed_overtime_excess = excluded.fixed_overtime_excess,
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
       health_insurance = excluded.health_insurance,
@@ -391,6 +408,7 @@ export const saveSalaryResult = async (
     result.totalWorkHours, result.totalOvertimeHours, result.totalNightHours,
     result.standardPremiumHours, result.highPremiumHours,
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
+    result.fixedOvertimeAllowance, result.fixedOvertimeExcess,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
@@ -602,9 +620,24 @@ export const calculateSalary = (
   // const premiums = standardOvertimePay + highOvertimePay + nightPay;
   // const roundedPremiums = applyRounding(premiums, companySettings?.round_overtime || 'round');
   // const roundedStatutory = applyRounding(statutoryOvertimePay, companySettings?.round_overtime || 'round');
-  const premiums = (standardOvertimePay || 0) + (highOvertimePay || 0) + (holidayWorkPay || 0) + (nightPay || 0);
-  const roundedPremiums = applyRounding(premiums, companySettings?.round_overtime || 'round');
-  const roundedStatutory = applyRounding(statutoryOvertimePay || 0, companySettings?.round_overtime || 'round');
+  const roundOvertime = companySettings?.round_overtime || 'round';
+  const roundedStatutory = applyRounding(statutoryOvertimePay || 0, roundOvertime);
+
+  // 固定残業代（月給制の人だけ）：時間外労働の割増賃金の代わりに定額を払い、法定の計算額が上回る分だけ足す
+  const fixedOvertimeAllowance = staff.wage_type === 'monthly'
+    ? Math.max(0, Math.floor(Number(staff.fixed_overtime_allowance) || 0))
+    : 0;
+  const fixedOvertimeHours = fixedOvertimeAllowance > 0 ? Math.max(0, Number(staff.fixed_overtime_hours) || 0) : 0;
+  let fixedOvertimeExcess = 0;
+  let roundedPremiums: number;
+  if (fixedOvertimeAllowance > 0) {
+    const legalOvertimePay = applyRounding((standardOvertimePay || 0) + (highOvertimePay || 0), roundOvertime);
+    fixedOvertimeExcess = Math.max(0, legalOvertimePay - fixedOvertimeAllowance);
+    roundedPremiums = fixedOvertimeAllowance + fixedOvertimeExcess
+      + applyRounding((holidayWorkPay || 0) + (nightPay || 0), roundOvertime);
+  } else {
+    roundedPremiums = applyRounding((standardOvertimePay || 0) + (highOvertimePay || 0) + (holidayWorkPay || 0) + (nightPay || 0), roundOvertime);
+  }
 
   const totalEarnings = Math.floor(basePay || 0)
                     - (absenceDeduction || 0)
@@ -711,6 +744,9 @@ export const calculateSalary = (
     standardOvertimePay: Math.floor(standardOvertimePay),
     highOvertimePay: Math.floor(highOvertimePay),
     holidayWorkPay: Math.floor(holidayWorkPay),
+    fixedOvertimeAllowance,
+    fixedOvertimeHours,
+    fixedOvertimeExcess,
     nightPay: Math.floor(nightPay),
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,

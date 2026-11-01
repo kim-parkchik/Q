@@ -58,7 +58,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         const groups = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
         // 前の年の12月（1月の変動を見るため）から、次の年の2月（11・12月の変動の3か月目まで）に支払った給与
         const salaries = await db.select<SalaryRecord[]>(
-          `SELECT staff_id, target_year, target_month, total_earnings, applied_base_wage FROM salary_results
+          `SELECT staff_id, target_year, target_month, total_earnings, applied_base_wage, fixed_overtime_allowance FROM salary_results
            WHERE (target_year * 12 + target_month) BETWEEN ? AND ?`,
           [(year - 1) * 12 + 12, (year + 1) * 12 + 2]
         );

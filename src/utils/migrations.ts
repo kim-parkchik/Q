@@ -93,6 +93,15 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "year_end_adjustment", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 7,
+    description: "給与の確定結果に固定残業代と、その超過分を追加",
+    up: async (db) => {
+      // 固定残業代は、今までの確定結果ではわからないので空（NULL）のままにする（月変で、わからない月とは比べないため）
+      await addColumnIfMissing(db, "salary_results", "fixed_overtime_allowance", "INTEGER");
+      await addColumnIfMissing(db, "salary_results", "fixed_overtime_excess", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

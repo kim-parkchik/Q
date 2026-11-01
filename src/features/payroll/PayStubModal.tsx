@@ -168,11 +168,23 @@ export default function PayStubModal(props: Props) {
                   {salary.statutoryOvertimePay > 0 && (
                     <tr><td style={S.tdS}>時間外手当(法定内)</td><td style={S.rtdS}>¥{salary.statutoryOvertimePay.toLocaleString()}</td></tr>
                   )}
-                  {salary.standardOvertimePay > 0 && (
-                    <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.standardOvertimePay.toLocaleString()}</td></tr>
-                  )}
-                  {salary.highOvertimePay > 0 && (
-                    <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_PREMIUM_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
+                  {/* 固定残業代がある人は、時間外労働の割増賃金の代わりに固定残業代（と超過分）を払う */}
+                  {salary.fixedOvertimeAllowance > 0 ? (
+                    <>
+                      <tr><td style={S.tdS}>固定残業代{salary.fixedOvertimeHours > 0 && `(${fmtH(salary.fixedOvertimeHours)}分)`}</td><td style={S.rtdS}>¥{salary.fixedOvertimeAllowance.toLocaleString()}</td></tr>
+                      {salary.fixedOvertimeExcess > 0 && (
+                        <tr><td style={S.tdS}>時間外手当(固定残業代の超過分)</td><td style={S.rtdS}>¥{salary.fixedOvertimeExcess.toLocaleString()}</td></tr>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {salary.standardOvertimePay > 0 && (
+                        <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.standardOvertimePay.toLocaleString()}</td></tr>
+                      )}
+                      {salary.highOvertimePay > 0 && (
+                        <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_PREMIUM_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
+                      )}
+                    </>
                   )}
                   {salary.holidayWorkPay > 0 && (
                     <tr><td style={S.tdS}>休日出勤手当({Math.round((Master.HOLIDAY_WORK_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.holidayWorkPay.toLocaleString()}</td></tr>
@@ -225,6 +237,16 @@ export default function PayStubModal(props: Props) {
               </table>
             </div>
           </div>
+
+          {/* 固定残業代：法定の割増賃金と比べた結果 */}
+          {salary.fixedOvertimeAllowance > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              時間外労働 {fmtH(salary.standardPremiumHours + salary.highPremiumHours)}
+              （法定の割増賃金 ¥{(salary.standardOvertimePay + salary.highOvertimePay).toLocaleString()}）は、固定残業代 ¥{salary.fixedOvertimeAllowance.toLocaleString()} に含みます。
+              {salary.fixedOvertimeExcess > 0 && `固定残業代を超えた ¥${salary.fixedOvertimeExcess.toLocaleString()} を、超過分として支給します。`}
+              <span style={{ color: "#666" }}>法定内残業・休日出勤・深夜の手当は、固定残業代とは別に支給します。</span>
+            </div>
+          )}
 
           {/* 定額減税（令和6年6月〜）：給与支払明細書には月次減税額を書く */}
           {flatTaxTotal > 0 && (

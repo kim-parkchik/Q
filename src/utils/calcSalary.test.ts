@@ -417,6 +417,54 @@ describe("週40時間を超えた残業", () => {
     });
 });
 
+describe("固定残業代（月給制。時間外労働の割増賃金に当てる）", () => {
+    // 2026年6月の所定労働日は22日 → 時間単価 300,000 ÷ (22日 × 8時間) = 1,704.54…円
+    const fixed = { ...monthly, fixed_overtime_hours: 14, fixed_overtime_allowance: 30000 };
+
+    test("時間外労働がなくても、固定残業代を払う", () => {
+        const r = calc(fixed, weekdays());
+        expect(r.fixedOvertimeAllowance).toBe(30000);
+        expect(r.fixedOvertimeHours).toBe(14);
+        expect(r.fixedOvertimeExcess).toBe(0);
+        expect(r.totalEarnings).toBe(330000);
+    });
+    test("時間外労働の割増賃金が固定残業代以下なら、固定残業代だけ（法定の計算額は表示用に残す）", () => {
+        const r = calc(fixed, [...weekdays(), day("13", 8, "holiday_work")]); // 週40時間超が8時間
+        expect(r.standardOvertimePay).toBe(17045); // 1,704.54… × 1.25 × 8
+        expect(r.fixedOvertimeExcess).toBe(0);
+        expect(r.totalEarnings).toBe(330000);
+    });
+    test("時間外労働の割増賃金が固定残業代を超えたら、差額を超過分として払う", () => {
+        // 月〜水10時間（日の残業 2時間×3日）＋木金8時間＋土曜8時間（週の残業8時間）＝ 時間外労働14時間
+        const rows = [day("08", 10), day("09", 10), day("10", 10), day("11", 8), day("12", 8), day("13", 8, "holiday_work")];
+        const r = calc({ ...fixed, fixed_overtime_allowance: 20000 }, rows);
+        expect(r.standardPremiumHours).toBe(14);
+        // 1,704.54… × 1.25 × 14 = 29,829.54… → 29,830円（四捨五入）。固定残業代 20,000円との差額 9,830円
+        expect(r.fixedOvertimeExcess).toBe(9830);
+        expect(r.totalEarnings).toBe(300000 + 20000 + 9830);
+        // 固定残業代がなければ、法定の計算額をそのまま払う（支給合計は同じ）
+        expect(calc(monthly, rows).totalEarnings).toBe(329830);
+    });
+    test("法定内残業・休日労働・深夜労働の手当は、固定残業代とは別に払う", () => {
+        const rows = [
+            ...weekdays().map((r, i) => (i === 0 ? { ...r, night_hours: 2 } : r)), // 深夜2時間
+            day("14", 8, "statutory_holiday"), // 法定休日の労働
+        ];
+        const seven = { ...monthly, scheduled_work_hours: 7 }; // 所定7時間なら、8時間働いた日は1時間が法定内残業
+        const without = calc(seven, rows);
+        const withFixed = calc({ ...seven, fixed_overtime_hours: 10, fixed_overtime_allowance: 25000 }, rows);
+        expect(without.statutoryOvertimePay).toBeGreaterThan(0);
+        expect(without.holidayWorkPay).toBeGreaterThan(0);
+        expect(without.nightPay).toBeGreaterThan(0);
+        expect(withFixed.totalEarnings - without.totalEarnings).toBe(25000);
+    });
+    test("時給制の人には、固定残業代の設定を使わない", () => {
+        const r = calc({ ...hourly, fixed_overtime_hours: 10, fixed_overtime_allowance: 20000 }, weekdays({ actual_base_wage: 1200 }));
+        expect(r.fixedOvertimeAllowance).toBe(0);
+        expect(r.totalEarnings).toBe(calc(hourly, weekdays({ actual_base_wage: 1200 })).totalEarnings);
+    });
+});
+
 describe("月60時間超の割増（中小企業は2023年3月まで25%）", () => {
     const sme = { ...company, is_small_business: 1 };
     /** 2023年3月の平日13日に13時間ずつ（1日5時間の残業 × 13日 = 65時間） */

@@ -9,6 +9,10 @@ interface Props {
     cm: StaffManagerState;
 }
 
+/** 固定残業代が何時間分の時間外労働の割増賃金（1.25倍）に当たるか（月平均所定労働時間で出した時間単価での目安） */
+const fixedOvertimeCoverage = (amount: number, hourlyRate: number) =>
+    hourlyRate > 0 && Number.isFinite(hourlyRate) ? amount / (hourlyRate * 1.25) : null;
+
 export default function WorkPatternSection({ cm }: Props) {
     const {
         targetPatternId,
@@ -357,8 +361,26 @@ export default function WorkPatternSection({ cm }: Props) {
                     </div>
 
                     <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "6px", lineHeight: "1.4" }}>
-                        ※設定時間を超過した残業が発生した場合は、1分単位で超過手当が自動計算されます。
+                        ※固定残業代は、時間外労働（1日8時間・週40時間超）の割増賃金に当てる手当として、残業の有無にかかわらず毎月払います。
+                        実際の時間外労働の割増賃金が固定残業代を超えた月は、その差額を「固定残業代の超過分」として足して払います。
+                        法定内残業・休日出勤・深夜の手当は、固定残業代とは別に払います。月給制の人だけ計算に使います。
                     </p>
+                    {targetFixedOvertimeAmount > 0 && targetWageType !== "monthly" && (
+                        <p style={{ fontSize: "10px", color: "#b45309", marginTop: "4px" }}>
+                            ⚠ 固定残業代は月給制の人だけ計算に使います。この人の給与計算には入りません。
+                        </p>
+                    )}
+                    {targetFixedOvertimeAmount > 0 && targetWageType === "monthly" && (() => {
+                        const hours = fixedOvertimeCoverage(targetFixedOvertimeAmount, hourlyConversion);
+                        if (hours === null) return null;
+                        const short = targetFixedOvertimeHours > 0 && hours < targetFixedOvertimeHours;
+                        return (
+                            <p style={{ fontSize: "10px", color: short ? "#b45309" : "#64748b", marginTop: "4px", lineHeight: 1.5 }}>
+                                {short ? "⚠ " : ""}{targetFixedOvertimeAmount.toLocaleString()}円は、時間外労働 約{hours.toFixed(1)}時間分の割増賃金（時給換算 約{Math.round(hourlyConversion).toLocaleString()}円 × 1.25）に当たります（目安）。
+                                {short && `設定した${targetFixedOvertimeHours}時間より少ないため、${targetFixedOvertimeHours}時間に届く前から超過分を払うことになります。金額か時間を見直してください。`}
+                            </p>
+                        );
+                    })()}
                 </div>
 
                 {/* 統計・換算結果フッター (月給制または日給制の時に表示) */}

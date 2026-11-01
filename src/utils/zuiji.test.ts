@@ -105,6 +105,42 @@ describe("変動月の候補を探す", () => {
         const salaries = [salary(2026, 3, 300000), salary(2026, 4, 300000, 400000), salary(2026, 5, 300000, 400000)];
         expect(findZuijiCandidates([staff], 2026, [group], salaries, [])).toHaveLength(0);
     });
+    describe("固定残業代の追加・廃止・金額の変更も、固定的賃金の変動として探す", () => {
+        const pay = (m: number, base: number, fixed: number | null, total = base + (fixed ?? 0)) =>
+            ({ ...salary(2026, m, base, total), fixed_overtime_allowance: fixed });
+        test("固定残業代を新しく払い始めた月（基本給は同じ）→ 上がった", () => {
+            const salaries = [pay(3, 300000, 0), pay(4, 300000, 60000), pay(5, 300000, 60000), pay(6, 300000, 60000)];
+            const [c, ...rest] = findZuijiCandidates([staff], 2026, [group], salaries, []);
+            expect(rest).toHaveLength(0);
+            expect(c).toMatchObject({
+                month: 4, direction: "up", baseWageBefore: null, baseWageAfter: null,
+                fixedOvertimeBefore: 0, fixedOvertimeAfter: 60000, note: null, revisionFrom: "2026-07",
+            });
+            // 平均 360,000円 → 36万円（従前 30万円から2等級以上）
+            expect(judgeZuiji(c.months, false, c.previous, c.direction, table).status).toBe("target");
+        });
+        test("固定残業代をやめた月 → 下がった", () => {
+            const salaries = [pay(3, 300000, 60000), pay(4, 300000, 0), pay(5, 300000, 0), pay(6, 300000, 0)];
+            const [c] = findZuijiCandidates([{ ...staff, standard_remuneration: 360000 }], 2026, [group], salaries, []);
+            expect(c).toMatchObject({ month: 4, direction: "down", fixedOvertimeBefore: 60000, fixedOvertimeAfter: 0 });
+        });
+        test("固定残業代を保存する前（空）に確定した月とは比べない", () => {
+            const salaries = [pay(3, 300000, null), pay(4, 300000, 60000), pay(5, 300000, 60000)];
+            expect(findZuijiCandidates([staff], 2026, [group], salaries, [])).toHaveLength(0);
+        });
+        test("基本給と固定残業代が同じ月に変わったら、合計の上がり下がりで向きを決める", () => {
+            // 基本給 +20,000円・固定残業代 −30,000円 → 合計 −10,000円で「下がった」
+            const salaries = [pay(3, 300000, 60000), pay(4, 320000, 30000)];
+            const [c] = findZuijiCandidates([staff], 2026, [group], salaries, []);
+            expect(c).toMatchObject({ direction: "down", baseWageBefore: 300000, baseWageAfter: 320000, fixedOvertimeBefore: 60000, fixedOvertimeAfter: 30000, note: null });
+        });
+        test("基本給と固定残業代が逆向きに同じ額だけ変わったら、基本給の向きで判定し、注意を出す", () => {
+            const salaries = [pay(3, 300000, 60000), pay(4, 330000, 30000)];
+            const [c] = findZuijiCandidates([staff], 2026, [group], salaries, []);
+            expect(c.direction).toBe("up");
+            expect(c.note).toContain("年金事務所");
+        });
+    });
     test("従前は変動月から3か月目の分の値。改定の月の行がすでにあれば登録済み", () => {
         const history = JSON.stringify([{ from: "", amount: 300000, reason: "shutoku" }, { from: "2026-07", amount: 340000, reason: "zuiji" }]);
         const c = buildZuijiCandidate({ ...staff, standard_remuneration_history: history }, 2026, 4, "up", [group], [], []);

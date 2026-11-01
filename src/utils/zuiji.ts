@@ -11,9 +11,14 @@
  *   （表の外に、もう1つ同じ幅の等級があるものとして2等級の差を数える。
  *     健康保険なら、50等級の人は報酬月額1,415千円以上、1等級の人は53千円未満を、表の外の等級として扱う）
  * 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20150515-02.html
+ *       （固定的賃金は「支給額や支給率が決まっているもの」。固定的な手当の追加・支給額の変更も、固定的賃金の変動に当たる）
  *
- * Q では、確定した給与の基本給（時給制は時給）が前の月と変わった月を、変動月の候補として探す。
- * 手当や通勤手当の変更、給与体系の変更（時給→月給など）は見つけられないので、画面で変動月を指定してもらう。
+ * Q では、確定した給与の基本給（時給制は時給）か固定残業代が前の月と変わった月を、変動月の候補として探す。
+ * ・固定残業代は、時間外労働の有無にかかわらず決まった額を払う固定的な手当なので、追加・廃止・金額の変更を変動として扱う
+ *   （固定残業代を超えた月に払う超過分は、残業時間で変わる非固定的賃金なので、変動には数えない）
+ * ・基本給と固定残業代が同じ月に変わったときは、2つの合計（固定的賃金）が上がったか下がったかで向きを決める
+ * ・固定残業代を保存する前（DB v7 より前）に確定した給与は固定残業代がわからないので、その月とは比べない
+ * そのほかの手当や通勤手当の変更、給与体系の変更（時給→月給など）は見つけられないので、画面で変動月を指定してもらう。
  * 等級は健康保険の等級で判定する（厚生年金の上限・下限の決まりは、健康保険の2等級の差と同じ結果になる）。
  */
 import { checkSocialInsEnrolled } from './calcSalary';
@@ -129,9 +134,14 @@ export interface ZuijiCandidate {
   year: number;
   month: number;
   direction: ZuijiDirection;
-  /** 確定した給与の基本給の変化（画面で変動月を指定したときは null） */
+  /** 確定した給与の基本給の変化（画面で変動月を指定したとき・基本給が変わっていないときは null） */
   baseWageBefore: number | null;
   baseWageAfter: number | null;
+  /** 確定した給与の固定残業代の変化（変わっていないときは null。なしは 0） */
+  fixedOvertimeBefore: number | null;
+  fixedOvertimeAfter: number | null;
+  /** 判定するときの注意（基本給と固定残業代が逆に変わり、合計が変わっていないときなど） */
+  note: string | null;
   /** 変動月から3か月 */
   months: ZuijiMonth[];
   /** 従前の標準報酬月額（変動月から3か月目の分の値） */
@@ -152,6 +162,7 @@ export const buildZuijiCandidate = (
   salaries: SalaryRecord[],
   attendance: AttendanceRecord[],
   baseWages: { before: number | null; after: number | null } = { before: null, after: null },
+  fixedOvertime: { before: number | null; after: number | null; note?: string | null } = { before: null, after: null },
 ): ZuijiCandidate => {
   const group = groupOf(staff, groups);
   const months = [0, 1, 2].map((k) => {
@@ -165,6 +176,8 @@ export const buildZuijiCandidate = (
   return {
     staff, year, month, direction,
     baseWageBefore: baseWages.before, baseWageAfter: baseWages.after,
+    fixedOvertimeBefore: fixedOvertime.before, fixedOvertimeAfter: fixedOvertime.after,
+    note: fixedOvertime.note ?? null,
     months,
     previous: getStandardRemuneration(staff, third.year, third.month),
     revisionFrom,
@@ -173,7 +186,7 @@ export const buildZuijiCandidate = (
 };
 
 /**
- * その年に変動月がある候補を、確定した給与の基本給（時給制は時給）の変化から探す
+ * その年に変動月がある候補を、確定した給与の基本給（時給制は時給）と固定残業代の変化から探す
  * @param salaries その年の前の年の12月から、次の年の2月までに支払った給与（3か月目まで見るため）
  */
 export const findZuijiCandidates = (
@@ -183,21 +196,36 @@ export const findZuijiCandidates = (
   salaries: SalaryRecord[],
   attendance: AttendanceRecord[],
 ): ZuijiCandidate[] => {
-  const baseWageOf = (staff: any, y: number, m: number) => {
+  const valueOf = (staff: any, y: number, m: number, key: 'applied_base_wage' | 'fixed_overtime_allowance') => {
     const s = salaries.find((r) => String(r.staff_id) === String(staff.id) && Number(r.target_year) === y && Number(r.target_month) === m);
-    const wage = s?.applied_base_wage;
-    return wage === null || wage === undefined ? null : Number(wage);
+    const v = s?.[key];
+    return v === null || v === undefined ? null : Number(v);
   };
   const candidates: ZuijiCandidate[] = [];
   for (const staff of staffList) {
     for (let month = 1; month <= 12; month++) {
       const prev = addMonths(year, month, -1);
-      const before = baseWageOf(staff, prev.year, prev.month);
-      const after = baseWageOf(staff, year, month);
-      if (before === null || after === null || before <= 0 || after <= 0 || before === after) continue;
+      const baseBefore = valueOf(staff, prev.year, prev.month, 'applied_base_wage');
+      const baseAfter = valueOf(staff, year, month, 'applied_base_wage');
+      const baseChanged = baseBefore !== null && baseAfter !== null && baseBefore > 0 && baseAfter > 0 && baseBefore !== baseAfter;
+      const fixedBefore = valueOf(staff, prev.year, prev.month, 'fixed_overtime_allowance');
+      const fixedAfter = valueOf(staff, year, month, 'fixed_overtime_allowance');
+      const fixedChanged = fixedBefore !== null && fixedAfter !== null && fixedBefore !== fixedAfter;
+      if (!baseChanged && !fixedChanged) continue;
       if (!checkSocialInsEnrolled(staff, year, month)) continue;
+
+      // 固定的賃金（基本給と固定残業代）の合計が上がったか下がったか。合計が同じなら基本給の向き
+      const baseDiff = baseChanged ? baseAfter! - baseBefore! : 0;
+      const fixedDiff = fixedChanged ? fixedAfter! - fixedBefore! : 0;
+      const total = baseDiff + fixedDiff;
+      const direction: ZuijiDirection = total !== 0 ? (total > 0 ? 'up' : 'down') : baseDiff > 0 ? 'up' : 'down';
+      const note = baseChanged && fixedChanged && total === 0
+        ? '基本給と固定残業代が逆向きに同じ額だけ変わり、固定的賃金の合計は変わっていません。対象になるかは年金事務所に確かめてください（ここでは基本給の向きで判定しています）'
+        : null;
       candidates.push(buildZuijiCandidate(
-        staff, year, month, after > before ? 'up' : 'down', groups, salaries, attendance, { before, after },
+        staff, year, month, direction, groups, salaries, attendance,
+        baseChanged ? { before: baseBefore, after: baseAfter } : { before: null, after: null },
+        fixedChanged ? { before: fixedBefore, after: fixedAfter, note } : { before: null, after: null, note },
       ));
     }
   }

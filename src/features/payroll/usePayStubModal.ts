@@ -179,8 +179,9 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   const earningItemsCount = 1
     + (salary.absenceDeduction > 0 ? 1 : 0)
     + (salary.statutoryOvertimePay > 0 ? 1 : 0)
-    + (salary.standardOvertimePay > 0 ? 1 : 0)
-    + (salary.highOvertimePay > 0 ? 1 : 0)
+    + (salary.fixedOvertimeAllowance > 0
+      ? 1 + (salary.fixedOvertimeExcess > 0 ? 1 : 0)
+      : (salary.standardOvertimePay > 0 ? 1 : 0) + (salary.highOvertimePay > 0 ? 1 : 0))
     + (salary.holidayWorkPay > 0 ? 1 : 0)
     + (salary.paidLeavePay > 0 ? 1 : 0)
     + 1 + 1 + 1 + customEarningItems.length;

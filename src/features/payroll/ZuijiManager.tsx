@@ -48,9 +48,10 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
           {z.isLoading && <span style={{ fontSize: 12, color: "#64748b" }}>読み込み中…</span>}
         </div>
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 }}>
-          確定した給与の基本給（時給制は時給）が前の月と変わった月を「変動月」として、変動月から3か月の給与（通勤手当を含む）の平均で判定します。
+          確定した給与の基本給（時給制は時給）か固定残業代が前の月と変わった月を「変動月」として、変動月から3か月の給与（通勤手当を含む）の平均で判定します。
           従前の標準報酬月額と2等級以上の差があり、3か月とも支払基礎日数が17日以上（短時間労働者は11日以上）なら、4か月目の分から改定します。
-          手当・通勤手当の変更や、時給から月給への変更は自動で見つけられないので、下の欄で変動月を指定してください。月額変更届は「速やかに」提出します。
+          固定残業代は、追加・廃止・金額の変更を変動として扱います（このバージョンより前に確定した月の固定残業代はわからないので、その月とは比べません）。
+          そのほかの手当・通勤手当の変更や、時給から月給への変更は自動で見つけられないので、下の欄で変動月を指定してください。月額変更届は「速やかに」提出します。
         </p>
       </div>
 
@@ -70,7 +71,7 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
             </thead>
             <tbody>
               {z.rows.length === 0 && !z.isLoading && (
-                <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={7}>{z.year}年に基本給が変わった人はいません</td></tr>
+                <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={7}>{z.year}年に基本給・固定残業代が変わった人はいません</td></tr>
               )}
               {z.rows.map((r) => <ZuijiTableRow key={r.key} r={r} z={z} />)}
             </tbody>
@@ -125,8 +126,12 @@ function ZuijiTableRow({ r, z }: { r: ZuijiRow; z: ReturnType<typeof useZuijiMan
         <div style={{ fontSize: 11, color: "#64748b" }}>
           {r.manual
             ? `手で指定（${r.direction === "up" ? "上がった" : "下がった"}）`
-            : `基本給 ${r.baseWageBefore?.toLocaleString()} → ${r.baseWageAfter?.toLocaleString()}円`}
+            : [
+                r.baseWageBefore !== null && `基本給 ${r.baseWageBefore.toLocaleString()} → ${r.baseWageAfter?.toLocaleString()}円`,
+                r.fixedOvertimeBefore !== null && `固定残業代 ${r.fixedOvertimeBefore.toLocaleString()} → ${r.fixedOvertimeAfter?.toLocaleString()}円`,
+              ].filter(Boolean).map((t) => <div key={t as string}>{t}</div>)}
         </div>
+        {r.note && <div style={{ fontSize: 11, color: "#b45309", marginTop: 4, whiteSpace: "normal", maxWidth: 220 }}>⚠ {r.note}</div>}
         {r.manual && (
           <button onClick={() => z.removeManual(r.key)} style={{ marginTop: 4, fontSize: 11, border: "none", background: "none", color: "#94a3b8", cursor: "pointer", padding: 0 }}>
             一覧から外す

@@ -188,4 +188,14 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         old.exec("PRAGMA user_version = 5");
         expect(await runMigrations(wrap(old))).toHaveLength(MIGRATIONS.length - 5);
     });
+    test("v7: v6 まで更新済みの会社ファイルに、給与の確定結果の固定残業代・超過分の列を追加する（今までの確定結果の固定残業代は、わからないので空）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE salary_results (id INTEGER PRIMARY KEY, staff_id TEXT, net_pay INTEGER)");
+        db.exec("INSERT INTO salary_results VALUES (1, 'S001', 250000)");
+        db.exec("PRAGMA user_version = 6");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied[0]).toStartWith("v7:");
+        expect(db.query("SELECT fixed_overtime_allowance AS a, fixed_overtime_excess AS e FROM salary_results").get()).toEqual({ a: null, e: 0 });
+    });
 });
