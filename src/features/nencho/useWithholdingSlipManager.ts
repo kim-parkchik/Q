@@ -22,7 +22,8 @@ export interface SlipStaffRow extends NenchoStaffRow {
   attention: boolean;
 }
 
-const statusOf = (r: NenchoStaffRow, paid: boolean): { status: string; attention: boolean } => {
+/** 一覧に出す状況（源泉徴収簿の画面でも使う） */
+export const statusOf = (r: NenchoStaffRow, paid: boolean): { status: string; attention: boolean } => {
   if (!paid) return { status: "支払なし", attention: false };
   if (r.exclusion) return { status: "年末調整なし", attention: false };
   if (!r.saved) return { status: "年末調整がまだ", attention: true };

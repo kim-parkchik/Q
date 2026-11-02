@@ -274,3 +274,31 @@ export const calcBonusWithholdingTax = (
         : calcBonusTaxRate(prev, dependents, master.BONUS_TABLE);
     return addRate(bonus, rate);
 };
+
+/**
+ * 確定した賞与の税額で使った「賞与の金額に乗ずべき率」（%。源泉徴収簿の税率の欄に書く）
+ * ・算出率の表を使わない場合（前月の給与がない・賞与が前月の給与の10倍を超える。月額表で計算する）は null
+ * ・前月の給与と扶養親族等の数から求めた率で計算し直した税額が、確定した税額と違うときも null
+ *   （確定したときの扶養親族等の数などがわからないので、率を書かない）
+ */
+export const bonusTaxRateUsed = (
+    bonusAfterSocial: number,
+    prevMonthAfterSocial: number,
+    dependents: number,
+    payYear: number,
+    column: TaxColumn,
+    tax: number
+): number | null => {
+    const bonus = Math.max(0, Math.floor(bonusAfterSocial));
+    const prev = Math.max(0, Math.floor(prevMonthAfterSocial));
+    if (prev === 0 || bonus > prev * 10) return null;
+    const master = Master.getTaxMaster(payYear);
+    try {
+        const rate = column === "otsu"
+            ? calcBonusOtsuTaxRate(prev, master.BONUS_TABLE)
+            : calcBonusTaxRate(prev, dependents, master.BONUS_TABLE);
+        return addRate(bonus, rate) === Math.floor(Number(tax) || 0) ? rate : null;
+    } catch {
+        return null;
+    }
+};

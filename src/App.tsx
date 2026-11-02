@@ -16,6 +16,7 @@ import {
   Calculator, 
   FileText, 
   FileSpreadsheet, 
+  BookOpen, 
   UserCog, 
   LogOut 
 } from 'lucide-react';
@@ -37,6 +38,7 @@ import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
 import NenchoManager from "./features/nencho/NenchoManager";
 import WithholdingSlipManager from "./features/nencho/WithholdingSlipManager";
+import WithholdingLedgerManager from "./features/nencho/WithholdingLedgerManager";
 
 // settings フォルダ
 import CompanyManager from "./features/settings/CompanyManager";
@@ -60,6 +62,7 @@ const TAB_NAMES: Record<string, string> = {
   zuiji: "月変（随時改定）",
   nencho: "年末調整",
   gensen: "源泉徴収票",
+  gensenbo: "源泉徴収簿",
   payslip: "明細書出力",
   user_management: "システム設定"
 };
@@ -77,6 +80,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   zuiji: <TrendingUp size={18} />,
   nencho: <Calculator size={18} />,
   gensen: <FileSpreadsheet size={18} />,
+  gensenbo: <BookOpen size={18} />,
   payslip: <FileText size={18} />,
   user_management: <UserCog size={18} />
 };
@@ -228,10 +232,11 @@ function App() {
             "zuiji",
             "nencho",
             "gensen",
+            "gensenbo",
             "payslip"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "nencho", "gensen", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "nencho", "gensen", "gensenbo", "payslip"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -348,6 +353,9 @@ function App() {
               )}
               {activeTab === "gensen" && db && (
                 <WithholdingSlipManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "gensenbo" && db && (
+                <WithholdingLedgerManager db={db} staffList={staffList} />
               )}
               {activeTab === "payslip" && db && (
                 <PaySlipManager 
