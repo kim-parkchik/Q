@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
-import { calculateSalary, saveSalaryResult, type SalaryExtras } from '../../utils/calcSalary';
+import { calculateSalary, loadCustomItems, saveSalaryResult, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
-import { countAnnualWorkDays, parseWorkDays } from '../../utils/annualWorkDays';
+import { loadAnnualWorkDays } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 
 // 型定義
@@ -35,33 +35,16 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
 
   // カスタム項目の読み込み
   useEffect(() => {
-    const loadCustomItems = async () => {
+    const load = async () => {
       if (!db) return;
       try {
-        interface SalaryItemRow {
-          name: string;
-          type: 'earning' | 'deduction';
-          amount: number;
-        }
-        const rows = await db.select(
-          `SELECT m.name, m.type, COALESCE(v.amount, 0) as amount
-          FROM salary_item_master m
-          LEFT JOIN staff_salary_values v ON m.id = v.item_id AND v.staff_id = ?
-          WHERE m.category != 'formula'
-          ORDER BY m.type DESC, m.id ASC`,
-          [staff.id]
-        ) as SalaryItemRow[];
-
-        const items = rows
-          .filter(r => r.amount > 0)
-          .map(r => ({ name: r.name, amount: Number(r.amount), type: r.type }));
-
+        const items = await loadCustomItems(db, staff.id);
         setExtras(p => ({ ...p, customItems: items }));
       } catch (e) {
         console.error("customItems 読み込みエラー:", e);
       }
     };
-    loadCustomItems();
+    load();
   }, [db, staff.id]);
 
   // 源泉所得税の計算方法（給与規定グループの設定）を読み込む
@@ -138,32 +121,30 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   const wageLabel = staff.wage_type === "monthly" ? "月給制" : "時給制";
   const customEarningItems = extras.customItems.filter(i => i.type === 'earning');
   const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
-  // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
-  // 月給は「1年間における1月平均所定労働時間」で割る（従業員画面と同じく、会社カレンダーから1年間の所定労働日数を数える）
+  // 1年間の所定労働日数（給与の計算期間の終わりの日の年。従業員画面と同じく、会社カレンダーから数える）
+  // 残業代の時給（1年間における1か月平均所定労働時間で割る）と、最低賃金のチェックに使う
+  // undefined：読み込み中（この間は確定しない） / null：読み込めなかった（その月の所定労働日数で計算する）
   const periodEnd: string = staff.periodEnd || `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
   const dailyHours = Number(staff.scheduled_work_hours) || 0;
-  const [monthlyAverageHours, setMonthlyAverageHours] = useState<number | null>(null);
   useEffect(() => {
-    const loadAnnualWorkDays = async () => {
-      if (!db || staff.wage_type !== 'monthly') return;
+    let cancelled = false;
+    setExtras(p => ({ ...p, annualWorkDays: undefined }));
+    (async () => {
+      if (!db) return;
+      let days: number | null = null;
       try {
-        const patternId = Number(staff.calendar_pattern_id ?? 1);
-        let holidays = new Set<string>();
-        const companyCalendar: Record<string, number> = {};
-        if (patternId !== 0) {
-          const resHolidays = await db.select("SELECT holiday_date FROM holiday_master") as { holiday_date: string }[];
-          holidays = new Set(resHolidays.map(h => h.holiday_date.replace(/\//g, "-")));
-          const resCompany = await db.select("SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?", [patternId]) as { work_date: string; is_holiday: number }[];
-          resCompany.forEach(c => { companyCalendar[c.work_date] = c.is_holiday; });
-        }
-        const days = countAnnualWorkDays(Number(periodEnd.slice(0, 4)), patternId, parseWorkDays(staff.work_days), holidays, companyCalendar);
-        setMonthlyAverageHours(days * dailyHours / 12);
+        days = await loadAnnualWorkDays(db, staff, Number(periodEnd.slice(0, 4)));
       } catch (e) {
         console.error("年間の所定労働日数の読み込みエラー:", e);
       }
-    };
-    loadAnnualWorkDays();
-  }, [db, staff.wage_type, staff.calendar_pattern_id, staff.work_days, dailyHours, periodEnd]);
+      if (!cancelled) setExtras(p => ({ ...p, annualWorkDays: days }));
+    })();
+    return () => { cancelled = true; };
+  }, [db, staff.calendar_pattern_id, staff.work_days, periodEnd]);
+
+  // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
+  // 月給は「1年間における1月平均所定労働時間」で割る
+  const monthlyAverageHours = extras.annualWorkDays ? extras.annualWorkDays * dailyHours / 12 : null;
   const minimumWageCheck = checkMinimumWage(
     Master.toKenpoPrefName(staff.prefecture),
     periodEnd,
@@ -191,6 +172,10 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   // 保存処理
   const handleSaveResult = async () => {
     if (!db || !staff) return;
+    if (extras.annualWorkDays === undefined) {
+      alert("1年間の所定労働日数を読み込んでいます。少し待ってから、もう一度確定してください。");
+      return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
     if (result.success) {
       setIsSaved(true);

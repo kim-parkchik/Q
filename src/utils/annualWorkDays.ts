@@ -38,3 +38,32 @@ export const countAnnualWorkDays = (
   }
   return count;
 };
+
+/** loadAnnualWorkDays に要るDB操作（tauri-plugin-sql の Database と互換） */
+interface SelectDb {
+  select<T>(query: string, bindValues?: unknown[]): Promise<T>;
+}
+
+/**
+ * 従業員の1年間の所定労働日数を、祝日と会社カレンダーをDBから読んで数える
+ * （給与明細の残業代の時給・最低賃金のチェックと、勤怠画面の概算で同じ数え方にする）
+ */
+export const loadAnnualWorkDays = async (
+  db: SelectDb,
+  staff: { calendar_pattern_id?: unknown; work_days?: string | null },
+  year: number,
+): Promise<number> => {
+  const patternId = Number(staff.calendar_pattern_id ?? 1);
+  let holidays = new Set<string>();
+  const companyCalendar: Record<string, number> = {};
+  if (patternId !== 0) {
+    const resHolidays = await db.select<{ holiday_date: string }[]>("SELECT holiday_date FROM holiday_master");
+    holidays = new Set(resHolidays.map((h) => h.holiday_date.replace(/\//g, "-")));
+    const resCompany = await db.select<{ work_date: string; is_holiday: number }[]>(
+      "SELECT work_date, is_holiday FROM company_calendar WHERE pattern_id = ?",
+      [patternId],
+    );
+    resCompany.forEach((c) => { companyCalendar[c.work_date] = Number(c.is_holiday); });
+  }
+  return countAnnualWorkDays(year, patternId, parseWorkDays(staff.work_days), holidays, companyCalendar);
+};

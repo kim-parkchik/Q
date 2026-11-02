@@ -7,6 +7,8 @@ export interface SalaryItem {
   type: "earning" | "deduction";
   category: "fixed" | "variable" | "formula";
   display_order: number;
+  /** 支給項目を残業代の時給（割増賃金の基礎）に入れるか（1: 入れる / 0: 入れない） */
+  in_overtime_base: number;
 }
 
 interface Database {
@@ -35,7 +37,7 @@ export function useCustomItemManager(db: Database) {
   const loadMasterItems = async () => {
     try {
       const res = await db.select<SalaryItem[]>(
-        "SELECT id, name, type, category, display_order FROM salary_item_master ORDER BY display_order ASC, id ASC"
+        "SELECT id, name, type, category, display_order, COALESCE(in_overtime_base, 1) AS in_overtime_base FROM salary_item_master ORDER BY display_order ASC, id ASC"
       );
       setItems(res || []);
     } catch (e) {
@@ -160,6 +162,17 @@ export function useCustomItemManager(db: Database) {
     }
   };
 
+  // 支給項目を、残業代の時給（割増賃金の基礎）に入れるかを切り替える
+  const setOvertimeBase = async (id: number, include: boolean) => {
+    try {
+      await db.execute("UPDATE salary_item_master SET in_overtime_base = ? WHERE id = ?", [include ? 1 : 0, id]);
+      setItems(prev => prev.map(i => i.id === id ? { ...i, in_overtime_base: include ? 1 : 0 } : i));
+    } catch (e) {
+      console.error("残業代の時給に入れるかの保存に失敗しました:", e);
+      alert("保存に失敗しました。");
+    }
+  };
+
   const saveAmount = async (itemId: number, amount: number) => {
     if (!selectedStaffId) return;
     await db.execute(
@@ -189,6 +202,7 @@ export function useCustomItemManager(db: Database) {
     addMasterItem, 
     deleteMasterItem, 
     saveAmount,
+    setOvertimeBase,
     moveItem
   };
 }

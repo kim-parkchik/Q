@@ -24,7 +24,7 @@ export default function CustomItemManager({ db, staffList }: Props) {
     activeTab, setActiveTab,
     earnings, deductions, selectedStaffId, setSelectedStaffId, staffValues,
     newItemName, setNewItemName, newItemType, setNewItemType, newItemCategory, setNewItemCategory,
-    addMasterItem, deleteMasterItem, saveAmount,
+    addMasterItem, deleteMasterItem, saveAmount, setOvertimeBase,
     moveItem // ← 忘れずに受け取る
   } = useCustomItemManager(db);
 
@@ -102,6 +102,11 @@ export default function CustomItemManager({ db, staffList }: Props) {
                 <h4 style={{ color: "#3498db", borderBottom: "2px solid #3498db", paddingBottom: "5px", marginBottom: "15px", display: "flex", alignItems: "center", gap: "8px" }}>
                   <CircleDollarSign size={20} /> 支給項目（マスター）
                 </h4>
+                <p style={{ fontSize: "11px", color: "#666", lineHeight: 1.7, margin: "0 0 12px 0" }}>
+                  「残業代の時給に入れる」にチェックした手当は、基本給と合わせて残業代・休日手当・深夜手当の時給の計算に入れます。
+                  入れなくてよいのは、家族手当・通勤手当・別居手当・子女教育手当・住宅手当・臨時に支払う賃金・1か月を超える期間ごとに支払う賃金だけです（労働基準法37条5項・施行規則21条）。
+                  これに当たるかは名前ではなく中身で決まります（家族の人数に関係なく一律に払う家族手当、距離に関係なく一律に払う通勤手当などは入れます）。
+                </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   {earnings.map((item, index) => (
                     <div key={item.id} style={{ ...S.itemRow(item.type), padding: "10px" }}>
@@ -110,6 +115,14 @@ export default function CustomItemManager({ db, staffList }: Props) {
                         <div style={{ fontSize: "11px", color: "#666", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
                           {getCategoryContent(item.category)}
                         </div>
+                        <label style={{ fontSize: "11px", color: item.in_overtime_base ? "#333" : "#b45309", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={Number(item.in_overtime_base) !== 0}
+                            onChange={e => setOvertimeBase(item.id, e.target.checked)}
+                          />
+                          残業代の時給に入れる
+                        </label>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                         <div style={{ display: "flex", gap: "4px" }}>

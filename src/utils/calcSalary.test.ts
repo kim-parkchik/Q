@@ -3,12 +3,13 @@
  * 実行方法: bun test
  *
  * 2026年6月（平日22日・土日8日、6月7日が日曜）の勤怠で、実務でよくあるケースを確認する。
- * 月給 300,000円・所定8時間の人の時間単価は 300,000 ÷ (22日 × 8時間) = 1,704.5454…円。
+ * 月給 300,000円・所定8時間の人の時間単価は 300,000 ÷ (22日 × 8時間) = 1,704.5454…円
+ * （1年間の所定労働日数を渡さないときは、その月の所定労働日数で割る。渡したときのテストは「残業代の時給」）。
  */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
-    calculateSalary, saveSalaryResult, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
+    calculateSalary, loadCustomItems, saveSalaryResult, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
     getInsuranceByAge, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
@@ -499,6 +500,85 @@ describe("残業代の対象外（管理監督者など。労働基準法41条�
     test("設定がない（古いデータ）・チェックありの人は、今までどおり残業代の対象", () => {
         expect(calc(monthly, rows).isOvertimeEligible).toBe(true);
         expect(calc({ ...monthly, is_overtime_eligible: 1 }, rows).holidayWorkPay).toBeGreaterThan(0);
+    });
+});
+
+describe("残業代の時給（1年間における1か月平均所定労働時間で割る・手当も入れる。労基則19条・21条）", () => {
+    // 1年間の所定労働日数 245日（年間休日120日）・所定8時間 → 1か月平均所定労働時間 245 × 8 ÷ 12 = 163.33…時間
+    const annual = { annualWorkDays: 245 };
+    const items = [
+        { name: "役職手当", amount: 20000, type: "earning" as const },
+        { name: "家族手当", amount: 10000, type: "earning" as const, inOvertimeBase: false },
+        { name: "社宅費", amount: 5000, type: "deduction" as const },
+    ];
+    /** 6月15日(月)〜19日(金)に8時間ずつ */
+    const week2 = () => ["15", "16", "17", "18", "19"].map((d) => day(d, 8));
+
+    test("月給は、その月の所定労働日数ではなく、1年間における1か月平均所定労働時間で割る", () => {
+        // 週40時間を超えた8時間：300,000 ÷ 163.33… = 1,836.73…円 × 1.25 × 8 = 18,367.34…円
+        const r = calc(monthly, [...weekdays(), day("13", 8, "holiday_work")], annual);
+        expect(r.overtimeBaseHoursIsAnnual).toBe(true);
+        expect(r.overtimeBaseHours).toBeCloseTo(245 * 8 / 12, 10);
+        expect(r.overtimeHourlyRate).toBeCloseTo(300000 / (245 * 8 / 12), 10);
+        expect(r.standardOvertimePay).toBe(18367);
+        expect(r.totalEarnings).toBe(318367);
+    });
+    test("1年間の所定労働日数がわからないときは、その月の所定労働時間で割る（22日 × 8時間 = 176時間）", () => {
+        const r = calc(monthly, [...weekdays(), day("13", 8, "holiday_work")]);
+        expect(r.overtimeBaseHoursIsAnnual).toBe(false);
+        expect(r.overtimeBaseHours).toBe(176);
+        expect(r.standardOvertimePay).toBe(17045); // 300,000 ÷ 176 × 1.25 × 8 = 17,045.45…
+    });
+    test("欠勤控除は、今までどおりその月の所定労働日数で日割りする", () => {
+        const r = calc(monthly, [day("08", 0, "absent")], annual);
+        expect(r.absenceDeduction).toBe(13636); // 300,000 ÷ 22日
+    });
+    test("「残業代の時給に入れる」手当は月給に足して割る。外した手当（家族手当など）と控除項目は入れない", () => {
+        // 法定休日の8時間：(300,000 ＋ 役職手当 20,000) ÷ 163.33… = 1,959.18…円 × 1.35 × 8 = 21,159.18…円
+        const r = calc(monthly, [day("07", 8, "statutory_holiday")], { ...annual, customItems: items });
+        expect(r.overtimeBaseAllowances).toBe(20000);
+        expect(r.overtimeHourlyRate).toBeCloseTo(320000 / (245 * 8 / 12), 10);
+        expect(r.holidayWorkPay).toBe(21159);
+        expect(r.totalEarnings).toBe(300000 + 20000 + 10000 + 21159);
+    });
+    test("固定残業代と比べる法定の割増賃金も、手当を入れた時給で計算する", () => {
+        // 時間外16時間：1,959.18…円 × 1.25 × 16 = 39,183.67…円 → 39,184円。固定残業代 30,000円との差 9,184円を払う
+        const fixed = { ...monthly, fixed_overtime_hours: 14, fixed_overtime_allowance: 30000 };
+        const rows = [...weekdays(), day("13", 8, "holiday_work"), ...week2(), day("20", 8, "holiday_work")];
+        const r = calc(fixed, rows, { ...annual, customItems: items });
+        expect(r.fixedOvertimeExcess).toBe(9184);
+        expect(r.totalEarnings).toBe(300000 + 30000 + 9184 + 20000 + 10000);
+    });
+    test("時給制の人の月額の手当は、時間あたりにして時間外・深夜の割増に足す（時給の1.0倍分は働いた時間の賃金で払う）", () => {
+        // 1年間 240日 × 8時間 ÷ 12 = 160時間。役職手当 16,000円 ÷ 160 = 100円
+        // 時間外8時間：(1,200 × 0.25 ＋ 100 × 1.25) × 8 = 3,400円、深夜2時間：(1,200 ＋ 100) × 0.25 × 2 = 650円
+        const allowance = [{ name: "役職手当", amount: 16000, type: "earning" as const }];
+        const rows = [day("08", 8, "normal", { night_hours: 2 }), ...weekdays().slice(1), day("13", 8)];
+        const r = calc(hourly, rows, { annualWorkDays: 240, customItems: allowance });
+        expect(r.overtimeHourlyRate).toBe(1300);
+        expect(r.basePay).toBe(57600);
+        expect(r.standardOvertimePay).toBe(3400);
+        expect(r.nightPay).toBe(650);
+        expect(r.totalEarnings).toBe(57600 + 3400 + 650 + 16000);
+
+        // 「残業代の時給に入れる」を外せば、時給だけで計算する
+        const off = calc(hourly, rows, { annualWorkDays: 240, customItems: [{ ...allowance[0], inOvertimeBase: false }] });
+        expect([off.standardOvertimePay, off.nightPay]).toEqual([2400, 600]);
+    });
+    test("給与項目の読み込み：金額が入った項目だけを読み、「残業代の時給に入れる」を外した支給項目に印を付ける", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order) VALUES (1, '役職手当', 'earning', 'fixed', 10)");
+        db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order, in_overtime_base) VALUES (2, '住宅手当', 'earning', 'fixed', 20, 0)");
+        db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order) VALUES (3, '資格手当', 'earning', 'fixed', 30)");
+        db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order) VALUES (4, '社宅費', 'deduction', 'fixed', 10)");
+        db.exec("INSERT INTO staff_salary_values (staff_id, item_id, amount) VALUES ('S001', 1, 20000), ('S001', 2, 15000), ('S001', 3, 0), ('S001', 4, 5000)");
+        const asyncDb = { select: async (sql: string, params: any[]) => db.prepare(sql).all(...params) };
+        expect(await loadCustomItems(asyncDb, "S001")).toEqual([
+            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true },
+            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false },
+            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true },
+        ]);
     });
 });
 

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
-import { calculateSalary, calcDetailedDiff } from "../../utils/calcSalary";
+import { calculateSalary, calcDetailedDiff, loadCustomItems, type SalaryExtras } from "../../utils/calcSalary";
+import { loadAnnualWorkDays } from "../../utils/annualWorkDays";
 import * as Master from '../../constants';
 import { useToast } from "../../components/Toast";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
@@ -350,6 +351,31 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     }
   };
 
+  // --- 給与集計に使う、給与項目と1年間の所定労働日数（残業代の時給。給与明細と同じ読み方） ---
+  const [customItems, setCustomItems] = useState<SalaryExtras['customItems']>([]);
+  const [annualWorkDays, setAnnualWorkDays] = useState<number | null>(null);
+  const periodEndYear = payrollPeriod ? Number(payrollPeriod.endStr.slice(0, 4)) : targetYear;
+  useEffect(() => {
+    let cancelled = false;
+    setCustomItems([]);
+    setAnnualWorkDays(null);
+    if (!db || !selectedStaff) return;
+    (async () => {
+      try {
+        const [items, days] = await Promise.all([
+          loadCustomItems(db, selectedStaff.id),
+          loadAnnualWorkDays(db, selectedStaff, periodEndYear),
+        ]);
+        if (cancelled) return;
+        setCustomItems(items);
+        setAnnualWorkDays(days);
+      } catch (e) {
+        console.error("給与項目・年間の所定労働日数の読み込みエラー:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [db, selectedStaff, periodEndYear]);
+
   // --- 給与集計 ---
   const calcResult = useMemo(() => {
     // 1. 初期値をエンジン側の戻り値の構造と合わせる
@@ -400,8 +426,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         residentTax: 0, 
         prefecture: branchPrefecture, 
         dependents: Number(selectedStaff.dependents) || 0, 
-        customItems: [],
+        customItems,
         taxMethod: currentGroup?.tax_calc_method,
+        annualWorkDays,
       }, 
       targetYear, 
       targetMonth, 
@@ -410,7 +437,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, annualWorkDays]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {

@@ -87,7 +87,7 @@ export default function SummaryBoard({ am }: Props) {
           <div style={{ fontSize: "28px", fontWeight: "bold", color: "#2ecc71" }}>
             ¥{(calcResult?.totalEarnings ?? 0).toLocaleString()}
           </div>
-          <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・控除を反映済</div>
+          <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・手当・欠勤控除を反映済</div>
         </div>
       </div>
     </>

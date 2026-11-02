@@ -102,6 +102,14 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "fixed_overtime_excess", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 8,
+    description: "給与項目に、残業代の時給（割増賃金の基礎）に入れるかを追加（今までの項目は入れる）",
+    up: async (db) => {
+      // 労働基準法37条5項・施行規則21条で外せる7つの賃金以外は入れるのが原則なので、今までの項目は「入れる」にする
+      await addColumnIfMissing(db, "salary_item_master", "in_overtime_base", "INTEGER DEFAULT 1");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

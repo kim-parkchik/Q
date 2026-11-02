@@ -201,7 +201,8 @@ export const DB_SCHEMAS = [
     name TEXT NOT NULL,
     type TEXT NOT NULL,
     category TEXT NOT NULL, 
-    display_order INTEGER DEFAULT 0
+    display_order INTEGER DEFAULT 0,
+    in_overtime_base INTEGER DEFAULT 1 -- 支給項目を残業代の時給（割増賃金の基礎）に入れるか（1: 入れる / 0: 入れない。家族手当・通勤手当・住宅手当など）
   );`,
 
   // 11. スタッフ個別給与設定

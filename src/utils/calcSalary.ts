@@ -23,6 +23,20 @@
  *  - 時給制の人の、働いた時間の時給（1.0倍）はそのまま払う
  *  出典：労働基準法41条（e-Gov法令検索 https://laws.e-gov.go.jp/law/322AC0000000049）
  *        厚生労働省「労働基準法における管理監督者の範囲の適正化のために」https://www.mhlw.go.jp/bunya/roudoukijun/dl/kanri.pdf
+ *
+ * 残業代の時給（割増賃金の基礎）:
+ *  - 月給は「1年間における1か月平均所定労働時間」（1年間の所定労働日数 × 1日の所定労働時間 ÷ 12）で割る（労基則19条1項4号）
+ *  - 手当も入れる。入れなくてよいのは、家族手当・通勤手当・別居手当・子女教育手当・住宅手当・臨時に支払われた賃金・
+ *    1か月を超える期間ごとに支払われる賃金だけ（労基法37条5項・労基則21条。当たるかは名前でなく中身で決まる）
+ *    Q では、給与項目（支給）ごとに「残業代の時給に入れる」を選ぶ（固定残業代・通勤手当は入れない）
+ *  - 時給制の人の月額の手当は、同じく1年間における1か月平均所定労働時間で割って時給に足す（労基則19条1項7号）。
+ *    時給の1.0倍分は働いた時間の賃金で払っているので、手当の分は時間外・休日・深夜の割増に足す（法定内残業には足さない）
+ *  - 1年間の所定労働日数は、呼び出し側が会社カレンダーから数えて渡す（extras.annualWorkDays。utils/annualWorkDays.ts）。
+ *    渡されないときは、その月の所定労働日数で割る
+ *  出典：労働基準法施行規則19条・21条、労働基準法37条（e-Gov法令検索 https://laws.e-gov.go.jp/law/322M40000100023）
+ *        厚生労働省「残業、早出や休日出勤による割増賃金のチェック方法を教えてください。」
+ *        https://www.check-roudou.mhlw.go.jp/qa/roudousya/chingin/q3.html
+ *        （月給（各種手当を含んだ合計）÷ 1年間における1か月平均所定労働時間数）
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -47,13 +61,16 @@ export interface SalaryExtras {
   residentTax: number;
   prefecture: string;
   dependents: number;
-  customItems: { name: string; amount: number; type: 'earning' | 'deduction' }[];
+  /** 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる） */
+  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean }[];
   /** 源泉所得税の計算方法（給与規定グループの設定。省略時は月額表） */
   taxMethod?: TaxCalcMethod;
   /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
   flatTaxReductionRemaining?: number;
   /** この給与で精算する年末調整の過不足額（＋なら還付、−なら徴収。なければ 0） */
   yearEndSettlement?: number;
+  /** 1年間の所定労働日数（残業代の時給を出す「1年間における1か月平均所定労働時間」に使う。なければその月の所定労働日数で割る） */
+  annualWorkDays?: number | null;
 }
 
 export interface SalaryResult {
@@ -81,6 +98,14 @@ export interface SalaryResult {
   fixedOvertimeExcess: number;
   /** 残業代の対象か（false なら、時間外・休日の割増賃金を払わず、深夜の割増賃金だけ払う） */
   isOvertimeEligible: boolean;
+  /** 残業代の時給（月給制は (月給＋手当) ÷ 時間、時給制は 時給＋手当を時間あたりにした額。割増率を掛ける前） */
+  overtimeHourlyRate: number;
+  /** 残業代の時給に入れた手当の月額 */
+  overtimeBaseAllowances: number;
+  /** 月給・手当を割った時間（1か月平均所定労働時間。overtimeBaseHoursIsAnnual が false なら、その月の所定労働時間） */
+  overtimeBaseHours: number;
+  /** 1年間における1か月平均所定労働時間で割ったか */
+  overtimeBaseHoursIsAnnual: boolean;
   nightPay: number;
   paidLeavePay: number;           // 有給休暇の賃金（時給制）
   commutePay: number;
@@ -293,7 +318,7 @@ export const checkInsuredOnBonusDate = (
 };
 
 /**
- * 月給制の、その月の所定労働日数（欠勤控除・時間単価の計算に使う）
+ * 月給制の、その月の所定労働日数（欠勤控除に使う。1年間の所定労働日数がわからないときは、残業代の時給にも使う）
  * 従業員に月の所定労働日数があればそれを、なければその月の土日を除いた日数を使う
  */
 export const prescribedWorkDays = (staff: any, year: number, month: number): number => {
@@ -358,6 +383,24 @@ export const calcDetailedDiff = (inT: string, outT: string, bStart: string, bEnd
     total: Math.round((totalMin / 60) * 1000) / 1000,
     night: Math.round((nightMin / 60) * 1000) / 1000
   };
+};
+
+/**
+ * 従業員の給与項目（自動計算の項目を除き、金額が入っているもの）を読む
+ * 支給項目には、残業代の時給に入れるか（inOvertimeBase）も付ける
+ */
+export const loadCustomItems = async (db: any, staffId: string | number): Promise<SalaryExtras['customItems']> => {
+  const rows = await db.select(
+    `SELECT m.name, m.type, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base
+    FROM salary_item_master m
+    LEFT JOIN staff_salary_values v ON m.id = v.item_id AND v.staff_id = ?
+    WHERE m.category != 'formula'
+    ORDER BY m.type DESC, m.id ASC`,
+    [staffId]
+  ) as { name: string; type: 'earning' | 'deduction'; amount: number; in_overtime_base: number }[];
+  return rows
+    .filter(r => Number(r.amount) > 0)
+    .map(r => ({ name: r.name, amount: Number(r.amount), type: r.type, inOvertimeBase: Number(r.in_overtime_base) !== 0 }));
 };
 
 /**
@@ -490,6 +533,22 @@ export const calculateSalary = (
       Math.max(0, after - Master.LEGAL_WORK_HOURS_WEEKLY) - Math.max(0, before - Master.LEGAL_WORK_HOURS_WEEKLY);
   }
 
+  // ── 残業代の時給（割増賃金の基礎）─────────────────────────────
+  // 月給と月額の手当は「1年間における1か月平均所定労働時間」で割って時間あたりにする（上の「残業代の時給」）
+  const customItems = extras.customItems ?? [];
+  const overtimeBaseAllowances = (Number(extras.allowanceAmount) || 0)
+    + customItems
+      .filter(i => i.type === 'earning' && i.inOvertimeBase !== false)
+      .reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const annualWorkDays = Number(extras.annualWorkDays) || 0;
+  const overtimeBaseHoursIsAnnual = annualWorkDays > 0;
+  const overtimeBaseHours = overtimeBaseHoursIsAnnual
+    ? annualWorkDays * scheduledHours / 12
+    : prescribedWorkDays(staff, targetYear, targetMonth) * scheduledHours;
+  // 時給制の人の、月額の手当を時間あたりにした額
+  const allowancePerHour = overtimeBaseHours > 0 ? overtimeBaseAllowances / overtimeBaseHours : 0;
+  let overtimeHourlyRate = 0;
+
   if (staff.wage_type === 'monthly') {
     // DBの「base_wage」と JSの「baseWage」の両方に対応させる
     const rawWage = staff.base_wage ?? staff.baseWage ?? 0;
@@ -499,10 +558,9 @@ export const calculateSalary = (
     // 所定労働日数の確定
     const prescribedDays = prescribedWorkDays(staff, targetYear, targetMonth);
     
-    // 時給単価の計算（残業代などのベース）
-    const hourlyRate = (prescribedDays > 0 && scheduledHours > 0)
-      ? monthlyWage / (prescribedDays * scheduledHours)
-      : 0;
+    // 残業代の時給：(月給 ＋ 残業代の時給に入れる手当) ÷ 1年間における1か月平均所定労働時間
+    const hourlyRate = overtimeBaseHours > 0 ? (monthlyWage + overtimeBaseAllowances) / overtimeBaseHours : 0;
+    overtimeHourlyRate = hourlyRate;
 
     // ── 【ここを修正】 欠勤控除 ──
     // 先ほど算出した actualAbsentDays を使ってダイレクトに計算
@@ -569,6 +627,9 @@ export const calculateSalary = (
 
   } else {
     // ── 時給制 ────────────────────────────────────────────
+    // 割増には、時給に月額の手当を時間あたりにした額（allowancePerHour）を足す。
+    // 時給の1.0倍分は basePay で払っているので割増分だけを、手当の分は払っていないので割増率をそのまま掛ける
+    overtimeHourlyRate = (Number(staff.base_wage) || 0) + allowancePerHour;
     for (const row of sorted) {
       const h = Number(row.work_hours) || 0;
       const n = Number(row.night_hours) || 0;
@@ -584,11 +645,11 @@ export const calculateSalary = (
       paidLeaveHours += leaveHours;
       paidLeavePay += wage * leaveHours;
 
-      nightPay += wage * Master.NIGHT_SHIFT_RATE * n;
+      nightPay += (wage + allowancePerHour) * Master.NIGHT_SHIFT_RATE * n;
 
       if (type === 'statutory_holiday') {
         // 法定休日の労働：基本の時給分は basePay に入っているので、35%の割増分だけを足す（60h超のカウントには含めない）
-        holidayWorkPay += wage * (Master.HOLIDAY_WORK_RATE - 1) * h;
+        holidayWorkPay += (wage * (Master.HOLIDAY_WORK_RATE - 1) + allowancePerHour * Master.HOLIDAY_WORK_RATE) * h;
         holidayWorkHours += h;
         continue;
       }
@@ -605,8 +666,8 @@ export const calculateSalary = (
         const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
 
         // ★ 2. 金額を累積
-        standardOvertimePay += wage * (Master.OVERTIME_RATE - 1) * split.standard;
-        highOvertimePay += wage * (Master.OVERTIME_PREMIUM_RATE - 1) * split.high;
+        standardOvertimePay += (wage * (Master.OVERTIME_RATE - 1) + allowancePerHour * Master.OVERTIME_RATE) * split.standard;
+        highOvertimePay += (wage * (Master.OVERTIME_PREMIUM_RATE - 1) + allowancePerHour * Master.OVERTIME_PREMIUM_RATE) * split.high;
 
         // ★ 3. 外側の変数（合計時間）に足し込む
         standardPremiumHours += split.standard;
@@ -632,7 +693,6 @@ export const calculateSalary = (
                   : staff.commute_type === 'monthly' ? (Number(staff.commute_amount) || 0) : 0;
   const allowanceAmount = Number(extras.allowanceAmount) || 0;
 
-  const customItems = extras.customItems ?? [];
   const customEarnings   = customItems.filter(i => i.type === 'earning').reduce((s, i) => s + i.amount, 0);
   const customDeductions = customItems.filter(i => i.type === 'deduction').reduce((s, i) => s + i.amount, 0);
 
@@ -768,6 +828,10 @@ export const calculateSalary = (
     fixedOvertimeHours,
     fixedOvertimeExcess,
     isOvertimeEligible,
+    overtimeHourlyRate,
+    overtimeBaseAllowances,
+    overtimeBaseHours,
+    overtimeBaseHoursIsAnnual,
     nightPay: Math.floor(nightPay),
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,

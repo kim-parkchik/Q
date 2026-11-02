@@ -21,6 +21,7 @@ export default function PayStubModal(props: Props) {
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH
   } = usePayStubModal(props);
+  const { staff } = props;
 
   const padRows = (current: number, target: number) =>
   Array.from({ length: Math.max(0, target - current) }, (_, i) => (
@@ -237,6 +238,24 @@ export default function PayStubModal(props: Props) {
               </table>
             </div>
           </div>
+
+          {/* 残業代の時給：月給・手当を1年間における1か月平均所定労働時間で割った額（時給制で手当がない人は時給そのままなので出さない） */}
+          {(staff.wage_type === "monthly" || salary.overtimeBaseAllowances > 0)
+            && (salary.statutoryOvertimePay + salary.standardOvertimePay + salary.highOvertimePay + salary.holidayWorkPay + salary.nightPay + salary.fixedOvertimeAllowance) > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              残業代の時給：¥{salary.overtimeHourlyRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              <span style={{ color: "#666", marginLeft: 8 }}>
+                {staff.wage_type === "monthly"
+                  ? `（(基本給 ¥${(Number(staff.base_wage) || 0).toLocaleString()}${salary.overtimeBaseAllowances > 0 ? ` ＋ 手当 ¥${salary.overtimeBaseAllowances.toLocaleString()}` : ""}) ÷ ${salary.overtimeBaseHoursIsAnnual ? "1か月平均所定労働時間" : "この月の所定労働時間"} ${fmtH(salary.overtimeBaseHours)}）`
+                  : `（時給 ¥${(Number(staff.base_wage) || 0).toLocaleString()} ＋ 手当 ¥${salary.overtimeBaseAllowances.toLocaleString()} ÷ ${salary.overtimeBaseHoursIsAnnual ? "1か月平均所定労働時間" : "この月の所定労働時間"} ${fmtH(salary.overtimeBaseHours)}）`}
+              </span>
+              {!salary.overtimeBaseHoursIsAnnual && (
+                <div style={{ color: "#b45309", marginTop: 4 }}>
+                  1年間の所定労働日数がわからないため、この月の所定労働時間で割っています（従業員画面の出勤曜日・カレンダーを確かめてください）。
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 残業代の対象外（管理監督者など） */}
           {!salary.isOvertimeEligible && (

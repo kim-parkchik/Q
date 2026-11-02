@@ -198,4 +198,15 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied[0]).toStartWith("v7:");
         expect(db.query("SELECT fixed_overtime_allowance AS a, fixed_overtime_excess AS e FROM salary_results").get()).toEqual({ a: null, e: 0 });
     });
+    test("v8: v7 まで更新済みの会社ファイルに、給与項目を残業代の時給に入れるかの列を追加する（今までの項目は入れる）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE salary_item_master (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, type TEXT, category TEXT, display_order INTEGER)");
+        db.exec("INSERT INTO salary_item_master (name, type, category, display_order) VALUES ('役職手当', 'earning', 'fixed', 10)");
+        db.exec("PRAGMA user_version = 7");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 7);
+        expect(applied[0]).toStartWith("v8:");
+        expect(db.query("SELECT in_overtime_base AS v FROM salary_item_master").get()).toEqual({ v: 1 });
+    });
 });
