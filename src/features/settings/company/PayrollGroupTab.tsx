@@ -25,7 +25,9 @@ import {
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
 import { TAX_CALC_METHOD_LABELS, type TaxCalcMethod } from '../../../utils/incomeTax';
-import { SOCIAL_INS_COLLECTION_LABELS, toSocialInsCollection, type SocialInsCollection } from '../../../utils/calcSalary';
+import {
+    PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, toProrationMethod, toSocialInsCollection, type ProrationMethod, type SocialInsCollection,
+} from '../../../utils/calcSalary';
 
 interface Props {
     cm: CompanyManagerState;
@@ -46,6 +48,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgTaxMethod,
         pgSocialInsCollection,
         setPgSocialInsCollection,
+        pgProrationMethod,
+        setPgProrationMethod,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -84,6 +88,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                     <span style={{ marginLeft: "6px", color: "#94a3b8" }}>
                                         / 所得税: {TAX_CALC_METHOD_LABELS[(pg.tax_calc_method === "densanki" ? "densanki" : "table") as TaxCalcMethod]}
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
+                                        / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
                                     </span>
                                 </div>
                             </div>
@@ -201,6 +206,24 @@ export default function PayrollGroupTab({ cm }: Props) {
                         翌月徴収にすると、料率の切り替え・入社した月・退職した月・産休育休の免除は、前月の分で決まります。
                         退職するときは、最後の給与から前月と退職した月の2か月分を引けます。雇用保険料と賞与の保険料は、どちらでも支払ったときに引きます。
                         途中で切り替えると、1か月分を引かない（2か月分を引く）月が出るので、切り替える月に気をつけてください。
+                    </p>
+
+                    <label style={miniLabelStyle}>計算期間の途中で入社・退職した人の月給</label>
+                    <select
+                        value={pgProrationMethod}
+                        onChange={e => setPgProrationMethod(e.target.value as ProrationMethod)}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="none">{PRORATION_METHOD_LABELS.none}（満額を払う）</option>
+                        <option value="workdays">{PRORATION_METHOD_LABELS.workdays}（月額 × 在籍した日の所定労働日数 ÷ 計算期間の所定労働日数）</option>
+                        <option value="calendar">{PRORATION_METHOD_LABELS.calendar}（月額 × 在籍した暦日数 ÷ 計算期間の暦日数）</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        日割りのしかたは法律では決まっていないので、会社の賃金規程（就業規則）に合わせて選んでください。
+                        厚生労働省のモデル就業規則（第46条第2項）は「当該計算期間の所定労働日数を基準に日割計算」です。
+                        月給制の人の基本給と、給与項目のうち「固定（毎月同額）」の支給項目を日割りします（1円未満は切り上げ）。
+                        固定残業代・通勤手当・「変動」の項目は日割りしないので、規程で日割りするなら金額を直してください。
+                        所定労働日数は、会社カレンダー（従業員の出勤曜日）から数えます。
                     </p>
 
                     <div style={{ display: "flex", gap: "10px" }}>

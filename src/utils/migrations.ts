@@ -125,6 +125,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "payroll_groups", "social_ins_collection", "TEXT DEFAULT 'current'");
     },
   },
+  {
+    version: 11,
+    description: "給与規定グループに、途中で入社・退職した月給制の人の日割りのしかたを追加（今までのグループは日割りしない）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "proration_method", "TEXT DEFAULT 'none'");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

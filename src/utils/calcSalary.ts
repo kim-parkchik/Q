@@ -69,8 +69,8 @@ export interface SalaryExtras {
   residentTax: number;
   prefecture: string;
   dependents: number;
-  /** 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる） */
-  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean }[];
+  /** 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる）。fixed は「固定（毎月同額）」の項目（日割りする） */
+  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean; fixed?: boolean }[];
   /** 源泉所得税の計算方法（給与規定グループの設定。省略時は月額表） */
   taxMethod?: TaxCalcMethod;
   /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
@@ -83,6 +83,13 @@ export interface SalaryExtras {
   socialInsCollection?: SocialInsCollection;
   /** 翌月徴収で、退職する月の給与から、その月の分の保険料も引く（この後に給与を払わないとき） */
   collectRetirementMonth?: boolean;
+  /** 計算期間の途中で入社・退職した人の日割り（給与規定グループの設定。省略時はしない） */
+  prorationMethod?: ProrationMethod;
+  /** 給与の計算期間（YYYY-MM-DD。日割りに使う） */
+  period?: { start: string; end: string } | null;
+  /** 計算期間の所定労働日数と、そのうち在籍した日の所定労働日数（所定労働日数で日割りするとき） */
+  periodWorkDays?: number | null;
+  employedWorkDays?: number | null;
 }
 
 export interface SalaryResult {
@@ -127,6 +134,13 @@ export interface SalaryResult {
   commutePay: number;
   allowanceAmount: number;
   customEarnings: number;
+  /** 給与項目ごとの支給額・控除額（固定の支給項目は日割りした額） */
+  customEarningLines: { name: string; amount: number }[];
+  customDeductionLines: { name: string; amount: number }[];
+  /** 計算期間の途中で入社・退職したときの日割り（日割りしなければ null）。基本給（月給制）と固定の支給項目に使う */
+  proration: Proration | null;
+  /** 日割りできなかったときの注意 */
+  prorationNote: string | null;
   totalEarnings: number;
   /** 通勤手当のうち所得税がかからない額 */
   nonTaxableCommute: number;
@@ -413,16 +427,16 @@ export const calcDetailedDiff = (inT: string, outT: string, bStart: string, bEnd
  */
 export const loadCustomItems = async (db: any, staffId: string | number): Promise<SalaryExtras['customItems']> => {
   const rows = await db.select(
-    `SELECT m.name, m.type, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base
+    `SELECT m.name, m.type, m.category, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base
     FROM salary_item_master m
     LEFT JOIN staff_salary_values v ON m.id = v.item_id AND v.staff_id = ?
     WHERE m.category != 'formula'
     ORDER BY m.type DESC, m.id ASC`,
     [staffId]
-  ) as { name: string; type: 'earning' | 'deduction'; amount: number; in_overtime_base: number }[];
+  ) as { name: string; type: 'earning' | 'deduction'; category: string; amount: number; in_overtime_base: number }[];
   return rows
     .filter(r => Number(r.amount) > 0)
-    .map(r => ({ name: r.name, amount: Number(r.amount), type: r.type, inOvertimeBase: Number(r.in_overtime_base) !== 0 }));
+    .map(r => ({ name: r.name, amount: Number(r.amount), type: r.type, inOvertimeBase: Number(r.in_overtime_base) !== 0, fixed: r.category === 'fixed' }));
 };
 
 /**
@@ -590,6 +604,68 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
   return { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, healthInsurance, nursingInsurance, childSupport, welfarePension };
 };
 
+/** 計算期間の途中で入社・退職した人の日割り：none: しない / workdays: 所定労働日数で / calendar: 暦日数で */
+export type ProrationMethod = 'none' | 'workdays' | 'calendar';
+
+export const PRORATION_METHOD_LABELS: Record<ProrationMethod, string> = {
+  none: '日割りしない',
+  workdays: '所定労働日数で日割り',
+  calendar: '暦日数で日割り',
+};
+
+export const toProrationMethod = (value: unknown): ProrationMethod =>
+  (value === 'workdays' || value === 'calendar' ? value : 'none');
+
+/** 日割りの割合（在籍した日数 ÷ 計算期間の日数） */
+export interface Proration {
+  method: ProrationMethod;
+  numerator: number;
+  denominator: number;
+}
+
+/** 月額を日割りする（1円未満は切り上げる。払う額が少なくならないように） */
+export const prorate = (amount: number, p: Proration | null): number =>
+  p ? Math.ceil((Math.floor(Number(amount) || 0) * p.numerator) / p.denominator) : Math.floor(Number(amount) || 0);
+
+/**
+ * 計算期間の途中で入社・退職した人の月額の賃金の日割り（日割りしない・期間の途中でないときは proration が null）
+ * 日割りのしかたは法律では決まっておらず、会社の賃金規程で決める。
+ * ・workdays：月額 × 在籍した日の所定労働日数 ÷ 計算期間の所定労働日数
+ *   （厚生労働省「モデル就業規則（令和7年12月版）」第46条第2項：計算期間の中途で採用された労働者又は退職した労働者については、
+ *    月額の賃金は当該計算期間の所定労働日数を基準に日割計算して支払う）
+ * ・calendar：月額 × 在籍した暦日数 ÷ 計算期間の暦日数
+ * @param periodWorkDays   計算期間の所定労働日数（workdays のとき。呼び出し側が会社カレンダーから数える）
+ * @param employedWorkDays 計算期間のうち在籍した日の所定労働日数
+ */
+export const prorationOf = (
+  staff: any,
+  method: ProrationMethod,
+  period: { start: string; end: string } | null | undefined,
+  periodWorkDays: number | null | undefined,
+  employedWorkDays: number | null | undefined,
+): { proration: Proration | null; note: string | null } => {
+  if (method === 'none' || !period) return { proration: null, note: null };
+  const join = staff.join_date || '';
+  const retire = staff.retirement_date || '';
+  const joinedMidway = !!join && join > period.start && join <= period.end;
+  const retiredMidway = !!retire && retire >= period.start && retire < period.end;
+  if (!joinedMidway && !retiredMidway) return { proration: null, note: null };
+
+  const from = joinedMidway ? join : period.start;
+  const to = retiredMidway ? retire : period.end;
+  if (method === 'calendar') {
+    const days = (a: string, b: string) => dayjs(b).diff(dayjs(a), 'day') + 1;
+    return { proration: { method, numerator: Math.max(0, days(from, to)), denominator: days(period.start, period.end) }, note: null };
+  }
+  if (periodWorkDays === null || periodWorkDays === undefined || employedWorkDays === null || employedWorkDays === undefined) {
+    return { proration: null, note: '会社カレンダーを読み込めていないため、日割りしていません' };
+  }
+  if (periodWorkDays <= 0) {
+    return { proration: null, note: '計算期間に所定労働日がないため、日割りしていません（従業員画面の出勤曜日・会社カレンダーを確かめてください）' };
+  }
+  return { proration: { method, numerator: Math.min(employedWorkDays, periodWorkDays), denominator: periodWorkDays }, note: null };
+};
+
 export const calculateSalary = (
   staff: any,
   attendanceData: any[],
@@ -646,6 +722,11 @@ export const calculateSalary = (
       Math.max(0, after - Master.LEGAL_WORK_HOURS_WEEKLY) - Math.max(0, before - Master.LEGAL_WORK_HOURS_WEEKLY);
   }
 
+  // ── 計算期間の途中で入社・退職した人の日割り ─────────────────────
+  const { proration, note: prorationNote } = prorationOf(
+    staff, toProrationMethod(extras.prorationMethod), extras.period, extras.periodWorkDays, extras.employedWorkDays,
+  );
+
   // ── 残業代の時給（割増賃金の基礎）─────────────────────────────
   // 月給と月額の手当は「1年間における1か月平均所定労働時間」で割って時間あたりにする（上の「残業代の時給」）
   const customItems = extras.customItems ?? [];
@@ -673,7 +754,8 @@ export const calculateSalary = (
       // DBの「base_wage」と JSの「baseWage」の両方に対応させる
       const rawWage = staff.base_wage ?? staff.baseWage ?? 0;
       const monthlyWage = Number(rawWage);
-      basePay = monthlyWage;
+      // 計算期間の途中で入社・退職した月は、日割りする（残業代の時給・欠勤控除は、日割りする前の月給で計算する）
+      basePay = prorate(monthlyWage, proration);
 
       // 所定労働日数の確定
       const prescribedDays = prescribedWorkDays(staff, targetYear, targetMonth);
@@ -832,8 +914,12 @@ export const calculateSalary = (
                   : staff.commute_type === 'monthly' ? (Number(staff.commute_amount) || 0) : 0;
   const allowanceAmount = Number(extras.allowanceAmount) || 0;
 
-  const customEarnings   = customItems.filter(i => i.type === 'earning').reduce((s, i) => s + i.amount, 0);
-  const customDeductions = customItems.filter(i => i.type === 'deduction').reduce((s, i) => s + i.amount, 0);
+  // 固定（毎月同額）の支給項目は、基本給と同じく日割りする（変動の項目は、その月に入れた額のまま）
+  const customEarningLines = customItems.filter(i => i.type === 'earning')
+    .map(i => ({ name: i.name, amount: i.fixed ? prorate(i.amount, proration) : Number(i.amount) || 0 }));
+  const customDeductionLines = customItems.filter(i => i.type === 'deduction').map(i => ({ name: i.name, amount: Number(i.amount) || 0 }));
+  const customEarnings   = customEarningLines.reduce((s, i) => s + i.amount, 0);
+  const customDeductions = customDeductionLines.reduce((s, i) => s + i.amount, 0);
 
   // ── 支給合計 ──────────────────────────────────────────────
   // const premiums = standardOvertimePay + highOvertimePay + nightPay;
@@ -948,6 +1034,10 @@ export const calculateSalary = (
     commutePay,
     allowanceAmount,
     customEarnings,
+    customEarningLines,
+    customDeductionLines,
+    proration,
+    prorationNote,
     totalEarnings,
     nonTaxableCommute,
     taxableAmount,

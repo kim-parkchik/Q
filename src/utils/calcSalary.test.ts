@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
-    calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
+    calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, prorate, prorationOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
     getInsuranceByAge, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
@@ -329,6 +329,60 @@ describe("年末調整の過不足額の精算（12月の給与で）", () => {
     });
 });
 
+describe("計算期間の途中で入社・退職した人の日割り（会社の規程。モデル就業規則 第46条第2項は所定労働日数）", () => {
+    const june = { start: "2026-06-01", end: "2026-06-30" };
+    test("日割りしない設定・期間の途中でない人は、日割りしない", () => {
+        expect(prorationOf({ join_date: "2026-06-16" }, "none", june, 22, 11).proration).toBeNull();
+        expect(prorationOf({ join_date: "2026-06-01" }, "calendar", june, 22, 22).proration).toBeNull();
+        expect(prorationOf({ join_date: "2020-04-01", retirement_date: "2026-06-30" }, "calendar", june, 22, 22).proration).toBeNull();
+    });
+    test("暦日数：在籍した暦日数 ÷ 計算期間の暦日数（6月16日入社 → 15日 ÷ 30日）", () => {
+        expect(prorationOf({ join_date: "2026-06-16" }, "calendar", june, null, null).proration).toEqual({ method: "calendar", numerator: 15, denominator: 30 });
+        expect(prorationOf({ join_date: "2020-04-01", retirement_date: "2026-06-10" }, "calendar", june, null, null).proration)
+            .toEqual({ method: "calendar", numerator: 10, denominator: 30 });
+        // 同じ期間に入社して退職した
+        expect(prorationOf({ join_date: "2026-06-11", retirement_date: "2026-06-20" }, "calendar", june, null, null).proration?.numerator).toBe(10);
+        // 20日締め（5月21日〜6月20日）の期間に6月1日入社 → 20日 ÷ 31日
+        expect(prorationOf({ join_date: "2026-06-01" }, "calendar", { start: "2026-05-21", end: "2026-06-20" }, null, null).proration)
+            .toEqual({ method: "calendar", numerator: 20, denominator: 31 });
+    });
+    test("所定労働日数：在籍した日の所定労働日数 ÷ 計算期間の所定労働日数（呼び出し側が会社カレンダーから数えた数）", () => {
+        expect(prorationOf({ join_date: "2026-06-16" }, "workdays", june, 22, 11).proration).toEqual({ method: "workdays", numerator: 11, denominator: 22 });
+        const missing = prorationOf({ join_date: "2026-06-16" }, "workdays", june, null, null);
+        expect(missing.proration).toBeNull();
+        expect(missing.note).toContain("会社カレンダー");
+        expect(prorationOf({ join_date: "2026-06-16" }, "workdays", june, 0, 0).note).toContain("所定労働日がない");
+    });
+    test("日割りした額は1円未満を切り上げる", () => {
+        expect(prorate(250000, { method: "calendar", numerator: 11, denominator: 30 })).toBe(91667); // 91,666.66…
+        expect(prorate(300000, { method: "calendar", numerator: 15, denominator: 30 })).toBe(150000);
+        expect(prorate(300000, null)).toBe(300000);
+    });
+    test("月給と「固定」の支給項目を日割りし、「変動」の項目・残業代の時給・欠勤控除は日割りする前の額で計算する", () => {
+        const joined = { ...monthly, join_date: "2026-06-16" };
+        const items = [
+            { name: "役職手当", amount: 20000, type: "earning" as const, fixed: true },
+            { name: "資格手当", amount: 5000, type: "earning" as const, fixed: false },
+            { name: "社宅費", amount: 3000, type: "deduction" as const, fixed: true },
+        ];
+        const r = calc(joined, [day("17", 0, "absent")], { prorationMethod: "calendar", period: june, customItems: items, annualWorkDays: 245 });
+        expect(r.proration).toEqual({ method: "calendar", numerator: 15, denominator: 30 });
+        expect(r.basePay).toBe(150000);
+        expect(r.customEarningLines).toEqual([{ name: "役職手当", amount: 10000 }, { name: "資格手当", amount: 5000 }]);
+        expect(r.customDeductionLines).toEqual([{ name: "社宅費", amount: 3000 }]);
+        expect(r.absenceDeduction).toBe(13636); // 300,000 ÷ 22日（日割りする前の月給）
+        expect(r.overtimeHourlyRate).toBeCloseTo((300000 + 25000) / (245 * 8 / 12), 10);
+        expect(r.totalEarnings).toBe(150000 - 13636 + 10000 + 5000);
+    });
+    test("時給制・日給制の人は基本給を日割りしない（固定の支給項目は日割りする）", () => {
+        const r = calc({ ...hourly, join_date: "2026-06-16" }, [day("16", 8)], {
+            prorationMethod: "calendar", period: june, customItems: [{ name: "役職手当", amount: 20000, type: "earning", fixed: true }],
+        });
+        expect(r.basePay).toBe(9600);
+        expect(r.customEarnings).toBe(10000);
+    });
+});
+
 describe("社会保険料の徴収月（当月徴収・翌月徴収。健康保険法167条・厚生年金保険法84条）", () => {
     const at = (staff: any, year: number, month: number, o: Partial<SalaryExtras> = {}) =>
         calculateSalary(staff, [], extras(o), year, month, company);
@@ -643,9 +697,9 @@ describe("残業代の時給（1年間における1か月平均所定労働時�
         db.exec("INSERT INTO staff_salary_values (staff_id, item_id, amount) VALUES ('S001', 1, 20000), ('S001', 2, 15000), ('S001', 3, 0), ('S001', 4, 5000)");
         const asyncDb = { select: async (sql: string, params: any[]) => db.prepare(sql).all(...params) };
         expect(await loadCustomItems(asyncDb, "S001")).toEqual([
-            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true },
-            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false },
-            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true },
+            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true, fixed: true },
+            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false, fixed: true },
+            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true, fixed: true },
         ]);
     });
 });

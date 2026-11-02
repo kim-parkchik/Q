@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { MINIMUM_WAGES } from "../constants/minimumWage";
 import { INSURANCE_2026 } from "../constants/insurance";
 import { baseWagePerHour, checkMinimumWage, describeMinimumWage, minimumWageOn, nextMinimumWage } from "./minimumWage";
-import { countAnnualWorkDays, parseWorkDays } from "./annualWorkDays";
+import { countAnnualWorkDays, countPrescribedWorkDays, parseWorkDays } from "./annualWorkDays";
 
 describe("最低賃金のデータ", () => {
     test("47都道府県そろっていて、名前は保険料率と同じ書き方", () => {
@@ -92,5 +92,23 @@ describe("1年間の所定労働日数", () => {
         expect(countAnnualWorkDays(2026, 1, {}, holidays, {})).toBe(260);
         expect(countAnnualWorkDays(2026, 1, {}, holidays, { "2026-01-03": 0 })).toBe(261); // 土曜を出勤日に
         expect(countAnnualWorkDays(2026, 1, {}, holidays, { "2026-01-02": 1 })).toBe(259); // 金曜を休みに
+    });
+});
+
+describe("期間の所定労働日数（日割りに使う）", () => {
+    const ctx = (o: Partial<Parameters<typeof countPrescribedWorkDays>[0]> = {}) =>
+        ({ patternId: 1, workDays: parseWorkDays(""), holidays: new Set<string>(), companyCalendar: {}, ...o });
+    test("土日と祝日を休みにし、会社カレンダーで休み・出勤に変えた日を反映する（2026年6月は平日22日）", () => {
+        expect(countPrescribedWorkDays(ctx(), "2026-06-01", "2026-06-30")).toBe(22);
+        expect(countPrescribedWorkDays(ctx({ companyCalendar: { "2026-06-15": 1 } }), "2026-06-01", "2026-06-30")).toBe(21);
+        expect(countPrescribedWorkDays(ctx({ companyCalendar: { "2026-06-13": 0 } }), "2026-06-01", "2026-06-30")).toBe(23);
+        expect(countPrescribedWorkDays(ctx({ holidays: new Set(["2026-06-16"]) }), "2026-06-16", "2026-06-30")).toBe(10);
+    });
+    test("カレンダーパターン0（曜日で決める）は、出勤する曜日の日数。期間が逆なら0", () => {
+        expect(countPrescribedWorkDays(ctx({ patternId: 0, workDays: parseWorkDays("mon,wed,fri") }), "2026-06-01", "2026-06-30")).toBe(13);
+        expect(countPrescribedWorkDays(ctx(), "2026-06-30", "2026-06-01")).toBe(0);
+    });
+    test("年をまたぐ期間も数えられる", () => {
+        expect(countPrescribedWorkDays(ctx(), "2025-12-29", "2026-01-02")).toBe(5);
     });
 });

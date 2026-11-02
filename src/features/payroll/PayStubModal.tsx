@@ -78,6 +78,13 @@ export default function PayStubModal(props: Props) {
               この明細は勤怠に残した{staff.wage_type === "daily" ? "日給" : "時給"}で計算しています。履歴の値で計算するなら、勤怠の画面でその日を確定し直してください。
             </div>
           )}
+          {(salary.proration || salary.prorationNote) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: salary.prorationNote ? "#b45309" : "#475569" }}>
+              {salary.proration
+                ? `計算期間の途中で入社・退職したため、月給${salary.customEarningLines.length > 0 ? "と固定の支給項目" : ""}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。固定残業代・通勤手当は日割りしていません。`
+                : `⚠ ${salary.prorationNote}`}
+            </div>
+          )}
           {salary.socialInsCollection === "next" && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
               社会保険料（翌月徴収）：この給与から{insMonthLabel}を引きます。
@@ -183,7 +190,7 @@ export default function PayStubModal(props: Props) {
               <table style={S.tableS}>
                 <thead><tr style={S.theadS}><th colSpan={2} style={S.thS}>支給項目</th></tr></thead>
                 <tbody>
-                  <tr><td style={S.tdS}>{staff.wage_type === "daily" ? `日給(${Number(salary.dailyWageDays.toFixed(2))}日分)` : "基本給/時給分"}</td><td style={S.rtdS}>¥{salary.basePay.toLocaleString()}</td></tr>
+                  <tr><td style={S.tdS}>{staff.wage_type === "daily" ? `日給(${Number(salary.dailyWageDays.toFixed(2))}日分)` : salary.proration && staff.wage_type === "monthly" ? `基本給(日割り ${salary.proration.numerator}/${salary.proration.denominator}日)` : "基本給/時給分"}</td><td style={S.rtdS}>¥{salary.basePay.toLocaleString()}</td></tr>
                   
                   {/* 欠勤控除 */}
                   {salary.absenceDeduction > 0 && (

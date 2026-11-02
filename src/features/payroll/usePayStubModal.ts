@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
-import { calculateSalary, loadCustomItems, saveSalaryResult, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
+import { calculateSalary, loadCustomItems, saveSalaryResult, toProrationMethod, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
-import { loadAnnualWorkDays } from '../../utils/annualWorkDays';
+import { countPrescribedWorkDays, loadCalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 
@@ -57,15 +57,16 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
-        ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number }[];
+        ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string }[];
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
         setExtras(p => ({
           ...p,
           taxMethod: method,
           socialInsCollection: toSocialInsCollection(rows?.[0]?.social_ins_collection),
           collectRetirementMonth: Number(rows?.[0]?.is_next_month) !== 1,
+          prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
         }));
       } catch (e) {
         console.error("給与規定グループの設定の読み込みエラー:", e);
@@ -128,28 +129,42 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   );
 
   const wageLabel = staff.wage_type === "monthly" ? "月給制" : staff.wage_type === "daily" ? "日給制" : "時給制";
-  const customEarningItems = extras.customItems.filter(i => i.type === 'earning');
-  const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
+  // 給与項目は、計算した額（固定の支給項目は日割りした額）で出す
+  const customEarningItems = salary.customEarningLines;
+  const customDeductionItems = salary.customDeductionLines;
   // 1年間の所定労働日数（給与の計算期間の終わりの日の年。従業員画面と同じく、会社カレンダーから数える）
   // 残業代の時給（1年間における1か月平均所定労働時間で割る）と、最低賃金のチェックに使う
   // undefined：読み込み中（この間は確定しない） / null：読み込めなかった（その月の所定労働日数で計算する）
+  // 給与の計算期間（給与一覧から開いたときは締日で区切った期間。わからなければその月の1日〜末日）
   const periodEnd: string = staff.periodEnd || `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+  const periodStart: string = staff.periodStart || `${year}-${String(month).padStart(2, '0')}-01`;
   const dailyHours = Number(staff.scheduled_work_hours) || 0;
+  // 会社カレンダーから、1年間の所定労働日数と、計算期間の所定労働日数・そのうち在籍した日の所定労働日数（日割り）を数える
   useEffect(() => {
     let cancelled = false;
     setExtras(p => ({ ...p, annualWorkDays: undefined }));
     (async () => {
       if (!db) return;
       let days: number | null = null;
+      let periodWorkDays: number | null = null;
+      let employedWorkDays: number | null = null;
       try {
-        days = await loadAnnualWorkDays(db, staff, Number(periodEnd.slice(0, 4)));
+        const ctx = await loadCalendarContext(db, staff);
+        const y = periodEnd.slice(0, 4);
+        days = countPrescribedWorkDays(ctx, `${y}-01-01`, `${y}-12-31`);
+        periodWorkDays = countPrescribedWorkDays(ctx, periodStart, periodEnd);
+        const from = staff.join_date && staff.join_date > periodStart ? staff.join_date : periodStart;
+        const to = staff.retirement_date && staff.retirement_date < periodEnd ? staff.retirement_date : periodEnd;
+        employedWorkDays = countPrescribedWorkDays(ctx, from, to);
       } catch (e) {
-        console.error("年間の所定労働日数の読み込みエラー:", e);
+        console.error("会社カレンダー（所定労働日数）の読み込みエラー:", e);
       }
-      if (!cancelled) setExtras(p => ({ ...p, annualWorkDays: days }));
+      if (!cancelled) {
+        setExtras(p => ({ ...p, annualWorkDays: days, period: { start: periodStart, end: periodEnd }, periodWorkDays, employedWorkDays }));
+      }
     })();
     return () => { cancelled = true; };
-  }, [db, staff.calendar_pattern_id, staff.work_days, periodEnd]);
+  }, [db, staff.calendar_pattern_id, staff.work_days, staff.join_date, staff.retirement_date, periodStart, periodEnd]);
 
   // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
   // 月給は「1年間における1月平均所定労働時間」で割る
@@ -190,7 +205,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   // 保存処理
   const handleSaveResult = async () => {
     if (!db || !staff) return;
-    if (extras.annualWorkDays === undefined || extras.socialInsCollection === undefined) {
+    if (extras.annualWorkDays === undefined || extras.socialInsCollection === undefined || extras.prorationMethod === undefined) {
       alert("給与規定グループの設定・1年間の所定労働日数を読み込んでいます。少し待ってから、もう一度確定してください。");
       return;
     }

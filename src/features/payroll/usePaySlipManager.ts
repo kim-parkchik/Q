@@ -102,7 +102,7 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
         [staff.id, period.startStr, period.endStr]
       );
       setAttendanceData(res || []);
-      setSelectedStaff({ ...staff, prefecture: getPrefecture(staff.branch_id || 1), periodLabel: period.displayRange, periodEnd: period.endStr });
+      setSelectedStaff({ ...staff, prefecture: getPrefecture(staff.branch_id || 1), periodLabel: period.displayRange, periodStart: period.startStr, periodEnd: period.endStr });
       setShowModal(true);
     } catch (err) {
       console.error("勤怠詳細のロードに失敗しました:", err);

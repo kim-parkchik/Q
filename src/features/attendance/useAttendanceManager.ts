@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
-import { calculateSalary, calcDetailedDiff, loadCustomItems, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
-import { loadAnnualWorkDays } from "../../utils/annualWorkDays";
+import { calculateSalary, calcDetailedDiff, loadCustomItems, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
+import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
 import { useToast } from "../../components/Toast";
@@ -354,30 +354,35 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     }
   };
 
-  // --- 給与集計に使う、給与項目と1年間の所定労働日数（残業代の時給。給与明細と同じ読み方） ---
+  // --- 給与集計に使う、給与項目と所定労働日数（残業代の時給・日割り。給与明細と同じ読み方） ---
   const [customItems, setCustomItems] = useState<SalaryExtras['customItems']>([]);
-  const [annualWorkDays, setAnnualWorkDays] = useState<number | null>(null);
-  const periodEndYear = payrollPeriod ? Number(payrollPeriod.endStr.slice(0, 4)) : targetYear;
+  const [workDays, setWorkDays] = useState<{ annual: number | null; period: number | null; employed: number | null }>({ annual: null, period: null, employed: null });
+  const periodStart = payrollPeriod?.startStr ?? "";
+  const periodEnd = payrollPeriod?.endStr ?? "";
   useEffect(() => {
     let cancelled = false;
     setCustomItems([]);
-    setAnnualWorkDays(null);
+    setWorkDays({ annual: null, period: null, employed: null });
     if (!db || !selectedStaff) return;
     (async () => {
       try {
-        const [items, days] = await Promise.all([
-          loadCustomItems(db, selectedStaff.id),
-          loadAnnualWorkDays(db, selectedStaff, periodEndYear),
-        ]);
+        const [items, ctx] = await Promise.all([loadCustomItems(db, selectedStaff.id), loadCalendarContext(db, selectedStaff)]);
         if (cancelled) return;
         setCustomItems(items);
-        setAnnualWorkDays(days);
+        const y = periodEnd ? periodEnd.slice(0, 4) : String(targetYear);
+        const from = selectedStaff.join_date && selectedStaff.join_date > periodStart ? selectedStaff.join_date : periodStart;
+        const to = selectedStaff.retirement_date && selectedStaff.retirement_date < periodEnd ? selectedStaff.retirement_date : periodEnd;
+        setWorkDays({
+          annual: countPrescribedWorkDays(ctx, `${y}-01-01`, `${y}-12-31`),
+          period: periodStart ? countPrescribedWorkDays(ctx, periodStart, periodEnd) : null,
+          employed: periodStart ? countPrescribedWorkDays(ctx, from, to) : null,
+        });
       } catch (e) {
-        console.error("給与項目・年間の所定労働日数の読み込みエラー:", e);
+        console.error("給与項目・所定労働日数の読み込みエラー:", e);
       }
     })();
     return () => { cancelled = true; };
-  }, [db, selectedStaff, periodEndYear]);
+  }, [db, selectedStaff, periodStart, periodEnd, targetYear]);
 
   // --- 給与集計 ---
   const calcResult = useMemo(() => {
@@ -431,7 +436,12 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         dependents: Number(selectedStaff.dependents) || 0, 
         customItems,
         taxMethod: currentGroup?.tax_calc_method,
-        annualWorkDays,
+        annualWorkDays: workDays.annual,
+        // 計算期間の途中で入社・退職した月給制の人の日割り（給与規定グループの設定）
+        prorationMethod: toProrationMethod(currentGroup?.proration_method),
+        period: periodStart ? { start: periodStart, end: periodEnd } : null,
+        periodWorkDays: workDays.period,
+        employedWorkDays: workDays.employed,
         // 社会保険料の徴収（給与規定グループの設定。翌月徴収の退職月は、当月払いなら退職した月の分も引く）
         socialInsCollection: toSocialInsCollection(currentGroup?.social_ins_collection),
         collectRetirementMonth: Number(currentGroup?.is_next_month) !== 1,
@@ -443,7 +453,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, annualWorkDays]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {

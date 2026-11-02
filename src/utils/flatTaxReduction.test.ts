@@ -231,4 +231,15 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied[0]).toStartWith("v10:");
         expect(db.query("SELECT social_ins_collection AS c FROM payroll_groups").get()).toEqual({ c: "current" });
     });
+    test("v11: v10 まで更新済みの会社ファイルに、給与規定グループの日割りのしかたの列を追加する（今までのグループは日割りしない）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE payroll_groups (id INTEGER PRIMARY KEY, name TEXT, closing_day INTEGER, is_next_month INTEGER, payment_day INTEGER)");
+        db.exec("INSERT INTO payroll_groups VALUES (1, '全社', 99, 0, 25)");
+        db.exec("PRAGMA user_version = 10");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 10);
+        expect(applied[0]).toStartWith("v11:");
+        expect(db.query("SELECT proration_method AS p FROM payroll_groups").get()).toEqual({ p: "none" });
+    });
 });

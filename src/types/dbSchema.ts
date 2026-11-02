@@ -335,6 +335,7 @@ export const DB_SCHEMAS = [
     payment_day INTEGER NOT NULL,    -- 1~31
     tax_calc_method TEXT DEFAULT 'table', -- 源泉所得税の計算方法 'table':月額表 / 'densanki':電算機計算の特例
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
+    proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,
 
