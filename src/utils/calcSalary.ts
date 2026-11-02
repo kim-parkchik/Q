@@ -55,7 +55,7 @@ import {
   getNightMinutesInPeriod, 
   getWeekKey
 } from './timeUtils';
-import { calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
+import { calcDailyHeiTaxByTable, calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
 import { checkLeaveExemptMonth, parseLeavePeriods } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
 import * as Master from '../constants';
@@ -156,8 +156,15 @@ export interface SalaryResult {
   incomeTax: number;
   /** 定額減税を引く前の源泉所得税 */
   incomeTaxBeforeReduction: number;
-  /** 源泉所得税の欄（甲欄・乙欄） */
+  /** 源泉所得税の欄（甲欄・乙欄・丙欄） */
   taxColumn: TaxColumn;
+  /**
+   * 丙欄で計算した日ごとの、社会保険料等控除後の給与等の金額と税額（丙欄でなければ空）
+   * date が null は、働いた日がなく1日分として計算したもの
+   */
+  heiDays: { date: string | null; amount: number; tax: number }[];
+  /** 丙欄の注意（入社から2か月を超えて働いた日がある・月給制の人など。なければ空） */
+  heiWarnings: string[];
   /** この給与で差し引いた定額減税額 */
   flatTaxReduction: number;
   /** この給与のあとに残る定額減税額（次の給与から引く） */
@@ -666,6 +673,82 @@ export const prorationOf = (
   return { proration: { method, numerator: Math.min(employedWorkDays, periodWorkDays), denominator: periodWorkDays }, note: null };
 };
 
+/**
+ * 金額を、重みの割合で分ける（1円未満は切り捨て。累計で分けるので、合計はもとの金額と同じになる）
+ */
+export const splitByWeights = (total: number, weights: number[]): number[] => {
+  const sum = weights.reduce((s, w) => s + w, 0);
+  if (weights.length === 0 || sum <= 0) return weights.map(() => 0);
+  let cumWeight = 0, given = 0;
+  return weights.map((w, i) => {
+    cumWeight += w;
+    const upto = i === weights.length - 1 ? total : Math.floor((total * cumWeight) / sum);
+    const amount = upto - given;
+    given = upto;
+    return amount;
+  });
+};
+
+/**
+ * 入社日から継続して2か月を超える最初の日（YYYY-MM-DD）。この日からの給与は丙欄を使えない（所得税法施行令309条かっこ書）
+ * 期間は入社日から数え、2か月後の応当日の前日に満了する。応当日がない月（1月31日入社の2月など）は、その月の末日に満了する（民法143条2項）
+ */
+export const heiLimitDate = (joinDate: string): string => {
+  const join = dayjs(joinDate);
+  const corresponding = join.add(2, 'month');
+  return (corresponding.date() === join.date() ? corresponding : corresponding.endOf('month').add(1, 'day')).format('YYYY-MM-DD');
+};
+
+/**
+ * 丙欄（日雇賃金）：その月の社会保険料等控除後の給与を、働いた日ごとに分けて、日額表の丙欄を当てはめる（所得税基本通達185-8）
+ * ・日ごとの給与は、勤怠から出したその日の支給額（日給・時給・有給休暇の賃金・残業代・深夜手当など）
+ * ・月額の手当・通勤手当の課税分・社会保険料のように日がわからない額は、日ごとの支給額の割合で分ける
+ * ・日ごとの支給額がない（月給制など）ときは働いた日数で等分し、働いた日もなければ1日分として計算する
+ */
+const heiDaysOf = (
+  staff: any,
+  sortedRows: any[],
+  dayPays: Record<string, { pay: number; overtime: number }>,
+  isOvertimeEligible: boolean,
+  taxBase: number,
+  payYear: number,
+): { days: SalaryResult['heiDays']; warnings: string[] } => {
+  const warnings: string[] = [];
+  const table = Master.getTaxMaster(payYear).DAILY_HEI_TABLE;
+  const workedDates = sortedRows.filter(r => (Number(r.work_hours) || 0) > 0).map(r => r.work_date as string);
+  let entries = staff.wage_type === 'monthly'
+    ? []
+    : Object.entries(dayPays)
+      .map(([date, d]) => ({ date, weight: d.pay + (isOvertimeEligible ? d.overtime : 0) }))
+      .filter(e => e.weight > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  if (staff.wage_type === 'monthly') {
+    warnings.push('月給制の人には丙欄を使えません（丙欄は、働いた日・時間で計算する給与に使います）。働いた日数で等分して計算しています。');
+  }
+  if (entries.length === 0) entries = workedDates.map(date => ({ date, weight: 1 }));
+
+  let days: SalaryResult['heiDays'];
+  if (entries.length === 0) {
+    days = taxBase > 0 ? [{ date: null, amount: taxBase, tax: calcDailyHeiTaxByTable(taxBase, table) }] : [];
+    if (taxBase > 0) warnings.push('働いた日がないため、1日分の給与として丙欄で計算しています。');
+  } else {
+    const amounts = splitByWeights(taxBase, entries.map(e => e.weight));
+    days = entries.map((e, i) => ({ date: e.date, amount: amounts[i], tax: calcDailyHeiTaxByTable(amounts[i], table) }));
+  }
+
+  // 同じ会社から継続して2か月を超えて払う分は丙欄を使えない
+  if (!staff.join_date) {
+    warnings.push('入社日が入っていないため、入社から2か月を超えたかどうかを確かめられません。');
+  } else {
+    const limit = heiLimitDate(staff.join_date);
+    const over = workedDates.filter(d => d >= limit).length;
+    if (over > 0) {
+      warnings.push(`入社日（${staff.join_date}）から2か月を超えた日（${limit}以後）に働いた日が${over}日あります。2か月を超えた日の給与には丙欄を使えません。従業員の設定で甲欄か乙欄に変えてください。`);
+    }
+  }
+  return { days, warnings };
+};
+
 export const calculateSalary = (
   staff: any,
   attendanceData: any[],
@@ -699,6 +782,15 @@ export const calculateSalary = (
   let holidayWorkHours = 0;
   let paidLeaveHours = 0;
   let dailyWageDays = 0;        // 日給制で日給を払った日数
+  // 日ごとの支給額（丙欄で、働いた日ごとの給与を出すのに使う）。overtime は残業代の対象外の人には払わない分
+  const dayPays: Record<string, { pay: number; overtime: number }> = {};
+  const payTotal = () => basePay + paidLeavePay + nightPay;
+  const overtimeTotal = () => statutoryOvertimePay + standardOvertimePay + highOvertimePay + holidayWorkPay;
+  const addDayPay = (date: string, pay: number, overtime: number) => {
+    const d = (dayPays[date] ??= { pay: 0, overtime: 0 });
+    d.pay += pay;
+    d.overtime += overtime;
+  };
   // 中小企業（2023年3月までの月60時間超の割増が猶予される）
   const isSmallBusiness = Number(companySettings?.is_small_business) === 1;
 
@@ -775,6 +867,7 @@ export const calculateSalary = (
       const h = Number(row.work_hours) || 0;
       const n = Number(row.night_hours) || 0;
       const type = row.work_type || 'normal';
+      const pay0 = payTotal(), overtime0 = overtimeTotal();
       totalWorkHours += h;
       totalNightHours += n;
 
@@ -844,6 +937,7 @@ export const calculateSalary = (
       // 平日残業(60h内)の場合：1.25 + 0.25 = 1.50
       // 平日残業(60h超)の場合：1.50 + 0.25 = 1.75
       nightPay += rate * Master.NIGHT_SHIFT_RATE * n;
+      addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
     }
 
   } else {
@@ -856,6 +950,7 @@ export const calculateSalary = (
       const n = Number(row.night_hours) || 0;
       const wage = Number(row.actual_base_wage) || Number(staff.base_wage) || 0;
       const type = row.work_type || 'normal';
+      const pay0 = payTotal(), overtime0 = overtimeTotal();
       totalWorkHours += h;
       totalNightHours += n;
 
@@ -872,6 +967,7 @@ export const calculateSalary = (
         // 法定休日の労働：基本の時給分は basePay に入っているので、35%の割増分だけを足す（60h超のカウントには含めない）
         holidayWorkPay += (wage * (Master.HOLIDAY_WORK_RATE - 1) + allowancePerHour * Master.HOLIDAY_WORK_RATE) * h;
         holidayWorkHours += h;
+        addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
         continue;
       }
 
@@ -896,6 +992,7 @@ export const calculateSalary = (
         deferredHighPremiumHours += split.deferred;
         totalOvertimeHours += legalOvertimeToday;
       }
+      addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
     }
   }
 
@@ -988,8 +1085,16 @@ export const calculateSalary = (
   const taxableAmount = totalEarnings - nonTaxableCommute;
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
   // 扶養控除等申告書を出していない人は乙欄（扶養人数は「従たる給与についての扶養控除等申告書」の人数）
+  // 日雇賃金は丙欄で、働いた日ごとに計算する（下の heiDaysOf）
   const taxColumn = toTaxColumn(staff.tax_column);
-  const incomeTaxBeforeReduction = getGensenTax(Math.max(0, taxableAmount - socialTotal), Number(extras.dependents) || 0, targetYear, extras.taxMethod, taxColumn);
+  const taxBase = Math.max(0, taxableAmount - socialTotal);
+  const isHei = taxColumn === 'hei';
+  const { days: heiDays, warnings: heiWarnings } = isHei
+    ? heiDaysOf(staff, sorted, dayPays, isOvertimeEligible, taxBase, targetYear)
+    : { days: [], warnings: [] };
+  const incomeTaxBeforeReduction = isHei
+    ? heiDays.reduce((sum, d) => sum + d.tax, 0)
+    : getGensenTax(taxBase, Number(extras.dependents) || 0, targetYear, extras.taxMethod, taxColumn);
   // 定額減税（令和6年6月〜）：残っている減税額を、源泉所得税を上限に差し引く
   const reductionBefore = Math.max(0, Math.floor(Number(extras.flatTaxReductionRemaining) || 0));
   const flatTaxReduction = Math.min(incomeTaxBeforeReduction, reductionBefore);
@@ -1028,7 +1133,7 @@ export const calculateSalary = (
     overtimeBaseHours,
     overtimeBaseHoursIsAnnual,
     dailyWageDays,
-    appliedDependents: Number(extras.dependents) || 0,
+    appliedDependents: isHei ? 0 : Number(extras.dependents) || 0,
     nightPay: Math.floor(nightPay),
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,
@@ -1051,6 +1156,8 @@ export const calculateSalary = (
     incomeTax,
     incomeTaxBeforeReduction,
     taxColumn,
+    heiDays,
+    heiWarnings,
     flatTaxReduction,
     flatTaxReductionRemaining: reductionBefore - flatTaxReduction,
     residentTax,

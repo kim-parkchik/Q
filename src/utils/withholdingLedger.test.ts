@@ -133,6 +133,7 @@ describe("精算の時期・不足額・年末調整をしない人", () => {
         expect([l.adjustment, l.dependentLines]).toEqual([null, null]);
         expect(l.salaryRows[11]).toMatchObject({ adjustment: 0 });
         expect(l.salaryTotal.tax).toBe(79170);
+        expect(buildWithholdingLedger(source({ staff: { name: "丙欄 次郎", tax_column: "hei" }, adjustment: null }), m).taxColumn).toBe("hei");
     });
     test("払っていない月の行は空。年末調整の表がない年分は、年末調整の欄を作らない", () => {
         const l = buildWithholdingLedger(source({ salaries: [salary(4), salary(5)], bonuses: [] }), null);

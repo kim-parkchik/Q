@@ -3,7 +3,7 @@
  * 
  * 参照元: 国税庁「令和3年〜令和7年分 月額表の甲欄を適用する給与等に対する税額の電算機計算の特例」（DENSANKI）
  *   URL: https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2022/data/denshi_10.pdf
- *         国税庁「令和7年分 源泉徴収税額表」（月額表・賞与の算出率の表）
+ *         国税庁「令和7年分 源泉徴収税額表」（月額表・日額表の丙欄・賞与の算出率の表）
  *   URL: https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2024/02.htm
  *
  * 適用期間: 2025年1月1日 〜 2025年12月31日
@@ -12,11 +12,13 @@
  * 内容:
  * 1. 月額表（monthlyTable2025.ts）と、電算機計算の特例（月額表の代わりに使える計算式）
  * 2. 賞与に対する源泉徴収税額の算出率の表（bonusTaxTable2025.ts）
- * 3. 通勤手当非課税限度額
+ * 3. 日額表の丙欄（dailyHeiTable2025.ts）
+ * 4. 通勤手当非課税限度額
  */
 
 import { MONTHLY_TABLE_2025 } from './monthlyTable2025';
 import { BONUS_TAX_TABLE_2025 } from './bonusTaxTable2025';
+import { DAILY_HEI_TABLE_2025 } from './dailyHeiTable2025';
 
 export const MASTER_YEAR = 2025;
 export const MASTER_MONTH = 1;
@@ -71,5 +73,7 @@ export const TAX_2025 = {
   MONTHLY_TABLE: MONTHLY_TABLE_2025,
   /** 賞与に対する源泉徴収税額の算出率の表（国税庁のExcelから自動生成） */
   BONUS_TABLE: BONUS_TAX_TABLE_2025,
+  /** 日額表の丙欄（国税庁のExcelから自動生成） */
+  DAILY_HEI_TABLE: DAILY_HEI_TABLE_2025,
   DEFAULT_COMMUTING_TAX_FREE_LIMIT,
 };

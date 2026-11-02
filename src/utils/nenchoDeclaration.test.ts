@@ -158,6 +158,7 @@ describe("年末調整の対象", () => {
     });
     test("乙欄の人・11月までに退職した人は対象外", () => {
         expect(nenchoExclusion({ tax_column: "otsu" }, 2026)).toContain("乙欄");
+        expect(nenchoExclusion({ tax_column: "hei" }, 2026)).toContain("丙欄");
         expect(nenchoExclusion({ retirement_date: "2026-11-30" }, 2026)).toContain("退職");
     });
 });

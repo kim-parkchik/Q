@@ -160,7 +160,8 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       result = null;
     }
   }
-  const otsu = toTaxColumn(staff.tax_column) === "otsu";
+  const column = toTaxColumn(staff.tax_column);
+  const otsu = column === "otsu";
 
   // 中途就・退職
   const joined = inYear(staff.join_date, year);
@@ -343,6 +344,9 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
     }
   } else if (otsu) {
     warnings.push("乙欄の人です。年末調整をしないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます（「従たる給与についての扶養控除等申告書」の人数の欄は、必要なら手で書き足してください）。");
+  } else if (column === "hei") {
+    // 「乙欄」の欄に丙欄の人も○を付けるのかは、国税庁の手引に書かれていないので付けない
+    warnings.push("丙欄（日雇賃金）の人です。年末調整をしないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます。「乙欄」の欄には○を付けていません。");
   } else {
     warnings.push("年末調整をしていないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます。控除対象配偶者・扶養親族の欄は、扶養控除等申告書を見て手で書き足してください。");
   }

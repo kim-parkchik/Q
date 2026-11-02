@@ -122,7 +122,7 @@ export const DB_SCHEMAS = [
     commute_type TEXT DEFAULT 'none', 
     commute_amount INTEGER DEFAULT 0, 
     dependents INTEGER DEFAULT 0, 
-    tax_column TEXT DEFAULT 'kou', -- 源泉所得税の欄（kou: 甲欄 / otsu: 乙欄）
+    tax_column TEXT DEFAULT 'kou', -- 源泉所得税の欄（kou: 甲欄 / otsu: 乙欄 / hei: 丙欄）
     resident_tax INTEGER DEFAULT 0,
     standard_remuneration INTEGER DEFAULT 0,  -- いちばん新しい標準報酬月額（その月の分の値は下の履歴から求める）
     standard_remuneration_history TEXT,      -- 標準報酬月額の履歴（何年何月分から・いくら・理由。JSON。詳しくは utils/standardRemuneration.ts）

@@ -2,7 +2,7 @@
  * 2026年分（令和8年分） 源泉徴収税額マスター
  * 
  * 参照元: 国税庁「令和8年分 電算機計算の特例」（DENSANKI）
- *         国税庁「令和8年分 源泉徴収税額表」（月額表・賞与の算出率の表）
+ *         国税庁「令和8年分 源泉徴収税額表」（月額表・日額表の丙欄・賞与の算出率の表）
  * URL: https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2026/01.htm
  *
  * 適用期間: 2026年1月1日 〜
@@ -11,11 +11,13 @@
  * 内容:
  * 1. 月額表（monthlyTable2026.ts）と、電算機計算の特例（月額表の代わりに使える計算式）
  * 2. 賞与に対する源泉徴収税額の算出率の表（bonusTaxTable2026.ts）
- * 3. 通勤手当非課税限度額
+ * 3. 日額表の丙欄（dailyHeiTable2026.ts）
+ * 4. 通勤手当非課税限度額
  */
 
 import { MONTHLY_TABLE_2026 } from './monthlyTable2026';
 import { BONUS_TAX_TABLE_2026 } from './bonusTaxTable2026';
+import { DAILY_HEI_TABLE_2026 } from './dailyHeiTable2026';
 
 export const MASTER_YEAR = 2026;
 export const MASTER_MONTH = 1;
@@ -78,5 +80,7 @@ export const TAX_2026 = {
   MONTHLY_TABLE: MONTHLY_TABLE_2026,
   /** 賞与に対する源泉徴収税額の算出率の表（国税庁のExcelから自動生成） */
   BONUS_TABLE: BONUS_TAX_TABLE_2026,
+  /** 日額表の丙欄（国税庁のExcelから自動生成） */
+  DAILY_HEI_TABLE: DAILY_HEI_TABLE_2026,
   DEFAULT_COMMUTING_TAX_FREE_LIMIT,
 };

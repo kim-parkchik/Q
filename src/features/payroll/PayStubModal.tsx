@@ -50,7 +50,7 @@ export default function PayStubModal(props: Props) {
               </select>
             </div>
             <div>
-              <label style={S.labelS}>扶養人数</label>
+              <label style={S.labelS}>{salary.taxColumn === "hei" ? "扶養人数（丙欄では使いません）" : "扶養人数"}</label>
               <input type="number" min={0} max={7} value={extras.dependents} onChange={e => setExtras(p => ({ ...p, dependents: Number(e.target.value) }))} style={S.inputS} />
             </div>
             <div>
@@ -117,6 +117,29 @@ export default function PayStubModal(props: Props) {
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && !salary.isLeaveExemptMonth && !salary.isHealthInsAgeTarget && <div>※ 75歳の誕生月の分から、健康保険料・子ども・子育て支援金はかかりません（後期高齢者医療制度へ移るため）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && !salary.isLeaveExemptMonth && !salary.isPensionAgeTarget && <div>※ 70歳に達した月（誕生日の前日がある月）の分から、厚生年金保険料はかかりません（70歳以上被用者）。</div>}
               {!salary.isEmploymentInsEnrolled && <div>※ 雇用保険は未加入のため控除していません（従業員設定の「雇用保険加入」）。</div>}
+            </div>
+          )}
+          {salary.taxColumn === "hei" && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              所得税は日額表の丙欄（日雇賃金）で、働いた日ごとの給与（社会保険料等を引いた額）に当てはめた税額の合計です（{salary.heiDays.length}日分）。
+              月額の手当や社会保険料のように日が決まらない額は、日ごとの支給額の割合で分けています。
+              {salary.heiDays.length > 0 && (
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ cursor: "pointer" }}>日ごとの金額と税額</summary>
+                  <table style={{ borderCollapse: "collapse", marginTop: 4 }}>
+                    <tbody>
+                      {salary.heiDays.map((d, i) => (
+                        <tr key={d.date ?? i}>
+                          <td style={{ padding: "1px 8px 1px 0" }}>{d.date ?? "（1日分）"}</td>
+                          <td style={{ padding: "1px 8px", textAlign: "right" }}>{d.amount.toLocaleString()}円</td>
+                          <td style={{ padding: "1px 0 1px 8px", textAlign: "right" }}>税額 {d.tax.toLocaleString()}円</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              )}
+              {salary.heiWarnings.map((w) => <div key={w} style={{ marginTop: 4, color: "#b45309" }}>⚠ {w}</div>)}
             </div>
           )}
         </div>
@@ -338,7 +361,7 @@ export default function PayStubModal(props: Props) {
             ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
             厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月からの料率で計算。
             健康保険・介護保険・子ども・子育て支援金・厚生年金は{insMonthLabel}（{salary.socialInsCollection === "next" ? "翌月徴収" : "当月徴収"}）。
-            所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
+            所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : salary.taxColumn === "hei" ? "日額表（丙欄。働いた日ごと）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
           </div>
         </div>
       </div>

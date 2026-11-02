@@ -27,6 +27,7 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetFlatTaxReductionPersons,
         targetTaxColumn,
         setTargetTaxColumn,
+        targetWageType,
         targetStandardRemuneration,
         targetIsEmploymentInsEligible,
         setTargetIsEmploymentInsEligible,
@@ -92,23 +93,37 @@ export default function InsuranceSection({ cm }: Props) {
                         労働基準監督署の許可を受けた監視断続的労働の人）と、役員だけです。管理監督者かどうかは、肩書ではなく、職務の内容・責任と権限・勤務の仕方・待遇の実態で決まります。
                     </p>
                 )}
-                {/* 源泉所得税の欄：扶養控除等申告書を出していない人（ほかの会社が主たる給与の人など）は乙欄 */}
+                {/* 源泉所得税の欄：扶養控除等申告書を出していない人（ほかの会社が主たる給与の人など）は乙欄、日雇賃金は丙欄 */}
                 <div style={{ gridColumn: "span 2" }}>
                     <label style={labelStyle}>源泉所得税の欄</label>
                     <select value={targetTaxColumn} onChange={e => setTargetTaxColumn(toTaxColumn(e.target.value))} style={{ ...inputStyle, fontSize: "12px" }}>
                         <option value="kou">甲欄（「扶養控除等申告書」を出している）</option>
                         <option value="otsu">乙欄（出していない・ほかの会社が主たる給与）</option>
+                        <option value="hei">丙欄（日雇い・2か月以内の契約で、日給・時給の人）</option>
                     </select>
                     {targetTaxColumn === "otsu" && (
                         <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0" }}>
                             乙欄の人の扶養人数は、「従たる給与についての扶養控除等申告書」に書かれた人数です（出ていなければ0）。乙欄の人は年末調整をせず、定額減税（令和6年分）の月次減税もしません。
                         </p>
                     )}
+                    {targetTaxColumn === "hei" && (
+                        <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
+                            丙欄は、日々雇い入れる人か、雇用契約の期間が2か月以内の人で、給与を働いた日・時間で計算している（日給制・時給制の）人に使います。
+                            所得税は、働いた日ごとの給与に日額表の丙欄を当てはめた税額の合計です（まとめて払うときも同じ）。
+                            入社から2か月を超えた日（契約の延長・再雇用を含む）からは丙欄を使えないので、甲欄か乙欄に変えてください。
+                            扶養人数は使わず、年末調整・定額減税の月次減税もしません。賞与は乙欄の率で計算します。
+                        </p>
+                    )}
+                    {targetTaxColumn === "hei" && targetWageType === "monthly" && (
+                        <p style={{ fontSize: "11px", color: "#b45309", margin: "4px 0 0 0" }}>
+                            ⚠ 月給制の人には丙欄を使えません。日給制か時給制にするか、甲欄・乙欄を選んでください。
+                        </p>
+                    )}
                 </div>
 
                 {/* 🆕 扶養人数（1fr） */}
                 <div>
-                    <label style={labelStyle}>{targetTaxColumn === "otsu" ? "扶養人数（従たる給与の申告書）" : "扶養人数"}</label>
+                    <label style={labelStyle}>{targetTaxColumn === "otsu" ? "扶養人数（従たる給与の申告書）" : targetTaxColumn === "hei" ? "扶養人数（丙欄では使いません）" : "扶養人数"}</label>
                     <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                         <input type="number" value={targetDependents} onChange={e => setTargetDependents(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "30px", textAlign: "right" }} />
                         <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>人</span>

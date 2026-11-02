@@ -113,7 +113,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetDependentsFrom, setTargetDependentsFrom] = useState("");
     const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
     const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 産休・育休の期間（社会保険料の免除）
-    const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄）
+    const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄・丙欄）
     const [targetResidentTax, setTargetResidentTax] = useState(0);
     // 標準報酬月額の履歴（何年何月分から・いくら）。最初の1件は「入社したときから」
     const [targetRemunerationHistory, setTargetRemunerationHistory] = useState<RemunerationEntry[]>([{ from: "", amount: 0, reason: "shutoku" }]);

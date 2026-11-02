@@ -296,12 +296,14 @@ export const validateDeclaration = (decl: NenchoDeclaration): string[] => {
 
 /**
  * 年末調整の対象かどうか（対象でなければ理由）
- * ・乙欄の人（扶養控除等申告書を出していない）はしない
+ * ・乙欄・丙欄の人（扶養控除等申告書を出していない）はしない（所得税法190条）
  * ・年の途中で退職した人は、原則としてしない（12月中に退職した人は、その年最後の給与を支払った後なら対象）
  * 出典：国税庁「令和8年分 年末調整のしかた」（年末調整の対象となる人）
  */
 export const nenchoExclusion = (staff: { tax_column?: unknown; retirement_date?: string | null }, year: number): string | null => {
-  if (toTaxColumn(staff.tax_column) === "otsu") return "乙欄の人は年末調整をしません（本人が確定申告します）";
+  const column = toTaxColumn(staff.tax_column);
+  if (column === "otsu") return "乙欄の人は年末調整をしません（本人が確定申告します）";
+  if (column === "hei") return "丙欄（日雇賃金）の人は年末調整をしません（扶養控除等申告書を出していないため）";
   if (staff.retirement_date && staff.retirement_date < `${year}-12-01`) return "年の途中で退職した人は、年末調整をしません（本人が確定申告します）";
   return null;
 };

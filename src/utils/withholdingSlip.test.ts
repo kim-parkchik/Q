@@ -238,6 +238,12 @@ describe("そのほかの欄", () => {
         expect(otsu.marks.otsu).toBe(true);
         expect(otsu.adjusted).toBe(false);
     });
+    test("丙欄の人は年末調整をしない人として書き、乙欄には印を付けない（注意を出す）", () => {
+        const hei = slipOf({ staff: { name: "A", tax_column: "hei" }, totals });
+        expect(hei.marks.otsu).toBe(false);
+        expect(hei.adjusted).toBe(false);
+        expect(hei.warnings.some((w) => w.includes("丙欄"))).toBe(true);
+    });
     test("控除対象扶養親族等・16歳未満が5人以上なら、5人目から摘要欄に（1）（2）…で書く", () => {
         const decl: NenchoDeclaration = {
             ...emptyDeclaration(),

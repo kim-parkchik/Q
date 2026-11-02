@@ -21,7 +21,7 @@
 import type { NenchoMaster } from "../constants/nencho";
 import { calcNencho, type NenchoResult } from "./nencho";
 import { buildNenchoInput, sumYearTotals, type NenchoDeclaration } from "./nenchoDeclaration";
-import { bonusTaxRateUsed, toTaxColumn } from "./incomeTax";
+import { bonusTaxRateUsed, toTaxColumn, type TaxColumn } from "./incomeTax";
 import { staffAsOf } from "./staffHistory";
 
 /** 確定した給与（salary_results の必要な列） */
@@ -130,8 +130,8 @@ export interface LedgerAdjustment {
 
 export interface WithholdingLedger {
   year: number;
-  /** 甲欄・乙欄 */
-  taxColumn: "kou" | "otsu";
+  /** 甲欄・乙欄・丙欄 */
+  taxColumn: TaxColumn;
   /** 給料・手当等（1〜12月の12行。払っていない月は null） */
   salaryRows: (LedgerRow | null)[];
   salaryTotal: LedgerTotals;

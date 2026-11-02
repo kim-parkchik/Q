@@ -11,6 +11,17 @@
  * 乙欄はいつも月額表で計算する（電算機計算の特例は甲欄の式）。
  * 出典：国税庁 タックスアンサー No.2520 https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2520.htm
  *       No.2523 https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2523.htm
+ *
+ * 日雇賃金（日々雇い入れる人、または雇用契約の期間が2か月以内の人に、働いた日・時間で計算して払う給与）は
+ * 日額表の丙欄で計算する（所得税法185条1項3号、施行令309条、所得税基本通達185-8）。
+ * ・働いた日ごとの給与（社会保険料等を引いた額）に丙欄を当てはめた税額の合計。まとめて払うときも同じ（通達185-8）
+ * ・同じ会社から継続して2か月を超えて払う分は丙欄を使えない（施行令309条かっこ書。甲欄か乙欄）
+ * ・扶養親族等の数は使わない。賞与は「扶養控除等申告書を出した人以外の賞与」として乙欄の率で計算する（所得税法186条1項2号）
+ * 出典：e-Gov 所得税法185条・186条 https://laws.e-gov.go.jp/law/340AC0000000033
+ *       e-Gov 所得税法施行令309条 https://laws.e-gov.go.jp/law/340CO0000000096
+ *       国税庁 所得税基本通達185-8・185-9 https://www.nta.go.jp/law/tsutatsu/kihon/shotoku/31/01.htm
+ *       国税庁 タックスアンサー No.2511 https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2511.htm
+ *       No.2514 https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2514.htm
  */
 import * as Master from "../constants";
 
@@ -136,21 +147,61 @@ export const calcMonthlyOtsuTaxByTable = (
 };
 
 // ─────────────────────────────────────────────────────────────
+// 日額表の丙欄（日雇賃金）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 日額表の丙欄で、1日分の税額を求める
+ * ・表の最初の金額未満は0円
+ * ・表の最後（24,000円）以上は「基準の税額 ＋ 超えた金額 × 率」（1円未満は切り捨て）
+ * @param dayAmount その日の社会保険料等控除後の給与等の金額
+ */
+export const calcDailyHeiTaxByTable = (
+    dayAmount: number,
+    table: Master.DailyHeiTaxTable = Master.TAX_2026.DAILY_HEI_TABLE
+): number => {
+    const amount = Math.max(0, Math.floor(dayAmount));
+    if (amount < table.rows[0][0]) return 0;
+    const row = table.rows.find(([from, to]) => amount >= from && amount < to);
+    if (row) return row[2];
+    const anchor = [...table.high].reverse().find((a) => amount >= a.amount);
+    if (!anchor) throw new Error(`日額表（丙欄）に該当する行がありません: ${amount}円`);
+    return anchor.base + addRate(amount - anchor.amount, anchor.rate);
+};
+
+/**
+ * 日雇賃金の源泉所得税：働いた日ごとの給与（社会保険料等を引いた額）に丙欄を当てはめた税額の合計（所得税基本通達185-8）
+ * @param dayAmounts 働いた日ごとの、社会保険料等控除後の給与等の金額
+ * @param payYear    支払った年（その年の税額表を使う）
+ */
+export const calcHeiWithholdingTax = (dayAmounts: number[], payYear: number): number => {
+    const table = Master.getTaxMaster(payYear).DAILY_HEI_TABLE;
+    return dayAmounts.reduce((sum, a) => sum + calcDailyHeiTaxByTable(a, table), 0);
+};
+
+// ─────────────────────────────────────────────────────────────
 // 計算方法と年を指定して求める（給与計算からはこれを使う）
 // ─────────────────────────────────────────────────────────────
 
 export type TaxCalcMethod = "table" | "densanki";
 
-/** 源泉所得税の欄。kou: 甲欄（扶養控除等申告書を出している） / otsu: 乙欄（出していない） */
-export type TaxColumn = "kou" | "otsu";
+/**
+ * 源泉所得税の欄
+ * kou: 甲欄（扶養控除等申告書を出している） / otsu: 乙欄（出していない） / hei: 丙欄（日雇賃金。日額表）
+ */
+export type TaxColumn = "kou" | "otsu" | "hei";
 
 export const TAX_COLUMN_LABELS: Record<TaxColumn, string> = {
     kou: "甲欄",
     otsu: "乙欄",
+    hei: "丙欄",
 };
 
 /** 従業員の tax_column を読む（空や知らない値は甲欄） */
-export const toTaxColumn = (value: unknown): TaxColumn => (value === "otsu" ? "otsu" : "kou");
+export const toTaxColumn = (value: unknown): TaxColumn => (value === "otsu" || value === "hei" ? value : "kou");
+
+/** 賞与の税額に使う欄（丙欄の人の賞与は、扶養控除等申告書を出した人以外の賞与として乙欄。所得税法186条1項2号） */
+const bonusColumnOf = (column: TaxColumn): "kou" | "otsu" => (column === "kou" ? "kou" : "otsu");
 
 export const TAX_CALC_METHOD_LABELS: Record<TaxCalcMethod, string> = {
     table: "税額表（月額表）",
@@ -161,7 +212,7 @@ export const TAX_CALC_METHOD_LABELS: Record<TaxCalcMethod, string> = {
  * 月額の源泉所得税
  * @param payYear 支払った年（その年の税額表・式を使う）
  * @param method  甲欄の計算方法。"table"（月額表・初期値） または "densanki"（電算機計算の特例）
- * @param column  "kou"（甲欄・初期値） または "otsu"（乙欄。いつも月額表で計算する）
+ * @param column  "kou"（甲欄・初期値） または "otsu"（乙欄。いつも月額表で計算する）。丙欄は日ごとに計算するので calcHeiWithholdingTax を使う
  */
 export const calcWithholdingTax = (
     taxBase: number,
@@ -171,6 +222,7 @@ export const calcWithholdingTax = (
     column: TaxColumn = "kou"
 ): number => {
     const master = Master.getTaxMaster(payYear);
+    if (column === "hei") throw new Error("丙欄は働いた日ごとに計算します（calcHeiWithholdingTax）");
     if (column === "otsu") return calcMonthlyOtsuTaxByTable(taxBase, dependents, master.MONTHLY_TABLE);
     return method === "densanki"
         ? calcMonthlyWithholdingTax(taxBase, dependents, master.DENSANKI)
@@ -248,7 +300,7 @@ export const calcBonusOtsuTaxRate = (
  * @param prevMonthAfterSocial 前月中の給与（賞与を除く）から社会保険料等を引いた金額
  * @param payYear 賞与を支払う年（その年の表を使う）
  * @param periodMonths 賞与の計算期間（月数）。6か月を超えるかどうかだけを使う
- * @param column "kou"（甲欄・初期値） または "otsu"（乙欄）
+ * @param column "kou"（甲欄・初期値） または "otsu"（乙欄）。丙欄の人は乙欄で計算する（所得税法186条1項2号）
  */
 export const calcBonusWithholdingTax = (
     bonusAfterSocial: number,
@@ -256,22 +308,25 @@ export const calcBonusWithholdingTax = (
     dependents: number,
     payYear: number,
     periodMonths = 6,
-    column: TaxColumn = "kou"
+    taxColumn: TaxColumn = "kou"
 ): number => {
     const bonus = Math.max(0, Math.floor(bonusAfterSocial));
     const prev = Math.max(0, Math.floor(prevMonthAfterSocial));
     const master = Master.getTaxMaster(payYear);
+    const column = bonusColumnOf(taxColumn);
+    // 丙欄の人には「従たる給与についての扶養控除等申告書」の人数がないので、扶養親族等の数は使わない
+    const deps = taxColumn === "hei" ? 0 : dependents;
 
     if (prev === 0 || bonus > prev * 10) {
         const n = periodMonths > 6 ? 12 : 6;
         const monthly = (amount: number) => column === "otsu"
-            ? calcMonthlyOtsuTaxByTable(amount, dependents, master.MONTHLY_TABLE)
-            : calcMonthlyTaxByTable(amount, dependents, master.MONTHLY_TABLE);
+            ? calcMonthlyOtsuTaxByTable(amount, deps, master.MONTHLY_TABLE)
+            : calcMonthlyTaxByTable(amount, deps, master.MONTHLY_TABLE);
         return (monthly(prev + bonus / n) - monthly(prev)) * n;
     }
     const rate = column === "otsu"
         ? calcBonusOtsuTaxRate(prev, master.BONUS_TABLE)
-        : calcBonusTaxRate(prev, dependents, master.BONUS_TABLE);
+        : calcBonusTaxRate(prev, deps, master.BONUS_TABLE);
     return addRate(bonus, rate);
 };
 
@@ -294,7 +349,7 @@ export const bonusTaxRateUsed = (
     if (prev === 0 || bonus > prev * 10) return null;
     const master = Master.getTaxMaster(payYear);
     try {
-        const rate = column === "otsu"
+        const rate = bonusColumnOf(column) === "otsu"
             ? calcBonusOtsuTaxRate(prev, master.BONUS_TABLE)
             : calcBonusTaxRate(prev, dependents, master.BONUS_TABLE);
         return addRate(bonus, rate) === Math.floor(Number(tax) || 0) ? rate : null;

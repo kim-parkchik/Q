@@ -1,12 +1,12 @@
 /**
- * 賞与の源泉所得税のテスト（甲欄・乙欄）
+ * 賞与の源泉所得税のテスト（甲欄・乙欄・丙欄の人の賞与）
  * 実行方法: bun test
  *
  * 期待値は国税庁「賞与に対する源泉徴収税額の算出率の表」（tax-tables/ の Excel）から引用。
  * 表は扶養親族等の数ごとに、率が変わる金額の区切りが違う（例: 令和8年分の6.126%は、0人なら26万〜30.9万円、2人なら32.1万〜37.7万円）。
  */
 import { describe, expect, test } from "bun:test";
-import { calcBonusOtsuTaxRate, calcBonusTaxRate, calcBonusWithholdingTax, calcMonthlyOtsuTaxByTable, calcMonthlyTaxByTable } from "./incomeTax";
+import { bonusTaxRateUsed, calcBonusOtsuTaxRate, calcBonusTaxRate, calcBonusWithholdingTax, calcMonthlyOtsuTaxByTable, calcMonthlyTaxByTable } from "./incomeTax";
 import { TAX_2025, TAX_2026 } from "../constants/tax";
 
 describe("令和8年分 算出率の表（甲欄）との照合", () => {
@@ -112,5 +112,17 @@ describe("賞与の源泉所得税（乙欄）", () => {
     test("令和7年分（2025年）の乙欄の率を使う", () => {
         expect(calcBonusWithholdingTax(500000, 223000, 0, 2025, 6, "otsu")).toBe(Math.floor(500000 * 0.2042));
         expect(calcBonusWithholdingTax(500000, 223000, 0, 2026, 6, "otsu")).toBe(Math.floor(500000 * 0.1021));
+    });
+});
+
+describe("丙欄の人の賞与", () => {
+    // 所得税法186条1項2号：扶養控除等申告書を出した人以外の賞与は、算出率の表の乙欄（前月の給与がなければ月額表の乙欄）
+    test("乙欄の率で計算し、扶養人数は使わない", () => {
+        expect(calcBonusWithholdingTax(500000, 300000, 2, 2026, 6, "hei")).toBe(Math.floor(500000 * 0.3063));
+        expect(calcBonusWithholdingTax(600000, 0, 1, 2026, 6, "hei")).toBe(3063 * 6);
+        expect(calcBonusWithholdingTax(1200000, 100000, 2, 2026, 6, "hei")).toBe(calcBonusWithholdingTax(1200000, 100000, 0, 2026, 6, "otsu"));
+    });
+    test("源泉徴収簿の税率も乙欄の率", () => {
+        expect(bonusTaxRateUsed(500000, 300000, 0, 2026, "hei", Math.floor(500000 * 0.3063))).toBe(30.63);
     });
 });

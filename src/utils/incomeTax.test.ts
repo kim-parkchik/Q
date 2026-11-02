@@ -1,5 +1,5 @@
 /**
- * 源泉所得税（月額）のテスト（甲欄・乙欄）
+ * 源泉所得税（月額）のテスト（甲欄・乙欄）と、日額表の丙欄（日雇賃金）のテスト
  * 実行方法: bun test
  *
  * 前半は「電算機計算の特例」（式）、後半は「月額表」（国税庁の表）の確認。
@@ -9,7 +9,7 @@
  * （電算機計算の特例として認められている差）。そのため「ぴったり一致」と「±30円以内」を使い分ける。
  */
 import { describe, expect, test } from "bun:test";
-import { calcMonthlyWithholdingTax, calcEmploymentDeduction, calcBasicDeduction, calcMonthlyTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
+import { calcMonthlyWithholdingTax, calcEmploymentDeduction, calcBasicDeduction, calcMonthlyTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax, calcDailyHeiTaxByTable, calcHeiWithholdingTax, toTaxColumn } from "./incomeTax";
 import { TAX_2025, TAX_2026, getTaxMaster } from "../constants/tax";
 
 const near = (actual: number, expected: number, tolerance = 30) =>
@@ -278,5 +278,64 @@ describe("月額表（令和7年分・2025年）乙欄", () => {
     test("支払った年の表を使う", () => {
         expect(calcWithholdingTax(740000, 0, 2025, "table", "otsu")).toBe(259800);
         expect(calcWithholdingTax(740000, 0, 2026, "table", "otsu")).toBe(259200);
+    });
+});
+
+// 丙欄（日雇賃金）
+//   期待値は日額表データ（国税庁の Excel から自動生成。src/constants/tax/dailyHeiTable20XX.ts）の丙欄の値と、
+//   Excel に書かれた丙欄の計算式（24,000円以上）。
+describe("日額表（令和8年分）丙欄", () => {
+    const T = TAX_2026.DAILY_HEI_TABLE;
+    const hei = (a: number) => calcDailyHeiTaxByTable(a, T);
+    test("9,800円未満は0円、9,800円から表の金額の幅ごとの丙欄の税額", () => {
+        expect(hei(0)).toBe(0);
+        expect(hei(3499)).toBe(0);
+        expect(hei(9799)).toBe(0);
+        expect(hei(9800)).toBe(1);
+        expect(hei(10000)).toBe(8);
+        expect(hei(12099)).toBe(79);
+        expect(hei(22000)).toBe(582);
+        expect(hei(23999)).toBe(738);
+    });
+    test("24,000円以上は「基準の税額 ＋ 超えた金額 × 率」（1円未満切り捨て）", () => {
+        expect(hei(24000)).toBe(746);
+        expect(hei(25000)).toBe(746 + Math.floor((1000 * 10210) / 100000));
+        expect(hei(26500)).toBe(1001);
+        expect(hei(32500)).toBe(2226);
+        expect(hei(57500)).toBe(8608);
+        expect(hei(116500)).toBe(28486);
+        expect(hei(200000)).toBe(28486 + Math.floor((83500 * 40840) / 100000));
+    });
+    test("税額は、働いた日ごとの税額の合計（平均した日額には当てはめない。所得税基本通達185-8）", () => {
+        // 12,000円の日は79円、8,000円の日は0円。平均の10,000円で2日分なら16円になってしまう
+        expect(calcHeiWithholdingTax([12000, 8000], 2026)).toBe(79);
+        expect(hei(10000) * 2).toBe(16);
+        expect(calcHeiWithholdingTax([], 2026)).toBe(0);
+    });
+    test("丙欄は月の給与にそのまま当てはめない（日ごとに計算する）", () => {
+        expect(() => calcWithholdingTax(300000, 0, 2026, "table", "hei")).toThrow();
+    });
+    test("従業員の tax_column の読み取り", () => {
+        expect(toTaxColumn("hei")).toBe("hei");
+        expect(toTaxColumn("otsu")).toBe("otsu");
+        expect(toTaxColumn("")).toBe("kou");
+        expect(toTaxColumn(null)).toBe("kou");
+    });
+});
+
+describe("日額表（令和7年分・2025年）丙欄", () => {
+    const hei = (a: number) => calcDailyHeiTaxByTable(a, TAX_2025.DAILY_HEI_TABLE);
+    test("9,300円未満は0円、9,300円から表の税額", () => {
+        expect(hei(9299)).toBe(0);
+        expect(hei(9300)).toBe(3);
+    });
+    test("24,000円は785円、116,500円は28,643円", () => {
+        expect(hei(24000)).toBe(785);
+        expect(hei(116500)).toBe(28643);
+    });
+    test("支払った年の表を使う（2020〜2025年は令和7年分の表）", () => {
+        expect(calcHeiWithholdingTax([24000], 2025)).toBe(785);
+        expect(calcHeiWithholdingTax([24000], 2020)).toBe(785);
+        expect(calcHeiWithholdingTax([24000], 2026)).toBe(746);
     });
 });

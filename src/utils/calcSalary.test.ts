@@ -10,10 +10,10 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
     calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, prorate, prorationOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
-    getInsuranceByAge, type SalaryExtras,
+    getInsuranceByAge, splitByWeights, heiLimitDate, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
-import { calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
+import { calcDailyHeiTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
 import { INSURANCE_2026 } from "../constants/insurance";
 import { TAX_2026 } from "../constants/tax";
 import { DB_SCHEMAS } from "../types/dbSchema";
@@ -265,6 +265,84 @@ describe("源泉所得税の乙欄", () => {
         const table = calc({ ...monthly, tax_column: "otsu" }, [], { taxMethod: "table" });
         const densanki = calc({ ...monthly, tax_column: "otsu" }, [], { taxMethod: "densanki" });
         expect(densanki.incomeTax).toBe(table.incomeTax);
+    });
+});
+
+describe("源泉所得税の丙欄（日雇賃金。働いた日ごとの給与に日額表の丙欄。所得税基本通達185-8）", () => {
+    /** 時給 1,200円・社保未加入・雇用保険も未加入（日ごとの金額をそのまま確かめるため）・6月1日入社 */
+    const hei = { ...hourly, tax_column: "hei", join_date: "2026-06-01", is_employment_ins_eligible: 0 };
+    const H = TAX_2026.DAILY_HEI_TABLE;
+
+    test("働いた日ごとの給与に丙欄を当てはめた税額の合計", () => {
+        // 10時間の日：1,200 × 10 ＋ 2時間の割増 1,200 × 0.25 × 2 = 12,600円 → 101円
+        // 5時間の日：6,000円 → 0円（平均の9,300円 × 2日でも0円だが、日ごとに計算する）
+        const r = calc(hei, [day("08", 10), day("09", 5)]);
+        expect(r.taxColumn).toBe("hei");
+        expect(r.totalEarnings).toBe(18600);
+        expect(r.heiDays).toEqual([
+            { date: "2026-06-08", amount: 12600, tax: 101 },
+            { date: "2026-06-09", amount: 6000, tax: 0 },
+        ]);
+        expect(r.incomeTax).toBe(101);
+        expect(r.heiWarnings).toEqual([]);
+    });
+    test("社会保険料等・月額の手当のように日が決まらない額は、日ごとの支給額の割合で分ける", () => {
+        // 8時間の日 9,600円・5時間の日 6,000円。手当 3,100円と雇用保険料を合わせた額を 9,600 : 6,000 で分ける
+        const r = calc({ ...hei, is_employment_ins_eligible: 1 }, [day("08", 8), day("09", 5)], { allowanceAmount: 3100 });
+        const taxBase = r.taxableAmount - r.empInsurance;
+        expect(r.totalEarnings).toBe(18700);
+        expect(r.empInsurance).toBeGreaterThan(0);
+        expect(r.heiDays.reduce((s, d) => s + d.amount, 0)).toBe(taxBase);
+        expect(r.heiDays[0].amount).toBe(Math.floor((taxBase * 9600) / 15600));
+        for (const d of r.heiDays) expect(d.tax).toBe(calcDailyHeiTaxByTable(d.amount, H));
+        expect(r.incomeTax).toBe(r.heiDays.reduce((s, d) => s + d.tax, 0));
+    });
+    test("日給制：その日の日給（と残業代）で分ける", () => {
+        const daily = { ...hei, wage_type: "daily", base_wage: 12000 };
+        const r = calc(daily, [day("08", 8, "normal", { actual_base_wage: 12000 }), day("09", 8, "normal", { actual_base_wage: 10000 })]);
+        expect(r.heiDays.map((d) => d.amount)).toEqual([12000, 10000]);
+        expect(r.incomeTax).toBe(calcDailyHeiTaxByTable(12000, H) + calcDailyHeiTaxByTable(10000, H));
+    });
+    test("扶養人数は使わない（確定結果の扶養人数も0）。年末調整・定額減税の月次減税の対象外は別のテスト", () => {
+        const r0 = calc(hei, [day("08", 10)]);
+        const r3 = calc(hei, [day("08", 10)], { dependents: 3 });
+        expect(r3.incomeTax).toBe(r0.incomeTax);
+        expect(r3.appliedDependents).toBe(0);
+    });
+    test("入社から2か月を超えて働いた日があれば注意を出す（その日からは甲欄か乙欄）", () => {
+        // 4月8日入社：6月7日で2か月 → 6月8日から超える
+        const over = calc({ ...hei, join_date: "2026-04-08" }, [day("08", 8), day("09", 8)]);
+        expect(over.heiWarnings).toHaveLength(1);
+        expect(over.heiWarnings[0]).toContain("2026-06-08以後");
+        expect(over.heiWarnings[0]).toContain("2日");
+        // 4月10日入社：6月10日から超えるので、8日・9日はまだ2か月以内
+        expect(calc({ ...hei, join_date: "2026-04-10" }, [day("08", 8), day("09", 8)]).heiWarnings).toEqual([]);
+        // 入社日がなければ確かめられない
+        expect(calc({ ...hei, join_date: null }, [day("08", 8)]).heiWarnings[0]).toContain("入社日が入っていない");
+    });
+    test("2か月の満了：応当日がない月は、その月の末日に満了する（民法143条2項）", () => {
+        expect(heiLimitDate("2026-04-10")).toBe("2026-06-10");
+        expect(heiLimitDate("2026-01-31")).toBe("2026-03-31");
+        expect(heiLimitDate("2025-12-31")).toBe("2026-03-01");
+        expect(heiLimitDate("2026-12-30")).toBe("2027-03-01");
+    });
+    test("月給制の人には使えない（注意を出し、働いた日数で等分して計算する）", () => {
+        const r = calc({ ...monthly, tax_column: "hei", join_date: "2026-06-01" }, weekdays());
+        expect(r.heiWarnings[0]).toContain("月給制");
+        expect(r.heiDays).toHaveLength(5);
+        const taxBase = r.taxableAmount - (r.healthInsurance + r.nursingInsurance + r.childSupport + r.welfarePension + r.empInsurance);
+        expect(r.heiDays.reduce((s, d) => s + d.amount, 0)).toBe(taxBase);
+    });
+    test("働いた日がなく支給だけあるときは、1日分として計算する", () => {
+        const r = calc(hei, [], { allowanceAmount: 15000 });
+        expect(r.heiDays).toEqual([{ date: null, amount: 15000, tax: calcDailyHeiTaxByTable(15000, H) }]);
+        expect(r.heiWarnings.some((w) => w.includes("1日分"))).toBe(true);
+    });
+    test("splitByWeights：割合で分け、合計はもとの金額と同じ", () => {
+        expect(splitByWeights(1000, [1, 1, 1])).toEqual([333, 333, 334]);
+        expect(splitByWeights(18600, [12600, 6000])).toEqual([12600, 6000]);
+        expect(splitByWeights(100, [])).toEqual([]);
+        expect(splitByWeights(100, [0, 0])).toEqual([0, 0]);
     });
 });
 

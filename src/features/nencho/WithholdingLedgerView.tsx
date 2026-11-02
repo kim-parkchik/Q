@@ -4,6 +4,7 @@
  */
 import type { LedgerRow, LedgerTotals, WithholdingLedger } from "../../utils/withholdingLedger";
 import { formatWareki } from "../../utils/wareki";
+import { TAX_COLUMN_LABELS } from "../../utils/incomeTax";
 
 const line = "1px solid #000";
 const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse", tableLayout: "fixed" };
@@ -97,7 +98,7 @@ export default function WithholdingLedgerView({ ledger, staff, branchName }: { l
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 24, marginBottom: 6 }}>
         <span style={{ fontSize: 12 }}>{reiwa}</span>
         <span style={{ fontSize: 16, fontWeight: "bold", letterSpacing: 4 }}>給与所得に対する源泉徴収簿</span>
-        <span style={{ fontSize: 11, border: line, padding: "0 6px" }}>{l.taxColumn === "otsu" ? "乙欄" : "甲欄"}</span>
+        <span style={{ fontSize: 11, border: line, padding: "0 6px" }}>{TAX_COLUMN_LABELS[l.taxColumn]}</span>
       </div>
 
       {/* 受給者 */}
@@ -113,7 +114,7 @@ export default function WithholdingLedgerView({ ledger, staff, branchName }: { l
           <tr>
             <th style={th}>整理番号</th><td style={td}>{staff.id}</td>
             <th style={th}>生年月日</th><td style={td}>{formatWareki(staff.birthday)}</td>
-            <th style={th}>扶養控除等申告書</th><td style={td}>{l.taxColumn === "otsu" ? "無" : "有"}</td>
+            <th style={th}>扶養控除等申告書</th><td style={td}>{l.taxColumn === "kou" ? "有" : "無"}</td>
           </tr>
         </tbody>
       </table>
