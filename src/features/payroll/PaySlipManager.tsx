@@ -99,7 +99,7 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
 
                   {/* 2. 給与条件 */}
                   <td style={S.td}>
-                    <div style={{ fontSize: "12px", color: "#666" }}>{s.wage_type === "monthly" ? "月給制" : "時給制"}</div>
+                    <div style={{ fontSize: "12px", color: "#666" }}>{s.wage_type === "monthly" ? "月給制" : s.wage_type === "daily" ? "日給制" : "時給制"}</div>
                     <div style={{ fontWeight: "600" }}>¥{Number(s.base_wage).toLocaleString()}</div>
                   </td>
 

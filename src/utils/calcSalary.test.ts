@@ -582,6 +582,80 @@ describe("残業代の時給（1年間における1か月平均所定労働時�
     });
 });
 
+describe("日給制（日給 ÷ 1日の所定労働時間で残業代の時給を出す。労基則19条1項2号・25条）", () => {
+    /** 日給 9,600円・所定8時間（残業代の時給 1,200円）・社保未加入 */
+    const daily = {
+        wage_type: "daily", base_wage: 9600, scheduled_work_hours: 8,
+        commute_type: "none", commute_amount: 0, standard_remuneration: 0, birthday: "1980-01-10",
+    };
+    const withWage = (rows: any[]) => rows.map((r) => ({ ...r, actual_base_wage: 9600 }));
+
+    test("働いた日数分の日給を払う（日給を時給として時間に掛けない）", () => {
+        const r = calc(daily, withWage([day("08", 8), day("09", 8)]));
+        expect(r.basePay).toBe(19200);
+        expect(r.dailyWageDays).toBe(2);
+        expect(r.overtimeHourlyRate).toBe(1200);
+        expect(r.totalEarnings).toBe(19200);
+    });
+    test("1日8時間を超えた時間は、日給 ÷ 所定労働時間 × 1.25 で払う", () => {
+        // 10時間働いた日の2時間：1,200 × 1.25 × 2 = 3,000円
+        const r = calc(daily, withWage([day("08", 10), ...weekdays().slice(1)]));
+        expect(r.basePay).toBe(48000);
+        expect(r.standardOvertimePay).toBe(3000);
+        expect(r.totalEarnings).toBe(51000);
+    });
+    test("所定7時間の人が8時間働いた日の1時間は法定内残業（1.0倍）", () => {
+        // 日給 8,400円 ÷ 7時間 = 1,200円。5日 × (8,400 ＋ 1,200)
+        const seven = { ...daily, base_wage: 8400, scheduled_work_hours: 7 };
+        const r = calc(seven, weekdays().map((x) => ({ ...x, actual_base_wage: 8400 })));
+        expect(r.basePay).toBe(42000);
+        expect(r.statutoryOvertimePay).toBe(6000);
+        expect(r.totalEarnings).toBe(48000);
+    });
+    test("所定休日・法定休日の労働には日給を払わず、時間を残業・休日労働として払う", () => {
+        // 土曜（週40時間超）8時間：1,200 × 1.25 × 8 = 12,000円
+        const sat = calc(daily, withWage([...weekdays(), day("13", 8, "holiday_work")]));
+        expect(sat.dailyWageDays).toBe(5);
+        expect(sat.standardOvertimePay).toBe(12000);
+        expect(sat.totalEarnings).toBe(60000);
+        // 法定休日8時間：1,200 × 1.35 × 8 = 12,960円
+        const sun = calc(daily, withWage([day("07", 8, "statutory_holiday")]));
+        expect([sun.basePay, sun.holidayWorkPay, sun.totalEarnings]).toEqual([0, 12960, 12960]);
+    });
+    test("有給休暇は日給で払い、半休・時間単位の有給は有給の時間の割合で分ける", () => {
+        const rows = withWage([
+            day("08", 0, "paid_full"),
+            day("09", 4, "paid_half"),
+            day("10", 6, "normal", { paid_leave_hours: 2 }),
+            day("11", 8), day("12", 8),
+        ]);
+        const r = calc(daily, rows);
+        // 日給：9,600 × (0.5 ＋ 0.75 ＋ 1 ＋ 1) = 31,200円、有給：9,600 × (1 ＋ 0.5 ＋ 0.25) = 16,800円
+        expect(r.dailyWageDays).toBe(3.25);
+        expect(r.basePay).toBe(31200);
+        expect(r.paidLeavePay).toBe(16800);
+        expect(r.paidLeaveHours).toBe(14);
+        expect(r.totalEarnings).toBe(48000);
+    });
+    test("欠勤・公休の日は日給を払わない（欠勤控除はしない）", () => {
+        const r = calc(daily, withWage([day("08", 0, "absent"), day("09", 0, "holiday"), day("10", 8)]));
+        expect([r.basePay, r.absenceDeduction, r.totalEarnings]).toEqual([9600, 0, 9600]);
+    });
+    test("深夜の時間は 日給 ÷ 所定労働時間 × 0.25 を足す", () => {
+        const r = calc(daily, withWage([day("08", 8, "normal", { night_hours: 2 })]));
+        expect(r.nightPay).toBe(600);
+        expect(r.totalEarnings).toBe(10200);
+    });
+    test("月額の手当は、1年間における1か月平均所定労働時間で割って残業代の時給に足す", () => {
+        // 役職手当 16,000円 ÷ (240日 × 8時間 ÷ 12 = 160時間) = 100円 → 残業代の時給 1,300円。2時間 × 1.25 = 3,250円
+        const allowance = [{ name: "役職手当", amount: 16000, type: "earning" as const }];
+        const r = calc(daily, withWage([day("08", 10), ...weekdays().slice(1)]), { annualWorkDays: 240, customItems: allowance });
+        expect(r.overtimeHourlyRate).toBe(1300);
+        expect(r.standardOvertimePay).toBe(3250);
+        expect(r.totalEarnings).toBe(48000 + 3250 + 16000);
+    });
+});
+
 describe("月60時間超の割増（中小企業は2023年3月まで25%）", () => {
     const sme = { ...company, is_small_business: 1 };
     /** 2023年3月の平日13日に13時間ずつ（1日5時間の残業 × 13日 = 65時間） */

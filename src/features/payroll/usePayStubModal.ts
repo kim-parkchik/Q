@@ -118,7 +118,7 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     [staff, attendanceData, extras, year, month, companySettings]
   );
 
-  const wageLabel = staff.wage_type === "monthly" ? "月給制" : "時給制";
+  const wageLabel = staff.wage_type === "monthly" ? "月給制" : staff.wage_type === "daily" ? "日給制" : "時給制";
   const customEarningItems = extras.customItems.filter(i => i.type === 'earning');
   const customDeductionItems = extras.customItems.filter(i => i.type === 'deduction');
   // 1年間の所定労働日数（給与の計算期間の終わりの日の年。従業員画面と同じく、会社カレンダーから数える）

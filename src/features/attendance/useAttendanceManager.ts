@@ -402,7 +402,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         work_hours: Number(row.savedHours) || 0,
         night_hours: Number(row.nightHours) || 0,
         actual_base_wage:
-          selectedStaff?.wage_type === "hourly"
+          selectedStaff?.wage_type !== "monthly"
             ? Number(selectedStaff.base_wage || 0)
             : 0,
         work_type: row.workType || "normal",

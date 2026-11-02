@@ -8,7 +8,7 @@ export interface Staff {
   name: string;
   status?: string;
   branch_id?: number;
-  wage_type?: "hourly" | "monthly";
+  wage_type?: "hourly" | "daily" | "monthly";
   base_wage?: number;
   calendar_pattern_id?: number;
 }

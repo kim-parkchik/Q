@@ -37,6 +37,14 @@
  *        厚生労働省「残業、早出や休日出勤による割増賃金のチェック方法を教えてください。」
  *        https://www.check-roudou.mhlw.go.jp/qa/roudousya/chingin/q3.html
  *        （月給（各種手当を含んだ合計）÷ 1年間における1か月平均所定労働時間数）
+ *
+ * 日給制:
+ *  - 所定労働日（出勤・半休）に働いた日に、日給を払う。所定休日・法定休日の労働には日給を払わず、
+ *    月給制と同じく、働いた時間を残業（1.0倍・1.25倍）・休日労働（1.35倍）として払う。欠勤・公休の日は払わない
+ *  - 残業代の時給は 日給 ÷ 1日の所定労働時間（労基則19条1項2号）＋ 月額の手当を時間あたりにした額（同7号）
+ *  - 有給休暇の賃金は日給（労基則25条1項2号）。半休・時間単位の有給は、日給 ÷ 1日の所定労働時間 × 有給の時間（同2項）
+ *  - 遅刻・早退の日も日給は満額払う（差し引くかは会社の規程による。月給制も差し引いていない）
+ *  出典：労働基準法39条9項・施行規則25条（e-Gov法令検索）
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -106,8 +114,10 @@ export interface SalaryResult {
   overtimeBaseHours: number;
   /** 1年間における1か月平均所定労働時間で割ったか */
   overtimeBaseHoursIsAnnual: boolean;
+  /** 日給制で日給を払った日数（半休・時間単位の有給の日は、働いた割合で数える。月給制・時給制は 0） */
+  dailyWageDays: number;
   nightPay: number;
-  paidLeavePay: number;           // 有給休暇の賃金（時給制）
+  paidLeavePay: number;           // 有給休暇の賃金（時給制・日給制）
   commutePay: number;
   allowanceAmount: number;
   customEarnings: number;
@@ -169,7 +179,7 @@ const scheduledHoursOf = (type: string, scheduledHours: number, paidLeaveHours: 
 };
 
 /**
- * 時給制で賃金を払う有給休暇の時間（所定労働時間を働いた場合の通常の賃金で払う）
+ * 時給制・日給制で賃金を払う有給休暇の時間（所定労働時間を働いた場合の通常の賃金で払う）
  * ・全休：1日の所定労働時間
  * ・半休：その半分
  * ・時間単位の有給：取った時間
@@ -510,6 +520,7 @@ export const calculateSalary = (
   let deferredHighPremiumHours = 0;
   let holidayWorkHours = 0;
   let paidLeaveHours = 0;
+  let dailyWageDays = 0;        // 日給制で日給を払った日数
   // 中小企業（2023年3月までの月60時間超の割増が猶予される）
   const isSmallBusiness = Number(companySettings?.is_small_business) === 1;
 
@@ -545,28 +556,36 @@ export const calculateSalary = (
   const overtimeBaseHours = overtimeBaseHoursIsAnnual
     ? annualWorkDays * scheduledHours / 12
     : prescribedWorkDays(staff, targetYear, targetMonth) * scheduledHours;
-  // 時給制の人の、月額の手当を時間あたりにした額
+  // 時給制・日給制の人の、月額の手当を時間あたりにした額
   const allowancePerHour = overtimeBaseHours > 0 ? overtimeBaseAllowances / overtimeBaseHours : 0;
   let overtimeHourlyRate = 0;
 
-  if (staff.wage_type === 'monthly') {
-    // DBの「base_wage」と JSの「baseWage」の両方に対応させる
-    const rawWage = staff.base_wage ?? staff.baseWage ?? 0;
-    const monthlyWage = Number(rawWage);
-    basePay = monthlyWage;
+  const isDaily = staff.wage_type === 'daily';
+  if (staff.wage_type === 'monthly' || isDaily) {
+    // 月給制・日給制：月給・日給は所定労働時間の分の賃金なので、所定を超えた時間・休日の労働を、残業代の時給で別に払う
+    let hourlyRate = 0;
+    if (isDaily) {
+      // 日給制：残業代の時給は 日給 ÷ 1日の所定労働時間 ＋ 手当を時間あたりにした額（上の「日給制」）。日ごとの日給で出すので、ここでは明細に出す値だけ
+      overtimeHourlyRate = (Number(staff.base_wage) || 0) / scheduledHours + allowancePerHour;
+    } else {
+      // DBの「base_wage」と JSの「baseWage」の両方に対応させる
+      const rawWage = staff.base_wage ?? staff.baseWage ?? 0;
+      const monthlyWage = Number(rawWage);
+      basePay = monthlyWage;
 
-    // 所定労働日数の確定
-    const prescribedDays = prescribedWorkDays(staff, targetYear, targetMonth);
-    
-    // 残業代の時給：(月給 ＋ 残業代の時給に入れる手当) ÷ 1年間における1か月平均所定労働時間
-    const hourlyRate = overtimeBaseHours > 0 ? (monthlyWage + overtimeBaseAllowances) / overtimeBaseHours : 0;
-    overtimeHourlyRate = hourlyRate;
+      // 所定労働日数の確定
+      const prescribedDays = prescribedWorkDays(staff, targetYear, targetMonth);
 
-    // ── 【ここを修正】 欠勤控除 ──
-    // 先ほど算出した actualAbsentDays を使ってダイレクトに計算
-    absenceDeduction = actualAbsentDays > 0
-      ? Math.floor((monthlyWage / prescribedDays) * actualAbsentDays)
-      : 0;
+      // 残業代の時給：(月給 ＋ 残業代の時給に入れる手当) ÷ 1年間における1か月平均所定労働時間
+      hourlyRate = overtimeBaseHours > 0 ? (monthlyWage + overtimeBaseAllowances) / overtimeBaseHours : 0;
+      overtimeHourlyRate = hourlyRate;
+
+      // ── 【ここを修正】 欠勤控除 ──
+      // 先ほど算出した actualAbsentDays を使ってダイレクトに計算
+      absenceDeduction = actualAbsentDays > 0
+        ? Math.floor((monthlyWage / prescribedDays) * actualAbsentDays)
+        : 0;
+    }
 
     for (const row of sorted) {
       const h = Number(row.work_hours) || 0;
@@ -575,10 +594,28 @@ export const calculateSalary = (
       totalWorkHours += h;
       totalNightHours += n;
 
+      // その日の残業代の時給（日給制は、その日の日給から出す）
+      let rate = hourlyRate;
+      if (isDaily) {
+        const dayWage = Number(row.actual_base_wage) || Number(staff.base_wage) || 0;
+        rate = dayWage / scheduledHours + allowancePerHour;
+
+        // 日給：所定労働日（出勤・半休）に働いた分と、有給休暇の分（労基則25条1項2号・2項）
+        // 半休・時間単位の有給の日は、1日の所定労働時間のうち有給の時間の割合を有給休暇の賃金にし、残りを日給として払う
+        const leaveHours = Math.min(scheduledHours, paidLeaveHoursOf(type, scheduledHours, Number(row.paid_leave_hours) || 0));
+        paidLeaveHours += leaveHours;
+        paidLeavePay += dayWage * leaveHours / scheduledHours;
+        if (h > 0 && (type === 'normal' || type === 'paid_half')) {
+          const workShare = (scheduledHours - leaveHours) / scheduledHours;
+          basePay += dayWage * workShare;
+          dailyWageDays += workShare;
+        }
+      }
+
       if (type === 'statutory_holiday') {
         // ── 【法定休日】（日曜日など） ──────────────────────
         // 1. 休日出勤手当 (1.35倍) ※60h超のカウントには含めない
-        holidayWorkPay += hourlyRate * Master.HOLIDAY_WORK_RATE * h;
+        holidayWorkPay += rate * Master.HOLIDAY_WORK_RATE * h;
         holidayWorkHours += h;
 
         // 2. 休日深夜割増 (+0.25倍加算 = 計1.60倍)
@@ -598,7 +635,7 @@ export const calculateSalary = (
         const effectiveStatutoryOvertime = Math.max(0, h - currentScheduled - legalOvertimeToday);
         
         totalStatutoryOvertimeHours += effectiveStatutoryOvertime;
-        statutoryOvertimePay += hourlyRate * effectiveStatutoryOvertime;
+        statutoryOvertimePay += rate * effectiveStatutoryOvertime;
 
         // 3. 法定外残業代（1.25倍 / 1.5倍）の累積
         if (legalOvertimeToday > 0) {
@@ -606,9 +643,9 @@ export const calculateSalary = (
           const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
 
           // 1.25倍（または25%増）の計算
-          standardOvertimePay += hourlyRate * Master.OVERTIME_RATE * split.standard;
+          standardOvertimePay += rate * Master.OVERTIME_RATE * split.standard;
           // 1.50倍（または50%増）の計算
-          highOvertimePay += hourlyRate * Master.OVERTIME_PREMIUM_RATE * split.high;
+          highOvertimePay += rate * Master.OVERTIME_PREMIUM_RATE * split.high;
 
           standardPremiumHours += split.standard;
           highPremiumHours += split.high;
@@ -622,7 +659,7 @@ export const calculateSalary = (
       // 法定休日の場合：1.35 + 0.25 = 1.60
       // 平日残業(60h内)の場合：1.25 + 0.25 = 1.50
       // 平日残業(60h超)の場合：1.50 + 0.25 = 1.75
-      nightPay += hourlyRate * Master.NIGHT_SHIFT_RATE * n;
+      nightPay += rate * Master.NIGHT_SHIFT_RATE * n;
     }
 
   } else {
@@ -832,6 +869,7 @@ export const calculateSalary = (
     overtimeBaseAllowances,
     overtimeBaseHours,
     overtimeBaseHoursIsAnnual,
+    dailyWageDays,
     nightPay: Math.floor(nightPay),
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,
