@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
-import { calculateSalary, loadCustomItems, saveSalaryResult, type SalaryExtras } from '../../utils/calcSalary';
+import { calculateSalary, loadCustomItems, saveSalaryResult, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { loadAnnualWorkDays } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
@@ -50,22 +50,28 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     load();
   }, [db, staff.id]);
 
-  // 源泉所得税の計算方法（給与規定グループの設定）を読み込む
+  // 源泉所得税の計算方法と社会保険料の徴収（給与規定グループの設定）を読み込む
+  // 翌月徴収で退職する月の給与は、当月払いのグループなら（この後に給与を払わないので）退職した月の分も引くのを初めの値にする
   useEffect(() => {
-    const loadTaxMethod = async () => {
+    const loadGroupSettings = async () => {
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
-        ) as { tax_calc_method?: string }[];
+        ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number }[];
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
-        setExtras(p => ({ ...p, taxMethod: method }));
+        setExtras(p => ({
+          ...p,
+          taxMethod: method,
+          socialInsCollection: toSocialInsCollection(rows?.[0]?.social_ins_collection),
+          collectRetirementMonth: Number(rows?.[0]?.is_next_month) !== 1,
+        }));
       } catch (e) {
-        console.error("税額計算方法の読み込みエラー:", e);
+        console.error("給与規定グループの設定の読み込みエラー:", e);
       }
     };
-    loadTaxMethod();
+    loadGroupSettings();
   }, [db, staff.payroll_group_id]);
 
   // 定額減税（令和6年6月〜）：その人の減税額の合計から、前の月までの確定済みの給与で差し引いた額を引いた残り
@@ -160,10 +166,13 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     ? attendanceData.filter(r => Number(r.actual_base_wage) > 0 && Number(r.actual_base_wage) !== Number(staff.base_wage)).length
     : 0;
 
-  // 明細の注記に出す料率の年度（その月の保険料に使ったもの）
-  const insMaster = Master.getInsuranceMaster(year, month);
+  // 明細の注記に出す料率の年度（この給与から引いた社会保険料の月のもの。翌月徴収なら前月の分）
+  const [insYear, insMonth] = (salary.socialInsMonths[0] ?? `${year}-${month}`).split('-').map(Number);
+  const insMaster = Master.getInsuranceMaster(insYear, insMonth);
+  // 雇用保険の料率は、支払った月のもの
+  const empInsMaster = Master.getInsuranceMaster(year, month);
   // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
-  const rateWarnings = [...insMaster.WARNINGS, ...Master.getTaxMasterWarnings(year)];
+  const rateWarnings = [...new Set([...insMaster.WARNINGS, ...empInsMaster.WARNINGS, ...Master.getTaxMasterWarnings(year)])];
 
   // 行数計算ロジック
   const earningItemsCount = 1
@@ -181,8 +190,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   // 保存処理
   const handleSaveResult = async () => {
     if (!db || !staff) return;
-    if (extras.annualWorkDays === undefined) {
-      alert("1年間の所定労働日数を読み込んでいます。少し待ってから、もう一度確定してください。");
+    if (extras.annualWorkDays === undefined || extras.socialInsCollection === undefined) {
+      alert("給与規定グループの設定・1年間の所定労働日数を読み込んでいます。少し待ってから、もう一度確定してください。");
       return;
     }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
@@ -210,6 +219,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     targetRows,
     insMaster,
     rateWarnings,
+    empInsMaster,
     minimumWageCheck,
     yearEndYear,
     flatTaxTotal,

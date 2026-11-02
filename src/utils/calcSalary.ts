@@ -79,6 +79,10 @@ export interface SalaryExtras {
   yearEndSettlement?: number;
   /** 1年間の所定労働日数（残業代の時給を出す「1年間における1か月平均所定労働時間」に使う。なければその月の所定労働日数で割る） */
   annualWorkDays?: number | null;
+  /** 社会保険料の徴収（給与規定グループの設定。省略時は当月徴収） */
+  socialInsCollection?: SocialInsCollection;
+  /** 翌月徴収で、退職する月の給与から、その月の分の保険料も引く（この後に給与を払わないとき） */
+  collectRetirementMonth?: boolean;
 }
 
 export interface SalaryResult {
@@ -159,6 +163,12 @@ export interface SalaryResult {
   isInsuredMonth: boolean;
   /** 産休・育休で、その月の分の社会保険料が免除されるか */
   isLeaveExemptMonth: boolean;
+  /** 社会保険料の徴収（当月徴収・翌月徴収） */
+  socialInsCollection: SocialInsCollection;
+  /** この給与から引いた社会保険料が何年何月分か（YYYY-MM。翌月徴収の退職月は2か月分）。isInsuredMonth などは最初の月の状態 */
+  socialInsMonths: string[];
+  /** 翌月徴収で、退職する月の分の保険料もこの給与から引けるか（画面で選ぶ） */
+  retirementMonthCollectable: boolean;
   hyojunHoshu: number;
   /** 健康保険・厚生年金に加入しているか（標準報酬月額が未設定・社保規定が「未加入」なら false） */
   isSocialInsEnrolled: boolean;
@@ -490,6 +500,96 @@ export const saveSalaryResult = async (
   }
 };
 
+/** 社会保険料の徴収：current: 当月徴収（その月の分を、その月に支払う給与から引く） / next: 翌月徴収（前月の分を引く） */
+export type SocialInsCollection = 'current' | 'next';
+
+export const SOCIAL_INS_COLLECTION_LABELS: Record<SocialInsCollection, string> = {
+  current: '当月徴収',
+  next: '翌月徴収',
+};
+
+export const toSocialInsCollection = (value: unknown): SocialInsCollection => (value === 'next' ? 'next' : 'current');
+
+const ymOf = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
+
+/**
+ * 翌月徴収で、退職する月に支払う給与から、その月の分の保険料も引けるか
+ * 退職日がその月にあり、その月の分の保険料がかかる（月末に退職した）とき
+ */
+export const isRetirementMonthCollectable = (staff: any, year: number, month: number, collection: SocialInsCollection): boolean =>
+  collection === 'next'
+  && !!staff.retirement_date && String(staff.retirement_date).slice(0, 7) === ymOf(year, month)
+  && checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
+
+/**
+ * その月に支払う給与から引く社会保険料が、何年何月分か
+ * ・当月徴収：支払う月の分
+ * ・翌月徴収：前月の分。退職する月の給与で、この後に給与を払わないとき（collectRetirementMonth）は、その月の分も引く
+ * 出典：健康保険法167条1項・厚生年金保険法84条1項（e-Gov法令検索）
+ *       「被保険者の負担すべき前月の標準報酬月額に係る保険料（使用されなくなった場合は、前月及びその月の標準報酬月額に係る保険料）を
+ *        報酬から控除することができる」。賞与の保険料は、その賞与の標準賞与額の分をその賞与から引く（同2項。徴収月に関係ない）
+ */
+export const socialInsMonthsOf = (
+  staff: any,
+  year: number,
+  month: number,
+  collection: SocialInsCollection,
+  collectRetirementMonth = false,
+): { year: number; month: number }[] => {
+  if (collection === 'current') return [{ year, month }];
+  const prev = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+  return collectRetirementMonth && isRetirementMonthCollectable(staff, year, month, collection) ? [prev, { year, month }] : [prev];
+};
+
+/** ある月の分の社会保険料（健康保険・介護保険・子ども・子育て支援金・厚生年金）と、その月の加入・年齢・免除の状態 */
+const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: string, companySettings: any) => {
+  // 保険料の対象月に合った料率（健康保険は3月分から新年度）
+  const ins = Master.getInsuranceMaster(year, month);
+
+  // 1. 加入しているかと標準報酬月額
+  // 従業員画面で「標準報酬月額 0：未加入・対象外」または社保規定「未加入 / 適用除外」を選んだ人からは控除しない
+  // （標準報酬月額は資格取得時・算定基礎・月変で決まり、毎月の給与からは計算しない）
+  // 標準報酬月額は、その月の分に使う値（履歴から。詳しくは utils/standardRemuneration.ts）
+  const isSocialInsEnrolled = checkSocialInsEnrolled(staff, year, month);
+  const hyojunHoshu = isSocialInsEnrolled ? getStandardRemuneration(staff, year, month) : 0;
+
+  // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
+  // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
+  const byAge = getInsuranceByAge(staff.birthday || '', year, month);
+  // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
+  const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
+  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts）
+  const isLeaveExemptMonth = checkLeaveExemptMonth(parseLeavePeriods(staff.leave_periods), year, month);
+  const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
+  const healthRate = (ins.KENPO_RATES[prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
+  const sInsType = companySettings?.round_social_ins || 'floor';
+  const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
+
+  let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
+  if (isSocialInsMonth && byAge.health) {
+    // 健康保険料
+    healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
+
+    // 介護保険料（40〜64歳）
+    // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
+    if (byAge.nursing) {
+      const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
+      nursingInsurance = combined - healthInsurance;
+    }
+
+    // 子ども・子育て支援金（令和8年4月分から。健康保険と同じ標準報酬月額に支援金率を掛ける）
+    if (Master.isChildSupportMonth(ins, year, month) && ins.CHILD_SUPPORT_RATE) {
+      childSupport = calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType);
+    }
+  }
+  if (isSocialInsMonth && byAge.pension) {
+    // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
+    const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
+    welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
+  }
+  return { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, healthInsurance, nursingInsurance, childSupport, welfarePension };
+};
+
 export const calculateSalary = (
   staff: any,
   attendanceData: any[],
@@ -768,51 +868,21 @@ export const calculateSalary = (
                     + (customEarnings || 0);
 
   // ── 社会保険料 ──────────────────────────────────────────────
-  // 保険料の対象月に合った料率（健康保険は3月分から、雇用保険は4月から新年度）
-  // ※ 支給年月を保険料の対象月として扱う（当月徴収）
+  // この給与から引く保険料の月：当月徴収はその月の分、翌月徴収は前月の分（上の socialInsMonthsOf）
+  // 加入しているか・標準報酬月額・料率・年齢・入社月や退職月・産休育休の免除は、すべて保険料の月で決める
+  const socialInsCollection = toSocialInsCollection(extras.socialInsCollection);
+  const retirementMonthCollectable = isRetirementMonthCollectable(staff, targetYear, targetMonth, socialInsCollection);
+  const socialInsMonths = socialInsMonthsOf(staff, targetYear, targetMonth, socialInsCollection, !!extras.collectRetirementMonth);
+  const perMonth = socialInsMonths.map(({ year, month }) => socialPremiumsOf(staff, year, month, extras.prefecture, companySettings));
+  const main = perMonth[0];
+  const { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth } = main;
+  const healthInsurance = perMonth.reduce((sum, p) => sum + p.healthInsurance, 0);
+  const nursingInsurance = perMonth.reduce((sum, p) => sum + p.nursingInsurance, 0);
+  const childSupport = perMonth.reduce((sum, p) => sum + p.childSupport, 0);
+  const welfarePension = perMonth.reduce((sum, p) => sum + p.welfarePension, 0);
+
+  // 雇用保険の料率は、賃金を支払った月のもの（社会保険料の徴収月とは関係ない）
   const ins = Master.getInsuranceMaster(targetYear, targetMonth);
-
-  // 1. 加入しているかと標準報酬月額
-  // 従業員画面で「標準報酬月額 0：未加入・対象外」または社保規定「未加入 / 適用除外」を選んだ人からは控除しない
-  // （標準報酬月額は資格取得時・算定基礎・月変で決まり、毎月の給与からは計算しない）
-  // 標準報酬月額は、その月の分に使う値（履歴から。詳しくは utils/standardRemuneration.ts）
-  const isSocialInsEnrolled = checkSocialInsEnrolled(staff, targetYear, targetMonth);
-  const hyojunHoshu = isSocialInsEnrolled ? getStandardRemuneration(staff, targetYear, targetMonth) : 0;
-
-  // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
-  // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
-  const byAge = getInsuranceByAge(staff.birthday || '', targetYear, targetMonth);
-  // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
-  const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, targetYear, targetMonth);
-  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts）
-  const isLeaveExemptMonth = checkLeaveExemptMonth(parseLeavePeriods(staff.leave_periods), targetYear, targetMonth);
-  const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
-  const healthRate = (ins.KENPO_RATES[extras.prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
-  const sInsType = companySettings?.round_social_ins || 'floor';
-  const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
-
-  let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
-  if (isSocialInsMonth && byAge.health) {
-    // 健康保険料
-    healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
-
-    // 介護保険料（40〜64歳）
-    // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
-    if (byAge.nursing) {
-      const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
-      nursingInsurance = combined - healthInsurance;
-    }
-
-    // 子ども・子育て支援金（令和8年4月分から。健康保険と同じ標準報酬月額に支援金率を掛ける）
-    if (Master.isChildSupportMonth(ins, targetYear, targetMonth) && ins.CHILD_SUPPORT_RATE) {
-      childSupport = calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType);
-    }
-  }
-  if (isSocialInsMonth && byAge.pension) {
-    // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
-    const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
-    welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
-  }
 
   // 雇用保険（賃金総額 × 本人負担率）
   // 従業員画面の「雇用保険加入」を外した人（役員など）からは控除しない
@@ -906,6 +976,9 @@ export const calculateSalary = (
     isPensionAgeTarget: byAge.pension,
     isInsuredMonth,
     isLeaveExemptMonth,
+    socialInsCollection,
+    socialInsMonths: socialInsMonths.map(({ year, month }) => ymOf(year, month)),
+    retirementMonthCollectable,
     hyojunHoshu,
     isSocialInsEnrolled,
     isEmploymentInsEnrolled,

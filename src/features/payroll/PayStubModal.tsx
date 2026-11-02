@@ -20,8 +20,10 @@ export default function PayStubModal(props: Props) {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
-    monthStaff, wageMismatchDays,
+    monthStaff, wageMismatchDays, empInsMaster,
   } = usePayStubModal(props);
+  // この給与から引いた社会保険料の月（翌月徴収なら前月の分）
+  const insMonthLabel = salary.socialInsMonths.map(ym => { const [y, m] = ym.split('-').map(Number); return `${y}年${m}月分`; }).join("と");
   // 給与形態・基本給・扶養人数は、この月の分の履歴の値
   const staff = monthStaff;
 
@@ -76,6 +78,21 @@ export default function PayStubModal(props: Props) {
               この明細は勤怠に残した{staff.wage_type === "daily" ? "日給" : "時給"}で計算しています。履歴の値で計算するなら、勤怠の画面でその日を確定し直してください。
             </div>
           )}
+          {salary.socialInsCollection === "next" && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              社会保険料（翌月徴収）：この給与から{insMonthLabel}を引きます。
+              {salary.retirementMonthCollectable && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!extras.collectRetirementMonth}
+                    onChange={e => setExtras(p => ({ ...p, collectRetirementMonth: e.target.checked }))}
+                  />
+                  退職した月の分もこの給与から引く（この後に給与を払わないとき。前月と退職した月の2か月分になります）
+                </label>
+              )}
+            </div>
+          )}
           {minimumWageCheck && !minimumWageCheck.ok && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               ⚠ 基本給を時間あたりにすると {Math.floor(minimumWageCheck.perHour).toLocaleString()}円で、
@@ -88,8 +105,8 @@ export default function PayStubModal(props: Props) {
           {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isInsuredMonth || salary.isLeaveExemptMonth || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               {!salary.isSocialInsEnrolled && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
-              {salary.isSocialInsEnrolled && !salary.isInsuredMonth && <div>※ 社会保険料は、入社した月の分から、退職日の翌日（資格喪失日）がある月の前月分までかかるため、この月の分はかかりません（月末に退職した人は、退職した月の分までかかります）。</div>}
-              {salary.isSocialInsEnrolled && salary.isInsuredMonth && salary.isLeaveExemptMonth && <div>※ 産休・育休中のため、この月の分の健康保険料・介護保険料・子ども・子育て支援金・厚生年金保険料は免除されます（年金事務所・健康保険組合への申出が必要です）。</div>}
+              {salary.isSocialInsEnrolled && !salary.isInsuredMonth && <div>※ 社会保険料は、入社した月の分から、退職日の翌日（資格喪失日）がある月の前月分までかかるため、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分はかかりません（月末に退職した人は、退職した月の分までかかります）。</div>}
+              {salary.isSocialInsEnrolled && salary.isInsuredMonth && salary.isLeaveExemptMonth && <div>※ 産休・育休中のため、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分の健康保険料・介護保険料・子ども・子育て支援金・厚生年金保険料は免除されます（年金事務所・健康保険組合への申出が必要です）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && !salary.isLeaveExemptMonth && !salary.isHealthInsAgeTarget && <div>※ 75歳の誕生月の分から、健康保険料・子ども・子育て支援金はかかりません（後期高齢者医療制度へ移るため）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && !salary.isLeaveExemptMonth && !salary.isPensionAgeTarget && <div>※ 70歳に達した月（誕生日の前日がある月）の分から、厚生年金保険料はかかりません（70歳以上被用者）。</div>}
               {!salary.isEmploymentInsEnrolled && <div>※ 雇用保険は未加入のため控除していません（従業員設定の「雇用保険加入」）。</div>}
@@ -312,7 +329,8 @@ export default function PayStubModal(props: Props) {
 
           <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
             ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
-            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{insMaster.LABOR_FROM.year}年{insMaster.LABOR_FROM.month}月からの料率で計算。
+            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月からの料率で計算。
+            健康保険・介護保険・子ども・子育て支援金・厚生年金は{insMonthLabel}（{salary.socialInsCollection === "next" ? "翌月徴収" : "当月徴収"}）。
             所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
           </div>
         </div>

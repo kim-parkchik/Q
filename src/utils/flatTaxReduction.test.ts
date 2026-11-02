@@ -220,4 +220,15 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied[0]).toStartWith("v9:");
         expect(db.query("SELECT wage_history AS w, dependents_history AS d, base_wage AS b FROM staff").get()).toEqual({ w: null, d: null, b: 300000 });
     });
+    test("v10: v9 まで更新済みの会社ファイルに、給与規定グループの社会保険料の徴収月の列を追加する（今までのグループは当月徴収）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE payroll_groups (id INTEGER PRIMARY KEY, name TEXT, closing_day INTEGER, is_next_month INTEGER, payment_day INTEGER)");
+        db.exec("INSERT INTO payroll_groups VALUES (1, '全社', 99, 0, 25)");
+        db.exec("PRAGMA user_version = 9");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 9);
+        expect(applied[0]).toStartWith("v10:");
+        expect(db.query("SELECT social_ins_collection AS c FROM payroll_groups").get()).toEqual({ c: "current" });
+    });
 });

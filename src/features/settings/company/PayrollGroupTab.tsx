@@ -25,6 +25,7 @@ import {
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
 import { TAX_CALC_METHOD_LABELS, type TaxCalcMethod } from '../../../utils/incomeTax';
+import { SOCIAL_INS_COLLECTION_LABELS, toSocialInsCollection, type SocialInsCollection } from '../../../utils/calcSalary';
 
 interface Props {
     cm: CompanyManagerState;
@@ -43,6 +44,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgPaymentDay,
         pgTaxMethod,
         setPgTaxMethod,
+        pgSocialInsCollection,
+        setPgSocialInsCollection,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -80,6 +83,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                     </span>
                                     <span style={{ marginLeft: "6px", color: "#94a3b8" }}>
                                         / 所得税: {TAX_CALC_METHOD_LABELS[(pg.tax_calc_method === "densanki" ? "densanki" : "table") as TaxCalcMethod]}
+                                        / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                     </span>
                                 </div>
                             </div>
@@ -180,6 +184,23 @@ export default function PayrollGroupTab({ cm }: Props) {
                     <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
                         税額表は国税庁の月額表どおりの金額になります。電算機計算の特例はその月の給与から式で計算するため、
                         数十円〜百円ほど差が出ることがあります（年末調整で精算されます）。
+                    </p>
+
+                    <label style={miniLabelStyle}>社会保険料の徴収</label>
+                    <select
+                        value={pgSocialInsCollection}
+                        onChange={e => setPgSocialInsCollection(e.target.value as SocialInsCollection)}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="current">{SOCIAL_INS_COLLECTION_LABELS.current}（その月の分を、その月に支払う給与から引く）</option>
+                        <option value="next">{SOCIAL_INS_COLLECTION_LABELS.next}（前月の分を、その月に支払う給与から引く）</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        健康保険・介護保険・子ども・子育て支援金・厚生年金の保険料を、どの月の給与から引くか。
+                        法律（健康保険法167条・厚生年金保険法84条）では、前月の分を引くことになっています（翌月徴収）。
+                        翌月徴収にすると、料率の切り替え・入社した月・退職した月・産休育休の免除は、前月の分で決まります。
+                        退職するときは、最後の給与から前月と退職した月の2か月分を引けます。雇用保険料と賞与の保険料は、どちらでも支払ったときに引きます。
+                        途中で切り替えると、1か月分を引かない（2か月分を引く）月が出るので、切り替える月に気をつけてください。
                     </p>
 
                     <div style={{ display: "flex", gap: "10px" }}>

@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
-    calculateSalary, loadCustomItems, saveSalaryResult, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
+    calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
     getInsuranceByAge, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
@@ -326,6 +326,61 @@ describe("年末調整の過不足額の精算（12月の給与で）", () => {
         expect(r.appliedDependents).toBe(2);
         await saveSalaryResult(asyncDb, "S001", 2026, 6, r, { ...monthly, dependents: 0 });
         expect(db.query("SELECT applied_dependents AS d, applied_base_wage AS w FROM salary_results").get()).toEqual({ d: 2, w: 300000 });
+    });
+});
+
+describe("社会保険料の徴収月（当月徴収・翌月徴収。健康保険法167条・厚生年金保険法84条）", () => {
+    const at = (staff: any, year: number, month: number, o: Partial<SalaryExtras> = {}) =>
+        calculateSalary(staff, [], extras(o), year, month, company);
+    const next = { socialInsCollection: "next" as const };
+    const premiums = (r: ReturnType<typeof at>) => [r.healthInsurance, r.nursingInsurance, r.childSupport, r.welfarePension];
+
+    test("翌月徴収は、前月の分の保険料を引く（1月の給与は前の年の12月分）", () => {
+        expect(socialInsMonthsOf(monthly, 2026, 6, "next")).toEqual([{ year: 2026, month: 5 }]);
+        expect(socialInsMonthsOf(monthly, 2026, 1, "next")).toEqual([{ year: 2025, month: 12 }]);
+        expect(socialInsMonthsOf(monthly, 2026, 6, "current")).toEqual([{ year: 2026, month: 6 }]);
+        expect(at(monthly, 2026, 6, next).socialInsMonths).toEqual(["2026-05"]);
+    });
+    test("料率は保険料の月のもの：翌月徴収の3月の給与は、2月分（前の年度の料率）で計算する", () => {
+        const mar = at(monthly, 2026, 3, next);
+        expect(premiums(mar)).toEqual(premiums(at(monthly, 2026, 2)));
+        expect(mar.healthInsurance).not.toBe(at(monthly, 2026, 3).healthInsurance);
+    });
+    test("子ども・子育て支援金（4月分から）は、翌月徴収なら5月の給与から引く", () => {
+        expect(at(monthly, 2026, 4).childSupport).toBeGreaterThan(0);
+        expect(at(monthly, 2026, 4, next).childSupport).toBe(0);
+        expect(at(monthly, 2026, 5, next).childSupport).toBe(at(monthly, 2026, 4).childSupport);
+    });
+    test("入社した月の給与からは引かず、次の月の給与から入社した月の分を引く", () => {
+        const joined = { ...monthly, join_date: "2026-06-10" };
+        expect(premiums(at(joined, 2026, 6, next))).toEqual([0, 0, 0, 0]);
+        expect(premiums(at(joined, 2026, 7, next))).toEqual(premiums(at(joined, 2026, 6)));
+    });
+    test("月末に退職するときは、最後の給与から前月と退職した月の2か月分を引ける（使用されなくなった場合）", () => {
+        const retiring = { ...monthly, retirement_date: "2026-06-30" };
+        const one = at(retiring, 2026, 6, next);
+        expect(one.retirementMonthCollectable).toBe(true);
+        expect(one.socialInsMonths).toEqual(["2026-05"]);
+        const two = at(retiring, 2026, 6, { ...next, collectRetirementMonth: true });
+        expect(two.socialInsMonths).toEqual(["2026-05", "2026-06"]);
+        expect(two.welfarePension).toBe(at(retiring, 2026, 5).welfarePension + at(retiring, 2026, 6).welfarePension);
+        // 翌月払いで、翌月にも給与を払うなら、その給与で退職した月の分を引く
+        expect(premiums(at(retiring, 2026, 7, next))).toEqual(premiums(at(retiring, 2026, 6)));
+    });
+    test("月の途中で退職したら、退職した月の分はかからないので、2か月分にはならない", () => {
+        const midMonth = { ...monthly, retirement_date: "2026-06-15" };
+        const r = at(midMonth, 2026, 6, { ...next, collectRetirementMonth: true });
+        expect(r.retirementMonthCollectable).toBe(false);
+        expect(r.socialInsMonths).toEqual(["2026-05"]);
+        expect(premiums(at(midMonth, 2026, 7, next))).toEqual([0, 0, 0, 0]);
+    });
+    test("産休・育休の免除も保険料の月で決まる（5月分が免除なら、翌月徴収は6月の給与から引かない）", () => {
+        const leave = { ...monthly, leave_periods: JSON.stringify([{ type: "maternity", start: "2026-05-01", end: "2026-05-31" }]) };
+        expect(premiums(at(leave, 2026, 6, next))).toEqual([0, 0, 0, 0]);
+        expect(at(leave, 2026, 6).healthInsurance).toBeGreaterThan(0);
+    });
+    test("雇用保険料は、徴収月に関係なく、その月に支払った賃金にかかる", () => {
+        expect(at(monthly, 2026, 4, next).empInsurance).toBe(at(monthly, 2026, 4).empInsurance);
     });
 });
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
-import { calculateSalary, calcDetailedDiff, loadCustomItems, type SalaryExtras } from "../../utils/calcSalary";
+import { calculateSalary, calcDetailedDiff, loadCustomItems, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
 import { loadAnnualWorkDays } from "../../utils/annualWorkDays";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
@@ -432,6 +432,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         customItems,
         taxMethod: currentGroup?.tax_calc_method,
         annualWorkDays,
+        // 社会保険料の徴収（給与規定グループの設定。翌月徴収の退職月は、当月払いなら退職した月の分も引く）
+        socialInsCollection: toSocialInsCollection(currentGroup?.social_ins_collection),
+        collectRetirementMonth: Number(currentGroup?.is_next_month) !== 1,
       }, 
       targetYear, 
       targetMonth, 

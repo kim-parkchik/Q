@@ -118,6 +118,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "dependents_history", "TEXT");
     },
   },
+  {
+    version: 10,
+    description: "給与規定グループに社会保険料の徴収月（当月徴収・翌月徴収）を追加（今までのグループは当月徴収）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "social_ins_collection", "TEXT DEFAULT 'current'");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

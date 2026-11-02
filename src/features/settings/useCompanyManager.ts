@@ -12,6 +12,7 @@ import { fetchAddressByZip } from "../../utils/addressUtils";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import type { TaxCalcMethod } from "../../utils/incomeTax";
+import { toSocialInsCollection, type SocialInsCollection } from "../../utils/calcSalary";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -55,6 +56,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgIsNextMonth, setPgIsNextMonth] = useState(0); // 0:当月, 1:翌月
     const [pgPaymentDay, setPgPaymentDay] = useState(25);
     const [pgTaxMethod, setPgTaxMethod] = useState<TaxCalcMethod>("table"); // 源泉所得税の計算方法
+    const [pgSocialInsCollection, setPgSocialInsCollection] = useState<SocialInsCollection>("current"); // 社会保険料の徴収（当月・翌月）
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
 
@@ -329,6 +331,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgIsNextMonth(pg.is_next_month);
         setPgPaymentDay(pg.payment_day);
         setPgTaxMethod(pg.tax_calc_method === "densanki" ? "densanki" : "table");
+        setPgSocialInsCollection(toSocialInsCollection(pg.social_ins_collection));
     };
 
     // フォームのリセット（キャンセル時）
@@ -339,6 +342,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgIsNextMonth(0);
         setPgPaymentDay(25);
         setPgTaxMethod("table");
+        setPgSocialInsCollection("current");
     };
 
     // 計算用のヘルパー
@@ -500,14 +504,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method) VALUES (?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection) VALUES (?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection]
                 );
             }
             resetPgForm();
@@ -812,6 +816,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         pgPaymentDay,
         pgTaxMethod,
         setPgTaxMethod,
+        pgSocialInsCollection,
+        setPgSocialInsCollection,
         setPgPaymentDay,
         editingPgId,
         setEditingPgId,
