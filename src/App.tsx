@@ -13,6 +13,7 @@ import {
   Coins, 
   ClipboardList, 
   TrendingUp, 
+  Baby, 
   Calculator, 
   FileText, 
   FileSpreadsheet, 
@@ -36,6 +37,7 @@ import PaySlipManager from "./features/payroll/PaySlipManager";
 import BonusManager from "./features/payroll/BonusManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
+import LeaveEndRevisionManager from "./features/payroll/LeaveEndRevisionManager";
 import NenchoManager from "./features/nencho/NenchoManager";
 import WithholdingSlipManager from "./features/nencho/WithholdingSlipManager";
 import WithholdingLedgerManager from "./features/nencho/WithholdingLedgerManager";
@@ -60,6 +62,7 @@ const TAB_NAMES: Record<string, string> = {
   bonus: "賞与計算",
   santei: "算定基礎（定時決定）",
   zuiji: "月変（随時改定）",
+  kyugyo: "休業終了時改定",
   nencho: "年末調整",
   gensen: "源泉徴収票",
   gensenbo: "源泉徴収簿",
@@ -78,6 +81,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   bonus: <Coins size={18} />,
   santei: <ClipboardList size={18} />,
   zuiji: <TrendingUp size={18} />,
+  kyugyo: <Baby size={18} />,
   nencho: <Calculator size={18} />,
   gensen: <FileSpreadsheet size={18} />,
   gensenbo: <BookOpen size={18} />,
@@ -230,13 +234,14 @@ function App() {
             "bonus", 
             "santei",
             "zuiji",
+            "kyugyo",
             "nencho",
             "gensen",
             "gensenbo",
             "payslip"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "nencho", "gensen", "gensenbo", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "kyugyo", "nencho", "gensen", "gensenbo", "payslip"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -347,6 +352,9 @@ function App() {
               )}
               {activeTab === "zuiji" && db && (
                 <ZuijiManager db={db} staffList={staffList} onDataChange={refreshData} />
+              )}
+              {activeTab === "kyugyo" && db && (
+                <LeaveEndRevisionManager db={db} staffList={staffList} onDataChange={refreshData} />
               )}
               {activeTab === "nencho" && db && (
                 <NenchoManager db={db} staffList={staffList} />
