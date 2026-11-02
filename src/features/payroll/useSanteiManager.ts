@@ -9,19 +9,35 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from "../../constants";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 import {
-  SANTEI_MONTHS, buildSanteiInputs, decideTeiji, gradeOfStandard,
+  SANTEI_MONTHS, buildSanteiInputs, decideTeiji, gradeOfStandard, groupOf,
   type SanteiInput, type SanteiMonth, type SanteiResult, type SanteiWorkerKind,
 } from "../../utils/santei";
+import {
+  buildAnnualEarlierMonths, decideTeijiAnnual, earlierMonthsOf, type AnnualMonth, type AnnualResult,
+} from "../../utils/santeiAnnual";
 import { latestStandardRemuneration, remunerationHistoryOf, stringifyRemunerationHistory } from "../../utils/standardRemuneration";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 
-/** 画面で選ぶ値（区分・登録するか）を足したもの */
-type RowInput = SanteiInput & { kind: SanteiWorkerKind; selected: boolean };
+/**
+ * 画面で選ぶ値（区分・登録するか・年間平均で申し立てるか）と、年間平均に使う前年7月〜当年3月の値を足したもの
+ */
+type RowInput = SanteiInput & {
+  kind: SanteiWorkerKind;
+  selected: boolean;
+  earlierMonths: AnnualMonth[];
+  /** 年間報酬の平均で申し立てる（例年の差で、本人が同意している） */
+  annualRequested: boolean;
+};
 
 export interface SanteiRow extends RowInput {
   previousGrade: number | null;
+  /** 4〜6月の平均で決めた結果 */
   result: SanteiResult;
+  /** 前年7月〜当年6月の平均と比べた結果（utils/santeiAnnual.ts） */
+  annual: AnnualResult;
+  /** 登録する標準報酬月額（年間平均で申し立てて、2等級以上の差があるときは年間平均で決めた額） */
+  decided: { standard: number; grade: number | null; byAnnual: boolean };
 }
 
 /** 4月以後なら今年、1〜3月なら前の年の算定を初めに開く */
@@ -48,12 +64,15 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
       setIsLoading(true);
       try {
         const groups = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
+        // 年間平均と比べるため、前年7月〜当年6月に支払った給与を読む
         const salaries = await db.select<any[]>(
-          "SELECT staff_id, target_year, target_month, total_earnings FROM salary_results WHERE target_year = ? AND target_month IN (4, 5, 6)",
-          [year]
+          "SELECT staff_id, target_year, target_month, total_earnings FROM salary_results " +
+          "WHERE (target_year = ? AND target_month >= 7) OR (target_year = ? AND target_month <= 6)",
+          [year - 1, year]
         );
-        // 4〜6月に支払う給与の計算期間（給与規定グループごとに違う）をすべて含む範囲の、確定した勤怠
-        const periods = groups.flatMap((g) => SANTEI_MONTHS.map((m) => getPeriodForPayMonth(g, year, m)));
+        // 前年7月〜当年6月に支払う給与の計算期間（給与規定グループごとに違う）をすべて含む範囲の、確定した勤怠
+        const payMonths = [...earlierMonthsOf(year), ...SANTEI_MONTHS.map((month) => ({ year, month }))];
+        const periods = groups.flatMap((g) => payMonths.map((p) => getPeriodForPayMonth(g, p.year, p.month)));
         const from = periods.map((p) => p.startStr).sort()[0];
         const to = periods.map((p) => p.endStr).sort().reverse()[0];
         const attendance = from && to
@@ -63,7 +82,10 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
             )
           : [];
         setInputs(buildSanteiInputs(staffList, year, groups, salaries, attendance)
-          .map((r) => ({ ...r, kind: "general", selected: r.exclusion === null })));
+          .map((r) => ({
+            ...r, kind: "general", selected: r.exclusion === null, annualRequested: false,
+            earlierMonths: buildAnnualEarlierMonths(r.staff, year, groupOf(r.staff, groups), salaries, attendance),
+          })));
       } catch (e) {
         console.error("算定基礎の読み込みに失敗しました:", e);
         dialog.error(`算定基礎のデータを読み込めませんでした。\n${e}`);
@@ -76,15 +98,24 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
   }, [db, staffList, year]);
 
   const rows: SanteiRow[] = useMemo(
-    () => inputs.map((r) => ({
-      ...r,
-      previousGrade: gradeOfStandard(table, r.previous),
-      result: decideTeiji(r.months, r.kind, r.previous, table),
-    })),
-    [inputs, table]
+    () => inputs.map((r) => {
+      const result = decideTeiji(r.months, r.kind, r.previous, table);
+      const annual = decideTeijiAnnual(year, r.earlierMonths, r.months, r.kind, result, table);
+      const byAnnual = r.annualRequested && annual.status === "target";
+      return {
+        ...r,
+        previousGrade: gradeOfStandard(table, r.previous),
+        result,
+        annual,
+        decided: byAnnual
+          ? { standard: annual.standard!, grade: annual.grade, byAnnual }
+          : { standard: result.standard, grade: result.grade, byAnnual },
+      };
+    }),
+    [inputs, table, year]
   );
 
-  const updateRow = (staffId: string, patch: Partial<Pick<RowInput, "kind" | "selected">>) =>
+  const updateRow = (staffId: string, patch: Partial<Pick<RowInput, "kind" | "selected" | "annualRequested">>) =>
     setInputs((prev) => prev.map((r) => (String(r.staff.id) === String(staffId) ? { ...r, ...patch } : r)));
 
   /** 支払基礎日数・報酬を手で直す（空にすると、その月は給与を支払っていない扱い） */
@@ -94,6 +125,13 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
       months: r.months.map((m) => (m.month === month ? { ...m, ...patch } : m)),
     }));
 
+  /** 前年7月〜当年3月の支払基礎日数・報酬を手で直す（空にすると、その月は平均に入れない） */
+  const updateEarlierMonth = (staffId: string, year: number, month: number, patch: Partial<Pick<AnnualMonth, "days" | "amount" | "partialJoin">>) =>
+    setInputs((prev) => prev.map((r) => String(r.staff.id) !== String(staffId) ? r : {
+      ...r,
+      earlierMonths: r.earlierMonths.map((m) => (m.year === year && m.month === month ? { ...m, ...patch } : m)),
+    }));
+
   const targets = rows.filter((r) => r.exclusion === null);
   const excluded = rows.filter((r) => r.exclusion !== null);
   const selectedRows = targets.filter((r) => r.selected);
@@ -101,8 +139,10 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
   /** 選んだ人の標準報酬月額を、この年の9月分から履歴に登録する（同じ月の分があれば置き換える） */
   const register = async () => {
     if (!db || selectedRows.length === 0) return;
+    const annualCount = selectedRows.filter((r) => r.decided.byAnnual).length;
     const ok = await ask(
       `${selectedRows.length}人の標準報酬月額を、${year}年9月分から履歴に登録します。\n` +
+      (annualCount > 0 ? `うち${annualCount}人は、年間報酬の平均で決めた額です。\n` : "") +
       `すでに${year}年9月分からの行がある人は、置き換えます。よろしいですか？`,
       { title: "算定基礎の登録", kind: "info" }
     );
@@ -113,7 +153,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
       for (const r of selectedRows) {
         const history = [
           ...remunerationHistoryOf(r.staff).filter((e) => e.from !== from),
-          { from, amount: r.result.standard, reason: "teiji" as const },
+          { from, amount: r.decided.standard, reason: "teiji" as const },
         ];
         await db.execute(
           "UPDATE staff SET standard_remuneration_history = ?, standard_remuneration = ? WHERE id = ?",
@@ -133,7 +173,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
   return {
     year, setYear, isLoading, isSaving,
     targets, excluded, selectedRows,
-    updateRow, updateMonth, register,
+    updateRow, updateMonth, updateEarlierMonth, register,
     rateWarnings: ins.WARNINGS,
   };
 }
