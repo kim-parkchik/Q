@@ -253,7 +253,7 @@ const getGensenTax = (taxBase: number, dependents: number, payYear: number, meth
   calcWithholdingTax(taxBase, dependents, payYear, method ?? "table", column);
 
 /** その年齢になる誕生日（2月29日生まれで、うるう年でない年は3月1日） */
-const birthdayAt = (birthday: string, age: number) => {
+export const birthdayAt = (birthday: string, age: number) => {
   const b = dayjs(birthday);
   return dayjs(new Date(b.year() + age, b.month(), b.date()));
 };

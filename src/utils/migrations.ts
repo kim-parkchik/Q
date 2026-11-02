@@ -132,6 +132,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "payroll_groups", "proration_method", "TEXT DEFAULT 'none'");
     },
   },
+  {
+    version: 12,
+    description: "従業員に、養育期間の標準報酬月額の特例（3歳未満の子を養育する人の年金の申出）を追加（初めは空）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "youiku_tokurei", "TEXT");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

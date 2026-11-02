@@ -135,6 +135,7 @@ export const DB_SCHEMAS = [
     employment_ins_num TEXT,  -- 雇用保険被保険者番号
     flat_tax_reduction_persons INTEGER DEFAULT 0, -- 令和6年分 定額減税の人数（本人＋同一生計配偶者＋扶養親族。0なら月次減税をしない）
     leave_periods TEXT,       -- 産休・育休の期間（社会保険料の免除に使う。JSON。詳しくは utils/leaveExemption.ts）
+    youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
     my_number TEXT,
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
     FOREIGN KEY (payroll_group_id) REFERENCES payroll_groups(id),

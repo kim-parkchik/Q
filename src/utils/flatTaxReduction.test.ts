@@ -242,4 +242,15 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied[0]).toStartWith("v11:");
         expect(db.query("SELECT proration_method AS p FROM payroll_groups").get()).toEqual({ p: "none" });
     });
+    test("v12: v11 まで更新済みの会社ファイルに、従業員の養育期間の特例の列を追加する（初めは空）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER)");
+        db.exec("INSERT INTO staff VALUES ('S001', '山田', 300000)");
+        db.exec("PRAGMA user_version = 11");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 11);
+        expect(applied[0]).toStartWith("v12:");
+        expect(db.query("SELECT youiku_tokurei AS y FROM staff").get()).toEqual({ y: null });
+    });
 });
