@@ -19,9 +19,11 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
+    monthStaff, wageMismatchDays,
   } = usePayStubModal(props);
-  const { staff } = props;
+  // 給与形態・基本給・扶養人数は、この月の分の履歴の値
+  const staff = monthStaff;
 
   const padRows = (current: number, target: number) =>
   Array.from({ length: Math.max(0, target - current) }, (_, i) => (
@@ -66,6 +68,12 @@ export default function PayStubModal(props: Props) {
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
+          {wageMismatchDays > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              ⚠ 勤怠を確定したときの{staff.wage_type === "daily" ? "日給" : "時給"}が、基本給の履歴のこの月の値（{Number(staff.base_wage).toLocaleString()}円）と違う日が{wageMismatchDays}日あります。
+              この明細は勤怠に残した{staff.wage_type === "daily" ? "日給" : "時給"}で計算しています。履歴の値で計算するなら、勤怠の画面でその日を確定し直してください。
             </div>
           )}
           {minimumWageCheck && !minimumWageCheck.ok && (

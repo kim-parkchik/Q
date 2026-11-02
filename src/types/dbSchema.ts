@@ -126,6 +126,8 @@ export const DB_SCHEMAS = [
     resident_tax INTEGER DEFAULT 0,
     standard_remuneration INTEGER DEFAULT 0,  -- いちばん新しい標準報酬月額（その月の分の値は下の履歴から求める）
     standard_remuneration_history TEXT,      -- 標準報酬月額の履歴（何年何月分から・いくら・理由。JSON。詳しくは utils/standardRemuneration.ts）
+    wage_history TEXT,        -- 基本給の履歴（何年何月分から・給与形態・金額。JSON。詳しくは utils/staffHistory.ts。base_wage・wage_type はいちばん新しい値）
+    dependents_history TEXT,  -- 扶養人数の履歴（何年何月分から・何人。JSON。dependents はいちばん新しい値）
     is_employment_ins_eligible INTEGER DEFAULT 1,
     employment_insurance_type TEXT,  -- 個人別の雇用保険区分（NULLなら会社設定に従う）
     health_ins_num TEXT,      -- 健康保険被保険者番号

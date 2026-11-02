@@ -4,6 +4,7 @@
  */
 import { UserCheck, Shield, Timer } from 'lucide-react';
 import RemunerationHistory from './RemunerationHistory';
+import { DependentsHistoryEditor } from './WageDependentsHistory';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { toTaxColumn } from '../../../utils/incomeTax';
@@ -122,6 +123,9 @@ export default function InsuranceSection({ cm }: Props) {
                         <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>円</span>
                     </div>
                 </div>
+
+                {/* 扶養人数の履歴（何年何月分から何人） */}
+                <DependentsHistoryEditor cm={cm} />
 
                 {/* 令和6年分の定額減税（2024年6月〜12月に支払う給与だけで使う） */}
                 <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: "10px" }}>

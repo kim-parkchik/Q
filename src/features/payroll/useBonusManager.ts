@@ -4,6 +4,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
 import { calcBonusWithholdingTax, toTaxColumn } from '../../utils/incomeTax';
+import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 import { checkLeaveExemptBonus, parseLeavePeriods } from '../../utils/leaveExemption';
@@ -378,7 +379,9 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     // 源泉所得税：国税庁の算出率の表（前月の給与がない・賞与が前月の給与の10倍を超えるときは月額表）で計算する
     // ※ 前月の給与は、前月支給分として確定した給与（非課税の通勤手当を除いた額 − 社会保険料）を使う
     // 扶養控除等申告書を出していない人は乙欄
-    const incomeTax = calcBonusWithholdingTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(staff.dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
+    // 扶養親族等の数は、賞与を支払う月の分の履歴の値（utils/staffHistory.ts）
+    const dependents = staffAsOf(staff, payYear, payMonth).dependents;
+    const incomeTax = calcBonusWithholdingTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
       
     // 🆕 カスタム控除も有効なものだけ合計
     const customDeductions = deductionItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);

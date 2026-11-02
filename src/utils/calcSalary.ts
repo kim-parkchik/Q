@@ -116,6 +116,8 @@ export interface SalaryResult {
   overtimeBaseHoursIsAnnual: boolean;
   /** 日給制で日給を払った日数（半休・時間単位の有給の日は、働いた割合で数える。月給制・時給制は 0） */
   dailyWageDays: number;
+  /** 源泉所得税の計算に使った扶養親族等の数（確定した結果に「その時の扶養人数」として残す） */
+  appliedDependents: number;
   nightPay: number;
   paidLeavePay: number;           // 有給休暇の賃金（時給制・日給制）
   commutePay: number;
@@ -422,7 +424,7 @@ export const saveSalaryResult = async (
   year: number, 
   month: number, 
   result: SalaryResult,
-  staffMaster: any // その時の基本給などのスナップショット用
+  staffMaster: any // その月の分の基本給（utils/staffHistory.ts の staffAsOf を通した従業員）。確定した結果に残す
 ) => {
   const sql = `
     INSERT INTO salary_results (
@@ -467,7 +469,7 @@ export const saveSalaryResult = async (
 
   const params = [
     staffId, year, month,
-    staffMaster.base_wage, staffMaster.dependents,
+    staffMaster.base_wage, result.appliedDependents,
     result.totalWorkHours, result.totalOvertimeHours, result.totalNightHours,
     result.standardPremiumHours, result.highPremiumHours,
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
@@ -870,6 +872,7 @@ export const calculateSalary = (
     overtimeBaseHours,
     overtimeBaseHoursIsAnnual,
     dailyWageDays,
+    appliedDependents: Number(extras.dependents) || 0,
     nightPay: Math.floor(nightPay),
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,

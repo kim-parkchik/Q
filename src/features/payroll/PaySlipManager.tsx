@@ -1,6 +1,7 @@
 import * as S from "./PaySlipManager.styles";
 import { usePaySlipManager } from "./usePaySlipManager";
 import PayStubModal from "./PayStubModal";
+import { staffAsOf } from "../../utils/staffHistory";
 
 interface Props {
   db: any;
@@ -78,7 +79,7 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
               const totalH = attSummary?.total_h || 0;
               const isOver60 = totalH >= 220;
               const isCalendarInvalid = attSummary?.calendar_invalid === 1;
-              const isMonthly = s.wage_type === "monthly";
+              const isMonthly = staffAsOf(s, year, month).wage_type === "monthly";
 
               // --- 🆕 修正：isDisabled は法違反のときだけ！ ---
               // 月給制で勤怠なしでも、作成自体はできるようにします。
@@ -99,8 +100,16 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
 
                   {/* 2. 給与条件 */}
                   <td style={S.td}>
-                    <div style={{ fontSize: "12px", color: "#666" }}>{s.wage_type === "monthly" ? "月給制" : s.wage_type === "daily" ? "日給制" : "時給制"}</div>
-                    <div style={{ fontWeight: "600" }}>¥{Number(s.base_wage).toLocaleString()}</div>
+                    {/* この月の分の給与形態・基本給（履歴の値） */}
+                    {(() => {
+                      const ms = staffAsOf(s, year, month);
+                      return (
+                        <>
+                          <div style={{ fontSize: "12px", color: "#666" }}>{ms.wage_type === "monthly" ? "月給制" : ms.wage_type === "daily" ? "日給制" : "時給制"}</div>
+                          <div style={{ fontWeight: "600" }}>¥{Number(ms.base_wage).toLocaleString()}</div>
+                        </>
+                      );
+                    })()}
                   </td>
 
                   {/* 3. 所属 */}

@@ -314,6 +314,19 @@ describe("年末調整の過不足額の精算（12月の給与で）", () => {
         expect(db.query("SELECT year_end_adjustment, net_pay FROM salary_results").get())
             .toEqual({ year_end_adjustment: 115270, net_pay: r.netPay });
     });
+    test("確定した結果の「その時の扶養人数」は、源泉所得税の計算に使った人数（給与明細で変えた人数）", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
+        db.exec("INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) VALUES (1, '全社', 99, 0, 25)");
+        db.exec("INSERT INTO social_insurance_groups (id, name) VALUES (1, '協会けんぽ')");
+        db.exec("INSERT INTO staff (id, name, base_wage, dependents) VALUES ('S001', '山田', 300000, 0)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const r = calculateSalary({ ...monthly, dependents: 0 }, [], extras({ dependents: 2 }), 2026, 6, company);
+        expect(r.appliedDependents).toBe(2);
+        await saveSalaryResult(asyncDb, "S001", 2026, 6, r, { ...monthly, dependents: 0 });
+        expect(db.query("SELECT applied_dependents AS d, applied_base_wage AS w FROM salary_results").get()).toEqual({ d: 2, w: 300000 });
+    });
 });
 
 describe("社会保険・雇用保険に加入しているか（給与・賞与で同じ判定）", () => {

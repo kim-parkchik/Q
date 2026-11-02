@@ -3,6 +3,7 @@ import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, calcDetailedDiff, loadCustomItems, type SalaryExtras } from "../../utils/calcSalary";
 import { loadAnnualWorkDays } from "../../utils/annualWorkDays";
+import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
 import { useToast } from "../../components/Toast";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
@@ -26,10 +27,12 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   const [isLoading, setIsLoading] = useState(false);
 
   // --- ヘルパー: 現在選択中のスタッフ情報を取得 ---
-  const selectedStaff = useMemo(() => 
-    staffList?.find((s: any) => String(s.id) === String(selectedStaffId)),
-    [staffList, selectedStaffId]
-  );
+  // 給与形態・基本給・扶養人数は、選んでいる月（給与の支給月）の分の履歴の値にする（utils/staffHistory.ts）
+  // 勤怠を確定すると、この時給・日給を勤怠に残す
+  const selectedStaff = useMemo(() => {
+    const s = staffList?.find((x: any) => String(x.id) === String(selectedStaffId));
+    return s ? staffAsOf(s, targetYear, targetMonth) : undefined;
+  }, [staffList, selectedStaffId, targetYear, targetMonth]);
 
   const loadPayrollGroup = useCallback(async (staffId: string) => {
     if (!db || !staffId) return null;

@@ -15,6 +15,10 @@ import {
     latestStandardRemuneration, remunerationHistoryOf, stringifyRemunerationHistory, validateRemunerationHistory,
     type RemunerationEntry,
 } from "../../utils/standardRemuneration";
+import {
+    dependentsHistoryOf, stringifyDependentsHistory, stringifyWageHistory, toWageType, validateHistory, wageHistoryOf,
+    type DependentsEntry, type WageEntry,
+} from "../../utils/staffHistory";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -101,6 +105,12 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetCommuteType, setTargetCommuteType] = useState("daily");
     const [targetCommuteAmount, setTargetCommuteAmount] = useState(0);
     const [targetDependents, setTargetDependents] = useState(0);
+    // 基本給・扶養人数の履歴（utils/staffHistory.ts）。上の入力欄は、いちばん新しい履歴の値と「何年何月分から」（From）
+    // 〜Past は、それより前の履歴
+    const [targetWageHistoryPast, setTargetWageHistoryPast] = useState<WageEntry[]>([]);
+    const [targetWageFrom, setTargetWageFrom] = useState("");
+    const [targetDependentsHistoryPast, setTargetDependentsHistoryPast] = useState<DependentsEntry[]>([]);
+    const [targetDependentsFrom, setTargetDependentsFrom] = useState("");
     const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
     const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 産休・育休の期間（社会保険料の免除）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄）
@@ -109,6 +119,46 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetRemunerationHistory, setTargetRemunerationHistory] = useState<RemunerationEntry[]>([{ from: "", amount: 0, reason: "shutoku" }]);
     const targetStandardRemuneration = latestStandardRemuneration(targetRemunerationHistory); // いちばん新しい標準報酬月額
     const remunerationHistoryError = validateRemunerationHistory(targetRemunerationHistory);
+    // 基本給・扶養人数の履歴の全体（それより前の履歴 ＋ 入力欄のいちばん新しい値）
+    const targetWageHistory: WageEntry[] = [
+        ...targetWageHistoryPast,
+        { from: targetWageFrom, wageType: toWageType(targetWageType), amount: Number(targetWage) || 0 },
+    ];
+    const targetDependentsHistory: DependentsEntry[] = [
+        ...targetDependentsHistoryPast,
+        { from: targetDependentsFrom, count: Number(targetDependents) || 0 },
+    ];
+    const wageHistoryError = validateHistory(targetWageHistory);
+    const dependentsHistoryError = validateHistory(targetDependentsHistory);
+
+    /** 変更を足すときの「何年何月分から」の初めの値：今月（いちばん新しい履歴が今月以降なら、その翌月） */
+    const nextFrom = (latest: string) => {
+        const now = new Date();
+        const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        if (!latest || latest < thisMonth) return thisMonth;
+        const [y, m] = latest.split('-').map(Number);
+        return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    };
+    /** 昇給・給与形態の変更を足す：いまの入力欄の値を履歴に移し、入力欄を新しい月の分にする */
+    const addWageChange = () => {
+        setTargetWageHistoryPast(targetWageHistory);
+        setTargetWageFrom(nextFrom(targetWageFrom));
+    };
+    /** 前の履歴を消す（前の履歴がなくなったら、入力欄の値を入社したときからにする） */
+    const removeWagePast = (index: number) => {
+        const rest = targetWageHistoryPast.filter((_, i) => i !== index);
+        setTargetWageHistoryPast(rest);
+        if (rest.length === 0) setTargetWageFrom("");
+    };
+    const addDependentsChange = () => {
+        setTargetDependentsHistoryPast(targetDependentsHistory);
+        setTargetDependentsFrom(nextFrom(targetDependentsFrom));
+    };
+    const removeDependentsPast = (index: number) => {
+        const rest = targetDependentsHistoryPast.filter((_, i) => i !== index);
+        setTargetDependentsHistoryPast(rest);
+        if (rest.length === 0) setTargetDependentsFrom("");
+    };
     const [targetIsEmploymentInsEligible, setTargetIsEmploymentInsEligible] = useState(1); // 雇用保険
     const [targetHealthInsNum, setTargetHealthInsNum] = useState("");      // 健康保険被保険者番号
     const [targetPensionNum, setTargetPensionNum] = useState("");          // 厚生年金整理番号
@@ -270,6 +320,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
         setTargetCommuteType("daily"); setTargetCommuteAmount(0);
         setTargetDependents(0); setTargetResidentTax(0); setTargetFlatTaxReductionPersons(0);
+        setTargetWageHistoryPast([]); setTargetWageFrom("");
+        setTargetDependentsHistoryPast([]); setTargetDependentsFrom("");
         setTargetLeavePeriods([]);
         setTargetTaxColumn("kou");
         setTargetRemunerationHistory([{ from: "", amount: 0, reason: "shutoku" }]);
@@ -295,10 +347,15 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetAddress(s.address || "");
         setTargetPhone(s.phone || ""); // 👈 追加
         setTargetMobile(s.mobile || ""); // 👈 追加
-        setTargetWage(s.base_wage);
+        // 基本給は、いちばん新しい履歴を入力欄に、それより前を履歴の一覧に出す
+        const wageHistory = wageHistoryOf(s);
+        const latestWage = wageHistory[wageHistory.length - 1];
+        setTargetWageHistoryPast(wageHistory.slice(0, -1));
+        setTargetWageFrom(latestWage.from);
+        setTargetWage(latestWage.amount);
         setTargetCommuteType(s.commute_type);
         setTargetCommuteAmount(s.commute_amount);
-        setTargetWageType(s.wage_type || "hourly");
+        setTargetWageType(latestWage.wageType);
         setTargetPatternId(s.calendar_pattern_id || 1);
         setTargetPayrollGroupId(s.payroll_group_id || 1);
         setTargetScheduledIn(s.scheduled_in || "");
@@ -311,7 +368,11 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetHours(h);
         setTargetMinutes(m);
         setTargetBranchId(s.branch_id || 1);
-        setTargetDependents(s.dependents || 0);
+        const dependentsHistory = dependentsHistoryOf(s);
+        const latestDependents = dependentsHistory[dependentsHistory.length - 1];
+        setTargetDependentsHistoryPast(dependentsHistory.slice(0, -1));
+        setTargetDependentsFrom(latestDependents.from);
+        setTargetDependents(latestDependents.count);
         setTargetFlatTaxReductionPersons(s.flat_tax_reduction_persons || 0);
         setTargetLeavePeriods(parseLeavePeriods(s.leave_periods));
         setTargetTaxColumn(toTaxColumn(s.tax_column));
@@ -380,6 +441,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
             stringifyRemunerationHistory(targetRemunerationHistory) !== stringifyRemunerationHistory(remunerationHistoryOf(original)) ||
+            stringifyWageHistory(targetWageHistory) !== stringifyWageHistory(wageHistoryOf(original)) ||
+            stringifyDependentsHistory(targetDependentsHistory) !== stringifyDependentsHistory(dependentsHistoryOf(original)) ||
             Number(targetIsExecutive) !== Number(original.is_executive || 0) ||
             Number(targetIsEmploymentInsEligible) !== Number(original.is_employment_ins_eligible ?? 1) ||
             Number(targetIsOvertimeEligible) !== Number(original.is_overtime_eligible ?? 1) ||
@@ -404,7 +467,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     const canSave = () => {
         const hasRequiredFields = targetId.trim() !== "" && targetName.trim() !== "";
-        return hasRequiredFields && isLeavePeriodsValid && !remunerationHistoryError && !isIdDuplicated() && isChanged() && !isSaving;
+        return hasRequiredFields && isLeavePeriodsValid && !remunerationHistoryError && !wageHistoryError && !dependentsHistoryError
+            && !isIdDuplicated() && isChanged() && !isSaving;
     };
 
     const saveStaff = async () => {
@@ -443,7 +507,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 Number(targetFlatTaxReductionPersons) || 0,
                 stringifyLeavePeriods(targetLeavePeriods) || null,
                 targetTaxColumn,
-                stringifyRemunerationHistory(targetRemunerationHistory)
+                stringifyRemunerationHistory(targetRemunerationHistory),
+                stringifyWageHistory(targetWageHistory),
+                stringifyDependentsHistory(targetDependentsHistory)
             ];
 
             if (editingId) {
@@ -462,7 +528,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         health_ins_num=?, pension_num=?, employment_ins_num=?,
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
                         flat_tax_reduction_persons=?, leave_periods=?, tax_column=?,
-                        standard_remuneration_history=?
+                        standard_remuneration_history=?, wage_history=?, dependents_history=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -482,7 +548,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         health_ins_num, pension_num, employment_ins_num,
                         scheduled_in, is_flex, core_start, core_end,
                         flat_tax_reduction_persons, leave_periods, tax_column,
-                        standard_remuneration_history,
+                        standard_remuneration_history, wage_history, dependents_history,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -665,6 +731,10 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteAmount,
         targetDependents,
         setTargetDependents,
+        targetWageHistoryPast, setTargetWageHistoryPast, targetWageFrom, setTargetWageFrom,
+        wageHistoryError, addWageChange, removeWagePast,
+        targetDependentsHistoryPast, setTargetDependentsHistoryPast, targetDependentsFrom, setTargetDependentsFrom,
+        dependentsHistoryError, addDependentsChange, removeDependentsPast,
         targetFlatTaxReductionPersons,
         setTargetFlatTaxReductionPersons,
         targetLeavePeriods,

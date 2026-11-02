@@ -110,6 +110,14 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_item_master", "in_overtime_base", "INTEGER DEFAULT 1");
     },
   },
+  {
+    version: 9,
+    description: "従業員に基本給・扶養人数の履歴（何年何月分から）を追加（今までの値は入社したときからの1件として扱う）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "wage_history", "TEXT");
+      await addColumnIfMissing(db, "staff", "dependents_history", "TEXT");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

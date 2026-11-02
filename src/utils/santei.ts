@@ -22,6 +22,7 @@
 import { checkSocialInsEnrolled, prescribedWorkDays } from './calcSalary';
 import { getPeriodForPayMonth, type PayrollGroupForPeriod } from './payrollPeriod';
 import { getStandardRemuneration, remunerationHistoryOf } from './standardRemuneration';
+import { staffAsOf } from './staffHistory';
 
 /** general: 一般 / part: 短時間就労者（パートなど） / short: 特定適用事業所の短時間労働者 */
 export type SanteiWorkerKind = 'general' | 'part' | 'short';
@@ -208,7 +209,8 @@ export const monthFigures = (
   return {
     figures: {
       month,
-      days: paymentBasisDays(staff.wage_type, period, rows, prescribedWorkDays(staff, year, month)),
+      // 給与形態は、その月の分の履歴の値（utils/staffHistory.ts）
+      days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedWorkDays(staff, year, month)),
       amount: Number(salary.total_earnings) || 0,
       // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
       partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,

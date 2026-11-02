@@ -7,6 +7,7 @@ import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import * as Master from '../../../constants';
 import { baseWagePerHour, checkMinimumWage, describeMinimumWage, nextMinimumWage } from '../../../utils/minimumWage';
+import { WageHistoryEditor } from './WageDependentsHistory';
 
 interface Props {
     cm: StaffManagerState;
@@ -82,6 +83,8 @@ export default function WageSection({ cm }: Props) {
                 ※ 基本給を時間あたりにすると約{Math.floor(perHour!).toLocaleString()}円で、{describeMinimumWage(prefecture, next)}を下回ります
             </p>
         )}
+        {/* 昇給・給与区分の変更の履歴（何年何月分から） */}
+        <WageHistoryEditor cm={cm} />
         </div>
     );
 }

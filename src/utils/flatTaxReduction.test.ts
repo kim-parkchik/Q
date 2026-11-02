@@ -209,4 +209,15 @@ describe("会社ファイルの更新（マイグレーション）", () => {
         expect(applied[0]).toStartWith("v8:");
         expect(db.query("SELECT in_overtime_base AS v FROM salary_item_master").get()).toEqual({ v: 1 });
     });
+    test("v9: v8 まで更新済みの会社ファイルに、従業員の基本給・扶養人数の履歴の列を追加する（初めは空）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, base_wage INTEGER, dependents INTEGER)");
+        db.exec("INSERT INTO staff VALUES ('S001', '山田', 300000, 2)");
+        db.exec("PRAGMA user_version = 8");
+
+        const applied = await runMigrations(wrap(db));
+        expect(applied).toHaveLength(MIGRATIONS.length - 8);
+        expect(applied[0]).toStartWith("v9:");
+        expect(db.query("SELECT wage_history AS w, dependents_history AS d, base_wage AS b FROM staff").get()).toEqual({ w: null, d: null, b: 300000 });
+    });
 });

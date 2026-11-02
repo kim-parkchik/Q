@@ -4,6 +4,7 @@ import { calculateSalary, loadCustomItems, saveSalaryResult, type SalaryExtras }
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { loadAnnualWorkDays } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
+import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 
 // 型定義
 interface UsePayStubProps {
@@ -15,7 +16,9 @@ interface UsePayStubProps {
   companySettings: any;
 }
 
-export function usePayStubModal({ db, staff, attendanceData, year, month, companySettings }: UsePayStubProps) {
+export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, month, companySettings }: UsePayStubProps) {
+  // 給与形態・基本給・扶養人数は、この月の分の履歴の値を使う（utils/staffHistory.ts）
+  const staff = useMemo(() => staffAsOf(staffRecord, year, month), [staffRecord, year, month]);
   const [isSaved, setIsSaved] = useState(false);
   const [extras, setExtras] = useState<SalaryExtras>({
     allowanceName: "役職手当",
@@ -151,6 +154,12 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
     baseWagePerHour(staff.wage_type, Number(staff.base_wage) || 0, dailyHours, monthlyAverageHours)
   );
 
+  // 勤怠を確定したときの時給・日給が、基本給の履歴のこの月の値と違う日の数（昇給などを履歴に入れている人だけ）
+  // 給与は勤怠に残した時給・日給で計算するので、履歴の値で計算し直すなら勤怠を確定し直す
+  const wageMismatchDays = staff.wage_type !== 'monthly' && hasWageChanges(staffRecord)
+    ? attendanceData.filter(r => Number(r.actual_base_wage) > 0 && Number(r.actual_base_wage) !== Number(staff.base_wage)).length
+    : 0;
+
   // 明細の注記に出す料率の年度（その月の保険料に使ったもの）
   const insMaster = Master.getInsuranceMaster(year, month);
   // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
@@ -186,6 +195,8 @@ export function usePayStubModal({ db, staff, attendanceData, year, month, compan
   };
 
   return {
+    monthStaff: staff,
+    wageMismatchDays,
     salary,
     extras,
     setExtras,

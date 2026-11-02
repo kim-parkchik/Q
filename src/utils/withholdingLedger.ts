@@ -22,6 +22,7 @@ import type { NenchoMaster } from "../constants/nencho";
 import { calcNencho, type NenchoResult } from "./nencho";
 import { buildNenchoInput, sumYearTotals, type NenchoDeclaration } from "./nenchoDeclaration";
 import { bonusTaxRateUsed, toTaxColumn } from "./incomeTax";
+import { staffAsOf } from "./staffHistory";
 
 /** 確定した給与（salary_results の必要な列） */
 export interface LedgerSalaryInput {
@@ -206,7 +207,7 @@ export const buildWithholdingLedger = (src: LedgerSource, m: NenchoMaster | null
       const prevAfterSocial = prev ? n(prev.taxable_amount) - n(prev.social_ins_total) : 0;
       const dependents = prev && prev.applied_dependents !== null && prev.applied_dependents !== undefined
         ? n(prev.applied_dependents)
-        : (src.staff?.dependents !== undefined ? n(src.staff.dependents) : null);
+        : (src.staff ? n(staffAsOf(src.staff, year, month).dependents) : null);
       const day = /^\d{4}-\d{2}-(\d{2})$/.exec(b.payment_date ?? "");
       return {
         month,
