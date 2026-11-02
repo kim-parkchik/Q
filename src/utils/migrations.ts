@@ -139,6 +139,14 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "youiku_tokurei", "TEXT");
     },
   },
+  {
+    version: 13,
+    description: "給与の確定結果に、非固定的賃金（残業代・休日や深夜の手当・変動の支給項目）の額を追加（今までの確定結果は空）",
+    up: async (db) => {
+      // 今までの確定結果では内訳がわからないので空（NULL）のままにする（月変の年間平均の画面で入れてもらう）
+      await addColumnIfMissing(db, "salary_results", "non_fixed_earnings", "INTEGER");
+    },
+  },
 ];
 
 /** 最新のバージョン番号 */

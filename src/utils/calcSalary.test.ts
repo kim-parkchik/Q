@@ -666,6 +666,50 @@ describe("固定残業代（月給制。時間外労働の割増賃金に当て�
     });
 });
 
+describe("非固定的賃金（月変の年間平均に使う。日本年金機構 年金用語集「固定的賃金」「非固定的賃金」）", () => {
+    // 月〜水10時間（日の残業 2時間×3日）＋木金8時間＋土曜8時間（週の残業8時間）＝ 時間外労働14時間
+    const overtimeRows = [day("08", 10), day("09", 10), day("10", 10), day("11", 8), day("12", 8), day("13", 8, "holiday_work")];
+    test("残業代は非固定的賃金、基本給は固定的賃金", () => {
+        const r = calc(monthly, overtimeRows);
+        expect(r.totalEarnings).toBe(329830);
+        expect(r.nonFixedEarnings).toBe(29830);
+        expect(calc(monthly, weekdays()).nonFixedEarnings).toBe(0);
+    });
+    test("固定残業代は固定的賃金、固定残業代を超えた超過分は非固定的賃金", () => {
+        const r = calc({ ...monthly, fixed_overtime_hours: 14, fixed_overtime_allowance: 20000 }, overtimeRows);
+        expect(r.nonFixedEarnings).toBe(9830);
+    });
+    test("法定内残業・休日労働・深夜労働の手当は非固定的賃金（固定残業代があっても）", () => {
+        const rows = [...weekdays().map((r, i) => (i === 0 ? { ...r, night_hours: 2 } : r)), day("14", 8, "statutory_holiday")];
+        const seven = { ...monthly, scheduled_work_hours: 7 };
+        const without = calc(seven, rows);
+        expect(without.nonFixedEarnings).toBe(without.totalEarnings - 300000);
+        expect(calc({ ...seven, fixed_overtime_hours: 10, fixed_overtime_allowance: 25000 }, rows).nonFixedEarnings).toBe(without.nonFixedEarnings);
+    });
+    test("「変動（毎月入力）」の支給項目は非固定的賃金、「固定（毎月同額）」の項目と通勤手当は固定的賃金", () => {
+        const r = calc({ ...monthly, commute_type: "monthly", commute_amount: 12000 }, weekdays(), {
+            customItems: [
+                { name: "住宅手当", amount: 10000, type: "earning", fixed: true },
+                { name: "皆勤手当", amount: 5000, type: "earning", fixed: false },
+                { name: "互助会費", amount: 1000, type: "deduction" },
+            ],
+        });
+        expect(r.totalEarnings).toBe(300000 + 12000 + 10000 + 5000);
+        expect(r.nonFixedEarnings).toBe(5000);
+    });
+    test("時給制の基本給（時給×時間）は固定的賃金", () => {
+        expect(calc(hourly, weekdays({ actual_base_wage: 1200 })).nonFixedEarnings).toBe(0);
+    });
+    test("確定した結果に保存する", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        await saveSalaryResult(asyncDb, "S001", 2026, 6, calc(monthly, overtimeRows), monthly);
+        expect(db.query("SELECT non_fixed_earnings AS n FROM salary_results").get()).toEqual({ n: 29830 });
+    });
+});
+
 describe("残業代の対象外（管理監督者など。労働基準法41条）", () => {
     // 平日5日×8時間（月曜は深夜2時間）＋土曜8時間（週40時間超）＋日曜の法定休日8時間
     const rows = [

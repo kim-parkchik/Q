@@ -84,23 +84,32 @@ export const earlierMonthsOf = (year: number): { year: number; month: number }[]
 ];
 
 /**
- * 前年7月〜当年3月に支払った給与の、支払基礎日数・報酬（数え方は 4〜6月と同じ。santei.ts の monthFigures）
- * @param salaries   確定した給与（前年7月〜当年3月に支払ったものを含む）
+ * 支払った月ごとの、支払基礎日数・報酬（数え方は 4〜6月と同じ。santei.ts の monthFigures）と、平均に入れない月の印
+ * @param salaries   確定した給与（その月に支払ったものを含む）
  * @param attendance 確定した勤怠（その給与の計算期間を含むもの）
  */
+export const annualMonthFigures = (
+  staff: any,
+  payMonths: { year: number; month: number }[],
+  group: PayrollGroupForPeriod | undefined,
+  salaries: SalaryRecord[],
+  attendance: AttendanceRecord[],
+): AnnualMonth[] =>
+  payMonths.map(({ year: y, month }) => {
+    const { figures, unfinalized } = monthFigures(staff, y, month, group, salaries, attendance);
+    const period = group ? getPeriodForPayMonth(group, y, month) : null;
+    const beforeJoin = !!staff.join_date && !!period && period.endStr < staff.join_date;
+    return { ...figures, year: y, notInsured: beforeJoin || !checkSocialInsEnrolled(staff, y, month), unfinalized };
+  });
+
+/** 前年7月〜当年3月に支払った給与の、支払基礎日数・報酬 */
 export const buildAnnualEarlierMonths = (
   staff: any,
   year: number,
   group: PayrollGroupForPeriod | undefined,
   salaries: SalaryRecord[],
   attendance: AttendanceRecord[],
-): AnnualMonth[] =>
-  earlierMonthsOf(year).map(({ year: y, month }) => {
-    const { figures, unfinalized } = monthFigures(staff, y, month, group, salaries, attendance);
-    const period = group ? getPeriodForPayMonth(group, y, month) : null;
-    const beforeJoin = !!staff.join_date && !!period && period.endStr < staff.join_date;
-    return { ...figures, year: y, notInsured: beforeJoin || !checkSocialInsEnrolled(staff, y, month), unfinalized };
-  });
+): AnnualMonth[] => annualMonthFigures(staff, earlierMonthsOf(year), group, salaries, attendance);
 
 /**
  * 4〜6月の平均（ordinary）と、前年7月〜当年6月の平均を比べる

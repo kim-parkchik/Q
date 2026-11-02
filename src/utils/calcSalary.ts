@@ -142,6 +142,11 @@ export interface SalaryResult {
   /** 日割りできなかったときの注意 */
   prorationNote: string | null;
   totalEarnings: number;
+  /**
+   * 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・「変動（毎月入力）」の支給項目）。残りは固定的賃金
+   * 月変の年間平均（固定的賃金と非固定的賃金を分けて平均する）のため、確定した結果に残す
+   */
+  nonFixedEarnings: number;
   /** 通勤手当のうち所得税がかからない額 */
   nonTaxableCommute: number;
   /** 所得税の対象になる支給額（支給合計 − 非課税の通勤手当） */
@@ -464,11 +469,11 @@ export const saveSalaryResult = async (
       total_work_hours, total_overtime_hours, total_night_hours,
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
-      fixed_overtime_allowance, fixed_overtime_excess,
+      fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -482,6 +487,7 @@ export const saveSalaryResult = async (
       statutory_overtime_pay = excluded.statutory_overtime_pay,
       fixed_overtime_allowance = excluded.fixed_overtime_allowance,
       fixed_overtime_excess = excluded.fixed_overtime_excess,
+      non_fixed_earnings = excluded.non_fixed_earnings,
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
       health_insurance = excluded.health_insurance,
@@ -504,7 +510,7 @@ export const saveSalaryResult = async (
     result.totalWorkHours, result.totalOvertimeHours, result.totalNightHours,
     result.standardPremiumHours, result.highPremiumHours,
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
-    result.fixedOvertimeAllowance, result.fixedOvertimeExcess,
+    result.fixedOvertimeAllowance, result.fixedOvertimeExcess, result.nonFixedEarnings,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
@@ -1050,6 +1056,14 @@ export const calculateSalary = (
                     + (allowanceAmount || 0)
                     + (customEarnings || 0);
 
+  // 非固定的賃金：勤務の実績で額が変わる報酬（残業代・休日や深夜の手当・「変動（毎月入力）」の支給項目）
+  // 固定的賃金：支給額や支給率が決まっている報酬（基本給（時給制は時給×時間）・有給休暇の賃金・通勤手当・固定の支給項目・固定残業代）
+  // 出典：日本年金機構 年金用語集「固定的賃金」https://www.nenkin.go.jp/service/yougo/kagyo/koteitekichingin.html
+  //       「非固定的賃金」https://www.nenkin.go.jp/service/yougo/hagyo/hikoteitekichingin.html
+  // ※ 名称でなく実態で判断するものなので、月変の年間平均の画面で直せるようにしている
+  const nonFixedEarnings = (roundedStatutory || 0) + (roundedPremiums || 0) - fixedOvertimeAllowance
+    + customItems.filter(i => i.type === 'earning' && !i.fixed).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
   // ── 社会保険料 ──────────────────────────────────────────────
   // この給与から引く保険料の月：当月徴収はその月の分、翌月徴収は前月の分（上の socialInsMonthsOf）
   // 加入しているか・標準報酬月額・料率・年齢・入社月や退職月・産休育休の免除は、すべて保険料の月で決める
@@ -1144,6 +1158,7 @@ export const calculateSalary = (
     proration,
     prorationNote,
     totalEarnings,
+    nonFixedEarnings,
     nonTaxableCommute,
     taxableAmount,
 
