@@ -17,7 +17,7 @@
  * ■ マイナンバー（個人番号）は、「マイナンバー」の画面で登録した番号を書く（事務取扱担当者が書き出すときだけ。utils/myNumber.ts）。
  *   PCdesk では、CSV から作った個人別明細書を後から直せない（手続き別ガイド 2章）ので、番号は CSV に入れる。
  *   5人目からの扶養親族の番号（項番132・133）は書かない
- * ■ 年末調整をしない人（年の途中で退職した人・乙欄の人）の控除対象配偶者の有無は、Q では分からないので空にする（源泉徴収票と同じ）
+ * ■ 年末調整をしない人の控除対象配偶者の有無は、扶養控除等申告書の内容を入れた人だけ書く（入れていなければ分からないので空。源泉徴収票と同じ）
  */
 import { SALARY_REPORT_CSV_FIELDS } from "../constants/salaryPaymentReportCsvLayout";
 import { familyKey, SELF_KEY } from "./myNumber";
@@ -159,8 +159,9 @@ export const buildCsvRow = (year: number, company: ReportCsvCompany, p: ReportCs
   set(12, toZenkaku(s.recipient.address), "0", toZenkaku(s.recipient.name));
   set(16, toZenkaku(s.kind), num(s.payment));
   set(19, num(s.employmentIncome), num(s.deductionTotal), num(s.withholdingTax));
-  // 控除対象配偶者の有無（主たる給与：有 1・無 2）。年末調整をしない人は分からないので空
-  set(23, s.adjusted ? (s.spouseMark.has ? "1" : "2") : "", s.adjusted ? flag(s.spouseMark.elderly) : "", num(s.spouseDeduction));
+  // 控除対象配偶者の有無（主たる給与：有 1・無 2）。年末調整をしない人は、扶養控除等申告書の内容がなければ分からないので空
+  const known = s.adjusted || s.declared;
+  set(23, known ? (s.spouseMark.has ? "1" : "2") : "", known ? flag(s.spouseMark.elderly) : "", num(s.spouseDeduction));
   const c = s.dependentCounts;
   set(26, num(c.specific), "", num(c.elderly), num(c.elderlyTogether), "", num(c.other), "");
   set(33, num(s.disabledCounts.special), num(s.disabledCounts.specialTogether), num(s.disabledCounts.other));

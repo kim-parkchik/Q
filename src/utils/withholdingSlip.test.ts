@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { GENSEN_2026, NENCHO_2026 } from "../constants/nencho";
 import { classifyDependent, emptyDeclaration, type DeclaredDependent, type NenchoDeclaration } from "./nenchoDeclaration";
-import { buildWithholdingSlip, housingLoanKindDescription, specificRelativeCode, type SlipSource } from "./withholdingSlip";
+import { buildWithholdingSlip, housingLoanKindDescription, specificRelativeCode, specificRelativeCodeByIncome, type SlipSource } from "./withholdingSlip";
 import { formatWareki, toWareki } from "./wareki";
 
 const nm = NENCHO_2026;
@@ -286,5 +286,65 @@ describe("そのほかの欄", () => {
         expect(slip.adjusted).toBe(false);
         expect(slip.withholdingTax).toBe(50000);
         expect(slip.warnings[0]).toContain("20,000,000円");
+    });
+});
+
+describe("記載例4の続き：年末調整をしていないが、扶養控除等申告書の記載に応じて書く", () => {
+    // 記載例4（国税直樹。令和8年5月31日に退職。源泉控除対象配偶者 国税優子）。所得の見積額・扶養親族は仮
+    const source: NenchoDeclaration = {
+        ...emptyDeclaration(),
+        self: { ...emptyDeclaration().self, widow: false, disability: "general" },
+        spouse: { name: "国税 優子", furigana: "コクゼイ ユウコ", birthday: "1982-04-01", totalIncome: 900000, disability: "none", livingTogether: true },
+        dependents: [
+            dep("国税 一郎", "2006-04-01", { relation: "子", totalIncome: 900000 }), // 20歳・見積額90万円：特定親族（100万円以下なので源泉控除対象親族）
+            dep("国税 次郎", "2009-05-01", { relation: "子" }),                      // 17歳：一般の控除対象扶養親族
+            dep("国税 三郎", "2016-06-01", { relation: "子" }),                      // 10歳：16歳未満
+            dep("国税 孝男", "1950-07-01", { relation: "父", linealAscendant: true }), // 76歳・同居の直系尊属：同居老親等
+            dep("国税 春子", "1996-08-01", { relation: "姉", totalIncome: 600000 }),  // 見積額60万円：11月30日以前の線（58万円）を超えるので数えない
+        ],
+    };
+    const slip = slipOf({
+        staff: { name: "国税 直樹", address: "東京都", birthday: "1980-01-01", join_date: "2015-04-01", retirement_date: "2026-05-31" },
+        totals: { salary: 1500000, socialInsurance: 220000, withheldTax: 30000, salaryMonths: [1, 2, 3, 4, 5], bonusCount: 0 },
+        sourceDeclaration: source,
+    });
+    test("手引の線（年末調整をしない人）は PDF から読み取り、年末調整の線とも合う", () => {
+        expect(gm.withoutAdjustment).toEqual({
+            recipientIncomeLimit: 9000000, spouseIncomeLimit: 950000, earlierUntil: "11-30",
+            earlierIncomeLimit: 580000, currentIncomeLimit: 620000, specificRelativeLimit: 1000000,
+        });
+        expect(gm.withoutAdjustment.currentIncomeLimit).toBe(nm.spouse.spouseIncomeLimit);
+    });
+    test("年末調整はしていないが、申告書に応じて書いた", () => {
+        expect([slip.adjusted, slip.declared]).toEqual([false, true]);
+        expect(slip.employmentIncome).toBeNull();
+    });
+    test("源泉控除対象配偶者（見積額95万円以下）：有、配偶者の合計所得は見積額。配偶者（特別）控除の額は書かない", () => {
+        expect(slip.spouseMark).toEqual({ has: true, elderly: false });
+        expect(slip.spouse).toEqual({ furigana: "コクゼイ ユウコ", name: "国税 優子", birthday: "1982-04-01", code: "00" });
+        expect(slip.spouseTotalIncome).toBe(900000);
+        expect(slip.spouseDeduction).toBeNull();
+        expect(slip.specificRelativeDeduction).toBeNull();
+    });
+    test("源泉控除対象親族の人数と欄（特定親族の区分は見積額で決める）", () => {
+        expect(slip.dependentCounts).toEqual({ specific: null, elderly: 1, elderlyTogether: 1, other: 1, specificRelative: 1 });
+        expect(slip.youngCount).toBe(1);
+        expect(slip.dependents.map((p) => [p.name, p.code])).toEqual([["国税 一郎", "20"], ["国税 次郎", "00"], ["国税 孝男", "00"]]);
+        expect(slip.youngDependents.map((p) => p.name)).toEqual(["国税 三郎"]);
+    });
+    test("本人の障害者なども、申告書に応じて書く", () => {
+        expect([slip.marks.selfDisabled, slip.marks.selfSpecialDisabled]).toEqual([true, false]);
+    });
+    test("申告書を入れていなければ、今までどおり空欄", () => {
+        const none = slipOf({
+            staff: { name: "国税 直樹", address: "東京都", birthday: "1980-01-01", join_date: "2015-04-01", retirement_date: "2026-05-31" },
+            totals: { salary: 1500000, socialInsurance: 220000, withheldTax: 30000, salaryMonths: [1, 2, 3, 4, 5], bonusCount: 0 },
+        });
+        expect([none.declared, none.spouse, none.dependents]).toEqual([false, null, []]);
+    });
+    test("年末調整をしない人の特定親族の区分：表のいちばん上の行は「58万円超」で読む", () => {
+        expect(specificRelativeCodeByIncome(580000, gm)).toBe("");
+        expect(specificRelativeCodeByIncome(600000, gm)).toBe("10");
+        expect(specificRelativeCodeByIncome(1000000, gm)).toBe("40");
     });
 });

@@ -101,6 +101,7 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
         const adjusted = !r.exclusion && r.saved;
         const slip = buildWithholdingSlip({
           year, staff: r.staff, company: {}, totals: r.totals, declaration: adjusted ? r.saved!.declaration : null,
+          sourceDeclaration: r.exclusion && r.saved ? r.saved.declaration : null,
         }, master, slipMaster);
         const person = buildReportPerson({
           year, staff: r.staff, payment: slip.payment, withholdingTax: slip.withholdingTax,

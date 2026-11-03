@@ -7,6 +7,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { NENCHO_YEARS, settleOptions, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
 import NenchoDeclarationForm from "./NenchoDeclarationForm";
 import NenchoResultPanel from "./NenchoResultPanel";
+import { toTaxColumn } from "../../utils/incomeTax";
 
 interface Props {
   db: Database;
@@ -55,7 +56,7 @@ export default function NenchoManager({ db, staffList }: Props) {
               >
                 <div style={{ fontSize: 13, fontWeight: "bold", color: r.exclusion ? "#94a3b8" : "#1e293b" }}>{r.staff.name}</div>
                 <div style={{ fontSize: 11, color: r.exclusion ? "#94a3b8" : diff === undefined ? "#b45309" : "#64748b" }}>
-                  {r.exclusion ? "対象外"
+                  {r.exclusion ? (r.saved ? "対象外・申告書あり" : "対象外")
                     : diff === undefined ? "未入力"
                     : diff >= 0 ? `還付 ${yen(diff)}` : `徴収 ${yen(-diff)}`}
                   {r.saved && !r.exclusion && <span style={{ color: statusColor(r) }}>・{statusLabel(r)}</span>}
@@ -68,6 +69,32 @@ export default function NenchoManager({ db, staffList }: Props) {
         {/* 選んだ人 */}
         {!z.selected ? (
           <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>左の一覧から従業員を選んでください。</div>
+        ) : z.selected.exclusion && toTaxColumn(z.selected.staff.tax_column) === "kou" && z.master && z.draft ? (
+          // 年末調整をしない甲欄の人（年の途中で退職した人など）：扶養控除等申告書の内容だけを入れる（源泉徴収票の配偶者・扶養親族の欄に書く）
+          <div style={card}>
+            <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 6 }}>{z.selected.staff.name}さん（{z.year}年分）：扶養控除等申告書の内容</div>
+            <p style={{ fontSize: 12, color: "#b45309", margin: "0 0 6px 0" }}>※ {z.selected.exclusion}</p>
+            <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px 0", lineHeight: 1.7 }}>
+              年末調整をしない人の源泉徴収票・給与支払報告書にも、出してもらった「給与所得者の扶養控除等（異動）申告書」の記載に応じて、
+              源泉控除対象配偶者・控除対象扶養親族等の人数と氏名、16歳未満の扶養親族、障害者の人数を書きます（国税庁「法定調書の作成と提出の手引」）。
+              申告書の内容を入れて保存してください（年末調整の計算はしません）。
+            </p>
+            <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} sourceOnly />
+            {z.errors.map((e) => <div key={e} style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{e}</div>)}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+              <button
+                onClick={z.saveSource}
+                disabled={z.isSaving || z.errors.length > 0}
+                style={{
+                  padding: "10px 20px", border: "none", borderRadius: 8, fontWeight: "bold", color: "white",
+                  cursor: z.errors.length > 0 ? "not-allowed" : "pointer", backgroundColor: z.errors.length > 0 ? "#cbd5e1" : "#2563eb",
+                }}
+              >
+                {z.isSaving ? "保存中…" : "申告書の内容を保存"}
+              </button>
+              {z.selected.saved && <span style={{ fontSize: 11, color: "#64748b" }}>最後に保存：{z.selected.saved.updatedAt}</span>}
+            </div>
+          </div>
         ) : z.selected.exclusion ? (
           <div style={{ ...card, fontSize: 13, color: "#b45309" }}>{z.selected.staff.name}さん：{z.selected.exclusion}</div>
         ) : z.master && z.draft && (

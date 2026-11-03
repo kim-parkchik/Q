@@ -25,7 +25,7 @@ export interface SlipStaffRow extends NenchoStaffRow {
 /** 一覧に出す状況（源泉徴収簿の画面でも使う） */
 export const statusOf = (r: NenchoStaffRow, paid: boolean): { status: string; attention: boolean } => {
   if (!paid) return { status: "支払なし", attention: false };
-  if (r.exclusion) return { status: "年末調整なし", attention: false };
+  if (r.exclusion) return { status: r.saved ? "年末調整なし・申告書あり" : "年末調整なし", attention: false };
   if (!r.saved) return { status: "年末調整がまだ", attention: true };
   if (r.stale) return { status: "年末調整の保存し直しが必要", attention: true };
   if (r.settlement !== "done") return { status: "過不足額の精算がまだ", attention: true };
@@ -82,6 +82,8 @@ export function useWithholdingSlipManager(db: Database, staffList: any[]) {
       company,
       totals: selected.totals,
       declaration: adjusted ? selected.saved!.declaration : null,
+      // 年末調整をしない人の扶養控除等申告書（年末調整の画面で入れたもの）
+      sourceDeclaration: selected.exclusion && selected.saved ? selected.saved.declaration : null,
     }, master, slipMaster);
     const notes: string[] = [];
     if (!selected.exclusion && !selected.saved) {

@@ -13,6 +13,14 @@ import type { WithholdingSlipMaster } from './nenchoTypes';
 export const GENSEN_2026: WithholdingSlipMaster = {
   year: 2026,
   residentCode: "00",
+  withoutAdjustment: {
+    recipientIncomeLimit: 9000000,
+    spouseIncomeLimit: 950000,
+    earlierUntil: "11-30",
+    earlierIncomeLimit: 580000,
+    currentIncomeLimit: 620000,
+    specificRelativeLimit: 1000000
+  },
   specificRelativeCodes: [
     {
       amount: 630000,

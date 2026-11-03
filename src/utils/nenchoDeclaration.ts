@@ -158,12 +158,18 @@ export const dependentIncomeLimit = (m: NenchoMaster) => m.spouse.spouseIncomeLi
 /** 特定親族の合計所得金額の上限（特定親族特別控除の表の最後の行） */
 const specificRelativeLimit = (m: NenchoMaster) => m.specificRelative[m.specificRelative.length - 1].upTo;
 
-export const classifyDependent = (d: DeclaredDependent, year: number, m: NenchoMaster): DependentKind => {
+/**
+ * @param limits 扶養親族の合計所得の線と、特定親族の上の線（年末調整をしない人の源泉徴収票では、手引の別の線を使う。utils/withholdingSlip.ts）
+ */
+export const classifyDependent = (
+  d: DeclaredDependent, year: number, m: NenchoMaster,
+  limits: { income: number; specificRelative: number } = { income: dependentIncomeLimit(m), specificRelative: specificRelativeLimit(m) },
+): DependentKind => {
   const age = ageAtYearEnd(d.birthday, year);
   if (age === null) return "none";
   const income = Math.max(0, Number(d.totalIncome) || 0);
-  if (income > dependentIncomeLimit(m)) {
-    return age >= 19 && age < 23 && income <= specificRelativeLimit(m) ? "specificRelative" : "none";
+  if (income > limits.income) {
+    return age >= 19 && age < 23 && income <= limits.specificRelative ? "specificRelative" : "none";
   }
   if (age < 16) return "young";
   if (age >= 19 && age < 23) return "specific";

@@ -96,8 +96,36 @@ def parse(lines):
     young = one(r"16歳未満の扶養親族が国内に住所を有する方である場合には「(\d{2})」", joined, "16歳未満の扶養親族の区分")
     assert spouse == dependent == young, f"居住者の区分が違います: {spouse} {dependent} {young}"
 
+    # 4 用語の説明：年末調整をしない人の源泉徴収票（扶養控除等申告書の記載に応じて書く）に使う線
+    # (1) 源泉控除対象配偶者：受給者（合計所得金額が○万円以下）と生計を一にする配偶者で、合計所得の見積額が○万円以下
+    recipient, source_spouse = one(
+        r"源泉控除対象配偶者とは、受給者\(合計所得金額が([\d,]+)万円以下である方に限ります。\)と生計を一にする配偶者で、合計所得の見積額が([\d,]+)万円以下である方",
+        joined, "源泉控除対象配偶者の線")
+    # (2) 同一生計配偶者：合計所得金額が○万円以下（令和N年M月D日以前は○万円以下）
+    current, until_m, until_d, earlier = one(
+        r"同一生計配偶者とは、受給者と生計を一にする配偶者で、合計所得金額が(\d+)万円以下\(令和\d+年(\d+)月(\d+)日以前は(\d+)万円以下\)",
+        joined, "同一生計配偶者の線")
+    # (4) 特定親族：年齢○歳以上○歳未満、合計所得金額が○万円超（M月D日以前は○万円超）○万円以下
+    age_from, age_to, sr_over, sr_earlier, sr_up_to = one(
+        r"特定親族とは、受給者と生計を一にする年齢(\d+)歳以上(\d+)歳未満の親族等で合計所得金額が(\d+)万円超\(令和\d+年\d+月\d+日以前は(\d+)万円超\)(\d+)万円以下",
+        joined, "特定親族の線")
+    # (5) 源泉控除対象親族：控除対象扶養親族又は合計所得の見積額が○万円以下である特定親族
+    source_relative = one(r"源泉控除対象親族とは、控除対象扶養親族又は合計所得の見積額が(\d+)万円以下である特定親族", joined, "源泉控除対象親族の線")
+    assert sr_over == current and sr_earlier == earlier, f"同一生計配偶者と特定親族の線が合いません: {current} {earlier} {sr_over} {sr_earlier}"
+    assert (age_from, age_to) == ("19", "23"), f"特定親族の年齢が19歳以上23歳未満ではありません: {age_from} {age_to}"
+    assert int(earlier) < int(current) and int(earlier) < int(source_relative) < int(sr_up_to), "線の大きさの順がおかしい"
+    man = lambda v: int(v.replace(",", "")) * 10000
+
     return {
         "residentCode": spouse,
+        "withoutAdjustment": {
+            "recipientIncomeLimit": man(recipient),
+            "spouseIncomeLimit": man(source_spouse),
+            "earlierUntil": f"{until_m.zfill(2)}-{until_d.zfill(2)}",
+            "earlierIncomeLimit": man(earlier),
+            "currentIncomeLimit": man(current),
+            "specificRelativeLimit": man(source_relative),
+        },
         "specificRelativeCodes": codes,
         "housingLoanKinds": sorted(kinds, key=lambda k: (k["code"][1], k["code"][0])),
         # ㉖ 未成年者・⑪ 16歳未満の扶養親族
@@ -139,7 +167,8 @@ def main():
     data = parse(pdf_lines(pdf))
     out.write_text(to_ts(data, year, pdf_hash), encoding="utf-8")
     print(f"{out} を作りました：住宅借入金等特別控除区分 {len(data['housingLoanKinds'])}、特定親族の区分 {len(data['specificRelativeCodes'])}行、"
-          f"未成年者 {data['minorBornOnOrAfter']} 以後生、16歳未満 {data['youngBornOnOrAfter']} 以後生")
+          f"未成年者 {data['minorBornOnOrAfter']} 以後生、16歳未満 {data['youngBornOnOrAfter']} 以後生、"
+          f"年末調整をしない人の線 {data['withoutAdjustment']}")
 
 
 if __name__ == "__main__":

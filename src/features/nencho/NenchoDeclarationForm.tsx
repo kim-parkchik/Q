@@ -1,6 +1,7 @@
 /**
  * 年末調整：申告書の内容を入れる欄
  * （扶養控除等申告書・基礎控除申告書・配偶者控除等申告書・保険料控除申告書・住宅借入金等特別控除申告書・前の勤め先の源泉徴収票）
+ * sourceOnly：年末調整をしない人の扶養控除等申告書（本人・配偶者・扶養親族）だけ。源泉徴収票の配偶者・扶養親族の欄に書く（utils/withholdingSlip.ts）
  */
 import { Plus, Trash2 } from "lucide-react";
 import { getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
@@ -9,7 +10,7 @@ import {
   type DeclaredDependent, type DisabilityKind, type DependentKind, type HousingLoan, type NenchoDeclaration, type YearTotals,
 } from "../../utils/nenchoDeclaration";
 import { specificRelativeDeduction } from "../../utils/nencho";
-import { housingLoanKindDescription } from "../../utils/withholdingSlip";
+import { classifySourceDependent, housingLoanKindDescription } from "../../utils/withholdingSlip";
 
 interface Props {
   year: number;
@@ -17,6 +18,8 @@ interface Props {
   draft: NenchoDeclaration;
   setDraft: (d: NenchoDeclaration) => void;
   totals: YearTotals;
+  /** 年末調整をしない人の扶養控除等申告書だけを入れる */
+  sourceOnly?: boolean;
 }
 
 const section: React.CSSProperties = { borderTop: "1px solid #e2e8f0", paddingTop: 12, marginTop: 12 };
@@ -59,7 +62,7 @@ const kindAmount = (kind: DependentKind, d: DeclaredDependent, m: NenchoMaster):
   }
 };
 
-export default function NenchoDeclarationForm({ year, master, draft, setDraft, totals }: Props) {
+export default function NenchoDeclarationForm({ year, master, draft, setDraft, totals, sourceOnly = false }: Props) {
   const set = (patch: Partial<NenchoDeclaration>) => setDraft({ ...draft, ...patch });
   const setSelf = (patch: Partial<NenchoDeclaration["self"]>) => set({ self: { ...draft.self, ...patch } });
   const setIns = (patch: Partial<NenchoDeclaration["insurance"]>) => set({ insurance: { ...draft.insurance, ...patch } });
@@ -68,14 +71,19 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
     set({ dependents: draft.dependents.map((d, k) => (k === i ? { ...d, ...patch } : d)) });
   const setLoan = (i: number, patch: Partial<HousingLoan>) =>
     set({ housingLoans: draft.housingLoans.map((h, k) => (k === i ? { ...h, ...patch } : h)) });
-  const housingLoanKinds = getWithholdingSlipMaster(year)?.housingLoanKinds ?? [];
+  const slipMaster = getWithholdingSlipMaster(year);
+  const housingLoanKinds = slipMaster?.housingLoanKinds ?? [];
+  const w = slipMaster?.withoutAdjustment;
+  /** 扶養親族の分け方（年末調整をしない人は、源泉控除対象親族かどうか） */
+  const kindOf = (d: DeclaredDependent): DependentKind =>
+    sourceOnly && slipMaster ? classifySourceDependent(d, year, master, slipMaster) : classifyDependent(d, year, master);
   const missingMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter((mo) => !totals.salaryMonths.includes(mo));
   const reiwa = year - 2018;
 
   return (
     <div>
       {/* 1年分の給与 */}
-      <div>
+      {!sourceOnly && <div>
         <p style={h}>{year}年に支払った給与・賞与（Q で確定したもの）</p>
         <div style={{ ...grid(3), fontSize: 13 }}>
           <div><span style={label}>給与・賞与の総額</span><b>{yen(totals.salary)}</b></div>
@@ -105,11 +113,11 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           </div>
         )}
         {draft.previousJob.salary > 0 && <p style={note}>名称・所在地・退職日は、源泉徴収票の摘要欄に書きます。</p>}
-      </div>
+      </div>}
 
       {/* 本人 */}
-      <div style={section}>
-        <p style={h}>本人（扶養控除等申告書・基礎控除申告書）</p>
+      <div style={sourceOnly ? undefined : section}>
+        <p style={h}>本人（扶養控除等申告書{sourceOnly ? "" : "・基礎控除申告書"}）</p>
         <div style={grid(4)}>
           <div><label style={label}>障害者</label><DisabilitySelect value={draft.self.disability} onChange={(v) => setSelf({ disability: v })} /></div>
           <div>
@@ -131,20 +139,20 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
               該当する
             </label>
           </div>
-          <NumField title="給与所得以外の所得の合計" value={draft.self.otherIncome} onChange={(v) => setSelf({ otherIncome: v })} />
+          {!sourceOnly && <NumField title="給与所得以外の所得の合計" value={draft.self.otherIncome} onChange={(v) => setSelf({ otherIncome: v })} />}
         </div>
       </div>
 
       {/* 配偶者 */}
       <div style={section}>
-        <p style={h}>配偶者（配偶者控除等申告書・扶養控除等申告書）</p>
+        <p style={h}>配偶者（{sourceOnly ? "扶養控除等申告書の源泉控除対象配偶者" : "配偶者控除等申告書・扶養控除等申告書"}）</p>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
           <input
             type="checkbox"
             checked={draft.spouse !== null}
             onChange={(e) => set({ spouse: e.target.checked ? { name: "", birthday: "", totalIncome: 0, disability: "none", livingTogether: true } : null })}
           />
-          配偶者控除・配偶者特別控除を受ける（または同一生計配偶者が障害者）
+          {sourceOnly ? "源泉控除対象配偶者がいる（または同一生計配偶者が障害者）" : "配偶者控除・配偶者特別控除を受ける（または同一生計配偶者が障害者）"}
         </label>
         {draft.spouse && (
           <div style={{ ...grid(6), marginTop: 8 }}>
@@ -165,14 +173,17 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
         {draft.spouse && (ageAtYearEnd(draft.spouse.birthday, year) ?? 0) >= 70 && (
           <p style={note}>{year}年12月31日に70歳以上なので、老人控除対象配偶者です。</p>
         )}
+        {sourceOnly && w && draft.spouse && draft.spouse.totalIncome > w.spouseIncomeLimit && (
+          <p style={{ ...note, color: "#b45309" }}>所得の見積額が{yen(w.spouseIncomeLimit)}を超えるので、源泉控除対象配偶者にはなりません。</p>
+        )}
       </div>
 
       {/* 扶養親族 */}
       <div style={section}>
-        <p style={h}>扶養親族・特定親族（扶養控除等申告書・特定親族特別控除申告書）</p>
+        <p style={h}>扶養親族・特定親族（扶養控除等申告書{sourceOnly ? "" : "・特定親族特別控除申告書"}）</p>
         {draft.dependents.map((d, i) => {
-          const kind = classifyDependent(d, year, master);
-          const amount = kindAmount(kind, d, master);
+          const kind = kindOf(d);
+          const amount = sourceOnly ? null : kindAmount(kind, d, master);
           const age = ageAtYearEnd(d.birthday, year);
           return (
             <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginBottom: 8 }}>
@@ -192,7 +203,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
                   <input type="checkbox" checked={d.linealAscendant} onChange={(e) => setDependent(i, { linealAscendant: e.target.checked })} />本人・配偶者の父母・祖父母
                 </label>
                 <div style={{ flex: 1, fontSize: 12, color: kind === "none" ? "#b45309" : "#2563eb", textAlign: "right" }}>
-                  {age !== null && `${year}年12月31日に${age}歳：`}{DEPENDENT_KIND_LABELS[kind]}{amount !== null && ` ${yen(amount)}`}
+                  {age !== null && `${year}年12月31日に${age}歳：`}{sourceOnly && kind === "specificRelative" ? "特定親族（源泉控除対象親族）" : DEPENDENT_KIND_LABELS[kind]}{amount !== null && ` ${yen(amount)}`}
                 </div>
                 <button
                   type="button" title="この人を消す"
@@ -212,11 +223,22 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
         >
           <Plus size={14} /> 扶養親族を追加
         </button>
-        <p style={note}>
-          16歳未満の子（年少扶養親族）も入れてください（障害者控除・所得金額調整控除・生命保険料控除の特例の判定に使います）。
-          区分は{year}年12月31日の年齢と合計所得金額で決まります（令和{reiwa}年分の扶養親族の所得要件は{yen(master.spouse.spouseIncomeLimit)}以下）。
-        </p>
+        {sourceOnly && w ? (
+          <p style={note}>
+            16歳未満の子も入れてください（源泉徴収票の16歳未満の扶養親族の欄に書きます）。
+            区分は{year}年12月31日の年齢と所得の見積額で決まります。年末調整をしない人は、{year}年{w.earlierUntil.replace("-", "月").replace(/^0/, "")}日以前に出された申告書の線で読み、
+            扶養親族の所得要件は{yen(w.earlierIncomeLimit)}以下、特定親族は見積額が{yen(w.specificRelativeLimit)}以下の人だけ書きます
+            （国税庁「法定調書の作成と提出の手引」 源泉徴収票の記載要領）。
+          </p>
+        ) : (
+          <p style={note}>
+            16歳未満の子（年少扶養親族）も入れてください（障害者控除・所得金額調整控除・生命保険料控除の特例の判定に使います）。
+            区分は{year}年12月31日の年齢と合計所得金額で決まります（令和{reiwa}年分の扶養親族の所得要件は{yen(master.spouse.spouseIncomeLimit)}以下）。
+          </p>
+        )}
       </div>
+
+      {!sourceOnly && <>
 
       {/* 保険料 */}
       <div style={section}>
@@ -283,6 +305,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }

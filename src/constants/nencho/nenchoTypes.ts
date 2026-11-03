@@ -88,6 +88,21 @@ export interface WithholdingSlipMaster {
   year: number;
   /** 控除対象配偶者・控除対象扶養親族・16歳未満の扶養親族が居住者（国内に住所がある）ときの区分 */
   residentCode: string;
+  /**
+   * 年末調整をしない人の源泉徴収票（扶養控除等申告書の記載に応じて書く）に使う線（手引「4 用語の説明」）
+   * ・源泉控除対象配偶者：受給者の合計所得金額が recipientIncomeLimit 以下で、配偶者の合計所得の見積額が spouseIncomeLimit 以下
+   * ・同一生計配偶者・扶養親族の合計所得の線は currentIncomeLimit。ただしその年の earlierUntil（MM-DD）以前は earlierIncomeLimit
+   *   （特定親族の下の線も同じ）
+   * ・源泉控除対象親族：控除対象扶養親族と、合計所得の見積額が specificRelativeLimit 以下の特定親族
+   */
+  withoutAdjustment: {
+    recipientIncomeLimit: number;
+    spouseIncomeLimit: number;
+    earlierUntil: string;
+    earlierIncomeLimit: number;
+    currentIncomeLimit: number;
+    specificRelativeLimit: number;
+  };
   /** 特定親族特別控除の額（特定親族の合計所得金額が over 超 upTo 以下）ごとの区分（居住者・非居住者） */
   specificRelativeCodes: { amount: number; over: number; upTo: number; resident: string; nonResident: string }[];
   /** 住宅借入金等特別控除区分（code は税務署提出用、label は受給者交付用・給与支払報告書の書き方） */

@@ -169,8 +169,30 @@ export function useNenchoManager(db: Database, staffList: any[]) {
     }
   };
 
+  /** 年末調整をしない人（甲欄）の扶養控除等申告書を保存する（計算結果・精算はない。源泉徴収票の配偶者・扶養親族の欄に使う） */
+  const saveSource = async () => {
+    if (!db || !selected || !draft || errors.length > 0) return;
+    setIsSaving(true);
+    try {
+      await db.execute(
+        `INSERT INTO year_end_adjustments (staff_id, year, declaration, result, settle_year, settle_month, updated_at)
+         VALUES (?, ?, ?, NULL, NULL, NULL, DATETIME('now', 'localtime'))
+         ON CONFLICT(staff_id, year) DO UPDATE SET
+           declaration = excluded.declaration, result = NULL, settle_year = NULL, settle_month = NULL, updated_at = excluded.updated_at`,
+        [selected.staff.id, year, JSON.stringify(draft)]
+      );
+      toast.success(`${selected.staff.name}さんの${year}年分の扶養控除等申告書の内容を保存しました`);
+      await load();
+    } catch (e) {
+      console.error(e);
+      dialog.error(`扶養控除等申告書の内容を保存できませんでした。\n${e}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return {
     year, setYear, master, isLoading, isSaving,
-    rows, selected, select, draft, setDraft, errors, result, save, settle, setSettle,
+    rows, selected, select, draft, setDraft, errors, result, save, saveSource, settle, setSettle,
   };
 }

@@ -4,8 +4,13 @@
  * ■ 年末調整をした人：保存した申告書の内容と、その年に確定した給与・賞与から年末調整の計算をし直して、その結果を書く
  *   ・支払金額：給与・賞与の総額（非課税の通勤手当を除く。前の勤め先の給与を通算したときは、それも含める）
  *   ・給与所得控除後の金額（調整控除後）・所得控除の額の合計額・源泉徴収税額（年調年税額）など
- * ■ 年末調整をしない人（年の途中で退職した人・乙欄の人など）：支払金額・源泉徴収税額（源泉徴収した税額の合計）・社会保険料等の金額だけ
- *   （扶養控除等申告書の内容は Q に入っていないので、控除対象配偶者・扶養親族の欄は空欄。画面に注意を出す）
+ * ■ 年末調整をしない人（年の途中で退職した人・乙欄の人など）：支払金額・源泉徴収税額（源泉徴収した税額の合計）・社会保険料等の金額
+ *   ・甲欄の人で、年末調整の画面に扶養控除等申告書の内容を入れてあれば、その記載に応じて（源泉）控除対象配偶者・控除対象扶養親族等の
+ *     人数と氏名・16歳未満の扶養親族・障害者の人数・配偶者の所得の見積額を書く（手引 ⑧⑩⑪⑫㉒㉓㉔。年の途中で退職した人にも書く）。
+ *     年末調整をしないので、源泉控除対象配偶者（配偶者の見積額95万円以下）・源泉控除対象親族（控除対象扶養親族と、見積額100万円以下の
+ *     特定親族）で数え、扶養親族の所得の線は11月30日以前に出された申告書の線（58万円）で読む（手引「4 用語の説明」。constants の withoutAdjustment）。
+ *     本人の合計所得金額が900万円以下であることは、申告書を出した本人が確かめている前提にする。配偶者（特別）控除の額などは書かない
+ *   ・入れていなければ空欄にして、画面に注意を出す
  *
  * 出典：国税庁「令和8年分 給与所得の源泉徴収票等の法定調書の作成と提出の手引」第2章 3 各欄の記載要領（記載例1〜4）
  *       https://www.nta.go.jp/publication/pamph/hotei/tebiki2026/index.htm
@@ -16,7 +21,7 @@ import type { NenchoMaster, WithholdingSlipMaster } from "../constants/nencho";
 import { calcNencho, specificRelativeDeduction, type NenchoInput, type NenchoResult } from "./nencho";
 import {
   ageAtYearEnd, buildNenchoInput, classifyDependent, dependentIncomeLimit,
-  type DeclaredPerson, type NenchoDeclaration, type YearTotals,
+  type DeclaredDependent, type DeclaredPerson, type DependentKind, type NenchoDeclaration, type YearTotals,
 } from "./nenchoDeclaration";
 import { toTaxColumn } from "./incomeTax";
 import { formatWareki, toWareki, type Wareki } from "./wareki";
@@ -35,6 +40,8 @@ export interface WithholdingSlip {
   year: number;
   /** 年末調整をした（年末調整をした受給者だけが書く欄に、値が入る） */
   adjusted: boolean;
+  /** 年末調整をしていないが、扶養控除等申告書の記載に応じて配偶者・扶養親族の欄を書いた */
+  declared: boolean;
   recipient: { address: string; furigana: string; name: string };
   /** 種別 */
   kind: string;
@@ -118,6 +125,8 @@ export interface SlipSource {
   totals: YearTotals;
   /** 年末調整の申告書（年末調整をしない人は null） */
   declaration: NenchoDeclaration | null;
+  /** 年末調整をしない人が出した扶養控除等申告書（年末調整の画面で入れたもの。配偶者・扶養親族の欄を、その記載に応じて書く） */
+  sourceDeclaration?: NenchoDeclaration | null;
 }
 
 const orNull = (n: number) => (n > 0 ? n : null);
@@ -129,6 +138,16 @@ const inYear = (date: string | null | undefined, year: number) => !!date && date
 /** 特定親族特別控除の額から、源泉徴収票の区分（居住者）を出す */
 export const specificRelativeCode = (deduction: number, gm: WithholdingSlipMaster): string =>
   gm.specificRelativeCodes.find((c) => c.amount === deduction)?.resident ?? "";
+
+/** 年末調整をしない人の特定親族の区分（合計所得の見積額による。表のいちばん上の行の「62万円超」は、11月30日以前の線で読む） */
+export const specificRelativeCodeByIncome = (income: number, gm: WithholdingSlipMaster): string =>
+  gm.specificRelativeCodes
+    .map((c, i) => (i === 0 ? { ...c, over: gm.withoutAdjustment.earlierIncomeLimit } : c))
+    .find((c) => income > c.over && income <= c.upTo)?.resident ?? "";
+
+/** 年末調整をしない人の扶養親族の分け方（扶養控除等申告書の記載に応じて。源泉控除対象親族かどうか） */
+export const classifySourceDependent = (d: DeclaredDependent, year: number, nm: NenchoMaster, gm: WithholdingSlipMaster): DependentKind =>
+  classifyDependent(d, year, nm, { income: gm.withoutAdjustment.earlierIncomeLimit, specificRelative: gm.withoutAdjustment.specificRelativeLimit });
 
 /** 住宅借入金等特別控除区分の、受給者交付用の書き方（住（特）など） */
 export const housingLoanKindLabel = (code: string, gm: WithholdingSlipMaster): string =>
@@ -146,6 +165,70 @@ export const housingLoanKindDescription = (label: string): string => {
 };
 
 const person = (p: DeclaredPerson, code: string): SlipPerson => ({ furigana: str(p.furigana), name: str(p.name), birthday: str(p.birthday), code });
+
+/** 障害者の数（本人を除く）を数える */
+const disabilityCounter = () => {
+  const counts = { special: 0, specialTogether: 0, other: 0 };
+  const add = (x: DeclaredPerson) => {
+    if (x.disability === "special") {
+      counts.special++;
+      if (x.livingTogether) counts.specialTogether++;
+    }
+    if (x.disability === "general") counts.other++;
+  };
+  return { counts, add };
+};
+
+/**
+ * 控除対象扶養親族等・16歳未満の扶養親族の人数と欄、障害者の人数を書く（申告書に入れた順）
+ * @param relativeCodeOf 特定親族の区分（書かない特定親族は null）
+ */
+const fillDependents = (
+  slip: WithholdingSlip, deps: DeclaredDependent[], gm: WithholdingSlipMaster,
+  kindOf: (d: DeclaredDependent) => DependentKind,
+  relativeCodeOf: (d: DeclaredDependent) => string | null,
+  disabled: ReturnType<typeof disabilityCounter>,
+  overflow: string[],
+) => {
+  const counts = { specific: 0, elderly: 0, elderlyTogether: 0, other: 0, specificRelative: 0, young: 0 };
+  const listed: SlipPerson[] = [];
+  const young: SlipPerson[] = [];
+  for (const dep of deps) {
+    const kind = kindOf(dep);
+    if (kind === "none") continue;
+    if (kind === "specificRelative") {
+      const code = relativeCodeOf(dep);
+      if (code === null) continue;
+      counts.specificRelative++;
+      listed.push(person(dep, code));
+      continue;
+    }
+    disabled.add(dep);
+    if (kind === "young") {
+      counts.young++;
+      young.push(person(dep, "")); // 受給者交付用：国内に住所がある人は区分を書かない
+      continue;
+    }
+    if (kind === "specific") counts.specific++;
+    if (kind === "general") counts.other++;
+    if (kind === "elderlyTogether" || kind === "elderlyOther") counts.elderly++;
+    if (kind === "elderlyTogether") counts.elderlyTogether++;
+    listed.push(person(dep, gm.residentCode));
+  }
+  slip.dependentCounts = {
+    specific: orNull(counts.specific), elderly: orNull(counts.elderly), elderlyTogether: orNull(counts.elderlyTogether),
+    other: orNull(counts.other), specificRelative: orNull(counts.specificRelative),
+  };
+  slip.youngCount = orNull(counts.young);
+  const d = disabled.counts;
+  slip.disabledCounts = { special: orNull(d.special), specialTogether: orNull(d.specialTogether), other: orNull(d.other) };
+  slip.dependents = listed.slice(0, 4);
+  slip.youngDependents = young.slice(0, 4);
+  // 5人目からは摘要欄に（1）（2）…を付けて書く。16歳未満は「（年少）」、特定親族は区分の数字を後ろに付ける
+  let n = 0;
+  for (const x of listed.slice(4)) overflow.push(`(${++n})${x.name}${x.code !== gm.residentCode ? ` ${x.code}` : ""}`);
+  for (const x of young.slice(4)) overflow.push(`(${++n})${x.name}（年少）`);
+};
 
 /** 源泉徴収票の各欄を作る */
 export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: WithholdingSlipMaster): WithholdingSlip => {
@@ -165,11 +248,14 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
   let decl = src.declaration;
   let input: NenchoInput | null = null;
   let result: NenchoResult | null = null;
+  /** 年末調整をしない人の扶養控除等申告書（年末調整の対象外になった人は、年末調整の申告書を使う） */
+  let sourceDecl = src.sourceDeclaration ?? null;
   if (decl) {
     input = buildNenchoInput(decl, totals, year, nm);
     result = calcNencho(input, nm);
     if (!result.eligible) {
       warnings.push(`${result.ineligibleReason}。年末調整をしない人として作ります。`);
+      sourceDecl = decl;
       decl = null;
       result = null;
     }
@@ -189,6 +275,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
   const slip: WithholdingSlip = {
     year,
     adjusted: !!result,
+    declared: false,
     recipient: { address: str(staff.address), furigana: str(staff.furigana), name: str(staff.name) },
     kind: totals.bonusCount > 0 ? "給与・賞与" : "給与",
     payment: totals.salary,
@@ -264,14 +351,8 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
 
     // 配偶者：配偶者控除・配偶者特別控除を受けたら、控除対象配偶者の欄に書く
     const limit = dependentIncomeLimit(nm);
-    const disabled = { special: 0, specialTogether: 0, other: 0 };
-    const countDisability = (x: DeclaredPerson) => {
-      if (x.disability === "special") {
-        disabled.special++;
-        if (x.livingTogether) disabled.specialTogether++;
-      }
-      if (x.disability === "general") disabled.other++;
-    };
+    const disabled = disabilityCounter();
+    const countDisability = disabled.add;
     if (decl.spouse) {
       const s = decl.spouse;
       const sameLivelihood = (Number(s.totalIncome) || 0) <= limit; // 同一生計配偶者
@@ -286,44 +367,11 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       if (sameLivelihood) countDisability(s);
     }
 
-    // 扶養親族・特定親族（申告書に入れた順）
-    const counts = { specific: 0, elderly: 0, elderlyTogether: 0, other: 0, specificRelative: 0, young: 0 };
-    const listed: SlipPerson[] = [];
-    const young: SlipPerson[] = [];
-    for (const dep of decl.dependents) {
-      const kind = classifyDependent(dep, year, nm);
-      if (kind === "none") continue;
-      if (kind === "specificRelative") {
-        const amount = specificRelativeDeduction([Math.max(0, Number(dep.totalIncome) || 0)], nm);
-        if (amount <= 0) continue;
-        counts.specificRelative++;
-        listed.push(person(dep, specificRelativeCode(amount, gm)));
-        continue;
-      }
-      countDisability(dep);
-      if (kind === "young") {
-        counts.young++;
-        young.push(person(dep, "")); // 受給者交付用：国内に住所がある人は区分を書かない
-        continue;
-      }
-      if (kind === "specific") counts.specific++;
-      if (kind === "general") counts.other++;
-      if (kind === "elderlyTogether" || kind === "elderlyOther") counts.elderly++;
-      if (kind === "elderlyTogether") counts.elderlyTogether++;
-      listed.push(person(dep, gm.residentCode));
-    }
-    slip.dependentCounts = {
-      specific: orNull(counts.specific), elderly: orNull(counts.elderly), elderlyTogether: orNull(counts.elderlyTogether),
-      other: orNull(counts.other), specificRelative: orNull(counts.specificRelative),
-    };
-    slip.youngCount = orNull(counts.young);
-    slip.disabledCounts = { special: orNull(disabled.special), specialTogether: orNull(disabled.specialTogether), other: orNull(disabled.other) };
-    slip.dependents = listed.slice(0, 4);
-    slip.youngDependents = young.slice(0, 4);
-    // 5人目からは摘要欄に（1）（2）…を付けて書く。16歳未満は「（年少）」、特定親族は区分の数字を後ろに付ける
-    let n = 0;
-    for (const x of listed.slice(4)) overflow.push(`(${++n})${x.name}${x.code !== gm.residentCode ? ` ${x.code}` : ""}`);
-    for (const x of young.slice(4)) overflow.push(`(${++n})${x.name}（年少）`);
+    // 扶養親族・特定親族（申告書に入れた順。特定親族は、特定親族特別控除を受けた人だけ）
+    fillDependents(slip, decl.dependents, gm, (dep) => classifyDependent(dep, year, nm), (dep) => {
+      const amount = specificRelativeDeduction([Math.max(0, Number(dep.totalIncome) || 0)], nm);
+      return amount > 0 ? specificRelativeCode(amount, gm) : null;
+    }, disabled, overflow);
 
     // 生命保険料控除の特例（23歳未満の扶養親族がいて、新生命保険料を払った）
     if (d.lifeInsurance > 0 && decl.insurance.lifeGeneralNew > 0 && input.hasDependentUnder23) {
@@ -375,8 +423,31 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
   } else if (column === "hei") {
     // 「乙欄」の欄に丙欄の人も○を付けるのかは、国税庁の手引に書かれていないので付けない
     warnings.push("丙欄（日雇賃金）の人です。年末調整をしないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます。「乙欄」の欄には○を付けていません。");
+  } else if (sourceDecl) {
+    // 年末調整をしない人：扶養控除等申告書の記載に応じて書く（源泉控除対象配偶者・源泉控除対象親族）
+    const w = gm.withoutAdjustment;
+    slip.declared = true;
+    const disabled = disabilityCounter();
+    const s = sourceDecl.spouse;
+    if (s) {
+      const income = Math.max(0, Number(s.totalIncome) || 0);
+      if (income <= w.spouseIncomeLimit) {
+        slip.spouse = person(s, gm.residentCode);
+        slip.spouseTotalIncome = income; // ㉓ 源泉控除対象配偶者の「所得の見積額」
+        slip.spouseMark = { has: true, elderly: (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
+      }
+      if (income <= w.earlierIncomeLimit) disabled.add(s); // 同一生計配偶者
+    }
+    fillDependents(slip, sourceDecl.dependents, gm, (dep) => classifySourceDependent(dep, year, nm, gm),
+      (dep) => specificRelativeCodeByIncome(Math.max(0, Number(dep.totalIncome) || 0), gm) || null, disabled, overflow);
+    slip.marks.selfSpecialDisabled = sourceDecl.self.disability === "special";
+    slip.marks.selfDisabled = sourceDecl.self.disability === "general";
+    slip.marks.widow = sourceDecl.self.widow;
+    slip.marks.singleParent = sourceDecl.self.singleParent;
+    slip.marks.workingStudent = sourceDecl.self.workingStudent;
+    warnings.push("年末調整をしていないので、配偶者・扶養親族の欄は、扶養控除等申告書の記載に応じて書きます（配偶者（特別）控除の額など、年末調整をした人だけが書く欄は空欄）。");
   } else {
-    warnings.push("年末調整をしていないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます。控除対象配偶者・扶養親族の欄は、扶養控除等申告書を見て手で書き足してください。");
+    warnings.push("年末調整をしていないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます。控除対象配偶者・扶養親族の欄は、年末調整の画面で扶養控除等申告書の内容を入れると書けます。");
   }
 
   // 同じ年に就職と退職の両方
