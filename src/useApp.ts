@@ -12,6 +12,7 @@ import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
 import { prepareCompanyFile } from "./utils/migrations";
 import { useMessageDialog } from "./components/MessageDialog";
+import { lockVault } from "./features/mynumber/myNumberVault";
 
 export const useApp = () => {
   const dialog = useMessageDialog();
@@ -69,6 +70,8 @@ export const useApp = () => {
 
   // 🆕 共通のロード処理（ここが今の useEffect の中身を移植した場所）
   const loadDatabase = async (path: string) => {
+    // ほかの会社ファイルで開けたマイナンバーの鍵は閉じる
+    lockVault("close");
     setIsLoading(true);
     try {
       // 魔法の一行：指定されたパスを読み込む！
@@ -172,6 +175,8 @@ export const useApp = () => {
   };
 
   const closeProject = async () => {
+    // マイナンバーの鍵も閉じる（開けたデータ鍵をメモリから消す）
+    lockVault("close");
     if (db && dbPath) {
       try {
         console.log("バックアップ作成中...");

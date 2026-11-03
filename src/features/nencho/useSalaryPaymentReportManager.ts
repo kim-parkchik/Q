@@ -17,7 +17,8 @@ import {
 import { rollForward } from "../../utils/residentTaxPayment";
 import type { SummarySheet } from "./SalaryReportSummaryView";
 import { buildSalaryReportCsv, type ReportCsvCompany, type ReportCsvPerson } from "../../utils/salaryPaymentReportCsv";
-import { hasMyNumberAccess, loadMyNumbers, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
+import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
+import { useMyNumberUnlock } from "../mynumber/MyNumberUnlock";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { localGovLabel } from "../../utils/localGov";
 import { useMessageDialog } from "../../components/MessageDialog";
@@ -65,6 +66,7 @@ export const reportRemarksOf = (r: ReportRow) => [r.ordinary ? r.reason : "", ..
 export function useSalaryPaymentReportManager(db: Database, staffList: any[], user: MyNumberUser | null, onDataChange: () => Promise<void> | void) {
   const dialog = useMessageDialog();
   const toast = useToast();
+  const unlock = useMyNumberUnlock();
   const [year, setYear] = useState(REPORT_YEARS[REPORT_YEARS.length - 1] ?? new Date().getFullYear());
   const master = getNenchoMaster(year);
   const slipMaster = getWithholdingSlipMaster(year);
@@ -207,17 +209,20 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
     }
   };
 
-  /** 紙の総括表・個人別明細書を印刷する（市区町村ごと。事務取扱担当者が選べば、個人別明細書にマイナンバーを書く） */
+  /** 紙の総括表・個人別明細書を印刷する（市区町村ごと。事務取扱担当者が選べば、個人別明細書にマイナンバーを書く。鍵が閉じていれば開ける） */
   const printGroup = async (g: MunicipalityGroup<ReportRow>, withNumbers: boolean) => {
     let numbers: Record<string, Record<string, string>> | null = null;
     const out = g.people.filter((p) => p.submit);
     if (withNumbers) {
-      if (!(await hasMyNumberAccess(db, user))) {
-        dialog.warning("マイナンバーを扱える印がありません（管理者がシステム設定で付けます）");
+      try {
+        numbers = await unlock.readNumbers(db, user, out.map((p) => p.staffId));
+        if (!numbers) return;
+        await logMyNumber(db, user, `給与支払報告書（個人別明細書）を印刷しました（${year}年分・${localGovLabel(g.municipality) || g.code}・${out.length}人。マイナンバーあり）`);
+      } catch (e) {
+        console.error(e);
+        dialog.error(`マイナンバーを読めませんでした。\n${e}`);
         return;
       }
-      numbers = await loadMyNumbers(db, out.map((p) => p.staffId));
-      await logMyNumber(db, user, `給与支払報告書（個人別明細書）を印刷しました（${year}年分・${localGovLabel(g.municipality) || g.code}・${out.length}人。マイナンバーあり）`);
     }
     setPrinting({ code: g.code, numbers });
   };
@@ -244,7 +249,7 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [year, company, rows, designations]);
 
-  /** CSV を保存する（事務取扱担当者なら、登録したマイナンバーを書く） */
+  /** CSV を保存する（事務取扱担当者なら、登録したマイナンバーを書く。鍵が閉じていれば開ける） */
   const exportCsv = async () => {
     if (csv.errors.length > 0) {
       dialog.warning(csv.errors.join("\n"), "CSV を作れません");
@@ -265,9 +270,9 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
     }
     try {
       const withNumbers = await hasMyNumberAccess(db, user);
-      const out = withNumbers
-        ? buildSalaryReportCsv(year, company, csvPeople(await loadMyNumbers(db, rows.map((r) => r.staffId))))
-        : csv;
+      const numbers = withNumbers ? await unlock.readNumbers(db, user, rows.map((r) => r.staffId)) : null;
+      if (withNumbers && !numbers) return;
+      const out = numbers ? buildSalaryReportCsv(year, company, csvPeople(numbers)) : csv;
       const saved = await saveCsvFile(out.csv, `給与支払報告書_${year}年分.csv`);
       if (!saved) return;
       if (withNumbers) {

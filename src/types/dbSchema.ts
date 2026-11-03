@@ -425,10 +425,23 @@ export const DB_SCHEMAS = [
     person TEXT NOT NULL,          -- "self"（本人）か、家族の印（"family:生年月日:氏名"。utils/myNumber.ts の familyKey）
     name TEXT,                     -- 家族の氏名（画面に出す。本人は空）
     relation TEXT,                 -- 家族の続柄（配偶者・子など。画面に出す）
-    number TEXT NOT NULL,          -- 12桁（12桁目の検査用数字を確かめてから入れる）
+    number TEXT NOT NULL,          -- 暗号化した番号（"v1:…"。utils/myNumberCrypto.ts）。暗号化を始める前に登録したものは12桁のまま（始めるときに暗号化する）
+    number_hash TEXT,              -- 同じ番号が2か所にないかを確かめる値（HMAC。鍵がないと番号に戻せない）
     updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     PRIMARY KEY (staff_id, person),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
+  // マイナンバーを暗号化する鍵（データ鍵）を、パスワードと回復用キーで包んだもの。1行だけ（詳しくは utils/myNumberCrypto.ts）
+  `CREATE TABLE IF NOT EXISTS my_number_keys (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    kdf TEXT NOT NULL,                 -- パスワードから鍵を作る方式と強さ（JSON）
+    salt TEXT NOT NULL,                -- パスワードから鍵を作るときの salt（base64）
+    wrapped_by_password TEXT NOT NULL, -- パスワードから作った鍵で包んだデータ鍵
+    recovery_salt TEXT NOT NULL,
+    wrapped_by_recovery TEXT NOT NULL, -- 回復用キーから作った鍵で包んだデータ鍵
+    created_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime'))
   );`,
 
   `CREATE TABLE IF NOT EXISTS app_logs (

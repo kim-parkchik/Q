@@ -86,6 +86,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "resident_tax_municipalities", "special_due", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 6,
+    description: "マイナンバーに、同じ番号かどうかを確かめる値を追加（暗号化を始めるときに入れる）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "my_numbers", "number_hash", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

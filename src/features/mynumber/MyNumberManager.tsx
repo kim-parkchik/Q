@@ -2,12 +2,17 @@
  * マイナンバー（個人番号）の画面
  * 本人と、年末調整の申告書に入れた家族（配偶者・扶養親族）の番号を登録する。番号はふだん隠し、「表示」を押したときだけ見せる。
  * 扱えるのは事務取扱担当者の印がある人だけ（システム設定で管理者が付ける）。きまりと出典は utils/myNumber.ts
+ * 番号は暗号化して置く。はじめにパスワードを決め、使うときに鍵を開ける（utils/myNumberCrypto.ts・myNumberVault.ts）
  */
 import { useEffect, useState } from "react";
+import { Lock, LockOpen } from "lucide-react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { formatMyNumber, MASKED_MY_NUMBER, type MyNumberEntry, type MyNumberStaffRow } from "../../utils/myNumber";
+import { PASSWORD_MIN_LENGTH, RECOVERY_KEY_LENGTH } from "../../utils/myNumberCrypto";
 import type { MyNumberUser } from "./myNumberStore";
+import { VAULT_IDLE_MINUTES } from "./myNumberVault";
+import RecoveryKeyDialog from "./RecoveryKeyDialog";
 import { useMyNumberManager } from "./useMyNumberManager";
 
 interface Props {
@@ -24,6 +29,9 @@ const th: React.CSSProperties = { textAlign: "left", fontSize: 11, color: "#6474
 const td: React.CSSProperties = { fontSize: 12, color: "#1e293b", padding: "8px", borderBottom: "1px solid #f1f5f9", verticalAlign: "middle" };
 const input: React.CSSProperties = { padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, fontFamily: "monospace", width: 170 };
 const button: React.CSSProperties = { padding: "4px 10px", border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 12, color: "#475569" };
+const mainButton: React.CSSProperties = { padding: "8px 16px", border: "none", borderRadius: 8, fontWeight: "bold", color: "white", cursor: "pointer", backgroundColor: "#2563eb", fontSize: 13 };
+const title: React.CSSProperties = { fontSize: 14, fontWeight: "bold", color: "#1e293b" };
+const summary: React.CSSProperties = { fontSize: 13, color: "#1e293b", cursor: "pointer", padding: "6px 0" };
 
 const dateJa = (d: string) => {
   const [y, m, day] = d.split("-").map(Number);
@@ -90,10 +98,128 @@ function EntryRow({ row, e, z }: { row: MyNumberStaffRow; e: MyNumberEntry; z: Z
   );
 }
 
+/** パスワードの欄（文字数を出す。決まりは15文字以上） */
+function PasswordField({ label, value, onChange, autoComplete, count = true }: { label: string; value: string; onChange: (v: string) => void; autoComplete: string; count?: boolean }) {
+  const length = [...value.normalize("NFKC")].length;
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#475569" }}>
+      <span>
+        {label}
+        {count && value && <span style={{ marginLeft: 8, color: length < PASSWORD_MIN_LENGTH ? "#b45309" : "#27ae60" }}>{length}文字</span>}
+      </span>
+      <input type="password" value={value} onChange={(e) => onChange(e.target.value)} autoComplete={autoComplete} style={{ ...input, width: 260, fontFamily: "inherit" }} />
+    </label>
+  );
+}
+
+/** はじめに：パスワードを決めて暗号化を始める */
+function SetupCard({ z, plainCount }: { z: Z; plainCount: number }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  return (
+    <div style={{ ...card, borderLeft: "4px solid #2563eb" }}>
+      <div style={title}>はじめに：マイナンバーを暗号化するパスワードを決める</div>
+      <p style={note}>
+        マイナンバーは、パスワードから作る鍵で暗号化して置きます。会社ファイル（.qp）やバックアップ（.qb）が持ち出されても、番号を読めないようにするためです
+        （個人情報保護委員会「特定個人情報の適正な取扱いに関するガイドライン（事業者編）」（別添1）技術的安全管理措置：データの暗号化又はパスワードによる保護）。
+        <br />・パスワードは{PASSWORD_MIN_LENGTH}文字以上です。英数字を混ぜるなどのきまりはありません。短い言葉をいくつかつなげると、長くても覚えやすくなります。
+        Q のログインのパスワードとは別のものにしてください。
+        <br />・決めると、回復用キー（{RECOVERY_KEY_LENGTH}文字）を1回だけ出します。パスワードを忘れても、回復用キーで開けて決め直せます。
+        <br />・パスワードと回復用キーの両方をなくすと、番号は戻せません。同ガイドライン（別添2）では、復号の鍵をなくして戻せなくなることも「毀損」に当たります（同じ番号がほかに保管されていれば当たりません）。
+        扶養控除等申告書など、番号が書いてある書類は保存期間まで残してください。
+        {plainCount > 0 && (
+          <>
+            <br />・いま登録してある{plainCount}件は、決めたときに暗号化します。それより前に作ったバックアップ（.qb）には、暗号化していない番号が残ります。
+          </>
+        )}
+      </p>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
+        <PasswordField label="パスワード" value={password} onChange={setPassword} autoComplete="new-password" />
+        <PasswordField label="もう一度（確かめのため）" value={confirm} onChange={setConfirm} autoComplete="new-password" count={false} />
+        <button type="button" disabled={z.busy} style={{ ...mainButton, opacity: z.busy ? 0.6 : 1 }}
+          onClick={async () => { if (await z.setup(password, confirm)) { setPassword(""); setConfirm(""); } }}>
+          {z.busy ? "暗号化しています…" : "暗号化を始める"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 鍵が開いているか・開け閉め */
+function VaultBar({ z }: { z: Z }) {
+  const open = z.vault.open;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, padding: "10px 12px", borderRadius: 8, background: open ? "#ecfdf5" : "#f1f5f9", fontSize: 13, color: "#1e293b" }}>
+      {open ? <LockOpen size={16} color="#27ae60" /> : <Lock size={16} color="#64748b" />}
+      <span>
+        {open
+          ? `鍵は開いています（使わなければ、あと${z.vault.minutesLeft}分ほどで自動で閉じます）`
+          : "鍵は閉じています（表示・登録するときや、給与支払報告書でマイナンバーを使うときに、パスワードを聞きます）"}
+      </span>
+      <button type="button" style={{ ...button, marginLeft: "auto" }} onClick={open ? z.closeVault : z.openVault}>{open ? "閉じる" : "開ける"}</button>
+    </div>
+  );
+}
+
+/** パスワードを変える・回復用キーを作り直す・パスワードを忘れたとき */
+function KeySettingsCard({ z }: { z: Z }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [nextConfirm, setNextConfirm] = useState("");
+  const [renewPassword, setRenewPassword] = useState("");
+  const [key, setKey] = useState("");
+  const [recoverPassword, setRecoverPassword] = useState("");
+  const [recoverConfirm, setRecoverConfirm] = useState("");
+  const row: React.CSSProperties = { display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", margin: "6px 0 12px 0" };
+  const go: React.CSSProperties = { ...mainButton, opacity: z.busy ? 0.6 : 1 };
+  return (
+    <div style={card}>
+      <div style={title}>パスワードと回復用キー</div>
+      <details>
+        <summary style={summary}>パスワードを変える</summary>
+        <div style={row}>
+          <PasswordField label="今のパスワード" value={current} onChange={setCurrent} autoComplete="current-password" count={false} />
+          <PasswordField label="新しいパスワード" value={next} onChange={setNext} autoComplete="new-password" />
+          <PasswordField label="もう一度（確かめのため）" value={nextConfirm} onChange={setNextConfirm} autoComplete="new-password" count={false} />
+          <button type="button" disabled={z.busy} style={go}
+            onClick={async () => { if (await z.changePassword(current, next, nextConfirm)) { setCurrent(""); setNext(""); setNextConfirm(""); } }}>変える</button>
+        </div>
+      </details>
+      <details>
+        <summary style={summary}>回復用キーを作り直す（紙をなくした・見られたかもしれないとき）</summary>
+        <p style={{ ...note, marginTop: 0 }}>作り直すと、前の回復用キーは使えなくなります。</p>
+        <div style={row}>
+          <PasswordField label="パスワード" value={renewPassword} onChange={setRenewPassword} autoComplete="current-password" count={false} />
+          <button type="button" disabled={z.busy} style={go}
+            onClick={async () => { if (await z.renewRecovery(renewPassword)) setRenewPassword(""); }}>作り直す</button>
+        </div>
+      </details>
+      <details>
+        <summary style={summary}>パスワードを忘れたとき（回復用キーで開ける）</summary>
+        <p style={{ ...note, marginTop: 0 }}>
+          しまってある回復用キーを入れて、新しいパスワードを決めます。開けたら、回復用キーも新しく作り直します（打ち込むときに見られたかもしれないので、前の紙は使えなくなります）。
+        </p>
+        <div style={row}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#475569" }}>
+            回復用キー（{RECOVERY_KEY_LENGTH}文字。空白はあってもなくても）
+            <input value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" spellCheck={false} style={{ ...input, width: 560 }} />
+          </label>
+        </div>
+        <div style={row}>
+          <PasswordField label="新しいパスワード" value={recoverPassword} onChange={setRecoverPassword} autoComplete="new-password" />
+          <PasswordField label="もう一度（確かめのため）" value={recoverConfirm} onChange={setRecoverConfirm} autoComplete="new-password" count={false} />
+          <button type="button" disabled={z.busy} style={go}
+            onClick={async () => { if (await z.recover(key, recoverPassword, recoverConfirm)) { setKey(""); setRecoverPassword(""); setRecoverConfirm(""); } }}>開けて決め直す</button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export default function MyNumberManager({ db, staffList, currentUser }: Props) {
   const z = useMyNumberManager(db, staffList, currentUser);
 
-  if (z.access === null) return <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>確かめています…</div>;
+  if (z.access === null || (z.access && z.setUp === null)) return <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>確かめています…</div>;
   if (!z.access) {
     return (
       <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -118,7 +244,13 @@ export default function MyNumberManager({ db, staffList, currentUser }: Props) {
           ・源泉徴収票・給与支払報告書など、法律で決まった事務（個人番号関係事務）だけに使います。給与支払報告書の CSV には、ここで登録した番号を書きます。
           <br />・本人から受け取るときは、マイナンバーカードを見せてもらうなどして本人確認をします（番号法16条）。
           家族の番号は、従業員が扶養控除等申告書に書いて出します（所得税法194条1項）。
-          <br />・番号はふだん隠しています。「表示」を押すと{REVEAL_SECONDS}秒だけ見せます。表示・登録・直す・消すは、下の記録に残ります（記録に番号は書きません）。
+          {z.setUp && (
+            <>
+              <br />・番号は暗号化して置いています。表示・登録するときや、給与支払報告書の CSV・印刷でマイナンバーを使うときに、パスワードで鍵を開けます。
+              使わなくなってから{VAULT_IDLE_MINUTES}分で、自動で閉じます。
+            </>
+          )}
+          <br />・番号はふだん隠しています。「表示」を押すと{REVEAL_SECONDS}秒だけ見せます。表示・登録・直す・消すと、鍵の開け閉めは、下の記録に残ります（記録に番号は書きません）。
           <br />・12桁目（検査用数字）を確かめてから登録します（総務省令 平成26年第85号 第5条）。
           <br />・家族は、年末調整の画面で申告書に入れた配偶者・扶養親族が出ます。氏名と生年月日で同じ人とみなすので、年が変わっても登録し直す必要はありません。
           <br />・退職した人の番号も、扶養控除等申告書などの保存期間（扶養控除等申告書は、提出期限の年の翌年1月10日の翌日から7年。所得税法施行規則76条の3）が
@@ -127,11 +259,14 @@ export default function MyNumberManager({ db, staffList, currentUser }: Props) {
         </p>
         <div style={{ display: "flex", gap: 24, marginTop: 10, fontSize: 13, color: "#1e293b" }}>
           <div>登録済み：<b>{registered}件</b></div>
-          {selfMissing > 0 && <div style={{ color: "#b45309" }}>⚠ 本人の番号が未登録（在籍している人）：{selfMissing}人</div>}
+          {z.setUp && selfMissing > 0 && <div style={{ color: "#b45309" }}>⚠ 本人の番号が未登録（在籍している人）：{selfMissing}人</div>}
         </div>
+        {z.setUp && <VaultBar z={z} />}
       </div>
 
-      {z.rows.map((row) => (
+      {!z.setUp && <SetupCard z={z} plainCount={registered} />}
+
+      {z.setUp && z.rows.map((row) => (
         <div key={row.staffId} style={card}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
             <div style={{ fontSize: 14, fontWeight: "bold", color: "#1e293b" }}>{row.name}</div>
@@ -155,6 +290,8 @@ export default function MyNumberManager({ db, staffList, currentUser }: Props) {
         </div>
       ))}
 
+      {z.setUp && <KeySettingsCard z={z} />}
+
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: "bold", color: "#1e293b" }}>取扱いの記録（新しい順・100件まで）</div>
         {z.logs.length === 0 ? (
@@ -174,6 +311,10 @@ export default function MyNumberManager({ db, staffList, currentUser }: Props) {
           </table>
         )}
       </div>
+
+      {z.recoveryKey && (
+        <RecoveryKeyDialog recoveryKey={z.recoveryKey} companyName={z.companyName} userName={currentUser?.display_name ?? ""} onClose={z.closeRecoveryKey} />
+      )}
     </div>
   );
 }

@@ -6,7 +6,14 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { DB_SCHEMAS } from "../../types/dbSchema";
 import { familyKey, SELF_KEY } from "../../utils/myNumber";
-import { hasMyNumberAccess, loadMyNumbers, logMyNumber } from "./myNumberStore";
+import { createKeys, encryptNumber, type DeriveKey } from "../../utils/myNumberCrypto";
+import { countMyNumbers, hasMyNumberAccess, loadMyNumbers, logMyNumber } from "./myNumberStore";
+
+/** テストでは Argon2id（Rust）の代わりに、軽い PBKDF2 で鍵を作る */
+const testDerive: DeriveKey = async (password, salt) => {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 1000 }, base, 256));
+};
 
 /** bun:sqlite を、アプリの Database と同じ使い方（Promise を返す）に合わせる */
 const wrap = (db: Database) => ({
@@ -38,18 +45,33 @@ describe("扱える人", () => {
 });
 
 describe("番号の表", () => {
-  test("本人と家族を、従業員ごとに読む。従業員を消すと番号も消える", async () => {
+  test("本人と家族を、従業員ごとに読む（暗号を解く）。従業員を消すと番号も消える", async () => {
     const db = open();
+    const { keys } = await createKeys("テスト用の長いパスワードです", testDerive);
+    const put = async (id: string, person: string, number: string, name: string | null = null, relation: string | null = null) =>
+      db.prepare("INSERT INTO my_numbers (staff_id, person, name, relation, number) VALUES (?, ?, ?, ?, ?)")
+        .run(id, person, name, relation, await encryptNumber(keys, number, id, person));
     const spouse = familyKey("国税 花子", "1972-01-01");
-    db.prepare("INSERT INTO my_numbers (staff_id, person, number) VALUES (?, ?, ?)").run("1001", SELF_KEY, "123456789018");
-    db.prepare("INSERT INTO my_numbers (staff_id, person, name, relation, number) VALUES (?, ?, ?, ?, ?)").run("1001", spouse, "国税 花子", "配偶者", "987654321093");
-    db.prepare("INSERT INTO my_numbers (staff_id, person, number) VALUES (?, ?, ?)").run("1002", SELF_KEY, "000000000060");
-    expect(await loadMyNumbers(wrap(db), ["1001"])).toEqual({ "1001": { [SELF_KEY]: "123456789018", [spouse]: "987654321093" } });
-    expect(Object.keys(await loadMyNumbers(wrap(db)))).toEqual(["1001", "1002"]);
+    await put("1001", SELF_KEY, "123456789018");
+    await put("1001", spouse, "987654321093", "国税 花子", "配偶者");
+    await put("1002", SELF_KEY, "000000000060");
+    expect(await countMyNumbers(wrap(db))).toBe(3);
+    expect(await loadMyNumbers(wrap(db), keys, ["1001"])).toEqual({ "1001": { [SELF_KEY]: "123456789018", [spouse]: "987654321093" } });
+    expect(Object.keys(await loadMyNumbers(wrap(db), keys))).toEqual(["1001", "1002"]);
     // 同じ人に2つ目は入らない（直すときは ON CONFLICT で上書き）
-    expect(() => db.prepare("INSERT INTO my_numbers (staff_id, person, number) VALUES (?, ?, ?)").run("1001", SELF_KEY, "000000000060")).toThrow();
+    expect(() => db.prepare("INSERT INTO my_numbers (staff_id, person, number) VALUES (?, ?, ?)").run("1001", SELF_KEY, "x")).toThrow();
     db.exec("DELETE FROM staff WHERE id = '1001'");
-    expect(await loadMyNumbers(wrap(db))).toEqual({ "1002": { [SELF_KEY]: "000000000060" } });
+    expect(await loadMyNumbers(wrap(db), keys)).toEqual({ "1002": { [SELF_KEY]: "000000000060" } });
+  });
+  test("ほかの人の行に写した番号・違う鍵では読めない", async () => {
+    const db = open();
+    const { keys } = await createKeys("テスト用の長いパスワードです", testDerive);
+    const other = (await createKeys("テスト用の長いパスワードです", testDerive)).keys;
+    db.prepare("INSERT INTO my_numbers (staff_id, person, number) VALUES (?, ?, ?)").run("1002", SELF_KEY, await encryptNumber(keys, "123456789018", "1001", SELF_KEY));
+    await expect(loadMyNumbers(wrap(db), keys)).rejects.toThrow("戻せませんでした");
+    db.exec("DELETE FROM my_numbers");
+    db.prepare("INSERT INTO my_numbers (staff_id, person, number) VALUES (?, ?, ?)").run("1001", SELF_KEY, await encryptNumber(keys, "123456789018", "1001", SELF_KEY));
+    await expect(loadMyNumbers(wrap(db), other)).rejects.toThrow("戻せませんでした");
   });
   test("記録には、した人と内容だけを残す（番号は書かない）", async () => {
     const db = open();

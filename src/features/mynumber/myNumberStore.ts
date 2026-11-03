@@ -5,6 +5,7 @@
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { writeLog } from "../../utils/logUtils";
+import { decryptNumber, type OpenKeys } from "../../utils/myNumberCrypto";
 
 /** 画面に渡すログインしている人（users の1行） */
 export interface MyNumberUser {
@@ -20,17 +21,24 @@ export const hasMyNumberAccess = async (db: Database, user: MyNumberUser | null 
   return Number(rows?.[0]?.my_number_access) === 1;
 };
 
-/** 登録した番号（従業員ID → 印（self・family:…）→ 番号） */
-export const loadMyNumbers = async (db: Database, staffIds?: string[]): Promise<Record<string, Record<string, string>>> => {
+/** 登録した番号（従業員ID → 印（self・family:…）→ 番号）。開けた鍵で暗号を解く（鍵の開け閉めは myNumberVault.ts） */
+export const loadMyNumbers = async (db: Database, keys: OpenKeys, staffIds?: string[]): Promise<Record<string, Record<string, string>>> => {
   const rows = await db.select<any[]>("SELECT staff_id, person, number FROM my_numbers");
   const ids = staffIds ? new Set(staffIds) : null;
   const out: Record<string, Record<string, string>> = {};
   for (const r of rows) {
     const id = String(r.staff_id);
     if (ids && !ids.has(id)) continue;
-    (out[id] ??= {})[String(r.person)] = String(r.number);
+    const person = String(r.person);
+    (out[id] ??= {})[person] = await decryptNumber(keys, String(r.number), id, person);
   }
   return out;
+};
+
+/** 登録した番号の件数（暗号を解かずに数える） */
+export const countMyNumbers = async (db: Database): Promise<number> => {
+  const rows = await db.select<any[]>("SELECT COUNT(*) AS n FROM my_numbers");
+  return Number(rows?.[0]?.n ?? 0);
 };
 
 /** 取扱いの記録（番号は書かない。ガイドライン（別添1）組織的安全管理措置 c） */

@@ -1,6 +1,6 @@
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
+    Algorithm, Argon2, Params, Version,
 };
 
 // --- パスワードをハッシュ化するコマンド ---
@@ -28,6 +28,23 @@ fn verify_password(password: String, hash: String) -> bool {
         .is_ok() // 一致すれば true
 }
 
+// --- マイナンバーを守る鍵を、パスワードから作る（Argon2id。強さは画面側の utils/myNumberCrypto.ts の KDF_DEFAULT） ---
+#[tauri::command]
+async fn derive_key(
+    password: String,
+    salt: Vec<u8>,
+    memory_kib: u32,
+    iterations: u32,
+    parallelism: u32,
+) -> Result<Vec<u8>, String> {
+    let params = Params::new(memory_kib, iterations, parallelism, Some(32)).map_err(|e| e.to_string())?;
+    let mut key = vec![0u8; 32];
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+        .hash_password_into(password.as_bytes(), &salt, &mut key)
+        .map_err(|e| e.to_string())?;
+    Ok(key)
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -45,7 +62,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             hash_password,
-            verify_password
+            verify_password,
+            derive_key
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

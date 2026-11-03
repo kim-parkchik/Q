@@ -29,3 +29,10 @@ serde_json = "1"
 argon2 = "0.5"
 password-hash = "0.5"
 rand_core = { version = "0.6", features = ["std"] }
+
+# Argon2 は最適化しないと何倍も遅いので、開発中（tauri dev）でも最適化する（ログインとマイナンバーの鍵で使う）
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
