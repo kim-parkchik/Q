@@ -403,6 +403,21 @@ export const DB_SCHEMAS = [
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,
 
+  // 紙の給与支払報告書（総括表。地方税法施行規則 第十七号様式）に書く、会社の表にない事項（1行だけ。features/nencho/SalaryReportSummaryView.tsx）
+  `CREATE TABLE IF NOT EXISTS salary_report_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    payer_kana TEXT,               -- 給与支払者の氏名又は名称のフリガナ
+    office_name TEXT,              -- 所得税の源泉徴収をしている事務所又は事業の名称（空なら会社名）
+    address_kana TEXT,             -- 同上の所在地のフリガナ
+    business_type TEXT,            -- 事業種目
+    tax_office TEXT,               -- 所轄税務署名（「税務署」は付けない）
+    contact_dept TEXT, contact_section TEXT, contact_name TEXT, contact_phone TEXT, -- 連絡者の所属課・係・氏名・電話番号
+    accountant_name TEXT, accountant_phone TEXT,  -- 関与税理士等の氏名・電話番号
+    payment_method TEXT,           -- 給与の支払方法及びその期日（月給・毎月25日 など）
+    payment_slip TEXT,             -- 納入書の送付（need：必要・no：不要・空：選んでいない）
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime'))
+  );`,
+
   // マイナンバー（個人番号）。従業員の一覧（staff.*）に入らないよう、別の表に置く。
   // 見る・入れる・消すのは、事務取扱担当者の印（users.my_number_access）がある人だけ（詳しくは utils/myNumber.ts）
   `CREATE TABLE IF NOT EXISTS my_numbers (

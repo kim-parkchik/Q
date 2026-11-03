@@ -11,8 +11,11 @@ import { getNenchoMaster, getWithholdingSlipMaster } from "../../constants/nench
 import { buildWithholdingSlip, type WithholdingSlip } from "../../utils/withholdingSlip";
 import {
   buildReportPerson, designationNumberError, groupByMunicipality, normalizeDesignationNumber, parseReportSetting,
-  type ReportPerson, type ReportSetting,
+  paymentPeriodOf, staffTotalOnJan1, summaryCounts,
+  type MunicipalityGroup, type ReportPerson, type ReportSetting,
 } from "../../utils/salaryPaymentReport";
+import { rollForward } from "../../utils/residentTaxPayment";
+import type { SummarySheet } from "./SalaryReportSummaryView";
 import { buildSalaryReportCsv, type ReportCsvCompany, type ReportCsvPerson } from "../../utils/salaryPaymentReportCsv";
 import { hasMyNumberAccess, loadMyNumbers, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
@@ -33,7 +36,31 @@ export interface ReportRow extends ReportPerson {
   slip: WithholdingSlip;
   /** まだ CSV に入れられない理由（年末調整がまだ・保存し直しが必要。空なら入れられる） */
   notReady: string;
+  /** 給与を払った月（総括表の給与の支払期間に使う） */
+  salaryMonths: number[];
 }
+
+/** 紙の総括表に書く、会社の表にない事項（salary_report_settings） */
+export interface PaperSettings {
+  payerKana: string; officeName: string; addressKana: string; businessType: string; taxOffice: string;
+  contactDept: string; contactSection: string; contactName: string; contactPhone: string;
+  accountantName: string; accountantPhone: string; paymentMethod: string; paymentSlip: "need" | "no" | "";
+}
+
+const PAPER_COLUMNS: Record<keyof PaperSettings, string> = {
+  payerKana: "payer_kana", officeName: "office_name", addressKana: "address_kana", businessType: "business_type", taxOffice: "tax_office",
+  contactDept: "contact_dept", contactSection: "contact_section", contactName: "contact_name", contactPhone: "contact_phone",
+  accountantName: "accountant_name", accountantPhone: "accountant_phone", paymentMethod: "payment_method", paymentSlip: "payment_slip",
+};
+
+const parsePaperSettings = (row: any): PaperSettings => {
+  const out = Object.fromEntries(Object.entries(PAPER_COLUMNS).map(([k, col]) => [k, String(row?.[col] ?? "")])) as unknown as PaperSettings;
+  out.paymentSlip = out.paymentSlip === "need" || out.paymentSlip === "no" ? out.paymentSlip : "";
+  return out;
+};
+
+/** 給与支払報告書の摘要（普通徴収の人は、理由を先に書く。CSV と同じ） */
+export const reportRemarksOf = (r: ReportRow) => [r.ordinary ? r.reason : "", ...r.slip.reportRemarks].filter(Boolean);
 
 export function useSalaryPaymentReportManager(db: Database, staffList: any[], user: MyNumberUser | null, onDataChange: () => Promise<void> | void) {
   const dialog = useMessageDialog();
@@ -44,7 +71,11 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
   const [data, setData] = useState<NenchoData>(EMPTY_NENCHO_DATA);
   const [settings, setSettings] = useState<Record<string, ReportSetting>>({});
   const [designations, setDesignations] = useState<Record<string, string>>({});
-  const [company, setCompany] = useState<ReportCsvCompany>({});
+  const [company, setCompany] = useState<ReportCsvCompany & { zip?: string; representative?: string }>({});
+  const [paper, setPaper] = useState<PaperSettings>(parsePaperSettings(null));
+  const [holidays, setHolidays] = useState<Set<string>>(new Set());
+  /** 印刷する市区町村（印刷している間だけ）と、書くマイナンバー */
+  const [printing, setPrinting] = useState<{ code: string; numbers: Record<string, Record<string, string>> | null } | null>(null);
   /** マイナンバーを扱える（事務取扱担当者）。扱える人が書き出すときだけ、CSV に番号を書く */
   const [myNumberAccess, setMyNumberAccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -58,12 +89,19 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
     const nencho = await loadNenchoData(db, target);
     const s = await db.select<any[]>("SELECT * FROM salary_payment_reports WHERE year = ?", [target]);
     const d = await db.select<any[]>("SELECT code, designation_number FROM resident_tax_municipalities");
-    const c = await db.select<any[]>("SELECT name, address, phone, corporate_number FROM company WHERE id = 1");
+    const c = await db.select<any[]>("SELECT name, zip_code, address, phone, corporate_number, representative FROM company WHERE id = 1");
+    const p = await db.select<any[]>("SELECT * FROM salary_report_settings WHERE id = 1");
+    const h = await db.select<any[]>("SELECT holiday_date FROM holiday_master");
     return {
       nencho,
       settings: Object.fromEntries(s.map((r) => [String(r.staff_id), parseReportSetting(r)])),
       designations: Object.fromEntries(d.map((r) => [String(r.code), String(r.designation_number ?? "")])),
-      company: { name: c[0]?.name, address: c[0]?.address, phone: c[0]?.phone, corporateNumber: c[0]?.corporate_number },
+      company: {
+        name: c[0]?.name, address: c[0]?.address, phone: c[0]?.phone, corporateNumber: c[0]?.corporate_number,
+        zip: c[0]?.zip_code ?? "", representative: c[0]?.representative ?? "",
+      },
+      paper: parsePaperSettings(p[0]),
+      holidays: new Set(h.map((r) => String(r.holiday_date).replace(/\//g, "-"))),
     };
   };
   const apply = (loaded: Awaited<ReturnType<typeof load>>) => {
@@ -71,6 +109,8 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
     setSettings(loaded.settings);
     setDesignations(loaded.designations);
     setCompany(loaded.company);
+    setPaper(loaded.paper);
+    setHolidays(loaded.holidays);
   };
 
   useEffect(() => {
@@ -109,11 +149,90 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
         });
         // 年末調整をする人で、まだ保存していない・保存し直しが要るときは、金額が決まっていないので CSV に入れない
         const notReady = r.exclusion ? "" : !r.saved ? "年末調整がまだです" : r.stale ? "年末調整を保存し直してください" : "";
-        return { ...person, ...statusOf(r, true), slip, notReady };
+        return { ...person, ...statusOf(r, true), slip, notReady, salaryMonths: r.totals.salaryMonths };
       });
   }, [staffList, data, year, master, slipMaster, settings]);
 
   const groups = useMemo(() => groupByMunicipality(rows), [rows]);
+
+  /** 出す期限：翌年1月31日。土曜日・日曜日・祝日なら次の日（地方税法20条の5第2項、施行令6条の18第2項） */
+  const deadline = useMemo(() => {
+    const statutory = `${year + 1}-01-31`;
+    return { statutory, due: rollForward(statutory, holidays) };
+  }, [year, holidays]);
+
+  /** 紙の総括表の中身（市区町村ごと） */
+  const summarySheetOf = (g: MunicipalityGroup<ReportRow>): SummarySheet => {
+    const out = g.people.filter((p) => p.submit);
+    return {
+      year,
+      municipalityLabel: localGovLabel(g.municipality) || g.code,
+      designation: designations[g.code] ?? "",
+      period: paymentPeriodOf(out.map((p) => p.salaryMonths)),
+      payerNumber: String(company.corporateNumber ?? "").normalize("NFKC").replace(/[^0-9]/g, "").length === 13
+        ? String(company.corporateNumber).normalize("NFKC").replace(/[^0-9]/g, "") : "",
+      payerKana: paper.payerKana,
+      payerName: String(company.name ?? ""),
+      officeName: paper.officeName || String(company.name ?? ""),
+      addressKana: paper.addressKana,
+      zip: String(company.zip ?? ""),
+      address: String(company.address ?? ""),
+      representative: String(company.representative ?? ""),
+      contact: { dept: paper.contactDept, section: paper.contactSection, name: paper.contactName, phone: paper.contactPhone },
+      accountant: { name: paper.accountantName, phone: paper.accountantPhone },
+      businessType: paper.businessType,
+      staffTotal: staffTotalOnJan1(staffList, year),
+      counts: summaryCounts(out),
+      taxOffice: paper.taxOffice,
+      paymentMethod: paper.paymentMethod,
+      paymentSlip: paper.paymentSlip,
+    };
+  };
+
+  /** 紙の総括表に書く事項を保存する（変えた項目だけ渡す） */
+  const savePaperSettings = async (patch: Partial<PaperSettings>) => {
+    const next = { ...paper, ...patch };
+    const cols = Object.values(PAPER_COLUMNS);
+    try {
+      await db.execute(
+        `INSERT INTO salary_report_settings (id, ${cols.join(", ")}, updated_at)
+         VALUES (1, ${cols.map(() => "?").join(", ")}, DATETIME('now', 'localtime'))
+         ON CONFLICT(id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(", ")}, updated_at = excluded.updated_at`,
+        (Object.keys(PAPER_COLUMNS) as (keyof PaperSettings)[]).map((k) => next[k].trim() || null)
+      );
+      setPaper(next);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`保存できませんでした。\n${e}`);
+    }
+  };
+
+  /** 紙の総括表・個人別明細書を印刷する（市区町村ごと。事務取扱担当者が選べば、個人別明細書にマイナンバーを書く） */
+  const printGroup = async (g: MunicipalityGroup<ReportRow>, withNumbers: boolean) => {
+    let numbers: Record<string, Record<string, string>> | null = null;
+    const out = g.people.filter((p) => p.submit);
+    if (withNumbers) {
+      if (!(await hasMyNumberAccess(db, user))) {
+        dialog.warning("マイナンバーを扱える印がありません（管理者がシステム設定で付けます）");
+        return;
+      }
+      numbers = await loadMyNumbers(db, out.map((p) => p.staffId));
+      await logMyNumber(db, user, `給与支払報告書（個人別明細書）を印刷しました（${year}年分・${localGovLabel(g.municipality) || g.code}・${out.length}人。マイナンバーあり）`);
+    }
+    setPrinting({ code: g.code, numbers });
+  };
+
+  // 印刷する中身を画面に置いてから印刷し、終わったら片付ける
+  useEffect(() => {
+    if (!printing) return;
+    const done = () => {
+      setPrinting(null);
+      window.removeEventListener("afterprint", done);
+    };
+    window.addEventListener("afterprint", done);
+    const t = setTimeout(() => window.print(), 200);
+    return () => clearTimeout(t);
+  }, [printing]);
 
   const csvPeople = (myNumbers?: Record<string, Record<string, string>>): ReportCsvPerson[] => rows.map((r) => ({
     report: r, slip: r.slip, staffNumber: r.staffId, designationNumber: r.municipality ? designations[r.municipality.code] ?? "" : "", notReady: r.notReady,
@@ -232,5 +351,8 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
     }
   };
 
-  return { year, setYear, isLoading, rows, groups, designations, csv, myNumberAccess, exportCsv, saveSetting, saveDesignation, fillFromAddress };
+  return {
+    year, setYear, isLoading, rows, groups, designations, csv, myNumberAccess, exportCsv, saveSetting, saveDesignation, fillFromAddress,
+    deadline, paper, savePaperSettings, summarySheetOf, printGroup, printing, company,
+  };
 }

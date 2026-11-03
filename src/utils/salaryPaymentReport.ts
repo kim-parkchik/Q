@@ -187,3 +187,27 @@ export const designationNumberError = (s: string): string | null => {
   if (v.length > 12) return "指定番号は12文字までです";
   return null;
 };
+
+/**
+ * 紙の総括表（地方税法施行規則 第十七号様式）の報告人員（記載要領10〜13）：
+ * 提出先に個人別明細書を出す人のうち、特別徴収・普通徴収（退職者）・普通徴収（退職者を除く）の人数と、その合計
+ */
+export const summaryCounts = (people: Pick<ReportPerson, "submit" | "ordinary" | "kind">[]) => {
+  const out = people.filter((p) => p.submit);
+  const special = out.filter((p) => !p.ordinary).length;
+  const ordinaryRetired = out.filter((p) => p.ordinary && p.kind === "retired").length;
+  const ordinaryOther = out.filter((p) => p.ordinary && p.kind !== "retired").length;
+  return { special, ordinaryRetired, ordinaryOther, total: special + ordinaryRetired + ordinaryOther };
+};
+
+/** 総括表の「給与の支払期間」（記載要領4：報告人員に給与を支払った期間）。給与を払った月の、いちばん早い月と遅い月 */
+export const paymentPeriodOf = (monthsList: number[][]): { from: number; to: number } | null => {
+  const all = monthsList.flat().filter((m) => m >= 1 && m <= 12);
+  return all.length === 0 ? null : { from: Math.min(...all), to: Math.max(...all) };
+};
+
+/** 総括表の「受給者総人員」（記載要領9：翌年1月1日に給与の支払を受けている人の総人員。提出先に関わらず会社全体） */
+export const staffTotalOnJan1 = (staff: { join_date?: string | null; retirement_date?: string | null }[], year: number): number => {
+  const jan1 = `${year + 1}-01-01`;
+  return staff.filter((s) => !(s.join_date && s.join_date > jan1) && !(s.retirement_date && s.retirement_date < jan1)).length;
+};

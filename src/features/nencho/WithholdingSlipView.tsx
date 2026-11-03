@@ -1,10 +1,26 @@
 /**
- * 給与所得の源泉徴収票（受給者交付用）の見た目
+ * 給与所得の源泉徴収票（受給者交付用）と、給与支払報告書（個人別明細書）の見た目
  * 欄の並びは、国税庁「令和8年分 給与所得の源泉徴収票等の法定調書の作成と提出の手引」の様式に合わせる。
  * 受給者交付用なので、マイナンバー・法人番号の欄は作らない。
+ * report を渡すと給与支払報告書（個人別明細書。地方税法施行規則 第十七号様式別表）として書く：
+ *   ※の欄（市区町村が書く）・受給者番号・個人番号（本人・配偶者・扶養親族・16歳未満の扶養親族、5人目以降）・
+ *   支払者の個人番号又は法人番号の欄を足し、摘要は給与支払報告書の書き方（普通徴収の理由を先に）にする
  */
+import { familyKey, SELF_KEY } from "../../utils/myNumber";
 import type { SlipPerson, WithholdingSlip } from "../../utils/withholdingSlip";
 import type { Wareki } from "../../utils/wareki";
+
+/** 給与支払報告書（個人別明細書）として書くときに足すもの */
+export interface SlipReportExtras {
+  /** 受給者番号（従業員ID） */
+  staffNumber: string;
+  /** 登録したマイナンバー（SELF_KEY・familyKey）。書かないときは null（欄は空） */
+  myNumbers: Record<string, string> | null;
+  /** 支払者の法人番号（13桁） */
+  payerNumber: string;
+  /** 摘要（普通徴収の理由を先に付けたもの） */
+  remarks: string[];
+}
 
 const line = "1px solid #000";
 const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse", tableLayout: "fixed", marginTop: -1 };
@@ -38,8 +54,38 @@ function PersonCell({ p, rowSpan }: { p: SlipPerson | undefined; rowSpan?: numbe
 
 const ymd = (w: Wareki | null) => (w ? [w.era, String(w.year), String(w.month), String(w.day)] : ["", "", "", ""]);
 
-export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip }) {
+/** 個人番号・法人番号の欄（1けたずつの枠。右詰め） */
+function NumberBoxes({ value, digits }: { value: string; digits: number }) {
+  const v = value.slice(-digits).padStart(digits, " ");
+  return (
+    <div style={{ display: "flex" }}>
+      {[...v].map((c, i) => (
+        <span key={i} style={{ flex: 1, borderLeft: i === 0 ? "none" : "1px dotted #888", textAlign: "center", fontFamily: "monospace", fontSize: 10, lineHeight: "14px" }}>
+          {c.trim()}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export default function WithholdingSlipView({ slip, report }: { slip: WithholdingSlip; report?: SlipReportExtras }) {
   const s = slip;
+  const numberOf = (p: SlipPerson | null | undefined) => (report?.myNumbers && p ? report.myNumbers[familyKey(p.name, p.birthday)] ?? "" : "");
+  /** 給与支払報告書では、氏名の下に個人番号の行を足す */
+  const PersonWithNumber = ({ p, rowSpan }: { p: SlipPerson | undefined; rowSpan?: number }) => (
+    report ? (
+      <td style={{ ...td, height: 30, padding: 0 }} rowSpan={rowSpan}>
+        <div style={{ padding: "2px 4px" }}>
+          <div style={{ fontSize: 8 }}>{p?.furigana ?? ""}</div>
+          <div>{p?.name ?? ""}</div>
+        </div>
+        <div style={{ borderTop: line, display: "flex" }}>
+          <span style={{ fontSize: 7, padding: "1px 3px", whiteSpace: "nowrap", borderRight: line }}>個人番号</span>
+          <div style={{ flex: 1 }}><NumberBoxes value={numberOf(p)} digits={12} /></div>
+        </div>
+      </td>
+    ) : <PersonCell p={p} rowSpan={rowSpan} />
+  );
   const c = s.dependentCounts;
   const sc = s.secondaryCounts;
   const loan = (i: number) => s.housingLoan.entries[i];
@@ -51,15 +97,24 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
     <div style={{ color: "#000", backgroundColor: "white", fontFamily: "'Hiragino Mincho ProN', 'Yu Mincho', serif" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 24, marginBottom: 6 }}>
         <span style={{ fontSize: 13 }}>令和 {s.year - 2018} 年分</span>
-        <span style={{ fontSize: 17, fontWeight: "bold", letterSpacing: 4 }}>給与所得の源泉徴収票</span>
+        <span style={{ fontSize: 17, fontWeight: "bold", letterSpacing: 4 }}>{report ? "給与支払報告書（個人別明細書）" : "給与所得の源泉徴収票"}</span>
       </div>
+      {report && (
+        // ※の欄は市区町村が書く（記載要領21）
+        <table style={table}>
+          <colgroup><col style={{ width: "46%" }} /><col style={{ width: "18%" }} /><col style={{ width: "18%" }} /><col style={{ width: "18%" }} /></colgroup>
+          <tbody>
+            <tr><th style={{ ...th, textAlign: "left" }}>※</th><th style={{ ...th, textAlign: "left" }}>※種別</th><th style={{ ...th, textAlign: "left" }}>※整理番号</th><th style={{ ...th, textAlign: "left" }}>※区分</th></tr>
+          </tbody>
+        </table>
+      )}
 
       {/* 支払を受ける者 */}
       <table style={table}>
         <colgroup><col style={{ width: "8%" }} /><col style={{ width: "12%" }} /><col style={{ width: "50%" }} /><col style={{ width: "10%" }} /><col style={{ width: "20%" }} /></colgroup>
         <tbody>
           <tr>
-            <th style={th} rowSpan={3}>支払を受ける者</th>
+            <th style={th} rowSpan={report ? 4 : 3}>支払を受ける者</th>
             <th style={th}>住所又は居所</th>
             <td style={td} colSpan={3}>{s.recipient.address}</td>
           </tr>
@@ -67,14 +122,21 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
             <th style={th}>（フリガナ）</th>
             <td style={{ ...td, fontSize: 9 }}>{s.recipient.furigana}</td>
             <th style={th}>（受給者番号）</th>
-            <td style={td}></td>
+            <td style={td}>{report?.staffNumber ?? ""}</td>
           </tr>
+
           <tr>
             <th style={th}>氏名</th>
             <td style={{ ...td, fontSize: 13 }}>{s.recipient.name}</td>
             <th style={th}>（役職名）</th>
             <td style={td}></td>
           </tr>
+          {report && (
+            <tr>
+              <th style={th}>（個人番号）</th>
+              <td style={{ ...td, padding: 0 }} colSpan={3}><div style={{ width: "50%" }}><NumberBoxes value={report.myNumbers?.[SELF_KEY] ?? ""} digits={12} /></div></td>
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -175,7 +237,7 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
       <table style={table}>
         <tbody>
           <tr><th style={{ ...th, textAlign: "left" }}>（摘要）</th></tr>
-          <tr><td style={{ ...td, height: 42, fontSize: 10, verticalAlign: "top" }}>{s.remarks.join("　")}</td></tr>
+          <tr><td style={{ ...td, height: 42, fontSize: 10, verticalAlign: "top" }}>{(report ? report.remarks : s.remarks).join("　")}</td></tr>
         </tbody>
       </table>
 
@@ -234,7 +296,7 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
         <tbody>
           <tr>
             <th style={th} rowSpan={2}>（源泉・特別）<br />控除対象<br />配偶者</th>
-            <PersonCell p={s.spouse ?? undefined} rowSpan={2} />
+            <PersonWithNumber p={s.spouse ?? undefined} rowSpan={2} />
             <td style={ctr} rowSpan={2}><span style={inner}>区分</span>{s.spouse?.code ?? ""}</td>
             <th style={th}>配偶者の合計所得</th>
             <th style={th}>国民年金保険料等<br />の金額</th>
@@ -263,13 +325,16 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
             <tr key={i}>
               {i === 0 && <th style={th} rowSpan={4}>控除対象<br />扶養親族</th>}
               <td style={{ ...ctr, fontSize: 9 }}>{i + 1}</td>
-              <PersonCell p={s.dependents[i]} />
+              <PersonWithNumber p={s.dependents[i]} />
               <td style={ctr}><span style={inner}>区分</span>{s.dependents[i]?.code ?? ""}</td>
               {i === 0 && <th style={th} rowSpan={4}>16歳未満<br />の扶養<br />親族</th>}
               <td style={{ ...ctr, fontSize: 9 }}>{i + 1}</td>
-              <PersonCell p={s.youngDependents[i]} />
+              <PersonWithNumber p={s.youngDependents[i]} />
               <td style={ctr}><span style={inner}>区分</span>{s.youngDependents[i]?.code ?? ""}</td>
-              {i === 0 && <td style={{ ...td, verticalAlign: "top", fontSize: 8 }} rowSpan={4}>（備考）</td>}
+              {i === 0 && !report && <td style={{ ...td, verticalAlign: "top", fontSize: 8 }} rowSpan={4}>（備考）</td>}
+              {/* 給与支払報告書：5人目以降の個人番号の欄（記載要領17・18。Q では書かない） */}
+              {i === 0 && report && <td style={{ ...td, verticalAlign: "top", fontSize: 7 }} rowSpan={2}>5人目以降の控除対象扶養親族等の個人番号</td>}
+              {i === 2 && report && <td style={{ ...td, verticalAlign: "top", fontSize: 7 }} rowSpan={2}>5人目以降の16歳未満の扶養親族の個人番号</td>}
             </tr>
           ))}
         </tbody>
@@ -319,8 +384,15 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
       <table style={table}>
         <colgroup><col style={{ width: "8%" }} /><col style={{ width: "16%" }} /><col style={{ width: "76%" }} /></colgroup>
         <tbody>
+          {report && (
+            <tr>
+              <th style={th} rowSpan={4}>支払者</th>
+              <th style={th}>個人番号又は<br />法人番号</th>
+              <td style={{ ...td, padding: 0 }}><div style={{ width: "60%" }}><NumberBoxes value={report.payerNumber} digits={13} /></div></td>
+            </tr>
+          )}
           <tr>
-            <th style={th} rowSpan={3}>支払者</th>
+            {!report && <th style={th} rowSpan={3}>支払者</th>}
             <th style={th}>住所（居所）<br />又は所在地</th>
             <td style={td}>{s.payer.address}</td>
           </tr>
@@ -334,7 +406,7 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
           </tr>
         </tbody>
       </table>
-      <div style={{ fontSize: 9, textAlign: "right", marginTop: 2 }}>（受給者交付用）</div>
+      {!report && <div style={{ fontSize: 9, textAlign: "right", marginTop: 2 }}>（受給者交付用）</div>}
     </div>
   );
 }

@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildReportPerson, designationNumberError, groupByMunicipality, normalizeDesignationNumber, parseReportSetting,
-  reportKindOf, type ReportSource,
+  reportKindOf, type ReportSource, paymentPeriodOf, staffTotalOnJan1, summaryCounts,
 } from "./salaryPaymentReport";
 
 const NO_SETTING = parseReportSetting(null);
@@ -148,5 +148,30 @@ describe("指定番号", () => {
   test("全角の数字・ハイフンは半角にそろえる", () => {
     expect(normalizeDesignationNumber(" １２３－４５ ")).toBe("123-45");
     expect(designationNumberError("１２３４５６７８")).toBeNull();
+  });
+});
+
+describe("紙の総括表（第十七号様式）", () => {
+  test("報告人員：特別徴収・普通徴収（退職者）・普通徴収（退職者を除く）。出さない人は数えない", () => {
+    expect(summaryCounts([
+      { submit: true, ordinary: false, kind: "employed" },
+      { submit: true, ordinary: false, kind: "employed" },
+      { submit: true, ordinary: true, kind: "retired" },
+      { submit: true, ordinary: true, kind: "employed" }, // 普B（乙欄）・普F（5月末までに退職する予定）など
+      { submit: false, ordinary: true, kind: "retired" }, // 30万円以下の退職者で出さない
+    ])).toEqual({ special: 2, ordinaryRetired: 1, ordinaryOther: 1, total: 4 });
+  });
+  test("給与の支払期間：給与を払った月のいちばん早い月から遅い月まで", () => {
+    expect(paymentPeriodOf([[1, 2, 3], [4, 5, 6, 7, 8, 9, 10, 11, 12]])).toEqual({ from: 1, to: 12 });
+    expect(paymentPeriodOf([[4, 5], [6]])).toEqual({ from: 4, to: 6 });
+    expect(paymentPeriodOf([[]])).toBeNull();
+  });
+  test("受給者総人員：翌年1月1日に在籍している人（会社全体）", () => {
+    expect(staffTotalOnJan1([
+      { join_date: "2020-04-01" },
+      { join_date: "2020-04-01", retirement_date: "2026-12-31" }, // 12月31日に退職：1月1日にはいない
+      { join_date: "2020-04-01", retirement_date: "2027-03-31" },
+      { join_date: "2027-01-02" },                                // 1月2日に入社：まだいない
+    ], 2026)).toBe(2);
   });
 });
