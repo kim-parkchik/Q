@@ -381,6 +381,25 @@ export const DB_SCHEMAS = [
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,
 
+  // 住民税の市区町村ごとの設定（給与支払報告書の提出先。詳しくは utils/salaryPaymentReport.ts）
+  `CREATE TABLE IF NOT EXISTS resident_tax_municipalities (
+    code TEXT PRIMARY KEY,         -- 団体コード（6桁。utils/localGov.ts）
+    designation_number TEXT,       -- 指定番号（市区町村が会社に付けた番号。特別徴収税額の決定通知書に書いてある）
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime'))
+  );`,
+
+  // 給与支払報告書の、従業員ごと・年分ごとの設定（詳しくは utils/salaryPaymentReport.ts）
+  `CREATE TABLE IF NOT EXISTS salary_payment_reports (
+    staff_id TEXT NOT NULL,
+    year INTEGER NOT NULL,         -- 給与を支払った年（令和8年分なら2026。翌年1月に出す）
+    ordinary_collection INTEGER,   -- 普通徴収にする（1）・特別徴収にする（0）。空なら初めの値（退職した人・乙欄の人は普通徴収）
+    ordinary_reason TEXT,          -- 普通徴収にする理由（摘要に書く符号「普A」〜「普F」、またはそのほかの理由）
+    submit INTEGER,                -- 出さなくてよい退職者（30万円以下）も出す（1）
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    PRIMARY KEY (staff_id, year),
+    FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
   `CREATE TABLE IF NOT EXISTS app_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,

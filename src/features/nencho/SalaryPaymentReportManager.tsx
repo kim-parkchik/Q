@@ -1,0 +1,226 @@
+/**
+ * 給与支払報告書（市区町村に出す。令和8年分から）
+ * その年に給与・賞与を支払った人を、出す先の市区町村ごとにまとめ、指定番号と、特別徴収・普通徴収を決める。
+ * 出す人・出す先のきまりは utils/salaryPaymentReport.ts
+ */
+import { useState } from "react";
+// @ts-ignore
+import Database from "@tauri-apps/plugin-sql";
+import { ORDINARY_REASONS, type MunicipalityGroup } from "../../utils/salaryPaymentReport";
+import { localGovLabel } from "../../utils/localGov";
+import { REPORT_YEARS, useSalaryPaymentReportManager, type ReportRow } from "./useSalaryPaymentReportManager";
+
+interface Props {
+  db: Database;
+  staffList: any[];
+  onDataChange: () => Promise<void> | void;
+}
+
+type Z = ReturnType<typeof useSalaryPaymentReportManager>;
+
+const card: React.CSSProperties = { backgroundColor: "white", padding: 16, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", marginBottom: 16 };
+const note: React.CSSProperties = { fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 };
+const th: React.CSSProperties = { textAlign: "left", fontSize: 11, color: "#64748b", fontWeight: "normal", padding: "6px 8px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" };
+const td: React.CSSProperties = { fontSize: 12, color: "#1e293b", padding: "8px", borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+const num: React.CSSProperties = { ...td, textAlign: "right", fontFamily: "monospace", whiteSpace: "nowrap" };
+const input: React.CSSProperties = { padding: "6px 8px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 12 };
+const button: React.CSSProperties = { padding: "6px 12px", border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff", cursor: "pointer", fontSize: 12, color: "#475569" };
+
+const yen = (n: number) => n.toLocaleString();
+const dateJa = (d: string) => {
+  const [y, m, day] = d.split("-").map(Number);
+  return `${y}年${m}月${day}日`;
+};
+
+/** 指定番号の入力（欄を離れたら保存する） */
+function DesignationInput({ code, saved, save }: { code: string; saved: string; save: Z["saveDesignation"] }) {
+  const [value, setValue] = useState(saved);
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#475569" }}>
+      指定番号
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={async () => { if (!(await save(code, value))) setValue(saved); }}
+        placeholder="前年度の通知書の番号"
+        maxLength={20}
+        style={{ ...input, width: 150, fontFamily: "monospace" }}
+      />
+    </label>
+  );
+}
+
+/** 特別徴収・普通徴収（理由）を選ぶ */
+function CollectionCell({ row, save }: { row: ReportRow; save: Z["saveSetting"] }) {
+  const codes = ORDINARY_REASONS.map((r) => r.code);
+  const value = !row.ordinary ? "special" : codes.includes(row.reason) ? row.reason : "other";
+  const [other, setOther] = useState(value === "other" ? row.reason : "");
+  const disabled = !row.submit;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "special") save(row, { ordinary: false, reason: "" });
+          else if (v === "other") save(row, { ordinary: true, reason: other.trim() });
+          else save(row, { ordinary: true, reason: v });
+        }}
+        style={{ ...input, maxWidth: 330 }}
+      >
+        <option value="special">特別徴収（給与から引く）</option>
+        {ORDINARY_REASONS.map((r) => <option key={r.code} value={r.code}>普通徴収：{r.code} {r.label}</option>)}
+        <option value="other">普通徴収：そのほかの理由</option>
+      </select>
+      {value === "other" && !disabled && (
+        <input
+          value={other}
+          onChange={(e) => setOther(e.target.value)}
+          onBlur={() => save(row, { ordinary: true, reason: other.trim() })}
+          placeholder="摘要に書く理由（市区町村の案内にある書き方）"
+          style={{ ...input, maxWidth: 330 }}
+        />
+      )}
+      {row.defaultWhy && !disabled && <span style={{ fontSize: 11, color: "#94a3b8" }}>初めの値（{row.defaultWhy}）</span>}
+    </div>
+  );
+}
+
+function GroupCard({ group, z }: { group: MunicipalityGroup<ReportRow>; z: Z }) {
+  const unset = !group.municipality;
+  const fillable = group.people.filter((r) => r.suggested);
+  return (
+    <div style={{ ...card, borderLeft: unset ? "4px solid #f59e0b" : undefined }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: "bold", color: unset ? "#b45309" : "#1e293b" }}>
+          {unset ? "市区町村が未設定" : localGovLabel(group.municipality)}
+          {!unset && <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: "normal", marginLeft: 8 }}>団体コード {group.code}</span>}
+        </div>
+        {!unset && <DesignationInput key={`${group.code}:${z.designations[group.code] ?? ""}`} code={group.code} saved={z.designations[group.code] ?? ""} save={z.saveDesignation} />}
+        <div style={{ fontSize: 12, color: "#475569", marginLeft: "auto" }}>
+          特別徴収 {group.special}人・普通徴収 {group.ordinary}人
+          {group.skipped > 0 && <span style={{ color: "#94a3b8" }}>（ほかに出さない退職者 {group.skipped}人）</span>}
+        </div>
+      </div>
+      {unset && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: "#b45309" }}>従業員の画面の「住民税（特別徴収）」で、市区町村を選んでください。</span>
+          {fillable.length > 0 && (
+            <button type="button" onClick={() => z.fillFromAddress(fillable)} style={button}>住所から市区町村を入れる（{fillable.length}人）</button>
+          )}
+        </div>
+      )}
+
+      <div style={{ overflowX: "auto", marginTop: 10 }}>
+        <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse", tableLayout: "fixed" }}>
+          {/* 市区町村ごとの表で、列の幅をそろえる */}
+          <colgroup>
+            <col style={{ width: 120 }} />
+            <col style={{ width: 190 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 150 }} />
+            <col style={{ width: 350 }} />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={th}>氏名</th>
+              <th style={th}>区分</th>
+              <th style={{ ...th, textAlign: "right" }}>支払金額</th>
+              <th style={{ ...th, textAlign: "right" }}>源泉徴収税額</th>
+              <th style={th}>年末調整</th>
+              <th style={th}>住民税の徴収</th>
+              <th style={th}>注意</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.people.map((r) => (
+              <tr key={r.staffId} style={{ opacity: r.submit ? 1 : 0.6 }}>
+                <td style={{ ...td, fontWeight: "bold", whiteSpace: "nowrap" }}>{r.name}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  {r.kind === "employed" ? "在職" : `退職（${dateJa(r.retiredOn!)}）`}
+                  {!r.required && (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>30万円以下なので、出さなくてよい</div>
+                      <label style={{ fontSize: 11, color: "#475569", display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                        <input type="checkbox" checked={r.submit} onChange={(e) => z.saveSetting(r, { submit: e.target.checked })} />
+                        出す
+                      </label>
+                    </div>
+                  )}
+                </td>
+                <td style={num}>{yen(r.payment)}</td>
+                <td style={num}>{yen(r.withholdingTax)}</td>
+                <td style={{ ...td, whiteSpace: "nowrap", color: r.attention ? "#b45309" : "#64748b" }}>{r.status}</td>
+                <td style={td}><CollectionCell key={`${r.staffId}:${r.ordinary}:${r.reason}`} row={r} save={z.saveSetting} /></td>
+                <td style={{ ...td, fontSize: 11, color: "#b45309", lineHeight: 1.6 }}>
+                  {r.warnings.map((w) => <div key={w}>⚠ {w}</div>)}
+                  {unset && r.suggested && <div style={{ color: "#64748b" }}>住所から：{localGovLabel(r.suggested)}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default function SalaryPaymentReportManager({ db, staffList, onDataChange }: Props) {
+  const z = useSalaryPaymentReportManager(db, staffList, onDataChange);
+  const submitting = z.rows.filter((r) => r.submit);
+  const special = submitting.filter((r) => !r.ordinary).length;
+  const skipped = z.rows.length - submitting.length;
+  const unset = submitting.filter((r) => !r.municipality).length;
+  const withWarnings = submitting.filter((r) => r.warnings.length > 0).length;
+  const notAdjusted = submitting.filter((r) => r.attention).length;
+
+  return (
+    <div style={{ maxWidth: 1300, margin: "0 auto" }}>
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <select value={z.year} onChange={(e) => z.setYear(Number(e.target.value))} style={{ padding: "8px 10px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14 }}>
+            {REPORT_YEARS.map((y) => <option key={y} value={y}>{y}年分（令和{y - 2018}年分）</option>)}
+          </select>
+          {z.isLoading && <span style={{ fontSize: 12, color: "#64748b" }}>読み込み中…</span>}
+          <span style={{ fontSize: 13, color: "#1e293b", fontWeight: "bold" }}>出す期限：{z.year + 1}年1月31日</span>
+        </div>
+        <p style={note}>
+          市区町村に出す「給与支払報告書（個人別明細書）」の準備をします。{z.year}年に給与・賞与を支払った人を、出す先の市区町村ごとにまとめます（地方税法317条の6）。
+          <br />・{z.year + 1}年1月1日に在職している人：その日の住所の市区町村に出します。
+          <br />・{z.year}年の途中で退職した人：退職した日の住所の市区町村に出します。{z.year}年の給与が30万円以下の人は、出さなくてもかまいません（出すよう求める市区町村もあります）。
+          <br />・出す先は、従業員の画面の「住民税（特別徴収）」で選んだ市区町村です。支払金額・源泉徴収税額は、源泉徴収票と同じです。
+          <br />・普通徴収にする人は、理由の符号（普A〜普F）を選びます。符号の基準は市区町村によって少し違うので、出す先の案内を確かめてください。
+          指定番号は、市区町村から届いた前年度の「特別徴収税額の決定通知書」に書いてある番号です（初めて出す市区町村は空でかまいません）。
+          <br />・令和9年1月からは、給与支払報告書を出せば、税務署に源泉徴収票を出したことになります（従業員に渡す源泉徴収票は、今までどおり要ります）。
+          前々年に税務署に出すべきだった源泉徴収票が30枚以上の会社は、eLTAX か光ディスク等で出します（令和9年1月から。令和8年までは100枚以上）。
+          <br />・4月1日までに退職した人がいたら、4月15日までに「給与支払報告に係る給与所得者異動届出書」を出します（同条第2項）。
+          <br />・eLTAX に取り込むファイル（CSV）と、紙の総括表・個人別明細書は、まだ作れません。マイナンバーも、まだ Q に入れる所がありません。
+        </p>
+      </div>
+
+      {z.rows.length === 0 ? (
+        <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>{z.year}年に確定した給与・賞与がありません。</div>
+      ) : (
+        <>
+          <div style={{ ...card, display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13, color: "#1e293b" }}>
+            <div>出す人：<b>{submitting.length}人</b>（特別徴収 {special}人・普通徴収 {submitting.length - special}人）</div>
+            <div>市区町村：{z.groups.filter((g) => g.municipality).length}か所</div>
+            {skipped > 0 && <div style={{ color: "#64748b" }}>出さない退職者（30万円以下）：{skipped}人</div>}
+            {unset > 0 && <div style={{ color: "#b45309" }}>⚠ 市区町村が未設定：{unset}人</div>}
+            {withWarnings > 0 && <div style={{ color: "#b45309" }}>⚠ 注意がある人：{withWarnings}人</div>}
+            {notAdjusted > 0 && <div style={{ color: "#b45309" }}>⚠ 年末調整が済んでいない人：{notAdjusted}人</div>}
+            {special > 0 && special <= 2 && (
+              <div style={{ color: "#64748b", flexBasis: "100%", fontSize: 12 }}>
+                特別徴収の人が{special}人です。市区町村の基準によっては、「普A（総従業員数が2人以下）」で普通徴収にできます。
+              </div>
+            )}
+          </div>
+          {z.groups.map((g) => <GroupCard key={g.code || "unset"} group={g} z={z} />)}
+        </>
+      )}
+    </div>
+  );
+}

@@ -61,8 +61,9 @@ export async function loadNenchoData(db: Database, year: number): Promise<Nencho
 
 /** その年に在籍した人ごとに、1年分の集計・保存した年末調整・精算の状況をまとめる */
 export const buildNenchoRows = (staffList: any[], data: NenchoData, year: number, master: NenchoMaster | null): NenchoStaffRow[] => staffList
-  // その年に在籍していない人は出さない
-  .filter((s) => !(s.join_date && s.join_date > `${year}-12-31`) && !(s.retirement_date && s.retirement_date < `${year}-01-01`))
+  // その年に在籍した人と、その年に給与・賞与を支払った人（12月末に退職して、翌年1月に最後の給与を支払った人など）
+  .filter((s) => (!(s.join_date && s.join_date > `${year}-12-31`) && !(s.retirement_date && s.retirement_date < `${year}-01-01`))
+    || [...data.salaries, ...data.bonuses].some((r) => String(r.staff_id) === String(s.id)))
   .map((staff) => {
     const sid = String(staff.id);
     const savedRow = data.saved.find((r) => String(r.staff_id) === sid);

@@ -19,6 +19,7 @@
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
  *   2. 下の MIGRATIONS の末尾に、次の番号（v2 から）で addColumnIfMissing を追加する（既存ファイル用）
  *   ※ 既にある番号の中身は、後から書き換えないこと（どこまで適用したかがずれるため）
+ *   ※ 新しい表を足すだけなら、番号は要らない（開くたびに CREATE TABLE IF NOT EXISTS で作られる）
  *
  * ■ 開発中の方針（まだ一般に配布していない間）
  *   ・表の定義の正は dbSchema.ts。変更がたまったら、MIGRATIONS を空にし、Q_FILE_ID を次の値（"QP02" など）に変えて、
