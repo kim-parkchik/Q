@@ -1,10 +1,11 @@
 /**
- * 「税・社会保険・労働保険」：加入区分・標準報酬月額・扶養人数・各種番号
+ * 「税・社会保険・労働保険」：加入区分・標準報酬月額・扶養人数・住民税・各種番号
  * （StaffManager.tsx から分割）
  */
 import { UserCheck, Shield, Timer } from 'lucide-react';
 import RemunerationHistory from './RemunerationHistory';
 import { DependentsHistoryEditor } from './WageDependentsHistory';
+import ResidentTaxEditor from './ResidentTaxEditor';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { toTaxColumn } from '../../../utils/incomeTax';
@@ -21,8 +22,6 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetIsOvertimeEligible,
         targetDependents,
         setTargetDependents,
-        targetResidentTax,
-        setTargetResidentTax,
         targetFlatTaxReductionPersons,
         setTargetFlatTaxReductionPersons,
         targetTaxColumn,
@@ -130,17 +129,11 @@ export default function InsuranceSection({ cm }: Props) {
                     </div>
                 </div>
 
-                {/* 🆕 住民税額（span 2 を外して 1fr に） */}
-                <div>
-                    <label style={labelStyle}>住民税額（月額）</label>
-                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                        <input type="number" value={targetResidentTax} onChange={e => setTargetResidentTax(Number(e.target.value))} style={{ ...inputStyle, paddingRight: "30px", textAlign: "right" }} />
-                        <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>円</span>
-                    </div>
-                </div>
-
                 {/* 扶養人数の履歴（何年何月分から何人） */}
                 <DependentsHistoryEditor cm={cm} />
+
+                {/* 住民税（年度ごとの6月分〜翌年5月分） */}
+                <ResidentTaxEditor cm={cm} />
 
                 {/* 令和6年分の定額減税（2024年6月〜12月に支払う給与だけで使う） */}
                 <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: "10px" }}>

@@ -5,6 +5,7 @@ import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, loadCalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
+import { residentTaxFor } from '../../utils/residentTax';
 
 // 型定義
 interface UsePayStubProps {
@@ -23,7 +24,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   const [extras, setExtras] = useState<SalaryExtras>({
     allowanceName: "役職手当",
     allowanceAmount: 0,
-    residentTax: Number(staff.resident_tax) || 0,
+    residentTax: residentTaxFor(staff, year, month), // この月に支給する給与の分（年度ごとの額。utils/residentTax.ts）
     prefecture: Master.toKenpoPrefName(staff.prefecture) ?? "京都",
     dependents: Number(staff.dependents) || 0,
     customItems: [],

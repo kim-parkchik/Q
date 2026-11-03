@@ -19,6 +19,7 @@ import {
     dependentsHistoryOf, stringifyDependentsHistory, stringifyWageHistory, toWageType, validateHistory, wageHistoryOf,
     type DependentsEntry, type WageEntry,
 } from "../../utils/staffHistory";
+import { residentTaxScheduleOf, stringifyResidentTaxSchedule, type ResidentTaxYear } from "../../utils/residentTax";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -114,7 +115,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
     const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 産休・育休の期間（社会保険料の免除）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄・丙欄）
-    const [targetResidentTax, setTargetResidentTax] = useState(0);
+    const [targetResidentTax, setTargetResidentTax] = useState(0); // 住民税の月額（以前の入れ方。年度の額を入れていない月に使う）
+    const [targetResidentTaxSchedule, setTargetResidentTaxSchedule] = useState<ResidentTaxYear[]>([]); // 住民税の年度ごとの12か月（utils/residentTax.ts）
     // 標準報酬月額の履歴（何年何月分から・いくら）。最初の1件は「入社したときから」
     const [targetRemunerationHistory, setTargetRemunerationHistory] = useState<RemunerationEntry[]>([{ from: "", amount: 0, reason: "shutoku" }]);
     const targetStandardRemuneration = latestStandardRemuneration(targetRemunerationHistory); // いちばん新しい標準報酬月額
@@ -319,7 +321,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetWageType("hourly"); setTargetWage(1200); setTargetIsOvertimeEligible(1);
         setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
         setTargetCommuteType("daily"); setTargetCommuteAmount(0);
-        setTargetDependents(0); setTargetResidentTax(0); setTargetFlatTaxReductionPersons(0);
+        setTargetDependents(0); setTargetResidentTax(0); setTargetResidentTaxSchedule([]); setTargetFlatTaxReductionPersons(0);
         setTargetWageHistoryPast([]); setTargetWageFrom("");
         setTargetDependentsHistoryPast([]); setTargetDependentsFrom("");
         setTargetLeavePeriods([]);
@@ -377,6 +379,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetLeavePeriods(parseLeavePeriods(s.leave_periods));
         setTargetTaxColumn(toTaxColumn(s.tax_column));
         setTargetResidentTax(s.resident_tax || 0);
+        setTargetResidentTaxSchedule(residentTaxScheduleOf(s));
         setTargetRemunerationHistory(remunerationHistoryOf(s));
         // 社保規定が空（NULL）なら「未加入 / 適用除外」
         setTargetSocialInsGroupId(s.social_insurance_group_id ?? 0);
@@ -439,6 +442,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             stringifyLeavePeriods(targetLeavePeriods) !== stringifyLeavePeriods(parseLeavePeriods(original.leave_periods)) ||
             targetTaxColumn !== toTaxColumn(original.tax_column) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
+            stringifyResidentTaxSchedule(targetResidentTaxSchedule) !== stringifyResidentTaxSchedule(residentTaxScheduleOf(original)) ||
             Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
             stringifyRemunerationHistory(targetRemunerationHistory) !== stringifyRemunerationHistory(remunerationHistoryOf(original)) ||
             stringifyWageHistory(targetWageHistory) !== stringifyWageHistory(wageHistoryOf(original)) ||
@@ -509,7 +513,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetTaxColumn,
                 stringifyRemunerationHistory(targetRemunerationHistory),
                 stringifyWageHistory(targetWageHistory),
-                stringifyDependentsHistory(targetDependentsHistory)
+                stringifyDependentsHistory(targetDependentsHistory),
+                stringifyResidentTaxSchedule(targetResidentTaxSchedule)
             ];
 
             if (editingId) {
@@ -528,7 +533,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         health_ins_num=?, pension_num=?, employment_ins_num=?,
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
                         flat_tax_reduction_persons=?, leave_periods=?, tax_column=?,
-                        standard_remuneration_history=?, wage_history=?, dependents_history=?
+                        standard_remuneration_history=?, wage_history=?, dependents_history=?,
+                        resident_tax_schedule=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -549,6 +555,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         scheduled_in, is_flex, core_start, core_end,
                         flat_tax_reduction_persons, leave_periods, tax_column,
                         standard_remuneration_history, wage_history, dependents_history,
+                        resident_tax_schedule,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -744,6 +751,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetTaxColumn,
         targetResidentTax,
         setTargetResidentTax,
+        targetResidentTaxSchedule,
+        setTargetResidentTaxSchedule,
         targetStandardRemuneration,
         targetRemunerationHistory,
         setTargetRemunerationHistory,

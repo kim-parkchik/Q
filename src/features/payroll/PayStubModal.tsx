@@ -54,7 +54,7 @@ export default function PayStubModal(props: Props) {
               <input type="number" min={0} max={7} value={extras.dependents} onChange={e => setExtras(p => ({ ...p, dependents: Number(e.target.value) }))} style={S.inputS} />
             </div>
             <div>
-              <label style={S.labelS}>住民税</label>
+              <label style={S.labelS} title="従業員の設定の、年度ごとの住民税の額（この月に支給する給与の分）。退職する人の一括徴収などは、ここで直します">住民税（{props.month}月分）</label>
               <input type="number" min={0} value={extras.residentTax} onChange={e => setExtras(p => ({ ...p, residentTax: Number(e.target.value) }))} style={S.inputS} />
             </div>
           </div>

@@ -55,10 +55,17 @@ export const addColumnIfMissing = async (
 };
 
 export const MIGRATIONS: Migration[] = [
-  // v1 は dbSchema.ts の形そのもの（上の「形式の番号」を参照）。次に列を足すときは version: 2 から追加する。
+  // v1 は 2026-11-03 の dbSchema.ts の形（上の「形式の番号」を参照）。列を足す更新は version: 2 から。
+  {
+    version: 2,
+    description: "従業員に、住民税の特別徴収の額（年度ごとの6月分〜翌年5月分）を追加（初めは空。今までの月額は、年度の額を入れていない月に使う）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "resident_tax_schedule", "TEXT");
+    },
+  },
 ];
 
-/** v1（dbSchema.ts の形そのもの）の番号 */
+/** v1（2026-11-03 の dbSchema.ts の形）の番号 */
 export const BASE_DB_VERSION = 1;
 
 /** 最新のバージョン番号 */
