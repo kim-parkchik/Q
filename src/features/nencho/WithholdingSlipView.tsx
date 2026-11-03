@@ -41,6 +41,7 @@ const ymd = (w: Wareki | null) => (w ? [w.era, String(w.year), String(w.month), 
 export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip }) {
   const s = slip;
   const c = s.dependentCounts;
+  const sc = s.secondaryCounts;
   const loan = (i: number) => s.housingLoan.entries[i];
   const loanDate = (i: number) => ymd(loan(i)?.residenceStart ?? null);
   const [jEra, jY, jM, jD] = ymd(s.joinRetire.date);
@@ -123,13 +124,13 @@ export default function WithholdingSlipView({ slip }: { slip: WithholdingSlip })
           </tr>
           <tr>
             <td style={ctr}>{mark(s.spouseMark.has)}</td>
-            <td style={ctr}></td>
+            <td style={ctr}>{mark(s.spouseMark.secondary)}</td>
             <td style={ctr}>{mark(s.spouseMark.elderly)}</td>
             <Amount value={s.spouseDeduction} />
-            <td style={ctr}>{n(c.specific)}</td><td style={ctr}></td>
-            <td style={ctr}><span style={inner}>内</span>{n(c.elderlyTogether)}</td><td style={ctr}>{n(c.elderly)}</td><td style={ctr}></td>
-            <td style={ctr}>{n(c.other)}</td><td style={ctr}></td>
-            <td style={ctr}>{n(c.specificRelative)}</td><td style={ctr}></td>
+            <td style={ctr}>{n(c.specific)}</td><td style={ctr}>{n(sc.specific)}</td>
+            <td style={ctr}><span style={inner}>内</span>{n(c.elderlyTogether)}</td><td style={ctr}>{n(c.elderly)}</td><td style={ctr}>{n(sc.elderly)}</td>
+            <td style={ctr}>{n(c.other)}</td><td style={ctr}>{n(sc.other)}</td>
+            <td style={ctr}>{n(c.specificRelative)}</td><td style={ctr}>{n(sc.specificRelative)}</td>
             <td style={ctr}>{n(s.youngCount)}</td>
             <td style={ctr}><span style={inner}>内</span>{n(s.disabledCounts.specialTogether)}</td>
             <td style={ctr}>{n(s.disabledCounts.special)}</td>

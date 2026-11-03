@@ -103,7 +103,7 @@ describe("記載例1：年末調整を行った一般の受給者", () => {
         expect(slip.spouseTotalIncome).toBe(400000);
     });
     test("人数（控除対象配偶者あり・その他1・老人1（同居老親等1）・特定親族1・16歳未満1・障害者1）", () => {
-        expect(slip.spouseMark).toEqual({ has: true, elderly: false });
+        expect(slip.spouseMark).toEqual({ has: true, secondary: false, elderly: false });
         expect(slip.dependentCounts).toEqual({ specific: null, elderly: 1, elderlyTogether: 1, other: 1, specificRelative: 1 });
         expect(slip.youngCount).toBe(1);
         expect(slip.disabledCounts).toEqual({ special: null, specialTogether: null, other: 1 });
@@ -320,7 +320,7 @@ describe("記載例4の続き：年末調整をしていないが、扶養控除
         expect(slip.employmentIncome).toBeNull();
     });
     test("源泉控除対象配偶者（見積額95万円以下）：有、配偶者の合計所得は見積額。配偶者（特別）控除の額は書かない", () => {
-        expect(slip.spouseMark).toEqual({ has: true, elderly: false });
+        expect(slip.spouseMark).toEqual({ has: true, secondary: false, elderly: false });
         expect(slip.spouse).toEqual({ furigana: "コクゼイ ユウコ", name: "国税 優子", birthday: "1982-04-01", code: "00" });
         expect(slip.spouseTotalIncome).toBe(900000);
         expect(slip.spouseDeduction).toBeNull();
@@ -346,5 +346,45 @@ describe("記載例4の続き：年末調整をしていないが、扶養控除
         expect(specificRelativeCodeByIncome(580000, gm)).toBe("");
         expect(specificRelativeCodeByIncome(600000, gm)).toBe("10");
         expect(specificRelativeCodeByIncome(1000000, gm)).toBe("40");
+    });
+});
+
+describe("乙欄の人：従たる給与についての扶養控除等申告書の記載に応じて「従」の欄に書く", () => {
+    // 生年月日・所得の見積額は仮
+    const source: NenchoDeclaration = {
+        ...emptyDeclaration(),
+        self: { ...emptyDeclaration().self, disability: "general" }, // 本人の欄は従たる給与の申告書にないので書かない
+        spouse: { name: "乙欄 花子", birthday: "1982-04-01", totalIncome: 0, disability: "special", livingTogether: true },
+        dependents: [
+            dep("乙欄 一郎", "2009-05-01", { relation: "子" }),                       // 17歳：その他
+            dep("乙欄 次郎", "2006-06-01", { relation: "子" }),                       // 20歳：特定扶養親族
+            dep("乙欄 三郎", "2016-06-01", { relation: "子" }),                       // 10歳：16歳未満は書かない
+            dep("乙欄 孝男", "1950-07-01", { relation: "父", linealAscendant: true }), // 76歳：老人
+        ],
+    };
+    const otsuStaff = { name: "乙欄 太郎", address: "東京都", birthday: "1980-01-01", join_date: "2015-04-01", tax_column: "otsu", dependents: 4 };
+    const totals = { salary: 600000, socialInsurance: 0, withheldTax: 20000, salaryMonths: [1, 2, 3, 4, 5, 6], bonusCount: 0 };
+    const slip = slipOf({ staff: otsuStaff, totals, sourceDeclaration: source });
+    test("従有に印。人数は「従」の欄に書き、主たる給与の欄は空", () => {
+        expect([slip.adjusted, slip.declared, slip.marks.otsu]).toEqual([false, true, true]);
+        expect(slip.spouseMark).toEqual({ has: false, secondary: true, elderly: false });
+        expect(slip.secondaryCounts).toEqual({ specific: 1, elderly: 1, other: 1, specificRelative: null });
+        expect(slip.dependentCounts).toEqual({ specific: null, elderly: null, elderlyTogether: null, other: null, specificRelative: null });
+    });
+    test("氏名は書く。16歳未満・障害者・本人の欄は書かない", () => {
+        expect(slip.spouse?.name).toBe("乙欄 花子");
+        expect(slip.dependents.map((p) => p.name)).toEqual(["乙欄 一郎", "乙欄 次郎", "乙欄 孝男"]);
+        expect([slip.youngCount, slip.youngDependents]).toEqual([null, []]);
+        expect(slip.disabledCounts).toEqual({ special: null, specialTogether: null, other: null });
+        expect(slip.marks.selfDisabled).toBe(false);
+    });
+    test("税額の計算に使っている扶養人数と、申告書の人数（配偶者1＋扶養親族3＝4人）が違えば知らせる", () => {
+        expect(slip.warnings.some((w) => w.includes("乙欄の税額の計算に使っている扶養人数"))).toBe(false);
+        const other = slipOf({ staff: { ...otsuStaff, dependents: 2 }, totals, sourceDeclaration: source });
+        expect(other.warnings).toContain("従たる給与についての扶養控除等申告書の扶養親族等は4人ですが、乙欄の税額の計算に使っている扶養人数（従業員の画面）は2人です。どちらかを直してください。");
+    });
+    test("申告書を入れていなければ、今までどおり空欄", () => {
+        const none = slipOf({ staff: otsuStaff, totals });
+        expect([none.declared, none.spouseMark.secondary, none.secondaryCounts.other]).toEqual([false, false, null]);
     });
 });

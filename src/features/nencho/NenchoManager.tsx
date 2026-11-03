@@ -69,17 +69,33 @@ export default function NenchoManager({ db, staffList }: Props) {
         {/* 選んだ人 */}
         {!z.selected ? (
           <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>左の一覧から従業員を選んでください。</div>
-        ) : z.selected.exclusion && toTaxColumn(z.selected.staff.tax_column) === "kou" && z.master && z.draft ? (
+        ) : z.selected.exclusion && ["kou", "otsu"].includes(toTaxColumn(z.selected.staff.tax_column)) && z.master && z.draft ? (
           // 年末調整をしない甲欄の人（年の途中で退職した人など）：扶養控除等申告書の内容だけを入れる（源泉徴収票の配偶者・扶養親族の欄に書く）
+          // 乙欄の人：従たる給与についての扶養控除等申告書の内容（源泉徴収票の「従」の欄に書く）
           <div style={card}>
-            <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 6 }}>{z.selected.staff.name}さん（{z.year}年分）：扶養控除等申告書の内容</div>
-            <p style={{ fontSize: 12, color: "#b45309", margin: "0 0 6px 0" }}>※ {z.selected.exclusion}</p>
-            <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px 0", lineHeight: 1.7 }}>
-              年末調整をしない人の源泉徴収票・給与支払報告書にも、出してもらった「給与所得者の扶養控除等（異動）申告書」の記載に応じて、
-              源泉控除対象配偶者・控除対象扶養親族等の人数と氏名、16歳未満の扶養親族、障害者の人数を書きます（国税庁「法定調書の作成と提出の手引」）。
-              申告書の内容を入れて保存してください（年末調整の計算はしません）。
-            </p>
-            <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} sourceOnly />
+            {toTaxColumn(z.selected.staff.tax_column) === "otsu" ? (
+              <>
+                <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 6 }}>{z.selected.staff.name}さん（{z.year}年分）：従たる給与についての扶養控除等申告書の内容</div>
+                <p style={{ fontSize: 12, color: "#b45309", margin: "0 0 6px 0" }}>※ {z.selected.exclusion}</p>
+                <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px 0", lineHeight: 1.7 }}>
+                  乙欄の人が「従たる給与についての扶養控除等（異動）申告書」を出していれば、この給与で控除する源泉控除対象配偶者・源泉控除対象親族を、
+                  源泉徴収票・給与支払報告書の「従有」と人数の「従」の欄、氏名の欄に書きます（所得税法195条、国税庁「法定調書の作成と提出の手引」）。
+                  出していない人は、入れる必要はありません。乙欄の税額は、従業員の画面の扶養人数（扶養親族等1人につき1,610円引く）で計算します。
+                </p>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 6 }}>{z.selected.staff.name}さん（{z.year}年分）：扶養控除等申告書の内容</div>
+                <p style={{ fontSize: 12, color: "#b45309", margin: "0 0 6px 0" }}>※ {z.selected.exclusion}</p>
+                <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px 0", lineHeight: 1.7 }}>
+                  年末調整をしない人の源泉徴収票・給与支払報告書にも、出してもらった「給与所得者の扶養控除等（異動）申告書」の記載に応じて、
+                  源泉控除対象配偶者・控除対象扶養親族等の人数と氏名、16歳未満の扶養親族、障害者の人数を書きます（国税庁「法定調書の作成と提出の手引」）。
+                  申告書の内容を入れて保存してください（年末調整の計算はしません）。
+                </p>
+              </>
+            )}
+            <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} sourceOnly
+              secondary={toTaxColumn(z.selected.staff.tax_column) === "otsu"} />
             {z.errors.map((e) => <div key={e} style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{e}</div>)}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
               <button

@@ -2,6 +2,7 @@
  * 年末調整：申告書の内容を入れる欄
  * （扶養控除等申告書・基礎控除申告書・配偶者控除等申告書・保険料控除申告書・住宅借入金等特別控除申告書・前の勤め先の源泉徴収票）
  * sourceOnly：年末調整をしない人の扶養控除等申告書（本人・配偶者・扶養親族）だけ。源泉徴収票の配偶者・扶養親族の欄に書く（utils/withholdingSlip.ts）
+ * secondary：乙欄の人の従たる給与についての扶養控除等申告書（配偶者・扶養親族だけ。所得税法195条）
  */
 import { Plus, Trash2 } from "lucide-react";
 import { getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
@@ -20,6 +21,8 @@ interface Props {
   totals: YearTotals;
   /** 年末調整をしない人の扶養控除等申告書だけを入れる */
   sourceOnly?: boolean;
+  /** 乙欄の人の、従たる給与についての扶養控除等申告書（本人の欄はない） */
+  secondary?: boolean;
 }
 
 const section: React.CSSProperties = { borderTop: "1px solid #e2e8f0", paddingTop: 12, marginTop: 12 };
@@ -62,7 +65,8 @@ const kindAmount = (kind: DependentKind, d: DeclaredDependent, m: NenchoMaster):
   }
 };
 
-export default function NenchoDeclarationForm({ year, master, draft, setDraft, totals, sourceOnly = false }: Props) {
+export default function NenchoDeclarationForm({ year, master, draft, setDraft, totals, sourceOnly: sourceOnlyProp = false, secondary = false }: Props) {
+  const sourceOnly = sourceOnlyProp || secondary;
   const set = (patch: Partial<NenchoDeclaration>) => setDraft({ ...draft, ...patch });
   const setSelf = (patch: Partial<NenchoDeclaration["self"]>) => set({ self: { ...draft.self, ...patch } });
   const setIns = (patch: Partial<NenchoDeclaration["insurance"]>) => set({ insurance: { ...draft.insurance, ...patch } });
@@ -116,7 +120,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
       </div>}
 
       {/* 本人 */}
-      <div style={sourceOnly ? undefined : section}>
+      {!secondary && <div style={sourceOnly ? undefined : section}>
         <p style={h}>本人（扶養控除等申告書{sourceOnly ? "" : "・基礎控除申告書"}）</p>
         <div style={grid(4)}>
           <div><label style={label}>障害者</label><DisabilitySelect value={draft.self.disability} onChange={(v) => setSelf({ disability: v })} /></div>
@@ -141,18 +145,18 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
           </div>
           {!sourceOnly && <NumField title="給与所得以外の所得の合計" value={draft.self.otherIncome} onChange={(v) => setSelf({ otherIncome: v })} />}
         </div>
-      </div>
+      </div>}
 
       {/* 配偶者 */}
-      <div style={section}>
-        <p style={h}>配偶者（{sourceOnly ? "扶養控除等申告書の源泉控除対象配偶者" : "配偶者控除等申告書・扶養控除等申告書"}）</p>
+      <div style={secondary ? undefined : section}>
+        <p style={h}>配偶者（{secondary ? "従たる給与についての扶養控除等申告書の源泉控除対象配偶者" : sourceOnly ? "扶養控除等申告書の源泉控除対象配偶者" : "配偶者控除等申告書・扶養控除等申告書"}）</p>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
           <input
             type="checkbox"
             checked={draft.spouse !== null}
             onChange={(e) => set({ spouse: e.target.checked ? { name: "", birthday: "", totalIncome: 0, disability: "none", livingTogether: true } : null })}
           />
-          {sourceOnly ? "源泉控除対象配偶者がいる（または同一生計配偶者が障害者）" : "配偶者控除・配偶者特別控除を受ける（または同一生計配偶者が障害者）"}
+          {secondary ? "源泉控除対象配偶者を、この給与で控除する" : sourceOnly ? "源泉控除対象配偶者がいる（または同一生計配偶者が障害者）" : "配偶者控除・配偶者特別控除を受ける（または同一生計配偶者が障害者）"}
         </label>
         {draft.spouse && (
           <div style={{ ...grid(6), marginTop: 8 }}>
@@ -180,7 +184,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
 
       {/* 扶養親族 */}
       <div style={section}>
-        <p style={h}>扶養親族・特定親族（扶養控除等申告書{sourceOnly ? "" : "・特定親族特別控除申告書"}）</p>
+        <p style={h}>扶養親族・特定親族（{secondary ? "従たる給与についての扶養控除等申告書" : sourceOnly ? "扶養控除等申告書" : "扶養控除等申告書・特定親族特別控除申告書"}）</p>
         {draft.dependents.map((d, i) => {
           const kind = kindOf(d);
           const amount = sourceOnly ? null : kindAmount(kind, d, master);
@@ -225,7 +229,9 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
         </button>
         {sourceOnly && w ? (
           <p style={note}>
-            16歳未満の子も入れてください（源泉徴収票の16歳未満の扶養親族の欄に書きます）。
+            {secondary
+              ? "この給与で控除する源泉控除対象親族を入れてください（16歳未満の子は、従たる給与の申告書には書かないので、入れても源泉徴収票には書きません）。"
+              : "16歳未満の子も入れてください（源泉徴収票の16歳未満の扶養親族の欄に書きます）。"}
             区分は{year}年12月31日の年齢と所得の見積額で決まります。年末調整をしない人は、{year}年{w.earlierUntil.replace("-", "月").replace(/^0/, "")}日以前に出された申告書の線で読み、
             扶養親族の所得要件は{yen(w.earlierIncomeLimit)}以下、特定親族は見積額が{yen(w.specificRelativeLimit)}以下の人だけ書きます
             （国税庁「法定調書の作成と提出の手引」 源泉徴収票の記載要領）。

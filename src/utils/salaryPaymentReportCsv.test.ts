@@ -30,7 +30,7 @@ const baseStaff: Staff = {
 };
 
 const personOf = (o: {
-  staff?: Partial<Staff>; totals?: SlipSource["totals"]; declaration?: NenchoDeclaration | null;
+  staff?: Partial<Staff>; totals?: SlipSource["totals"]; declaration?: NenchoDeclaration | null; sourceDeclaration?: NenchoDeclaration | null;
   setting?: Partial<ReportSetting>; designation?: string; notReady?: string;
 } = {}): ReportCsvPerson => {
   const staff = { ...baseStaff, ...o.staff };
@@ -38,6 +38,7 @@ const personOf = (o: {
     year: 2026, staff, company: {},
     totals: o.totals ?? { salary: 3_000_000, socialInsurance: 450_000, withheldTax: 60_000, salaryMonths: [], bonusCount: 0 },
     declaration: o.declaration ?? null,
+    sourceDeclaration: o.sourceDeclaration ?? null,
   }, NENCHO_2026, GENSEN_2026);
   const report = buildReportPerson({
     year: 2026, staff, payment: slip.payment, withholdingTax: slip.withholdingTax,
@@ -276,5 +277,24 @@ describe("CSV のファイル", () => {
     expect(x.count).toBe(1);
     expect(x.csv.split(",")[137]).toBe("");
     expect(x.notes).toEqual(["国税 太郎：従業員ID（A_01）に使えない記号があるので、受給者番号は空にしました"]);
+  });
+});
+
+describe("乙欄の人（従たる給与についての扶養控除等申告書）", () => {
+  const source: NenchoDeclaration = {
+    ...emptyDeclaration(),
+    spouse: { name: "乙欄 花子", birthday: "1982-04-01", totalIncome: 0, disability: "none", livingTogether: true },
+    dependents: [dep("乙欄 一郎", "2009-05-01", { relation: "子" }), dep("乙欄 孝男", "1950-07-01", { relation: "父", linealAscendant: true })],
+  };
+  test("配偶者の有無は「従たる給与：有」の3。人数は「従」の項番（27・30・32）に書く", () => {
+    const row = buildCsvRow(2026, company, personOf({ staff: { tax_column: "otsu" }, sourceDeclaration: source }));
+    expect([at(row, 23), at(row, 24), at(row, 50)]).toEqual(["3", "0", "1"]);
+    expect([at(row, 26), at(row, 27), at(row, 28), at(row, 30), at(row, 31), at(row, 32), at(row, 144), at(row, 145)])
+      .toEqual(["", "", "", "1", "", "1", "", ""]);
+    expect([at(row, 97), at(row, 101), at(row, 105)]).toEqual(["乙欄　花子", "乙欄　一郎", "乙欄　孝男"]);
+  });
+  test("配偶者がいなければ4", () => {
+    const row = buildCsvRow(2026, company, personOf({ staff: { tax_column: "otsu" }, sourceDeclaration: { ...source, spouse: null } }));
+    expect(at(row, 23)).toBe("4");
   });
 });

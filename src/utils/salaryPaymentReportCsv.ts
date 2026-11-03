@@ -159,11 +159,14 @@ export const buildCsvRow = (year: number, company: ReportCsvCompany, p: ReportCs
   set(12, toZenkaku(s.recipient.address), "0", toZenkaku(s.recipient.name));
   set(16, toZenkaku(s.kind), num(s.payment));
   set(19, num(s.employmentIncome), num(s.deductionTotal), num(s.withholdingTax));
-  // 控除対象配偶者の有無（主たる給与：有 1・無 2）。年末調整をしない人は、扶養控除等申告書の内容がなければ分からないので空
+  // 控除対象配偶者の有無（主たる給与：有 1・無 2。乙欄の人の従たる給与：有 3・無 4）。
+  // 年末調整をしない人は、扶養控除等申告書（乙欄の人は従たる給与についての扶養控除等申告書）の内容がなければ分からないので空
   const known = s.adjusted || s.declared;
-  set(23, known ? (s.spouseMark.has ? "1" : "2") : "", known ? flag(s.spouseMark.elderly) : "", num(s.spouseDeduction));
+  const spouseCode = !known ? "" : s.marks.otsu ? (s.spouseMark.secondary ? "3" : "4") : s.spouseMark.has ? "1" : "2";
+  set(23, spouseCode, known ? flag(s.spouseMark.elderly) : "", num(s.spouseDeduction));
   const c = s.dependentCounts;
-  set(26, num(c.specific), "", num(c.elderly), num(c.elderlyTogether), "", num(c.other), "");
+  const sc = s.secondaryCounts;
+  set(26, num(c.specific), num(sc.specific), num(c.elderly), num(c.elderlyTogether), num(sc.elderly), num(c.other), num(sc.other));
   set(33, num(s.disabledCounts.special), num(s.disabledCounts.specialTogether), num(s.disabledCounts.other));
   set(36, num(s.socialInsurance), num(s.smallBusinessMutualAid), num(s.lifeInsuranceDeduction), num(s.earthquakeDeduction), num(s.housingLoanCredit));
   set(41, num(s.lifeInsurancePaid.pensionOld), num(s.spouseTotalIncome), num(s.oldLongTerm));
@@ -194,7 +197,7 @@ export const buildCsvRow = (year: number, company: ReportCsvCompany, p: ReportCs
   const staffNumber = p.staffNumber.normalize("NFKC").trim();
   set(138, /^[\x21-\x7E]+$/.test(staffNumber) && !STAFF_NUMBER_BANNED.test(staffNumber) ? staffNumber : "");
   set(139, r.municipality?.code ?? "", p.designationNumber);
-  set(141, num(s.basicDeduction), num(s.incomeAdjustment), flag(m.singleParent), num(c.specificRelative), "", num(s.specificRelativeDeduction));
+  set(141, num(s.basicDeduction), num(s.incomeAdjustment), flag(m.singleParent), num(c.specificRelative), num(sc.specificRelative), num(s.specificRelativeDeduction));
   return v;
 };
 

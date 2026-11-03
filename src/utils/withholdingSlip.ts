@@ -54,11 +54,14 @@ export interface WithholdingSlip {
   /** 源泉徴収税額 */
   withholdingTax: number;
   /** 控除対象配偶者の有無等（有・老人） */
-  spouseMark: { has: boolean; elderly: boolean };
+  /** 有（主たる給与で控除）・従有（従たる給与で控除。乙欄の人の従たる給与についての扶養控除等申告書）・老人 */
+  spouseMark: { has: boolean; secondary: boolean; elderly: boolean };
   /** 配偶者（特別）控除の額 */
   spouseDeduction: number | null;
   /** 控除対象扶養親族の数（配偶者を除く）。特定・老人（うち同居老親等）・その他・特定親族。0人は null */
   dependentCounts: { specific: number | null; elderly: number | null; elderlyTogether: number | null; other: number | null; specificRelative: number | null };
+  /** 控除対象扶養親族の数の「従」の欄（乙欄の人が出した従たる給与についての扶養控除等申告書の人数。0人は null） */
+  secondaryCounts: { specific: number | null; elderly: number | null; other: number | null; specificRelative: number | null };
   /** 16歳未満扶養親族の数 */
   youngCount: number | null;
   /** 障害者の数（本人を除く）。特別障害者（うち同居）・その他 */
@@ -119,6 +122,8 @@ export interface SlipSource {
   staff: {
     name?: string | null; furigana?: string | null; address?: string | null; birthday?: string | null;
     join_date?: string | null; retirement_date?: string | null; tax_column?: unknown;
+    /** 税額の計算に使う扶養人数（乙欄の人は、従たる給与についての扶養控除等申告書の扶養親族等の数） */
+    dependents?: unknown;
   };
   company: { name?: string | null; address?: string | null; phone?: string | null };
   /** その年に確定した給与・賞与の合計（Q の分） */
@@ -282,9 +287,10 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
     employmentIncome: null,
     deductionTotal: null,
     withholdingTax: totals.withheldTax,
-    spouseMark: { has: false, elderly: false },
+    spouseMark: { has: false, secondary: false, elderly: false },
     spouseDeduction: null,
     dependentCounts: { specific: null, elderly: null, elderlyTogether: null, other: null, specificRelative: null },
+    secondaryCounts: { specific: null, elderly: null, other: null, specificRelative: null },
     youngCount: null,
     disabledCounts: { special: null, specialTogether: null, other: null },
     specificRelativeDeduction: null,
@@ -359,7 +365,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       if (d.spouse + d.spouseSpecial > 0) {
         slip.spouse = person(s, gm.residentCode);
         slip.spouseTotalIncome = Math.max(0, Number(s.totalIncome) || 0);
-        slip.spouseMark = { has: d.spouse > 0, elderly: d.spouse > 0 && (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
+        slip.spouseMark = { has: d.spouse > 0, secondary: false, elderly: d.spouse > 0 && (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
       } else if (sameLivelihood && s.disability !== "none") {
         // 控除対象配偶者ではない同一生計配偶者が障害者（所得金額調整控除の要件になる特別障害者も、同じ書き方）
         note(`${str(s.name)}（同配）`);
@@ -418,8 +424,35 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       ].filter(Boolean).join(" "));
       if (!str(p.payerName) || !retiredOn) warnings.push("前の勤め先の名称・所在地・退職日が入っていません（摘要欄に書きます）。年末調整の画面で入れてください。");
     }
+  } else if (otsu && sourceDecl) {
+    // 乙欄の人：従たる給与についての扶養控除等申告書（所得税法195条。源泉控除対象配偶者・源泉控除対象親族だけを書く申告書）に応じて、
+    // 「従有」と人数の「従」の欄、控除対象配偶者・控除対象扶養親族等の氏名を書く（手引 ⑧⑩㉒）。16歳未満・障害者・本人の欄は書かない
+    const w = gm.withoutAdjustment;
+    slip.declared = true;
+    const s = sourceDecl.spouse;
+    const hasSpouse = !!s && Math.max(0, Number(s.totalIncome) || 0) <= w.spouseIncomeLimit;
+    if (s && hasSpouse) {
+      slip.spouse = person(s, gm.residentCode);
+      slip.spouseMark = { has: false, secondary: true, elderly: (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
+    }
+    const kindOf = (dep: DeclaredDependent) => classifySourceDependent(dep, year, nm, gm);
+    const deps = sourceDecl.dependents.filter((dep) => kindOf(dep) !== "young");
+    fillDependents(slip, deps, gm, kindOf,
+      (dep) => specificRelativeCodeByIncome(Math.max(0, Number(dep.totalIncome) || 0), gm) || null, disabilityCounter(), overflow);
+    // 数えた人数を「従」の欄に移す（主たる給与の欄・障害者の数は空）
+    const c = slip.dependentCounts;
+    slip.secondaryCounts = { specific: c.specific, elderly: c.elderly, other: c.other, specificRelative: c.specificRelative };
+    slip.dependentCounts = { specific: null, elderly: null, elderlyTogether: null, other: null, specificRelative: null };
+    slip.disabledCounts = { special: null, specialTogether: null, other: null };
+    // 乙欄の税額は、扶養親族等1人につき1,610円引く（utils/incomeTax.ts）。その人数（従業員の画面の扶養人数）と申告書の人数が違えば知らせる
+    const declared = (hasSpouse ? 1 : 0) + deps.filter((dep) => kindOf(dep) !== "none").length;
+    const used = Math.max(0, Math.floor(Number(staff.dependents) || 0));
+    if (staff.dependents !== undefined && declared !== used) {
+      warnings.push(`従たる給与についての扶養控除等申告書の扶養親族等は${declared}人ですが、乙欄の税額の計算に使っている扶養人数（従業員の画面）は${used}人です。どちらかを直してください。`);
+    }
+    warnings.push("乙欄の人です。年末調整をしないので、配偶者・扶養親族の欄は、従たる給与についての扶養控除等申告書の記載に応じて「従」の欄に書きます。");
   } else if (otsu) {
-    warnings.push("乙欄の人です。年末調整をしないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます（「従たる給与についての扶養控除等申告書」の人数の欄は、必要なら手で書き足してください）。");
+    warnings.push("乙欄の人です。年末調整をしないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます（「従たる給与についての扶養控除等申告書」を出している人は、年末調整の画面でその内容を入れると「従」の欄に書けます）。");
   } else if (column === "hei") {
     // 「乙欄」の欄に丙欄の人も○を付けるのかは、国税庁の手引に書かれていないので付けない
     warnings.push("丙欄（日雇賃金）の人です。年末調整をしないので、支払金額・源泉徴収税額・社会保険料等の金額だけを書きます。「乙欄」の欄には○を付けていません。");
@@ -434,7 +467,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       if (income <= w.spouseIncomeLimit) {
         slip.spouse = person(s, gm.residentCode);
         slip.spouseTotalIncome = income; // ㉓ 源泉控除対象配偶者の「所得の見積額」
-        slip.spouseMark = { has: true, elderly: (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
+        slip.spouseMark = { has: true, secondary: false, elderly: (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
       }
       if (income <= w.earlierIncomeLimit) disabled.add(s); // 同一生計配偶者
     }
