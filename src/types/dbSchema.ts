@@ -125,6 +125,7 @@ export const DB_SCHEMAS = [
     tax_column TEXT DEFAULT 'kou', -- 源泉所得税の欄（kou: 甲欄 / otsu: 乙欄 / hei: 丙欄）
     resident_tax INTEGER DEFAULT 0,    -- 住民税の月額（以前の入れ方。下の年度の額を入れていない月に使う）
     resident_tax_schedule TEXT,        -- 住民税の特別徴収の額（年度ごとの6月分〜翌年5月分。JSON。詳しくは utils/residentTax.ts）
+    resident_tax_municipality TEXT,    -- 住民税の市区町村（1月1日の住所の市区町村の団体コード6桁。給与支払報告書の提出先。utils/localGov.ts）
     standard_remuneration INTEGER DEFAULT 0,  -- いちばん新しい標準報酬月額（その月の分の値は下の履歴から求める）
     standard_remuneration_history TEXT,      -- 標準報酬月額の履歴（何年何月分から・いくら・理由。JSON。詳しくは utils/standardRemuneration.ts）
     wage_history TEXT,        -- 基本給の履歴（何年何月分から・給与形態・金額。JSON。詳しくは utils/staffHistory.ts。base_wage・wage_type はいちばん新しい値）

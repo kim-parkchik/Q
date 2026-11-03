@@ -63,6 +63,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "resident_tax_schedule", "TEXT");
     },
   },
+  {
+    version: 3,
+    description: "従業員に、住民税の市区町村（1月1日の住所の市区町村。給与支払報告書の提出先）を追加（初めは空）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "resident_tax_municipality", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

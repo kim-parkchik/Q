@@ -1,5 +1,5 @@
 /**
- * 住民税（特別徴収）：年度（6月〜翌年5月）ごとの12か月の額
+ * 住民税（特別徴収）：市区町村（1月1日の住所。給与支払報告書の提出先）と、年度（6月〜翌年5月）ごとの12か月の額
  * 通知書の「6月分」と「7月以降」の額で12か月を埋め、月ごとに直せる（弥生給与の簡易入力・月別入力と同じ）。
  * 計算のきまりは utils/residentTax.ts
  */
@@ -10,6 +10,7 @@ import type { StaffManagerState } from '../useStaffManager';
 import {
     RESIDENT_TAX_MONTHS, annualTotal, emptyAmounts, fiscalYearLabel, fiscalYearOf, simpleAmounts, type ResidentTaxYear,
 } from '../../../utils/residentTax';
+import { LOCAL_GOVS, PREFECTURE_NAMES, findLocalGovByAddress, localGovByCode, localGovLabel } from '../../../utils/localGov';
 
 const small = { ...inputStyle, fontFamily: "monospace", fontSize: "12px", padding: "6px", textAlign: "right" as const };
 const note = { fontSize: "11px", color: "#64748b", margin: "6px 0 0 0", lineHeight: 1.6 };
@@ -17,6 +18,39 @@ const button = {
     display: "flex", alignItems: "center", gap: "4px", background: "#fff", border: "1px solid #cbd5e1",
     borderRadius: "6px", padding: "5px 10px", cursor: "pointer", fontSize: "12px", color: "#475569", whiteSpace: "nowrap" as const,
 };
+
+/** 住民税の市区町村：都道府県と市区町村を選ぶ。住所から見つかれば「これにする」で入れられる */
+function MunicipalityPicker({ cm }: { cm: StaffManagerState }) {
+    const { targetResidentTaxMunicipality: code, setTargetResidentTaxMunicipality: setCode, targetAddress } = cm;
+    const current = localGovByCode(code);
+    const [chosenPref, setChosenPref] = useState("");
+    const pref = current ? current.prefecture : chosenPref;
+    const suggested = findLocalGovByAddress(targetAddress);
+    const select = { ...inputStyle, width: "auto", fontSize: "12px", padding: "6px" };
+
+    return (
+        <div style={{ marginBottom: "10px" }}>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "12px", color: "#475569" }}>市区町村（1月1日の住所）</span>
+                <select value={pref} onChange={e => { setChosenPref(e.target.value); setCode(""); }} style={select}>
+                    <option value="">都道府県</option>
+                    {PREFECTURE_NAMES.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <select value={current?.code ?? ""} onChange={e => setCode(e.target.value)} disabled={!pref} style={select}>
+                    <option value="">市区町村</option>
+                    {LOCAL_GOVS.filter(g => g.prefecture === pref).map(g => <option key={g.code} value={g.code}>{g.name}</option>)}
+                </select>
+                {current && <span style={{ fontSize: "11px", color: "#94a3b8" }}>団体コード {current.code}</span>}
+                {suggested && suggested.code !== current?.code && (
+                    <button type="button" onClick={() => setCode(suggested.code)} style={button}>
+                        住所から：{localGovLabel(suggested)}にする
+                    </button>
+                )}
+            </div>
+            {code && !current && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px" }}>団体コード {code} は一覧にありません。選び直してください。</div>}
+        </div>
+    );
+}
 
 export default function ResidentTaxEditor({ cm }: { cm: StaffManagerState }) {
     const { targetResidentTaxSchedule: schedule, setTargetResidentTaxSchedule, targetResidentTax, setTargetResidentTax } = cm;
@@ -61,6 +95,7 @@ export default function ResidentTaxEditor({ cm }: { cm: StaffManagerState }) {
     return (
         <div style={{ gridColumn: "1 / -1", border: "1px solid #e2e8f0", borderRadius: "6px", padding: "10px" }}>
             <label style={labelStyle}>住民税（特別徴収）</label>
+            <MunicipalityPicker cm={cm} />
 
             {/* 年度を選ぶ・足す */}
             <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
@@ -131,7 +166,9 @@ export default function ResidentTaxEditor({ cm }: { cm: StaffManagerState }) {
             )}
 
             <p style={note}>
-                市区町村から届く「特別徴収税額の決定通知書」の額を、年度（6月分〜翌年5月分）ごとに入れます。6月分は6月に支給する給与から引きます。
+                市区町村は、給与支払報告書を出す先で、住民税の通知書が届く市区町村です。1月1日の住所の市区町村を選びます
+                （年の途中で退職した人は、退職した日の住所。政令指定都市は区ではなく市）。引っ越したら、次の1月1日の住所の市区町村に直してください。
+                額は、市区町村から届く「特別徴収税額の決定通知書」の額を、年度（6月分〜翌年5月分）ごとに入れます。6月分は6月に支給する給与から引きます。
                 通知書の6月分と7月以降の額を入れて「12か月に入れる」を押すと、12か月の額がそろいます。月ごとの額も直せます。
                 税額の変更の通知が届いたら、通知を受け取った月から後の額を直してください。
                 退職する人の残りの額を一括で引くときは、最後の給与明細の住民税の欄で直してください。

@@ -24,9 +24,9 @@ const header = (db: Database) => ({
 });
 
 describe("会社ファイルの形式（2026-11-03 の形を v1 とする）", () => {
-    test("v1 から始めて、今の最新は v2", () => {
+    test("v1 から始めて、今の最新は v3", () => {
         expect(BASE_DB_VERSION).toBe(1);
-        expect(LATEST_DB_VERSION).toBe(2);
+        expect(LATEST_DB_VERSION).toBe(3);
     });
     test("新しいファイル：表を作り、Q の印と最新の番号を付ける（更新は実行しない）", async () => {
         const db = new Database(":memory:");
@@ -80,11 +80,20 @@ describe("更新（マイグレーション）", () => {
     test("v2: 従業員に住民税の年度ごとの額の列を足す（初めは空。今までの月額はそのまま）", async () => {
         const db = v1File();
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(2);
         expect(applied[0]).toStartWith("v2:");
         expect(db.query("SELECT resident_tax AS t, resident_tax_schedule AS s FROM staff").get()).toEqual({ t: 7000, s: null });
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 2 });
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: LATEST_DB_VERSION });
         expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([]); // 2回目は何もしない
+    });
+    test("v3: v2 の会社ファイルの従業員に、住民税の市区町村の列を足す（初めは空）", async () => {
+        const db = v1File();
+        db.exec("ALTER TABLE staff ADD COLUMN resident_tax_schedule TEXT");
+        db.exec("PRAGMA user_version = 2");
+        const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
+        expect(applied).toHaveLength(1);
+        expect(applied[0]).toStartWith("v3:");
+        expect(db.query("SELECT resident_tax_municipality AS m FROM staff").get()).toEqual({ m: null });
     });
 });
 
