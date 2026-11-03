@@ -1,5 +1,5 @@
 /**
- * 住民税（特別徴収）：市区町村（1月1日の住所。給与支払報告書の提出先）と、年度（6月〜翌年5月）ごとの12か月の額
+ * 住民税（特別徴収）：市区町村（1月1日の住所。給与支払報告書の提出先）と、年度（6月〜翌年5月）ごとの12か月の額・納付先
  * 通知書の「6月分」と「7月以降」の額で12か月を埋め、月ごとに直せる（弥生給与の簡易入力・月別入力と同じ）。
  * 計算のきまりは utils/residentTax.ts
  */
@@ -19,27 +19,37 @@ const button = {
     borderRadius: "6px", padding: "5px 10px", cursor: "pointer", fontSize: "12px", color: "#475569", whiteSpace: "nowrap" as const,
 };
 
+/** 都道府県と市区町村を選ぶ2つの欄 */
+function LocalGovSelect({ code, setCode }: { code: string; setCode: (code: string) => void }) {
+    const current = localGovByCode(code);
+    const [chosenPref, setChosenPref] = useState("");
+    const pref = current ? current.prefecture : chosenPref;
+    const select = { ...inputStyle, width: "auto", fontSize: "12px", padding: "6px" };
+    return (
+        <>
+            <select value={pref} onChange={e => { setChosenPref(e.target.value); setCode(""); }} style={select}>
+                <option value="">都道府県</option>
+                {PREFECTURE_NAMES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <select value={current?.code ?? ""} onChange={e => setCode(e.target.value)} disabled={!pref} style={select}>
+                <option value="">市区町村</option>
+                {LOCAL_GOVS.filter(g => g.prefecture === pref).map(g => <option key={g.code} value={g.code}>{g.name}</option>)}
+            </select>
+        </>
+    );
+}
+
 /** 住民税の市区町村：都道府県と市区町村を選ぶ。住所から見つかれば「これにする」で入れられる */
 function MunicipalityPicker({ cm }: { cm: StaffManagerState }) {
     const { targetResidentTaxMunicipality: code, setTargetResidentTaxMunicipality: setCode, targetAddress } = cm;
     const current = localGovByCode(code);
-    const [chosenPref, setChosenPref] = useState("");
-    const pref = current ? current.prefecture : chosenPref;
     const suggested = findLocalGovByAddress(targetAddress);
-    const select = { ...inputStyle, width: "auto", fontSize: "12px", padding: "6px" };
 
     return (
         <div style={{ marginBottom: "10px" }}>
             <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: "12px", color: "#475569" }}>市区町村（1月1日の住所）</span>
-                <select value={pref} onChange={e => { setChosenPref(e.target.value); setCode(""); }} style={select}>
-                    <option value="">都道府県</option>
-                    {PREFECTURE_NAMES.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <select value={current?.code ?? ""} onChange={e => setCode(e.target.value)} disabled={!pref} style={select}>
-                    <option value="">市区町村</option>
-                    {LOCAL_GOVS.filter(g => g.prefecture === pref).map(g => <option key={g.code} value={g.code}>{g.name}</option>)}
-                </select>
+                <LocalGovSelect code={code} setCode={setCode} />
                 {current && <span style={{ fontSize: "11px", color: "#94a3b8" }}>団体コード {current.code}</span>}
                 {suggested && suggested.code !== current?.code && (
                     <button type="button" onClick={() => setCode(suggested.code)} style={button}>
@@ -74,6 +84,14 @@ export default function ResidentTaxEditor({ cm }: { cm: StaffManagerState }) {
 
     const setAmounts = (fiscalYear: number, amounts: number[]) =>
         setTargetResidentTaxSchedule(schedule.map(e => (e.fiscalYear === fiscalYear ? { ...e, amounts } : e)));
+    /** 年度の納付先（空なら上の市区町村） */
+    const setPayee = (fiscalYear: number, code: string) =>
+        setTargetResidentTaxSchedule(schedule.map(e => {
+            if (e.fiscalYear !== fiscalYear) return e;
+            const { municipality: _, ...rest } = e;
+            return code ? { ...rest, municipality: code } : rest;
+        }));
+    const ownLabel = localGovLabel(localGovByCode(cm.targetResidentTaxMunicipality));
     const addYear = () => {
         if (!schedule.some(e => e.fiscalYear === yearToAdd)) {
             const added: ResidentTaxYear = { fiscalYear: yearToAdd, amounts: emptyAmounts() };
@@ -151,6 +169,15 @@ export default function ResidentTaxEditor({ cm }: { cm: StaffManagerState }) {
                     <div style={{ fontSize: "12px", color: "#475569", marginTop: "6px", textAlign: "right" }}>
                         年税額（12か月の合計）：{annualTotal(shown.amounts).toLocaleString()}円
                     </div>
+
+                    {/* この年度の納付先（通知をした市区町村） */}
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginTop: "6px" }}>
+                        <span style={{ fontSize: "12px", color: "#475569" }}>この年度の納付先</span>
+                        <LocalGovSelect key={`${shown.fiscalYear}:${shown.municipality ?? ""}`} code={shown.municipality ?? ""} setCode={c => setPayee(shown.fiscalYear, c)} />
+                        {shown.municipality
+                            ? <button type="button" onClick={() => setPayee(shown.fiscalYear, "")} style={button}>上の市区町村と同じにする</button>
+                            : <span style={{ fontSize: "11px", color: "#94a3b8" }}>選ばなければ、上の市区町村{ownLabel ? `（${ownLabel}）` : ""}に納めます</span>}
+                    </div>
                 </>
             ) : (
                 <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "8px" }}>年度の額はまだありません。「年度を追加」で入れてください。</div>
@@ -171,6 +198,7 @@ export default function ResidentTaxEditor({ cm }: { cm: StaffManagerState }) {
                 額は、市区町村から届く「特別徴収税額の決定通知書」の額を、年度（6月分〜翌年5月分）ごとに入れます。6月分は6月に支給する給与から引きます。
                 通知書の6月分と7月以降の額を入れて「12か月に入れる」を押すと、12か月の額がそろいます。月ごとの額も直せます。
                 税額の変更の通知が届いたら、通知を受け取った月から後の額を直してください。
+                年度の納付先は、その年度の通知をした市区町村です。引っ越して上の市区町村を次の1月1日の住所に直しても、その年度の残りの月は通知をした市区町村に納めます。
                 退職する人の残りの額を一括で引くときは、最後の給与明細の住民税の欄で直してください。
                 年度の額を入れていない月は、住民税を引きません{targetResidentTax > 0 ? "（以前の月額が入っている人は、その額を引きます）" : ""}。
             </p>

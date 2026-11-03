@@ -22,6 +22,7 @@ import {
   Landmark, 
   IdCard, 
   FileDown, 
+  Banknote, 
   UserCog, 
   LogOut 
 } from 'lucide-react';
@@ -49,6 +50,7 @@ import WithholdingLedgerManager from "./features/nencho/WithholdingLedgerManager
 import SalaryPaymentReportManager from "./features/nencho/SalaryPaymentReportManager";
 import MyNumberManager from "./features/mynumber/MyNumberManager";
 import ResidentTaxImportManager from "./features/payroll/ResidentTaxImportManager";
+import ResidentTaxPaymentManager from "./features/payroll/ResidentTaxPaymentManager";
 
 // settings フォルダ
 import CompanyManager from "./features/settings/CompanyManager";
@@ -77,6 +79,7 @@ const TAB_NAMES: Record<string, string> = {
   gensenbo: "源泉徴収簿",
   kyuho: "給与支払報告書",
   juminzei: "住民税の取り込み",
+  nonyu: "住民税の納入",
   mynumber: "マイナンバー",
   payslip: "明細書出力",
   user_management: "システム設定"
@@ -100,6 +103,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   gensenbo: <BookOpen size={18} />,
   kyuho: <Landmark size={18} />,
   juminzei: <FileDown size={18} />,
+  nonyu: <Banknote size={18} />,
   mynumber: <IdCard size={18} />,
   payslip: <FileText size={18} />,
   user_management: <UserCog size={18} />
@@ -257,11 +261,12 @@ function App() {
             "gensenbo",
             "kyuho",
             "juminzei",
+            "nonyu",
             "mynumber",
             "payslip"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "mynumber", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -393,6 +398,9 @@ function App() {
               )}
               {activeTab === "juminzei" && db && (
                 <ResidentTaxImportManager db={db} staffList={staffList} onDataChange={refreshData} />
+              )}
+              {activeTab === "nonyu" && db && (
+                <ResidentTaxPaymentManager db={db} staffList={staffList} />
               )}
               {activeTab === "mynumber" && db && (
                 <MyNumberManager db={db} staffList={staffList} currentUser={currentUser} />

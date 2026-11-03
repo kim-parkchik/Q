@@ -129,7 +129,7 @@ export function useResidentTaxImportManager(db: Database, staffList: any[], onDa
     if (!ok) return;
     try {
       for (const r of targets) {
-        const schedule = withNoticeAmounts(residentTaxScheduleOf(r.staff), fiscalYear, r.record.amounts);
+        const schedule = withNoticeAmounts(residentTaxScheduleOf(r.staff), fiscalYear, r.record.amounts, r.municipality ? r.record.code : undefined);
         // 市区町村がまだ空なら、通知の市区町村を入れる（入っていれば変えない）
         await db.execute(
           `UPDATE staff SET resident_tax_schedule = ?,
@@ -138,17 +138,21 @@ export function useResidentTaxImportManager(db: Database, staffList: any[], onDa
           [stringifyResidentTaxSchedule(schedule), r.municipality ? r.record.code : null, r.staffId]
         );
       }
-      // 指定番号がまだ入っていない市区町村には、通知の番号を入れる
+      // 指定番号・宛名番号がまだ入っていない市区町村には、通知の番号を入れる（入っていれば変えない）
       const filled = new Set<string>();
       for (const r of targets) {
-        if (!r.municipality || !r.record.designationNumber || designations[r.record.code] || filled.has(r.record.code)) continue;
+        const { code, designationNumber, atenaNumber } = r.record;
+        if (!r.municipality || (!designationNumber && !atenaNumber) || filled.has(code)) continue;
         await db.execute(
-          `INSERT INTO resident_tax_municipalities (code, designation_number, updated_at)
-           VALUES (?, ?, DATETIME('now', 'localtime'))
-           ON CONFLICT(code) DO UPDATE SET designation_number = excluded.designation_number, updated_at = excluded.updated_at`,
-          [r.record.code, r.record.designationNumber]
+          `INSERT INTO resident_tax_municipalities (code, designation_number, atena_number, updated_at)
+           VALUES (?, ?, ?, DATETIME('now', 'localtime'))
+           ON CONFLICT(code) DO UPDATE SET
+             designation_number = COALESCE(NULLIF(TRIM(designation_number), ''), excluded.designation_number),
+             atena_number = COALESCE(NULLIF(TRIM(atena_number), ''), excluded.atena_number),
+             updated_at = excluded.updated_at`,
+          [code, designationNumber || null, atenaNumber || null]
         );
-        filled.add(r.record.code);
+        if (!designations[code] && designationNumber) filled.add(code);
       }
       toast.success(`${targets.length}人の住民税を入れました${filled.size > 0 ? `（指定番号 ${filled.size}か所も）` : ""}`);
       setLoaded([]);

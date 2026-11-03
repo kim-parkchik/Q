@@ -86,6 +86,9 @@ describe("従業員との結び付け", () => {
 describe("年度の12か月に入れる", () => {
   const old = [{ fiscalYear: 2025, amounts: Array(12).fill(9000) }];
   const next = Array(12).fill(10000);
+  test("通知をした市区町村を、その年度の納付先にする", () => {
+    expect(withNoticeAmounts(old, 2026, next, "041009")).toEqual([{ fiscalYear: 2025, amounts: Array(12).fill(9000) }, { fiscalYear: 2026, amounts: next, municipality: "041009" }]);
+  });
   test("その年度だけ入れ替え、ほかの年度はそのまま", () => {
     expect(withNoticeAmounts(old, 2026, next)).toEqual([{ fiscalYear: 2025, amounts: Array(12).fill(9000) }, { fiscalYear: 2026, amounts: next }]);
     expect(withNoticeAmounts(old, 2025, next)).toEqual([{ fiscalYear: 2025, amounts: next }]);

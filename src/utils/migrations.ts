@@ -78,6 +78,14 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "users", "my_number_access", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 5,
+    description: "住民税の市区町村ごとの設定に、宛名番号と納期の特例を追加（初めは空・特例なし）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "resident_tax_municipalities", "atena_number", "TEXT");
+      await addColumnIfMissing(db, "resident_tax_municipalities", "special_due", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

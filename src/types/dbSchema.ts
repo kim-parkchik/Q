@@ -386,6 +386,8 @@ export const DB_SCHEMAS = [
   `CREATE TABLE IF NOT EXISTS resident_tax_municipalities (
     code TEXT PRIMARY KEY,         -- 団体コード（6桁。utils/localGov.ts）
     designation_number TEXT,       -- 指定番号（市区町村が会社に付けた番号。特別徴収税額の決定通知書に書いてある）
+    atena_number TEXT,             -- 宛名番号（市区町村が会社に付けた番号。特別徴収税額通知の CSV に書いてある）
+    special_due INTEGER DEFAULT 0, -- 納期の特例の承認を受けた（1）：6月〜11月分は12月10日、12月〜翌年5月分は6月10日までに納める（地方税法321条の5の2）
     updated_at TEXT DEFAULT (DATETIME('now', 'localtime'))
   );`,
 

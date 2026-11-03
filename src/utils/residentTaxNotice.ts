@@ -7,7 +7,8 @@
  *   ・項目の設定内容は、団体によって違うことがある（同仕様書）
  *   ・PCdesk（WEB版）の「特徴税通（特徴義務者用）の照会・出力」で書き出すと ZIP にまとめられる
  *     （eLTAX「特別徴収税額通知（特別徴収義務者用）を確認するには」）→ ZIP を開いてから CSV を選ぶ
- * ■ 年度は CSV に書かれていないので、画面で選ぶ。月割額の並び（6月分〜翌年5月分）は utils/residentTax.ts の年度と同じ
+ * ■ 年度は CSV に書かれていないので、画面で選ぶ。月割額の並び（6月分〜翌年5月分）は utils/residentTax.ts の年度と同じ。
+ *   通知をした市区町村を、その年度の納付先にする
  * ■ 従業員との結び付け：受給者番号（給与支払報告書の CSV に書いた従業員ID）。合わなければ、漢字氏名（空白を除く）が同じ人が1人だけのとき
  * ■ 個人番号（項番8）は読まない（保存も表示もしない）
  */
@@ -126,9 +127,10 @@ export const matchNoticeRecord = (r: NoticeRecord, staff: { id: string | number;
   return { staffId: null, how: null, candidates: same.map((x) => String(x.id)) };
 };
 
-/** その年度の12か月を、通知の額にする（ほかの年度はそのまま） */
-export const withNoticeAmounts = (schedule: ResidentTaxYear[], fiscalYear: number, amounts: number[]): ResidentTaxYear[] =>
-  [...schedule.filter((e) => e.fiscalYear !== fiscalYear), { fiscalYear, amounts: [...amounts] }].sort((a, b) => a.fiscalYear - b.fiscalYear);
+/** その年度の12か月を通知の額にし、納付先を通知をした市区町村にする（ほかの年度はそのまま） */
+export const withNoticeAmounts = (schedule: ResidentTaxYear[], fiscalYear: number, amounts: number[], municipality?: string): ResidentTaxYear[] =>
+  [...schedule.filter((e) => e.fiscalYear !== fiscalYear), { fiscalYear, amounts: [...amounts], ...(municipality ? { municipality } : {}) }]
+    .sort((a, b) => a.fiscalYear - b.fiscalYear);
 
 /** いま入っている額と比べる（new：その年度の額がまだない / same：同じ / changed：違う） */
 export const compareWithSchedule = (schedule: ResidentTaxYear[], fiscalYear: number, amounts: number[]): "new" | "same" | "changed" => {

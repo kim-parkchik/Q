@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-    annualTotal, fiscalYearLabel, fiscalYearOf, indexInFiscalYear, parseResidentTaxSchedule, residentTaxFor,
+    annualTotal, fiscalYearLabel, fiscalYearOf, indexInFiscalYear, parseResidentTaxSchedule, paymentMunicipalityOf, residentTaxFor,
     simpleAmounts, stringifyResidentTaxSchedule, RESIDENT_TAX_MONTHS,
 } from "./residentTax";
 
@@ -88,5 +88,26 @@ describe("保存の形（JSON）", () => {
             { fiscalYear: 2026, amounts: [300, 400, -5, "50"] },
         ]));
         expect(list).toEqual([{ fiscalYear: 2026, amounts: [300, 400, 0, 50, 0, 0, 0, 0, 0, 0, 0, 0] }]);
+    });
+});
+
+describe("納付先（年度ごと）", () => {
+    // 2026年度は横浜市の通知。2026年の秋に千代田区へ引っ越し、従業員の市区町村を次の1月1日の千代田区に直した
+    const staff = {
+        resident_tax_municipality: "131016",
+        resident_tax_schedule: stringifyResidentTaxSchedule([
+            { fiscalYear: 2026, amounts: simpleAmounts(8700, 8300), municipality: "141003" },
+            { fiscalYear: 2027, amounts: simpleAmounts(9000, 9000) },
+        ]),
+    };
+    test("年度の納付先があればそれ。なければ従業員の市区町村", () => {
+        expect(paymentMunicipalityOf(staff, 2026)).toBe("141003");
+        expect(paymentMunicipalityOf(staff, 2027)).toBe("131016");
+        expect(paymentMunicipalityOf({}, 2027)).toBe("");
+    });
+    test("保存しても納付先は残る。空の納付先は書かない", () => {
+        const list = parseResidentTaxSchedule(staff.resident_tax_schedule);
+        expect(list.map((e) => e.municipality)).toEqual(["141003", undefined]);
+        expect(stringifyResidentTaxSchedule([{ fiscalYear: 2026, amounts: simpleAmounts(1, 1), municipality: " " }])).not.toContain("municipality");
     });
 });

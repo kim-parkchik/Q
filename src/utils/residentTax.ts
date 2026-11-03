@@ -16,6 +16,9 @@
  *     6月1日〜12月31日に退職して申し出た人は、残りの額を5月31日までに払う給与・退職手当等から一括で徴収する（321条の5第2項）
  *     → 一括徴収は、最後の給与明細の住民税の欄で直す
  * ■ 年度の額を入れていない月は、以前の入れ方の月額（staff.resident_tax）を使う（入れていなければ0円）
+ * ■ 納付先：引いた住民税は、その年度の通知をした市区町村に、引いた月の翌月10日までに納める（321条の5第1項）。
+ *   年度ごとに納付先（municipality）を持つ。空なら従業員の市区町村（staff.resident_tax_municipality）。
+ *   引っ越して従業員の市区町村を次の1月1日の住所に直しても、その年度の残りの月は通知をした市区町村に納める
  * 出典：地方税法 https://laws.e-gov.go.jp/law/325AC0000000226 （第20条の4の2、第321条の4・第321条の5・第321条の6）
  */
 import { toWareki } from './wareki';
@@ -28,6 +31,8 @@ export interface ResidentTaxYear {
   fiscalYear: number;
   /** 6月分〜翌年5月分の額（12個） */
   amounts: number[];
+  /** 納付先（その年度の通知をした市区町村の団体コード）。空なら従業員の市区町村 */
+  municipality?: string;
 }
 
 const nonNeg = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
@@ -55,10 +60,14 @@ export const annualTotal = (amounts: number[]) => amounts.reduce((sum, v) => sum
 
 const sortByYear = (list: ResidentTaxYear[]) => [...list].sort((a, b) => a.fiscalYear - b.fiscalYear);
 
-const normalize = (e: ResidentTaxYear): ResidentTaxYear => ({
-  fiscalYear: Math.floor(Number(e.fiscalYear)),
-  amounts: Array.from({ length: 12 }, (_, i) => nonNeg(e.amounts?.[i])),
-});
+const normalize = (e: ResidentTaxYear): ResidentTaxYear => {
+  const municipality = typeof e.municipality === 'string' ? e.municipality.trim() : '';
+  return {
+    fiscalYear: Math.floor(Number(e.fiscalYear)),
+    amounts: Array.from({ length: 12 }, (_, i) => nonNeg(e.amounts?.[i])),
+    ...(municipality ? { municipality } : {}),
+  };
+};
 
 /** 従業員の resident_tax_schedule（JSON の文字列）を読む。空・壊れているときはなし。同じ年度が2つあれば後のもの */
 export const parseResidentTaxSchedule = (json: unknown): ResidentTaxYear[] => {
@@ -83,6 +92,11 @@ export const residentTaxScheduleOf = (staff: any): ResidentTaxYear[] => parseRes
 /** 保存用の JSON（年度の順。年度が1つもなければ null） */
 export const stringifyResidentTaxSchedule = (list: ResidentTaxYear[]): string | null =>
   list.length === 0 ? null : JSON.stringify(sortByYear(list.map(normalize)));
+
+/** その年度の納付先（年度の納付先。なければ従業員の市区町村。どちらもなければ空） */
+export const paymentMunicipalityOf = (staff: any, fiscalYear: number): string =>
+  residentTaxScheduleOf(staff).find((e) => e.fiscalYear === fiscalYear)?.municipality
+  || String(staff?.resident_tax_municipality ?? '').trim();
 
 /** その月に支給する給与から引く住民税（年度の額を入れていない月は、以前の入れ方の月額） */
 export const residentTaxFor = (staff: any, payYear: number, payMonth: number): number => {
