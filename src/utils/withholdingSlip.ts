@@ -70,7 +70,8 @@ export interface WithholdingSlip {
     count: number | null;
     /** 住宅借入金等特別控除可能額（算出所得税額を超えて控除しきれないときだけ） */
     available: number | null;
-    entries: { residenceStart: Wareki | null; kindLabel: string; yearEndBalance: number | null }[];
+    /** code は区分の番号（"01" など。給与支払報告書の CSV に書く） */
+    entries: { residenceStart: Wareki | null; kindLabel: string; code: string; yearEndBalance: number | null }[];
   };
   /** （源泉・特別）控除対象配偶者 */
   spouse: SlipPerson | null;
@@ -87,6 +88,10 @@ export interface WithholdingSlip {
   youngDependents: SlipPerson[];
   /** 摘要 */
   remarks: string[];
+  /** 給与支払報告書（eLTAX の CSV）の摘要。3つ目からの住宅借入金等の書き方だけが、源泉徴収票と違う */
+  reportRemarks: string[];
+  /** 前の勤め先（前の勤め先の給与を通算して年末調整したときだけ。給与支払報告書の CSV では「他の支払者」の欄にも書く） */
+  previousJob: { address: string; name: string; salary: number; withheldTax: number; socialInsurance: number; retiredOn: Wareki | null } | null;
   marks: {
     minor: boolean; otsu: boolean;
     selfSpecialDisabled: boolean; selfDisabled: boolean;
@@ -115,6 +120,7 @@ export interface SlipSource {
 
 const orNull = (n: number) => (n > 0 ? n : null);
 const yen = (n: number) => `${n.toLocaleString()}円`;
+const pad2 = (n: number) => String(n).padStart(2, "0");
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const inYear = (date: string | null | undefined, year: number) => !!date && date >= `${year}-01-01` && date <= `${year}-12-31`;
 
@@ -146,6 +152,12 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
   /** 摘要（5人目からの扶養親族等は、ほかのことより前に書く） */
   const overflow: string[] = [];
   const remarks: string[] = [];
+  const reportRemarks: string[] = [];
+  /** 摘要に書く（給与支払報告書の CSV で書き方が違うものは、reportText に） */
+  const note = (text: string, reportText = text) => {
+    remarks.push(text);
+    reportRemarks.push(reportText);
+  };
 
   // 年末調整をし直す（年末調整の対象外になる人は、年末調整をしない人として書く）
   let decl = src.declaration;
@@ -203,6 +215,8 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
     dependents: [],
     youngDependents: [],
     remarks,
+    reportRemarks,
+    previousJob: null,
     marks: {
       // 未成年者：手引に書かれた生年月日以後に生まれた人
       minor: !!staff.birthday && staff.birthday >= gm.minorBornOnOrAfter,
@@ -265,7 +279,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
         slip.spouseMark = { has: d.spouse > 0, elderly: d.spouse > 0 && (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
       } else if (sameLivelihood && s.disability !== "none") {
         // 控除対象配偶者ではない同一生計配偶者が障害者（所得金額調整控除の要件になる特別障害者も、同じ書き方）
-        remarks.push(`${str(s.name)}（同配）`);
+        note(`${str(s.name)}（同配）`);
       }
       if (sameLivelihood) countDisability(s);
     }
@@ -311,7 +325,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
 
     // 生命保険料控除の特例（23歳未満の扶養親族がいて、新生命保険料を払った）
     if (d.lifeInsurance > 0 && decl.insurance.lifeGeneralNew > 0 && input.hasDependentUnder23) {
-      remarks.push(gm.lifeInsuranceYoungNote);
+      note(gm.lifeInsuranceYoungNote);
     }
 
     // 住宅借入金等特別控除の内訳
@@ -325,18 +339,30 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       slip.housingLoan.entries = loans.slice(0, 2).map((h) => ({
         residenceStart: toWareki(h.residenceStart),
         kindLabel: housingLoanKindLabel(h.kindCode, gm),
+        code: str(h.kindCode),
         yearEndBalance: many ? orNull(Number(h.yearEndBalance) || 0) : null,
       }));
-      loans.slice(2).forEach((h) => remarks.push(
-        `居住開始年月日 ${formatWareki(h.residenceStart)} 住宅借入金等特別控除区分 ${housingLoanKindLabel(h.kindCode, gm)} 住宅借入金等年末残高 ${yen(Number(h.yearEndBalance) || 0)}`,
-      ));
+      // 給与支払報告書の CSV では「住借区分（何回目）××」「住借控除居住年月日（何回目）××年××月××日」「住借額（何回目）×××円」
+      // （地方税共同機構「給与支払報告書CSVレイアウト仕様書（総務省通知形式）」項番86 摘要。年は和暦）
+      loans.slice(2).forEach((h, i) => {
+        const w = toWareki(h.residenceStart);
+        const n = `（${i + 3}回目）`;
+        note(
+          `居住開始年月日 ${formatWareki(h.residenceStart)} 住宅借入金等特別控除区分 ${housingLoanKindLabel(h.kindCode, gm)} 住宅借入金等年末残高 ${yen(Number(h.yearEndBalance) || 0)}`,
+          `住借区分${n}${str(h.kindCode)} 住借控除居住年月日${n}${w ? `${pad2(w.year)}年${pad2(w.month)}月${pad2(w.day)}日` : ""} 住借額${n}${Number(h.yearEndBalance) || 0}円`,
+        );
+      });
       if (loans.length === 0) warnings.push("住宅借入金等特別控除の内訳（居住開始年月日・区分）が入っていません。年末調整の画面で入れてください。");
     }
 
     // 前の勤め先の給与を通算した
     if ((Number(p.salary) || 0) > 0) {
       const retiredOn = formatWareki(p.retiredOn);
-      remarks.push([
+      slip.previousJob = {
+        address: str(p.payerAddress), name: str(p.payerName), salary: Number(p.salary) || 0,
+        withheldTax: Number(p.withheldTax) || 0, socialInsurance: Number(p.socialInsurance) || 0, retiredOn: toWareki(p.retiredOn),
+      };
+      note([
         str(p.payerAddress), str(p.payerName), retiredOn ? `${retiredOn}退職` : "",
         `支払金額 ${yen(Number(p.salary) || 0)}`, `源泉徴収税額 ${yen(Number(p.withheldTax) || 0)}`, `社会保険料 ${yen(Number(p.socialInsurance) || 0)}`,
       ].filter(Boolean).join(" "));
@@ -352,8 +378,9 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
   }
 
   // 同じ年に就職と退職の両方
-  if (joined && retired) remarks.push("中途就");
+  if (joined && retired) note("中途就");
 
   slip.remarks = [...overflow, ...remarks];
+  slip.reportRemarks = [...overflow, ...reportRemarks];
   return slip;
 };

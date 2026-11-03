@@ -148,6 +148,13 @@ describe("記載例2：就職前に他の支払者から受けた給与等を通
     });
     test("摘要欄に前の勤め先の所在地・名称・退職日・支払金額・源泉徴収税額・社会保険料", () => {
         expect(slip.remarks).toEqual(["神戸市中央区山手通2-X-X 株式会社××商事 令和8年3月31日退職 支払金額 1,095,000円 源泉徴収税額 15,180円 社会保険料 169,722円"]);
+        expect(slip.reportRemarks).toEqual(slip.remarks);
+    });
+    test("給与支払報告書の CSV の「他の支払者」の欄に書く、前の勤め先", () => {
+        expect(slip.previousJob).toEqual({
+            address: "神戸市中央区山手通2-X-X", name: "株式会社××商事", salary: 1095000, withheldTax: 15180, socialInsurance: 169722,
+            retiredOn: { era: "令和", year: 8, month: 3, day: 31 },
+        });
     });
     test("中途就職（令和8年4月1日）・生年月日（昭和62年5月13日）", () => {
         expect(slip.joinRetire).toEqual({ joined: true, retired: false, date: { era: "令和", year: 8, month: 4, day: 1 } });
@@ -183,8 +190,8 @@ describe("記載例3：2つの住宅借入金等特別控除を受け、控除�
     });
     test("1回目・2回目の居住開始年月日・区分・年末残高", () => {
         expect(slip.housingLoan.entries).toEqual([
-            { residenceStart: { era: "平成", year: 30, month: 5, day: 20 }, kindLabel: "住（特）", yearEndBalance: 11500000 },
-            { residenceStart: { era: "令和", year: 6, month: 5, day: 20 }, kindLabel: "住", yearEndBalance: 9000000 },
+            { residenceStart: { era: "平成", year: 30, month: 5, day: 20 }, kindLabel: "住（特）", code: "11", yearEndBalance: 11500000 },
+            { residenceStart: { era: "令和", year: 6, month: 5, day: 20 }, kindLabel: "住", code: "01", yearEndBalance: 9000000 },
         ]);
     });
     test("控除しきれるとき・1つだけのときは、可能額・年末残高を書かない。3つ目からは摘要欄", () => {
@@ -193,13 +200,15 @@ describe("記載例3：2つの住宅借入金等特別控除を受け、控除�
             declaration: { ...decl, housingLoanCredit: 50000, housingLoans: [decl.housingLoans[1]] },
         });
         expect(one.housingLoanCredit).toBe(50000);
-        expect(one.housingLoan).toEqual({ count: 1, available: null, entries: [{ residenceStart: { era: "令和", year: 6, month: 5, day: 20 }, kindLabel: "住", yearEndBalance: null }] });
+        expect(one.housingLoan).toEqual({ count: 1, available: null, entries: [{ residenceStart: { era: "令和", year: 6, month: 5, day: 20 }, kindLabel: "住", code: "01", yearEndBalance: null }] });
         const three = slipOf({
             totals: { salary: 5870000, socialInsurance: 836110, withheldTax: 110090, salaryMonths: [], bonusCount: 1 },
             declaration: { ...decl, housingLoans: [...decl.housingLoans, { residenceStart: "2025-03-01", kindCode: "02", yearEndBalance: 5000000 }] },
         });
         expect(three.housingLoan.entries).toHaveLength(2);
         expect(three.remarks).toEqual(["居住開始年月日 令和7年3月1日 住宅借入金等特別控除区分 認 住宅借入金等年末残高 5,000,000円"]);
+        // 給与支払報告書の CSV の摘要は「住借区分（何回目）××」「住借控除居住年月日（何回目）××年××月××日」「住借額（何回目）×××円」
+        expect(three.reportRemarks).toEqual(["住借区分（3回目）02 住借控除居住年月日（3回目）07年03月01日 住借額（3回目）5000000円"]);
     });
 });
 
