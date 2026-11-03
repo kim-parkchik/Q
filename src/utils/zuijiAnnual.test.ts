@@ -134,7 +134,7 @@ describe("平均に入れる月（Q&A 別紙1 Q7・Q8・Q11）", () => {
 describe("12か月の値を、確定した給与から作る", () => {
     const endOfMonth = { id: 1, closing_day: 99, is_next_month: 0 };
     const staff = { id: "A", wage_type: "monthly", standard_remuneration: 300000, join_date: "2020-04-01", payroll_group_id: 1 };
-    test("変動月の9か月前から、変動月から3か月目まで。非固定的賃金がない給与（DB v13 より前）は null", () => {
+    test("変動月の9か月前から、変動月から3か月目まで。非固定的賃金がない給与は null", () => {
         const salaries = [
             { staff_id: "A", target_year: 2025, target_month: 7, total_earnings: 310000, non_fixed_earnings: 10000 },
             { staff_id: "A", target_year: 2025, target_month: 8, total_earnings: 310000, non_fixed_earnings: null },

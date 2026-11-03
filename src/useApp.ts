@@ -10,7 +10,7 @@ import * as Master from './constants';
 import { APP_DIR_NAME, BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, HOLIDAY_CSV_URL_DEFAULT } from "./constants/appConfig";
 import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
-import { runMigrations } from "./utils/migrations";
+import { prepareCompanyFile } from "./utils/migrations";
 import { useMessageDialog } from "./components/MessageDialog";
 
 export const useApp = () => {
@@ -74,16 +74,10 @@ export const useApp = () => {
       // 魔法の一行：指定されたパスを読み込む！
       const sqlite = await Database.load(`sqlite:${path}`);
       
-      // --- ここに、今までの useEffect 内にあった DB_SCHEMAS のループや
-      // 初期データ投入 (INSERT INTO company 等) のコードを丸ごと移動します ---
-      for (const schema of DB_SCHEMAS) {
-        await sqlite.execute(schema);
-      }
-      
-      await sqlite.execute("PRAGMA foreign_keys = ON;");
+      // 会社ファイルの形式を確かめてから表を作り、足りない列などを追加する（詳しくは utils/migrations.ts）
+      const appliedMigrations = await prepareCompanyFile(sqlite, DB_SCHEMAS);
 
-      // 古い会社ファイルに足りない列などを追加する（詳しくは utils/migrations.ts）
-      const appliedMigrations = await runMigrations(sqlite);
+      await sqlite.execute("PRAGMA foreign_keys = ON;");
 
       // 会社・カレンダー・グループ等の初期投入
       const companyCheck = await sqlite.select<any[]>("SELECT id FROM company WHERE id = 1");

@@ -1,5 +1,5 @@
 /**
- * 会社ファイル（.qp）のマイグレーション
+ * 会社ファイル（.qp）の形式とマイグレーション
  *
  * アプリ起動時の「CREATE TABLE IF NOT EXISTS」は、表が無いときに作るだけで、
  * 既にある表に列を足すことはしない。そのため、古い会社ファイルを新しいアプリで開くと
@@ -7,17 +7,24 @@
  *
  * そこで、会社ファイルごとに「どこまで更新済みか」を SQLite の user_version に記録し、
  * まだ適用していない更新（マイグレーション）だけを順番に実行する。
+ * また、Q の会社ファイルであることを SQLite の application_id に印（Q_FILE_ID）として記録し、
+ * 印が違うファイルは開かない（v1 より前の開発中の形式のファイルには、この印がない）。
+ * user_version と application_id は、バックアップ（VACUUM INTO で作る .qb）にもそのまま写る。
+ *
+ * ■ 形式の番号
+ *   ・v1: 2026-11-03 の dbSchema.ts の形。開発中に積み重ねた更新（v1〜v13）をまとめて、ここを v1 とした。
+ *     それより前の開発中のQで作った会社ファイルは開けないので、作り直す。
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
- *   2. 下の MIGRATIONS の末尾に、次の番号で addColumnIfMissing を追加する（既存ファイル用）
+ *   2. 下の MIGRATIONS の末尾に、次の番号（v2 から）で addColumnIfMissing を追加する（既存ファイル用）
  *   ※ 既にある番号の中身は、後から書き換えないこと（どこまで適用したかがずれるため）
  *
  * ■ 開発中の方針（まだ一般に配布していない間）
- *   ・表の定義の正は dbSchema.ts。MIGRATIONS は、変更がたまったら空に戻してよい。
- *   ・空に戻すと、以前のアプリで開いたテスト用の会社ファイルは開けなくなるので、作り直す。
- *   ・最初のリリース以降は空に戻さず、番号を積み重ねていく（利用者のファイルを守るため）。
- *   ・2026-10: 開発中の変更（v1〜v4）を dbSchema.ts に反映済みとして、空に戻した。
+ *   ・表の定義の正は dbSchema.ts。変更がたまったら、MIGRATIONS を空にし、Q_FILE_ID を次の値（"QP02" など）に変えて、
+ *     今の形を v1 に戻してよい。（Q_FILE_ID を変えないと、前の形式の v2 以後のファイルを、新しい v2 以後と取り違える）
+ *   ・戻すと、前のQで作った会社ファイルは開けなくなるので、作り直す。
+ *   ・最初のリリース以降は戻さず、番号を積み重ねていく（利用者のファイルを守るため）。
  */
 
 /** マイグレーションに必要な最小限のDB操作（tauri-plugin-sql の Database と互換） */
@@ -48,132 +55,61 @@ export const addColumnIfMissing = async (
 };
 
 export const MIGRATIONS: Migration[] = [
-  {
-    version: 1,
-    description: "令和6年分の定額減税（従業員の対象人数・給与ごとの減税額）を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "flat_tax_reduction_persons", "INTEGER DEFAULT 0");
-      await addColumnIfMissing(db, "salary_results", "flat_tax_reduction", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 2,
-    description: "会社設定に「中小企業」（2023年3月までの月60時間超の割増率の猶予）を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "company", "is_small_business", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 3,
-    description: "従業員に産休・育休の期間（社会保険料の免除）を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "leave_periods", "TEXT");
-    },
-  },
-  {
-    version: 4,
-    description: "従業員に源泉所得税の欄（甲欄・乙欄）を追加（今までの人は甲欄）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "tax_column", "TEXT DEFAULT 'kou'");
-    },
-  },
-  {
-    version: 5,
-    description: "従業員に標準報酬月額の履歴（何年何月分から・いくら）を追加（今までの値は入社したときからの1件として扱う）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "standard_remuneration_history", "TEXT");
-    },
-  },
-  {
-    version: 6,
-    description: "年末調整の過不足額の精算（精算する給与の年月と、給与の確定結果の精算額）を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "year_end_adjustments", "settle_year", "INTEGER");
-      await addColumnIfMissing(db, "year_end_adjustments", "settle_month", "INTEGER");
-      await addColumnIfMissing(db, "salary_results", "year_end_adjustment", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 7,
-    description: "給与の確定結果に固定残業代と、その超過分を追加",
-    up: async (db) => {
-      // 固定残業代は、今までの確定結果ではわからないので空（NULL）のままにする（月変で、わからない月とは比べないため）
-      await addColumnIfMissing(db, "salary_results", "fixed_overtime_allowance", "INTEGER");
-      await addColumnIfMissing(db, "salary_results", "fixed_overtime_excess", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 8,
-    description: "給与項目に、残業代の時給（割増賃金の基礎）に入れるかを追加（今までの項目は入れる）",
-    up: async (db) => {
-      // 労働基準法37条5項・施行規則21条で外せる7つの賃金以外は入れるのが原則なので、今までの項目は「入れる」にする
-      await addColumnIfMissing(db, "salary_item_master", "in_overtime_base", "INTEGER DEFAULT 1");
-    },
-  },
-  {
-    version: 9,
-    description: "従業員に基本給・扶養人数の履歴（何年何月分から）を追加（今までの値は入社したときからの1件として扱う）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "wage_history", "TEXT");
-      await addColumnIfMissing(db, "staff", "dependents_history", "TEXT");
-    },
-  },
-  {
-    version: 10,
-    description: "給与規定グループに社会保険料の徴収月（当月徴収・翌月徴収）を追加（今までのグループは当月徴収）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "social_ins_collection", "TEXT DEFAULT 'current'");
-    },
-  },
-  {
-    version: 11,
-    description: "給与規定グループに、途中で入社・退職した月給制の人の日割りのしかたを追加（今までのグループは日割りしない）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "proration_method", "TEXT DEFAULT 'none'");
-    },
-  },
-  {
-    version: 12,
-    description: "従業員に、養育期間の標準報酬月額の特例（3歳未満の子を養育する人の年金の申出）を追加（初めは空）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "youiku_tokurei", "TEXT");
-    },
-  },
-  {
-    version: 13,
-    description: "給与の確定結果に、非固定的賃金（残業代・休日や深夜の手当・変動の支給項目）の額を追加（今までの確定結果は空）",
-    up: async (db) => {
-      // 今までの確定結果では内訳がわからないので空（NULL）のままにする（月変の年間平均の画面で入れてもらう）
-      await addColumnIfMissing(db, "salary_results", "non_fixed_earnings", "INTEGER");
-    },
-  },
+  // v1 は dbSchema.ts の形そのもの（上の「形式の番号」を参照）。次に列を足すときは version: 2 から追加する。
 ];
 
+/** v1（dbSchema.ts の形そのもの）の番号 */
+export const BASE_DB_VERSION = 1;
+
 /** 最新のバージョン番号 */
-export const LATEST_DB_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+export const LATEST_DB_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? BASE_DB_VERSION;
+
+/** Q の会社ファイルの印（SQLite の application_id）。"QP01" の文字コード（v1 の形式。形式を戻したら "QP02" などに変える） */
+export const Q_FILE_ID = 0x51503031;
+
+const readPragma = async (db: MigrationDb, name: "user_version" | "application_id") => {
+  const rows = await db.select<Record<string, number>[]>(`PRAGMA ${name}`);
+  return Number(rows?.[0]?.[name] ?? 0);
+};
 
 /**
- * 未適用のマイグレーションを順番に実行する。
+ * 会社ファイルを開くときに、形式を確かめてから表を作り、まだ適用していない更新を実行する。
+ *   ・表が1つもないファイル（新しく作ったもの）：表を作り、Q の印と最新の番号を付ける
+ *   ・Q の印があり、番号が最新以下のファイル：足りない表を作り、まだ適用していない更新を実行する
+ *   ・それ以外（v1 より前の開発中の形式・新しいQで保存したもの）：壊さないように触らず、エラーにする
+ * @param schemas 表を作る SQL（dbSchema.ts の DB_SCHEMAS）
  * 戻り値: 実行したマイグレーションの説明一覧（ログ用）
  */
-export const runMigrations = async (db: MigrationDb): Promise<string[]> => {
-  const rows = await db.select<{ user_version: number }[]>("PRAGMA user_version");
-  const current = rows?.[0]?.user_version ?? 0;
+export const prepareCompanyFile = async (db: MigrationDb, schemas: string[]): Promise<string[]> => {
+  const tables = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'");
+  // PRAGMA はプレースホルダが使えないため数値を直接埋め込む（どれも数値定数のみ）
+  if (Number(tables?.[0]?.n ?? 0) === 0) {
+    for (const schema of schemas) await db.execute(schema);
+    await db.execute(`PRAGMA application_id = ${Number(Q_FILE_ID)}`);
+    await db.execute(`PRAGMA user_version = ${Number(LATEST_DB_VERSION)}`);
+    return [];
+  }
 
-  // アプリより新しいバージョンで保存されたファイルは、壊さないように触らない
+  const fileId = await readPragma(db, "application_id");
+  const current = await readPragma(db, "user_version");
+  if (fileId !== Q_FILE_ID) {
+    throw new Error(
+      `この会社ファイルは、今のQの形式ではありません（開発中の古いQで作ったファイルなど）。\n` +
+      `今のQでは開けないので、新しく会社ファイルを作り直してください。`
+    );
+  }
   if (current > LATEST_DB_VERSION) {
     throw new Error(
-      `この会社ファイルは、今のQとは違う形式で保存されています（ファイル: v${current} / アプリ: v${LATEST_DB_VERSION}）。\n` +
-      `新しいバージョンのQで保存したファイルなら、Qを更新してから開いてください。\n` +
-      `開発中に作ったテスト用のファイルなら、新しく作り直してください。`
+      `この会社ファイルは、新しいバージョンのQで保存されています（ファイル: v${current} / アプリ: v${LATEST_DB_VERSION}）。\n` +
+      `Qを更新してから開いてください。`
     );
   }
 
+  for (const schema of schemas) await db.execute(schema);
   const applied: string[] = [];
   for (const m of MIGRATIONS) {
     if (m.version <= current) continue;
     await m.up(db);
-    // PRAGMA はプレースホルダが使えないため数値を直接埋め込む（version は数値定数のみ）
     await db.execute(`PRAGMA user_version = ${Number(m.version)}`);
     applied.push(`v${m.version}: ${m.description}`);
   }

@@ -22,7 +22,7 @@
  *   健康保険の等級で判定する（理由は santeiAnnual.ts と同じ）
  * ■ 1円未満：固定的賃金・非固定的賃金のそれぞれの月平均額を切り捨ててから足す（通知に書かれていないので Q の決め方）
  * ■ 固定的賃金と非固定的賃金の分け方は、給与を確定したときに残した額（salary_results.non_fixed_earnings）を初めの値にする。
- *   名称でなく実態で判断するものなので画面で直せる。その額がない月（DB v13 より前に確定した給与）は入れてもらう
+ *   名称でなく実態で判断するものなので画面で直せる。その額がない月は入れてもらう
  * 出典：厚生労働省 保発第4号 記2(4)(5) https://www.mhlw.go.jp/web/t_doc?dataId=00tb1543&dataType=1&pageNo=1
  *       平成30年3月1日 保保発0301第1号・年管管発0301第4号 https://www.mhlw.go.jp/web/t_doc?dataId=00tc3223&dataType=1&pageNo=1
  *       平成30年3月1日事務連絡 Q&A 別紙1（随時改定の場合） https://www.mhlw.go.jp/web/t_doc?dataId=00tc3243&dataType=1&pageNo=1
@@ -48,7 +48,7 @@ export const ZUIJI_ANNUAL_STATUS_LABELS: Record<ZuijiAnnualStatus, string> = {
   small: '3か月の平均との差が1等級以下なので、年間平均にはできません',
   not_zuiji: '通常の随時改定に当たらないので、年間平均にはできません',
   no_earlier: '変動月の前の9か月に平均に入れる月がないので、年間平均にはできません',
-  split_missing: '非固定的賃金がわからない月があります（この機能を入れる前に確定した給与）。12か月を開いて入れてください',
+  split_missing: '非固定的賃金がわからない月があります。12か月を開いて入れてください',
 };
 
 export interface ZuijiAnnualResult {

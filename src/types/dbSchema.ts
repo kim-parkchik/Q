@@ -237,9 +237,9 @@ export const DB_SCHEMAS = [
     standard_overtime_pay INTEGER,   -- 標準割増の支給額（固定残業代がある人は、法定の計算額）
     high_overtime_pay INTEGER,       -- 高率割増の支給額（固定残業代がある人は、法定の計算額）
     statutory_overtime_pay INTEGER,  -- 法定内残業の支給額（割増なし）
-    fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0。DB v7 より前に確定した給与は空）
+    fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0）
     fixed_overtime_excess INTEGER DEFAULT 0,    -- 時間外労働の割増賃金が固定残業代を超えた差額（超過分として払った額）
-    non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う。DB v13 より前に確定した給与は空）
+    non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う）
 
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,

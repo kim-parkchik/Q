@@ -124,7 +124,7 @@ describe("変動月の候補を探す", () => {
             const [c] = findZuijiCandidates([{ ...staff, standard_remuneration: 360000 }], 2026, [group], salaries, []);
             expect(c).toMatchObject({ month: 4, direction: "down", fixedOvertimeBefore: 60000, fixedOvertimeAfter: 0 });
         });
-        test("固定残業代を保存する前（空）に確定した月とは比べない", () => {
+        test("固定残業代がわからない（空の）月とは比べない", () => {
             const salaries = [pay(3, 300000, null), pay(4, 300000, 60000), pay(5, 300000, 60000)];
             expect(findZuijiCandidates([staff], 2026, [group], salaries, [])).toHaveLength(0);
         });

@@ -172,9 +172,9 @@ export interface SalaryRecord {
   total_earnings: number;
   /** 確定したときの基本給（時給制は時給） */
   applied_base_wage?: number | null;
-  /** 確定したときの固定残業代（なしは 0。固定残業代を保存する前（DB v7 より前）に確定した給与は null） */
+  /** 確定したときの固定残業代（なしは 0。わからないときは null） */
   fixed_overtime_allowance?: number | null;
-  /** 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。DB v13 より前に確定した給与は null） */
+  /** 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。わからないときは null） */
   non_fixed_earnings?: number | null;
 }
 
