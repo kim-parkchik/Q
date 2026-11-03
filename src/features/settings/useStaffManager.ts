@@ -20,6 +20,8 @@ import {
     type DependentsEntry, type WageEntry,
 } from "../../utils/staffHistory";
 import { residentTaxScheduleOf, stringifyResidentTaxSchedule, type ResidentTaxYear } from "../../utils/residentTax";
+import { loadCustomItems } from "../../utils/calcSalary";
+import { overtimeHourlyRateOf } from "../../utils/fixedOvertime";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -645,10 +647,26 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     };
 
 
+    // 残業代の時給に入れる手当（「給与項目設定」で入れた、この人の支給項目の額。固定残業代の時間の目安に使う。utils/fixedOvertime.ts）
+    const [overtimeBaseAllowances, setOvertimeBaseAllowances] = useState(0);
+    useEffect(() => {
+        if (!db || !editingId) { setOvertimeBaseAllowances(0); return; }
+        let cancelled = false;
+        loadCustomItems(db, editingId)
+            .then(items => {
+                if (cancelled) return;
+                setOvertimeBaseAllowances(items.filter(i => i.type === 'earning' && i.inOvertimeBase !== false).reduce((sum, i) => sum + i.amount, 0));
+            })
+            .catch(e => console.error("給与項目の読み込みに失敗しました:", e));
+        return () => { cancelled = true; };
+    }, [db, editingId]);
+
     // --- 計算用の変数（レンダリング時に算出） ---
     const annualTotalHours = annualWorkDays * targetDailyHours;
     const monthlyAverageHours = annualTotalHours / 12;
     const hourlyConversion = targetWageType === "monthly" ? (targetWage / monthlyAverageHours) : targetWage;
+    // 残業代の時給（給与計算と同じ：(月給 ＋ 残業代の時給に入れる手当) ÷ 月平均所定労働時間。月給制の人だけ）
+    const overtimeHourlyRate = targetWageType === "monthly" ? overtimeHourlyRateOf(targetWage, overtimeBaseAllowances, monthlyAverageHours) : 0;
 
     const branchMap = Object.fromEntries(branches.map(b => [b.id, b.name]));
 
@@ -807,6 +825,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         annualTotalHours,
         monthlyAverageHours,
         hourlyConversion,
+        overtimeBaseAllowances,
+        overtimeHourlyRate,
         branchMap,
         isFirstRun,
         isFormVisible,

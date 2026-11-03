@@ -4,14 +4,11 @@
  */
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
+import { fixedOvertimeCoverageHours, overtimePayFor } from '../../../utils/fixedOvertime';
 
 interface Props {
     cm: StaffManagerState;
 }
-
-/** 固定残業代が何時間分の時間外労働の割増賃金（1.25倍）に当たるか（基本給を月平均所定労働時間で割った時間単価での目安。手当は入れない） */
-const fixedOvertimeCoverage = (amount: number, hourlyRate: number) =>
-    hourlyRate > 0 && Number.isFinite(hourlyRate) ? amount / (hourlyRate * 1.25) : null;
 
 export default function WorkPatternSection({ cm }: Props) {
     const {
@@ -43,6 +40,8 @@ export default function WorkPatternSection({ cm }: Props) {
         annualWorkDays,
         monthlyAverageHours,
         hourlyConversion,
+        overtimeBaseAllowances,
+        overtimeHourlyRate,
     } = cm;
 
     return (
@@ -371,13 +370,18 @@ export default function WorkPatternSection({ cm }: Props) {
                         </p>
                     )}
                     {targetFixedOvertimeAmount > 0 && targetWageType === "monthly" && (() => {
-                        const hours = fixedOvertimeCoverage(targetFixedOvertimeAmount, hourlyConversion);
+                        // 給与計算と同じ「残業代の時給」で見た目安（utils/fixedOvertime.ts）
+                        const hours = fixedOvertimeCoverageHours(targetFixedOvertimeAmount, overtimeHourlyRate);
                         if (hours === null) return null;
-                        const short = targetFixedOvertimeHours > 0 && hours < targetFixedOvertimeHours;
+                        const needed = targetFixedOvertimeHours > 0 ? Math.ceil(overtimePayFor(targetFixedOvertimeHours, overtimeHourlyRate)) : 0;
+                        const short = targetFixedOvertimeHours > 0 && targetFixedOvertimeAmount < needed;
                         return (
                             <p style={{ fontSize: "10px", color: short ? "#b45309" : "#64748b", marginTop: "4px", lineHeight: 1.5 }}>
-                                {short ? "⚠ " : ""}{targetFixedOvertimeAmount.toLocaleString()}円は、時間外労働 約{hours.toFixed(1)}時間分の割増賃金（基本給の時給換算 約{Math.round(hourlyConversion).toLocaleString()}円 × 1.25）に当たります（目安。給与項目で「残業代の時給に入れる」手当があると、時給が上がるので時間は短くなります）。
-                                {short && `設定した${targetFixedOvertimeHours}時間より少ないため、${targetFixedOvertimeHours}時間に届く前から超過分を払うことになります。金額か時間を見直してください。`}
+                                {short ? "⚠ " : ""}{targetFixedOvertimeAmount.toLocaleString()}円は、時間外労働 約{hours.toFixed(1)}時間分の割増賃金に当たります
+                                （残業代の時給 約{Math.round(overtimeHourlyRate).toLocaleString()}円 ＝（基本給{overtimeBaseAllowances > 0 ? ` ＋ 残業代の時給に入れる手当 ${overtimeBaseAllowances.toLocaleString()}円` : ""}）÷ 月平均所定労働時間 {monthlyAverageHours.toFixed(1)}時間。
+                                25%増し、月60時間を超えた分は50%増し。給与明細で入れる役職手当は入れていない目安です）。
+                                {targetFixedOvertimeHours > 0 && `設定した${targetFixedOvertimeHours}時間分の割増賃金は 約${needed.toLocaleString()}円です。`}
+                                {short && `固定残業代が約${(needed - targetFixedOvertimeAmount).toLocaleString()}円足りないため、${targetFixedOvertimeHours}時間に届く前から超過分を払うことになります。金額か時間を見直してください。`}
                             </p>
                         );
                     })()}
