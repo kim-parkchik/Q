@@ -188,19 +188,9 @@ export default function BasicInfoSection({ cm }: Props) {
             </div>
             <div style={{ gridColumn: "span 2", marginTop: "5px" }}>
                 <label style={{ ...labelStyle, color: "#95a5a6" }}>マイナンバー</label>
-                <input 
-                    type="text" 
-                    value="" 
-                    readOnly 
-                    placeholder="**** **** **** (現在は入力できません)"
-                    style={{ 
-                        ...inputStyle, 
-                        backgroundColor: "#f5f5f5", 
-                        color: "#999", 
-                        cursor: "not-allowed",
-                        border: "1px solid #eee"
-                    }} 
-                />
+                <div style={{ fontSize: "12px", color: "#7f8c8d", marginTop: "4px", lineHeight: 1.6 }}>
+                    左のメニューの「マイナンバー」の画面で扱います（事務取扱担当者の印があるユーザーだけが見られます）。
+                </div>
             </div>
         </>
     );

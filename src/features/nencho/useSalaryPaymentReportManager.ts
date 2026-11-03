@@ -13,7 +13,8 @@ import {
   buildReportPerson, designationNumberError, groupByMunicipality, normalizeDesignationNumber, parseReportSetting,
   type ReportPerson, type ReportSetting,
 } from "../../utils/salaryPaymentReport";
-import { buildSalaryReportCsv, type ReportCsvCompany } from "../../utils/salaryPaymentReportCsv";
+import { buildSalaryReportCsv, type ReportCsvCompany, type ReportCsvPerson } from "../../utils/salaryPaymentReportCsv";
+import { hasMyNumberAccess, loadMyNumbers, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { localGovLabel } from "../../utils/localGov";
 import { useMessageDialog } from "../../components/MessageDialog";
@@ -34,7 +35,7 @@ export interface ReportRow extends ReportPerson {
   notReady: string;
 }
 
-export function useSalaryPaymentReportManager(db: Database, staffList: any[], onDataChange: () => Promise<void> | void) {
+export function useSalaryPaymentReportManager(db: Database, staffList: any[], user: MyNumberUser | null, onDataChange: () => Promise<void> | void) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const [year, setYear] = useState(REPORT_YEARS[REPORT_YEARS.length - 1] ?? new Date().getFullYear());
@@ -44,7 +45,14 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], on
   const [settings, setSettings] = useState<Record<string, ReportSetting>>({});
   const [designations, setDesignations] = useState<Record<string, string>>({});
   const [company, setCompany] = useState<ReportCsvCompany>({});
+  /** マイナンバーを扱える（事務取扱担当者）。扱える人が書き出すときだけ、CSV に番号を書く */
+  const [myNumberAccess, setMyNumberAccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!db) return;
+    hasMyNumberAccess(db, user).then(setMyNumberAccess).catch(() => setMyNumberAccess(false));
+  }, [db, user?.id]);
 
   const load = async (target = year) => {
     const nencho = await loadNenchoData(db, target);
@@ -106,12 +114,17 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], on
 
   const groups = useMemo(() => groupByMunicipality(rows), [rows]);
 
-  /** eLTAX に取り込む CSV（画面に、入る人数と入らない人を出す） */
-  const csv = useMemo(() => buildSalaryReportCsv(year, company, rows.map((r) => ({
+  const csvPeople = (myNumbers?: Record<string, Record<string, string>>): ReportCsvPerson[] => rows.map((r) => ({
     report: r, slip: r.slip, staffNumber: r.staffId, designationNumber: r.municipality ? designations[r.municipality.code] ?? "" : "", notReady: r.notReady,
-  }))), [year, company, rows, designations]);
+    myNumbers: myNumbers ? myNumbers[r.staffId] ?? {} : undefined,
+  }));
 
-  /** CSV を保存する */
+  /** eLTAX に取り込む CSV（画面に、入る人数と入らない人を出す。番号は書き出すときに読む） */
+  const csv = useMemo(() => buildSalaryReportCsv(year, company, csvPeople()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [year, company, rows, designations]);
+
+  /** CSV を保存する（事務取扱担当者なら、登録したマイナンバーを書く） */
   const exportCsv = async () => {
     if (csv.errors.length > 0) {
       dialog.warning(csv.errors.join("\n"), "CSV を作れません");
@@ -131,10 +144,18 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], on
       if (!ok) return;
     }
     try {
-      const saved = await saveCsvFile(csv.csv, `給与支払報告書_${year}年分.csv`);
+      const withNumbers = await hasMyNumberAccess(db, user);
+      const out = withNumbers
+        ? buildSalaryReportCsv(year, company, csvPeople(await loadMyNumbers(db, rows.map((r) => r.staffId))))
+        : csv;
+      const saved = await saveCsvFile(out.csv, `給与支払報告書_${year}年分.csv`);
       if (!saved) return;
-      toast.success(`「${saved.name}」を保存しました（${csv.count}人・${csv.municipalities}市区町村）`);
-      if (csv.notes.length > 0) await dialog.warning(csv.notes.join("\n"));
+      if (withNumbers) {
+        await logMyNumber(db, user, `給与支払報告書の CSV（${year}年分・${out.count}人。本人のマイナンバー ${out.myNumbers}人分）を書き出しました：${saved.name}`);
+      }
+      toast.success(`「${saved.name}」を保存しました（${out.count}人・${out.municipalities}市区町村）`);
+      const notes = withNumbers ? out.notes : [...out.notes, "マイナンバーは書いていません（事務取扱担当者の印がある人が書き出すと書きます）"];
+      if (notes.length > 0) await dialog.warning(notes.join("\n"));
     } catch (e) {
       console.error(e);
       dialog.error(`CSV を保存できませんでした。\n${e}`);
@@ -210,5 +231,5 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], on
     }
   };
 
-  return { year, setYear, isLoading, rows, groups, designations, csv, exportCsv, saveSetting, saveDesignation, fillFromAddress };
+  return { year, setYear, isLoading, rows, groups, designations, csv, myNumberAccess, exportCsv, saveSetting, saveDesignation, fillFromAddress };
 }

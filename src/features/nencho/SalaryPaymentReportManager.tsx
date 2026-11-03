@@ -9,10 +9,12 @@ import Database from "@tauri-apps/plugin-sql";
 import { ORDINARY_REASONS, type MunicipalityGroup } from "../../utils/salaryPaymentReport";
 import { localGovLabel } from "../../utils/localGov";
 import { REPORT_YEARS, useSalaryPaymentReportManager, type ReportRow } from "./useSalaryPaymentReportManager";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 
 interface Props {
   db: Database;
   staffList: any[];
+  currentUser: MyNumberUser | null;
   onDataChange: () => Promise<void> | void;
 }
 
@@ -199,15 +201,16 @@ function CsvCard({ z }: { z: Z }) {
         ・eLTAX の PCdesk で「CSV 取込による作成」を選び、このファイルを取り込みます。形式は、地方税共同機構「給与支払報告書CSVレイアウト仕様書（総務省通知形式）」です。
         総括表（会社の情報・人数など）は、PCdesk の画面で入れます。
         <br />・PCdesk では、CSV から作った個人別明細書を後から直せません。地方税共同機構の案内のとおり、初めは1〜2人だけの CSV で取り込みを試すと、誤りを見つけやすくなります。
-        <br />・マイナンバー（本人・配偶者・扶養親族）の欄は空です。CSV を Excel で開いて保存すると、先頭の0が消えるなどして取り込めなくなるので、開かずに取り込んでください。
+        <br />・マイナンバー（本人・配偶者・扶養親族）は、「マイナンバー」の画面で登録した番号を書きます。{z.myNumberAccess ? "書き出したことは、マイナンバーの取扱いの記録に残ります。" : "番号を書くのは、事務取扱担当者の印がある人が書き出したときだけです（いまの人が書き出すと、欄は空になります）。"}
+        <br />・CSV を Excel で開いて保存すると、先頭の0が消えるなどして取り込めなくなるので、開かずに取り込んでください。マイナンバーを書いた CSV は、持ち運ぶときにパスワードをかけるなどして、なくさないようにします。
         <br />・控除対象配偶者・扶養親族の欄は、年末調整をした人だけ書きます（年の途中で退職した人・乙欄の人は空。源泉徴収票と同じ）。
       </p>
     </div>
   );
 }
 
-export default function SalaryPaymentReportManager({ db, staffList, onDataChange }: Props) {
-  const z = useSalaryPaymentReportManager(db, staffList, onDataChange);
+export default function SalaryPaymentReportManager({ db, staffList, currentUser, onDataChange }: Props) {
+  const z = useSalaryPaymentReportManager(db, staffList, currentUser, onDataChange);
   const submitting = z.rows.filter((r) => r.submit);
   const special = submitting.filter((r) => !r.ordinary).length;
   const skipped = z.rows.length - submitting.length;
@@ -235,7 +238,7 @@ export default function SalaryPaymentReportManager({ db, staffList, onDataChange
           <br />・令和9年1月からは、給与支払報告書を出せば、税務署に源泉徴収票を出したことになります（従業員に渡す源泉徴収票は、今までどおり要ります）。
           前々年に税務署に出すべきだった源泉徴収票が30枚以上の会社は、eLTAX か光ディスク等で出します（令和9年1月から。令和8年までは100枚以上）。
           <br />・4月1日までに退職した人がいたら、4月15日までに「給与支払報告に係る給与所得者異動届出書」を出します（同条第2項）。
-          <br />・紙の総括表・個人別明細書は、まだ作れません。マイナンバーも、まだ Q に入れる所がありません。
+          <br />・紙の総括表・個人別明細書は、まだ作れません。
         </p>
       </div>
 

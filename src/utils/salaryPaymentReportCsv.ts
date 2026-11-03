@@ -14,11 +14,13 @@
  *   ・♂ ♀ ℃ ☆ ★ ⌒ Å ♯ ♭ ♪ の10文字は使えない（同ページ）
  *   ・いくつかの市区町村の分を1つのファイルにまとめてよい。1つの市区町村には、指定番号を1つだけ書く（上の資料13・17ページ）
  *   ・受給者のフリガナは半角カナ（仕様書 項番137）。配偶者・扶養親族のフリガナは全角（項番96など）
- * ■ マイナンバー（個人番号）の欄は空にする（Q にまだ入れる画面がない）。
- *   PCdesk では、CSV から作った個人別明細書を後から直せない（手続き別ガイド 2章）ので、番号を書くなら CSV に入れる必要がある
+ * ■ マイナンバー（個人番号）は、「マイナンバー」の画面で登録した番号を書く（事務取扱担当者が書き出すときだけ。utils/myNumber.ts）。
+ *   PCdesk では、CSV から作った個人別明細書を後から直せない（手続き別ガイド 2章）ので、番号は CSV に入れる。
+ *   5人目からの扶養親族の番号（項番132・133）は書かない
  * ■ 年末調整をしない人（年の途中で退職した人・乙欄の人）の控除対象配偶者の有無は、Q では分からないので空にする（源泉徴収票と同じ）
  */
 import { SALARY_REPORT_CSV_FIELDS } from "../constants/salaryPaymentReportCsvLayout";
+import { familyKey, SELF_KEY } from "./myNumber";
 import type { ReportPerson } from "./salaryPaymentReport";
 import type { SlipPerson, WithholdingSlip } from "./withholdingSlip";
 import { toWareki, type Wareki } from "./wareki";
@@ -42,14 +44,17 @@ export interface ReportCsvPerson {
   designationNumber: string;
   /** まだ CSV に入れられない理由（年末調整がまだ など。空なら入れられる） */
   notReady?: string;
+  /** 登録したマイナンバー（キーは utils/myNumber.ts の SELF_KEY・familyKey）。事務取扱担当者が書き出すときだけ渡す。渡さなければ欄は空 */
+  myNumbers?: Record<string, string>;
 }
 
 export interface ReportCsvResult {
   /** CSV の中身（BOM は保存するときに付ける）。会社の情報に誤りがあれば空 */
   csv: string;
-  /** CSV に入れた人数・市区町村の数 */
+  /** CSV に入れた人数・市区町村の数・本人のマイナンバーを書いた人数 */
   count: number;
   municipalities: number;
+  myNumbers: number;
   /** 会社の情報の誤り（あれば CSV を作らない） */
   errors: string[];
   /** 出す人のうち、直すところがあって CSV に入れなかった人 */
@@ -134,8 +139,8 @@ const corporateNumberOf = (s: string | null | undefined) => {
 };
 
 /** 控除対象配偶者・扶養親族の4項目（フリガナ・氏名・区分・個人番号） */
-const personFields = (p: SlipPerson | null | undefined, defaultCode = "00"): string[] =>
-  p ? [toZenkakuKatakana(p.furigana), toZenkaku(p.name), p.code || defaultCode, ""] : ["", "", "", ""];
+const personFields = (p: SlipPerson | null | undefined, numbers: Record<string, string>): string[] =>
+  p ? [toZenkakuKatakana(p.furigana), toZenkaku(p.name), p.code || "00", numbers[familyKey(p.name, p.birthday)] ?? ""] : ["", "", "", ""];
 
 /** 提出義務者（会社）の項目：項番4 所在地・5 名称・6 電話番号 */
 const companyFields = (company: ReportCsvCompany): [string, string, string] =>
@@ -178,11 +183,12 @@ export const buildCsvRow = (year: number, company: ReportCsvCompany, p: ReportCs
   set(86, toZenkaku([r.ordinary ? r.reason : "", ...s.reportRemarks].filter(Boolean).join(" ")));
   const lp = s.lifeInsurancePaid;
   set(87, num(lp.generalNew), num(lp.generalOld), num(lp.medical), num(lp.pensionNew), num(s.youngCount), num(s.nationalPension));
-  set(94, corporateNumberOf(company.corporateNumber));
-  set(96, ...personFields(s.spouse));
-  for (let i = 0; i < 4; i++) set(100 + i * 4, ...personFields(s.dependents[i]));
+  const numbers = p.myNumbers ?? {};
+  set(94, corporateNumberOf(company.corporateNumber), numbers[SELF_KEY] ?? "");
+  set(96, ...personFields(s.spouse, numbers));
+  for (let i = 0; i < 4; i++) set(100 + i * 4, ...personFields(s.dependents[i], numbers));
   // 16歳未満の扶養親族：国内に住所がある人は 00（受給者交付用の源泉徴収票では書かないが、CSV では書く）
-  for (let i = 0; i < 4; i++) set(116 + i * 4, ...personFields(s.youngDependents[i]));
+  for (let i = 0; i < 4; i++) set(116 + i * 4, ...personFields(s.youngDependents[i], numbers));
   set(134, flag(r.ordinary), "0", "0", toHankakuKana(s.recipient.furigana));
   const staffNumber = p.staffNumber.normalize("NFKC").trim();
   set(138, /^[\x21-\x7E]+$/.test(staffNumber) && !STAFF_NUMBER_BANNED.test(staffNumber) ? staffNumber : "");
@@ -193,7 +199,9 @@ export const buildCsvRow = (year: number, company: ReportCsvCompany, p: ReportCs
 
 /** 出す人をまとめて CSV にする（市区町村の団体コードの順） */
 export const buildSalaryReportCsv = (year: number, company: ReportCsvCompany, people: ReportCsvPerson[]): ReportCsvResult => {
-  const result: ReportCsvResult = { csv: "", count: 0, municipalities: 0, errors: [], skipped: [], notes: [] };
+  const result: ReportCsvResult = { csv: "", count: 0, municipalities: 0, myNumbers: 0, errors: [], skipped: [], notes: [] };
+  const noSelfNumber: string[] = [];
+  const noFamilyNumber: string[] = [];
   companyFields(company).forEach((value, i) => {
     const e = fieldError(4 + i, value);
     if (e) result.errors.push(`${e}（会社の設定で直してください）`);
@@ -222,8 +230,16 @@ export const buildSalaryReportCsv = (year: number, company: ReportCsvCompany, pe
       continue;
     }
     if (p.staffNumber && !row[137]) result.notes.push(`${r.name}：従業員ID（${p.staffNumber}）に使えない記号があるので、受給者番号は空にしました`);
+    if (p.myNumbers) {
+      if (row[94]) result.myNumbers++;
+      else noSelfNumber.push(r.name);
+      // 配偶者・扶養親族（4人まで）の欄で、名前があるのに番号がない
+      if ([99, 103, 107, 111, 115, 119, 123, 127, 131].some((no) => row[no - 1 - 2] && !row[no - 1])) noFamilyNumber.push(r.name);
+    }
     lines.push({ code: r.municipality!.code, line: row.join(",") });
   }
+  if (noSelfNumber.length > 0) result.notes.push(`本人のマイナンバーが登録されていない人（欄は空）：${noSelfNumber.join("、")}`);
+  if (noFamilyNumber.length > 0) result.notes.push(`配偶者・扶養親族のマイナンバーが登録されていない人がいる人（欄は空）：${noFamilyNumber.join("、")}`);
   lines.sort((a, b) => a.code.localeCompare(b.code));
   result.count = lines.length;
   result.municipalities = new Set(lines.map((l) => l.code)).size;

@@ -109,7 +109,7 @@ describe("記載例1：年末調整を行った一般の受給者", () => {
         expect(slip.disabledCounts).toEqual({ special: null, specialTogether: null, other: 1 });
     });
     test("控除対象扶養親族等の区分：居住者は00、特定親族は特定親族特別控除の額（51万円）の区分30", () => {
-        expect(slip.spouse).toEqual({ furigana: "コクゼイ ハナコ", name: "国税 花子", code: "00" });
+        expect(slip.spouse).toEqual({ furigana: "コクゼイ ハナコ", name: "国税 花子", birthday: "1972-01-01", code: "00" });
         expect(slip.dependents.map((p) => [p.name, p.code])).toEqual([["国税 一郎", "30"], ["国税 次郎", "00"], ["国税 孝男", "00"]]);
         expect(slip.youngDependents.map((p) => [p.name, p.code])).toEqual([["国税 三郎", ""]]);
     });

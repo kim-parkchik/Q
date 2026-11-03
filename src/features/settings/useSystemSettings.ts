@@ -4,6 +4,7 @@ import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { hashPassword } from "../../utils/authUtils";
+import { logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 
 export function useSystemSettings(db: any) {
   const toast = useToast();
@@ -39,7 +40,7 @@ export function useSystemSettings(db: any) {
   // --- 1. ユーザー関連ロジック ---
   const fetchUsers = async () => {
     try {
-      const res = await db.select("SELECT id, login_id, display_name, role, last_login FROM users ORDER BY id ASC");
+      const res = await db.select("SELECT id, login_id, display_name, role, last_login, my_number_access FROM users ORDER BY id ASC");
       setUsers(res);
     } catch (err) { console.error(err); }
   };
@@ -50,6 +51,26 @@ export function useSystemSettings(db: any) {
     if (ok) {
       await db.execute("DELETE FROM users WHERE login_id = ?", [loginId]);
       await fetchUsers();
+    }
+  };
+
+  /** マイナンバーを扱える（事務取扱担当者）の印を付け外しする（管理者だけ。記録に残す） */
+  const setMyNumberAccess = async (target: { id: number; login_id: string; display_name: string }, on: boolean, actor: MyNumberUser | null) => {
+    const ok = await ask(
+      on
+        ? `${target.display_name}（${target.login_id}）さんに、マイナンバーを扱える印を付けますか？\n\n印を付けた人は、従業員と家族のマイナンバーを見る・入れる・消すことができます。事務取扱担当者だけに付けてください。`
+        : `${target.display_name}（${target.login_id}）さんの、マイナンバーを扱える印を外しますか？`,
+      { title: "マイナンバーを扱える人", kind: "warning" }
+    );
+    if (!ok) return;
+    try {
+      await db.execute("UPDATE users SET my_number_access = ? WHERE id = ?", [on ? 1 : 0, target.id]);
+      await logMyNumber(db, actor, `マイナンバーを扱える印を${on ? "付けました" : "外しました"}：${target.display_name}（${target.login_id}）`);
+      await fetchUsers();
+      toast.success(on ? "マイナンバーを扱える印を付けました" : "マイナンバーを扱える印を外しました");
+    } catch (e) {
+      console.error(e);
+      dialog.error(`印を変えられませんでした。\n${e}`);
     }
   };
 
@@ -140,6 +161,7 @@ export function useSystemSettings(db: any) {
 
   return {
     users,
+    setMyNumberAccess,
     deleteUser,
     addUser,
     updatePassword,

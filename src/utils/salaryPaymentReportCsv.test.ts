@@ -9,6 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { GENSEN_2026, NENCHO_2026 } from "../constants/nencho";
 import { SALARY_REPORT_CSV_FIELDS } from "../constants/salaryPaymentReportCsvLayout";
+import { familyKey, myNumberError, SELF_KEY } from "./myNumber";
 import { emptyDeclaration, type DeclaredDependent, type NenchoDeclaration } from "./nenchoDeclaration";
 import { buildReportPerson, parseReportSetting, type ReportSetting } from "./salaryPaymentReport";
 import {
@@ -166,6 +167,29 @@ describe("記載例1（年末調整をした人）の1行", () => {
   });
   test("どの項目も、仕様書の文字属性・文字数に合う", () => {
     row.forEach((v, i) => expect(fieldError(i + 1, v)).toBeNull());
+  });
+
+  // マイナンバー：本人は SELF_KEY、家族は氏名と生年月日で結び付ける（番号は検査用数字が合う仮の値）
+  const self = "123456789018";
+  const spouse = "987654321093";
+  const withNumbers: ReportCsvPerson = { ...p, myNumbers: { [SELF_KEY]: self, [familyKey("国税　花子", "1972-01-01")]: spouse } };
+  test("登録したマイナンバーを、本人（項番95）・配偶者（項番99）の欄に書く", () => {
+    expect([myNumberError(self), myNumberError(spouse)]).toEqual([null, null]);
+    const r2 = buildCsvRow(2026, company, withNumbers);
+    expect([at(r2, 95), at(r2, 99)]).toEqual([self, spouse]);
+    expect([at(r2, 103), at(r2, 119)]).toEqual(["", ""]); // 登録していない家族は空
+    r2.forEach((v, i) => expect(fieldError(i + 1, v)).toBeNull());
+  });
+  test("番号を渡したときは、登録していない人を知らせる。渡さなければ（扱えない人）知らせない", () => {
+    const x = buildSalaryReportCsv(2026, company, [withNumbers]);
+    expect(x.myNumbers).toBe(1);
+    expect(x.notes).toEqual(["配偶者・扶養親族のマイナンバーが登録されていない人がいる人（欄は空）：国税 太郎"]);
+    const y = buildSalaryReportCsv(2026, company, [{ ...p, myNumbers: {} }]);
+    expect(y.myNumbers).toBe(0);
+    expect(y.notes[0]).toBe("本人のマイナンバーが登録されていない人（欄は空）：国税 太郎");
+    const z = buildSalaryReportCsv(2026, company, [p]);
+    expect(z.notes).toEqual([]);
+    expect(z.csv.split(",")[94]).toBe("");
   });
 });
 

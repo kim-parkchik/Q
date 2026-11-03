@@ -23,6 +23,7 @@ export const DB_SCHEMAS = [
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT DEFAULT 'staff',
+    my_number_access INTEGER DEFAULT 0, -- マイナンバーを扱える（事務取扱担当者。1）。印を付けられるのは管理者（詳しくは utils/myNumber.ts）
     status TEXT DEFAULT 'active',
     last_login TEXT,
     created_at TEXT DEFAULT (DATETIME('now', 'localtime'))
@@ -138,7 +139,7 @@ export const DB_SCHEMAS = [
     flat_tax_reduction_persons INTEGER DEFAULT 0, -- 令和6年分 定額減税の人数（本人＋同一生計配偶者＋扶養親族。0なら月次減税をしない）
     leave_periods TEXT,       -- 産休・育休の期間（社会保険料の免除に使う。JSON。詳しくは utils/leaveExemption.ts）
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
-    my_number TEXT,
+    my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
     FOREIGN KEY (payroll_group_id) REFERENCES payroll_groups(id),
     FOREIGN KEY (social_insurance_group_id) REFERENCES social_insurance_groups(id)
@@ -397,6 +398,19 @@ export const DB_SCHEMAS = [
     submit INTEGER,                -- 出さなくてよい退職者（30万円以下）も出す（1）
     updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     PRIMARY KEY (staff_id, year),
+    FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
+  // マイナンバー（個人番号）。従業員の一覧（staff.*）に入らないよう、別の表に置く。
+  // 見る・入れる・消すのは、事務取扱担当者の印（users.my_number_access）がある人だけ（詳しくは utils/myNumber.ts）
+  `CREATE TABLE IF NOT EXISTS my_numbers (
+    staff_id TEXT NOT NULL,
+    person TEXT NOT NULL,          -- "self"（本人）か、家族の印（"family:生年月日:氏名"。utils/myNumber.ts の familyKey）
+    name TEXT,                     -- 家族の氏名（画面に出す。本人は空）
+    relation TEXT,                 -- 家族の続柄（配偶者・子など。画面に出す）
+    number TEXT NOT NULL,          -- 12桁（12桁目の検査用数字を確かめてから入れる）
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    PRIMARY KEY (staff_id, person),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,
 

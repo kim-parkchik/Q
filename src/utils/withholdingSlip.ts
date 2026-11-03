@@ -25,6 +25,8 @@ import { formatWareki, toWareki, type Wareki } from "./wareki";
 export interface SlipPerson {
   furigana: string;
   name: string;
+  /** 生年月日（源泉徴収票には書かない。給与支払報告書の CSV で、マイナンバーを結び付けるのに使う） */
+  birthday: string;
   /** 区分（居住者は "00"、特定親族は特定親族特別控除の額に応じた数字。16歳未満の扶養親族は、受給者交付用では居住者なら空） */
   code: string;
 }
@@ -143,7 +145,7 @@ export const housingLoanKindDescription = (label: string): string => {
   return `${label}：${head}・${tail}`;
 };
 
-const person = (p: DeclaredPerson, code: string): SlipPerson => ({ furigana: str(p.furigana), name: str(p.name), code });
+const person = (p: DeclaredPerson, code: string): SlipPerson => ({ furigana: str(p.furigana), name: str(p.name), birthday: str(p.birthday), code });
 
 /** 源泉徴収票の各欄を作る */
 export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: WithholdingSlipMaster): WithholdingSlip => {

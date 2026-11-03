@@ -26,7 +26,7 @@ const header = (db: Database) => ({
 describe("会社ファイルの形式（2026-11-03 の形を v1 とする）", () => {
     test("v1 から始めて、今の最新は v3", () => {
         expect(BASE_DB_VERSION).toBe(1);
-        expect(LATEST_DB_VERSION).toBe(3);
+        expect(LATEST_DB_VERSION).toBe(4);
     });
     test("新しいファイル：表を作り、Q の印と最新の番号を付ける（更新は実行しない）", async () => {
         const db = new Database(":memory:");
@@ -80,7 +80,7 @@ describe("更新（マイグレーション）", () => {
     test("v2: 従業員に住民税の年度ごとの額の列を足す（初めは空。今までの月額はそのまま）", async () => {
         const db = v1File();
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(2);
+        expect(applied).toHaveLength(3);
         expect(applied[0]).toStartWith("v2:");
         expect(db.query("SELECT resident_tax AS t, resident_tax_schedule AS s FROM staff").get()).toEqual({ t: 7000, s: null });
         expect(header(db)).toEqual({ id: Q_FILE_ID, version: LATEST_DB_VERSION });
@@ -91,9 +91,23 @@ describe("更新（マイグレーション）", () => {
         db.exec("ALTER TABLE staff ADD COLUMN resident_tax_schedule TEXT");
         db.exec("PRAGMA user_version = 2");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(2);
         expect(applied[0]).toStartWith("v3:");
         expect(db.query("SELECT resident_tax_municipality AS m FROM staff").get()).toEqual({ m: null });
+    });
+    test("v4: v3 の会社ファイルのユーザーに、マイナンバーを扱える印の列を足す（初めは誰にも付けない）", async () => {
+        const db = v1File();
+        db.exec("ALTER TABLE staff ADD COLUMN resident_tax_schedule TEXT");
+        db.exec("ALTER TABLE staff ADD COLUMN resident_tax_municipality TEXT");
+        db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, login_id TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'staff')");
+        db.exec("INSERT INTO users (login_id, display_name, password_hash, role) VALUES ('admin', '管理者', 'x', 'admin')");
+        db.exec("PRAGMA user_version = 3");
+        const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
+        expect(applied).toHaveLength(1);
+        expect(applied[0]).toStartWith("v4:");
+        expect(db.query("SELECT my_number_access AS a FROM users").get()).toEqual({ a: 0 });
+        // マイナンバーの表は、開くときに作られる
+        expect(db.query("SELECT COUNT(*) AS n FROM my_numbers").get()).toEqual({ n: 0 });
     });
 });
 

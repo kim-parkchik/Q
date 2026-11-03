@@ -71,6 +71,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "resident_tax_municipality", "TEXT");
     },
   },
+  {
+    version: 4,
+    description: "ユーザーに、マイナンバーを扱える（事務取扱担当者）の印を追加（初めは誰にも付けない。管理者がシステム設定で付ける）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "users", "my_number_access", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

@@ -5,12 +5,12 @@ import { Users, DatabaseZap, Settings, Calendar, FileUp } from "lucide-react";
 import DevMessagePreview from "../../components/DevMessagePreview";
 
 // propsに currentUser を追加
-export default function SystemSettings({ db, currentUser }: { db: any, currentUser: { login_id: string, role: string } }) {
+export default function SystemSettings({ db, currentUser }: { db: any, currentUser: { id: number, login_id: string, display_name: string, role: string } }) {
   // currentUserがない場合のガード
   if (!currentUser) return null;
 
   const { 
-    users, deleteUser, addUser, updatePassword,
+    users, setMyNumberAccess, deleteUser, addUser, updatePassword,
     holidaySource, holidayUrl, updateHolidaySource, downloadSampleCsv,
     searchMode, updateSearchMode, apiKey, updateApiKey,
     backupGenerations, updateBackupGenerations
@@ -127,6 +127,7 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
                 <th style={S.th}>ログインID</th>
                 <th style={S.th}>表示名</th>
                 <th style={S.th}>権限</th>
+                <th style={S.th} title="マイナンバーを見る・入れる・消すことができる人（事務取扱担当者）">マイナンバー</th>
                 <th style={S.th}>最終ログイン</th>
                 <th style={S.th}>操作</th>
               </tr>
@@ -141,6 +142,20 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
                     <span style={S.roleBadge(user.role)}>
                       {user.role}
                     </span>
+                  </td>
+                  <td style={S.td}>
+                    {isAdmin ? (
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={Number(user.my_number_access) === 1}
+                          onChange={(e) => setMyNumberAccess(user, e.target.checked, currentUser)}
+                        />
+                        扱える
+                      </label>
+                    ) : (
+                      <span style={{ fontSize: 12, color: "#64748b" }}>{Number(user.my_number_access) === 1 ? "扱える" : "－"}</span>
+                    )}
                   </td>
                   <td style={{ ...S.td, ...S.lastLogin }}>
                     {user.last_login || "未ログイン"}
