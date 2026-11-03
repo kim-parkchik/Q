@@ -5,6 +5,9 @@
 import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { saveCsvFile } from "../../utils/fileSaveUtils";
+import { buildResidentTaxPaymentCsv } from "../../utils/residentTaxPaymentCsv";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { designationNumberError, normalizeDesignationNumber } from "../../utils/salaryPaymentReport";
@@ -102,5 +105,34 @@ export function useResidentTaxPaymentManager(db: Database, staffList: any[]) {
     }
   };
 
-  return { year, month, setYearMonth, isLoading, summary, saveSetting };
+  /** eLTAX の納付情報発行依頼の CSV を保存する（選んだ月の分。utils/residentTaxPaymentCsv.ts） */
+  const exportPaymentCsv = async () => {
+    const r = buildResidentTaxPaymentCsv(summary.groups, year, month);
+    if (r.error) {
+      dialog.warning(r.error);
+      return;
+    }
+    if (!r.csv) {
+      dialog.warning(["CSV に入れられる市区町村がありません。", ...r.skipped].join("\n"));
+      return;
+    }
+    const notes = [
+      ...(summary.pending.length > 0 ? [`${year}年${month}月の給与がまだ確定していない人が${summary.pending.length}人います（その人の分は CSV に入りません）。`] : []),
+      ...r.skipped,
+    ];
+    if (notes.length > 0) {
+      const ok = await ask(`${notes.join("\n")}\n\nこのまま CSV を作りますか？`, { title: "納付情報の CSV", kind: "warning" });
+      if (!ok) return;
+    }
+    try {
+      const saved = await saveCsvFile(r.csv, `住民税_納付情報_${year}年${month}月分.csv`);
+      if (!saved) return;
+      toast.success(`「${saved.name}」を保存しました（${r.municipalities}市区町村・${r.people}人・${r.total.toLocaleString()}円）`);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`CSV を保存できませんでした。\n${e}`);
+    }
+  };
+
+  return { year, month, setYearMonth, isLoading, summary, saveSetting, exportPaymentCsv };
 }

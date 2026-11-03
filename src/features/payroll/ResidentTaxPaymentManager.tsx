@@ -144,8 +144,23 @@ export default function ResidentTaxPaymentManager({ db, staffList }: Props) {
       ) : (
         <>
           <div style={{ ...card, fontSize: 13, color: "#1e293b" }}>
-            納める額の合計：<b>{yen(total)}円</b>（{z.summary.groups.length}か所）
-            {anySpecial && <span style={{ fontSize: 12, color: "#64748b", marginLeft: 8 }}>納期の特例の市区町村は、期間の6か月の合計です</span>}
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div>
+                納める額の合計：<b>{yen(total)}円</b>（{z.summary.groups.length}か所）
+                {anySpecial && <span style={{ fontSize: 12, color: "#64748b", marginLeft: 8 }}>納期の特例の市区町村は、期間の6か月の合計です</span>}
+              </div>
+              <button
+                type="button"
+                onClick={z.exportPaymentCsv}
+                style={{ padding: "9px 16px", border: "none", borderRadius: 8, fontWeight: "bold", color: "white", cursor: "pointer", backgroundColor: "#27ae60", marginLeft: "auto" }}
+              >
+                eLTAX の納付情報の CSV を書き出す（{z.year}年{z.month}月分）
+              </button>
+            </div>
+            <p style={note}>
+              eLTAX の PCdesk の「納付情報発行依頼」（個人住民税（特別徴収））で取り込むファイルです。形式は、地方税共同機構「個人住民税（特別徴収）CSVレイアウト仕様書（CSVフォーマット）」です。
+              毎月納める市区町村の、この月の分を書きます。納期の特例の市区町村は入れないので、PCdesk で入れてください。
+            </p>
           </div>
           {z.summary.groups.map((g) => <GroupCard key={g.code || "unset"} g={g} z={z} />)}
         </>
