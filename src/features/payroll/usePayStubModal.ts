@@ -6,6 +6,8 @@ import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
+import { writeLog } from '../../utils/logUtils';
+import { ask } from '@tauri-apps/plugin-dialog';
 
 // 型定義
 interface UsePayStubProps {
@@ -20,7 +22,24 @@ interface UsePayStubProps {
 export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, month, companySettings }: UsePayStubProps) {
   // 給与形態・基本給・扶養人数は、この月の分の履歴の値を使う（utils/staffHistory.ts）
   const staff = useMemo(() => staffAsOf(staffRecord, year, month), [staffRecord, year, month]);
+  /** この月の分の給与を確定しているか（確定した結果があるか。確定していれば、勤怠の画面でその月の勤怠を変えられない） */
   const [isSaved, setIsSaved] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!db) return;
+      try {
+        const rows = await db.select(
+          "SELECT COUNT(*) AS n FROM salary_results WHERE staff_id = ? AND target_year = ? AND target_month = ?",
+          [staff.id, year, month]
+        ) as { n: number }[];
+        if (!cancelled) setIsSaved(Number(rows?.[0]?.n) > 0);
+      } catch (e) {
+        console.error("給与の確定の状況の読み込みエラー:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [db, staff.id, year, month]);
   const [extras, setExtras] = useState<SalaryExtras>({
     allowanceName: "役職手当",
     allowanceAmount: 0,
@@ -244,9 +263,37 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
     if (result.success) {
       setIsSaved(true);
-      alert(`${staff.name}さん ${year}年${month}月分の給与を確定しました。`);
+      await writeLog(db, "INFO", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を確定しました`);
+      alert(`${staff.name}さん ${year}年${month}月分の給与を確定しました。\nこの月の勤怠は、確定を取り消すまで変えられません。`);
     } else {
       alert("保存に失敗しました: " + result.error);
+    }
+  };
+
+  /**
+   * 給与の確定を取り消す（確定した結果を消す）。取り消すと、この月の勤怠を直せるようになる（勤怠の画面のロックが外れる）
+   * 確定した給与は、年末調整・源泉徴収票・算定基礎・月変・住民税の納入などの集計に使うので、直したら確定し直してもらう
+   */
+  const handleCancelResult = async () => {
+    if (!db || !staff) return;
+    const ok = await ask(
+      `${staff.name}さんの${year}年${month}月分の給与の確定を取り消します。\n\n` +
+      `取り消すと、この月の勤怠を直せるようになります。確定した給与は、年末調整・源泉徴収票・算定基礎・月変・住民税の納入などの集計から外れるので、直したら必ずもう一度確定してください。\n\n` +
+      `よろしいですか？`,
+      { title: "給与の確定を取り消す", kind: "warning" }
+    );
+    if (!ok) return;
+    try {
+      await db.execute(
+        "DELETE FROM salary_results WHERE staff_id = ? AND target_year = ? AND target_month = ?",
+        [staff.id, year, month]
+      );
+      setIsSaved(false);
+      await writeLog(db, "INFO", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与の確定を取り消しました`);
+      alert(`${staff.name}さん ${year}年${month}月分の給与の確定を取り消しました。勤怠を直したら、もう一度確定してください。`);
+    } catch (e) {
+      console.error("給与の確定の取り消しに失敗しました:", e);
+      alert("確定を取り消せませんでした（確定したままです）: " + e);
     }
   };
 
@@ -258,6 +305,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     setExtras,
     isSaved,
     handleSaveResult,
+    handleCancelResult,
     wageLabel,
     customEarningItems,
     customDeductionItems,

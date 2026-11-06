@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { executeBatch } from "../../utils/dbBatch";
 
 export interface SalaryItem {
   id: number;
@@ -12,6 +13,8 @@ export interface SalaryItem {
 }
 
 interface Database {
+  /** Database.load に渡した "sqlite:…"（まとめて保存するときに使う。utils/dbBatch.ts） */
+  path: string;
   select<T>(query: string, bindValues?: any[]): Promise<T>;
   execute(query: string, bindValues?: any[]): Promise<any>;
 }
@@ -85,33 +88,21 @@ export function useCustomItemManager(db: Database) {
     const targetItem = sameTypeList[targetIndex];
 
     // 2. display_order を入れ替える
+    // 2つの UPDATE を1つのトランザクションでまとめて行う（途中で失敗したら、どちらも元のまま。utils/dbBatch.ts）
     try {
-      // 🆕 トランザクション開始
-      await db.execute("BEGIN");
-
-      // Aさんの順序をBさんのものにする
-      await db.execute(
-        "UPDATE salary_item_master SET display_order = ? WHERE id = ?", 
-        [targetItem.display_order, currentItem.id]
-      );
-
-      // Bさんの順序をAさんのものにする
-      await db.execute(
-        "UPDATE salary_item_master SET display_order = ? WHERE id = ?", 
-        [currentItem.display_order, targetItem.id]
-      );
-
-      // 🆕 全て成功したら確定（これによって2つのUPDATEが同時に適用される）
-      await db.execute("COMMIT");
+      await executeBatch(db, [
+        // Aさんの順序をBさんのものにする
+        { sql: "UPDATE salary_item_master SET display_order = ? WHERE id = ?", values: [targetItem.display_order, currentItem.id] },
+        // Bさんの順序をAさんのものにする
+        { sql: "UPDATE salary_item_master SET display_order = ? WHERE id = ?", values: [currentItem.display_order, targetItem.id] },
+      ]);
 
       // 画面上のリストを再読み込み
       loadMasterItems();
 
     } catch (e) {
-      // 🆕 途中でエラーが起きたら、1つ目のUPDATEもなかったことにする
-      await db.execute("ROLLBACK");
       console.error("並び替えに失敗しました", e);
-      alert("並び替え中にエラーが発生しました。");
+      alert("並び替え中にエラーが発生しました（並びは元のままです）。");
     }
   };
 

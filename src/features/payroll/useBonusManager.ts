@@ -8,6 +8,9 @@ import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 import { checkLeaveExemptBonus, parseLeavePeriods } from '../../utils/leaveExemption';
+import { executeBatch } from '../../utils/dbBatch';
+import { buildAddBonusSettingStatements, buildFinalizeBonusStatements, buildUnfinalizeBonusStatements } from '../../utils/bonusResults';
+import { useMessageDialog } from '../../components/MessageDialog';
 
 // --- Types ---
 interface BonusSetting {
@@ -27,6 +30,7 @@ interface BonusItem {
 }
 
 export const useBonusManager = (db: Database | null, staffList: any[]) => { // 🆕 nullを許容
+  const dialog = useMessageDialog();
   const [activeTab, setActiveTab] = useState<'list' | 'items' | 'calc'>('list');
   const [settings, setSettings] = useState<BonusSetting[]>([]);
   const [selectedSettingId, setSelectedSettingId] = useState<number | null>(null);
@@ -168,6 +172,11 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
   const saveSettingEdit = async () => {
     if (!db || !editingSettingId) return;
     if (!settingName.trim() || !newPaymentDate) return;
+    // 確定した賞与の支給日は変えない（支給日で、年末調整の年・料率・税額表・社会保険の判定が決まるため）
+    const editing = settings.find(s => s.id === editingSettingId);
+    if (editing?.is_closed && editing.payment_date !== newPaymentDate) {
+      return dialog.warning(`「${editing.name}」は確定済みのため、支給日を変えられません。\n支給日を変えるときは、先に「確定を取り消す」をしてから変え、もう一度確定してください。`);
+    }
 
     const dateObj = new Date(newPaymentDate);
     const year = dateObj.getFullYear();
@@ -221,6 +230,19 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
   const deleteItem = async (id: number) => {
     if (!db) return;
+    // 項目を消すと、すべての賞与のその項目の金額も一緒に消える（bonus_staff_values は項目を消すと消える）ので、金額が入っていれば消さない
+    const used = await db.select<{ name: string; payment_date: string }[]>(
+      `SELECT DISTINCT s.name, s.payment_date FROM bonus_staff_values v JOIN bonus_settings s ON s.id = v.bonus_setting_id
+       WHERE v.item_id = ? AND v.amount != 0 ORDER BY s.payment_date`,
+      [id]
+    );
+    if (used.length > 0) {
+      return dialog.warning(
+        `この項目には、次の賞与で金額が入っているため消せません（消すと、その金額も消えます）。\n` +
+        used.map(u => `・${u.name}（支給日 ${u.payment_date}）`).join("\n") +
+        `\n\n使わないときは、賞与ごとの項目の切り替えで外してください。`
+      );
+    }
     const ok = await ask("項目を削除しますか？", { title: '警告', kind: 'warning' });
     if (ok) {
       await db.execute("DELETE FROM bonus_item_master WHERE id = ?", [id]);
@@ -246,55 +268,37 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     if (!settingName.trim() || !newPaymentDate) return;
 
     try {
-      // 0. トランザクション開始
-      await db.execute("BEGIN");
-
-      const dateObj = new Date(newPaymentDate);
-      
-      // 1. 賞与設定を保存
-      const res = await db.execute(
-        "INSERT INTO bonus_settings (name, target_year, target_month, payment_date) VALUES (?, ?, ?, ?)", 
-        [settingName, dateObj.getFullYear(), dateObj.getMonth() + 1, newPaymentDate]
-      );
-
-      // 2. 新しく作った賞与のIDを取得
-      const newId = Number(res.lastInsertId);
-
-      // 3. デフォルト有効な項目を取得
-      const defaultItems = await db.select<{id: number}[]>(
-        "SELECT id FROM bonus_item_master WHERE is_default_active = 1"
-      );
-
-      // 4. ループで紐付けデータを挿入
-      for (const item of defaultItems) {
-        await db.execute(
-          "INSERT INTO bonus_setting_items (bonus_setting_id, item_id) VALUES (?, ?)",
-          [newId, item.id]
-        );
-      }
-
-      // 5. すべて成功したら確定
-      await db.execute("COMMIT");
+      // 賞与設定と、初めから有効にする項目の紐付けを、1つのトランザクションでまとめて保存する（utils/dbBatch.ts・bonusResults.ts）
+      const results = await executeBatch(db, buildAddBonusSettingStatements(settingName, newPaymentDate));
+      const newId = Number(results[0].lastInsertId);
 
       // --- 成功後のUI処理 ---
       await loadSettings();
       setSelectedSettingId(newId);
       setActiveTab('calc');
       // フォームをリセット（お好みで）
-      setSettingName('夏季賞与'); 
+      setSettingName('夏季賞与');
 
     } catch (e) {
-      // 6. どこかでエラーが起きたら、今回の全処理（設定保存含む）を取り消す
-      await db.execute("ROLLBACK");
+      // どこかでエラーが起きたら、設定の保存も含めて取り消されている
       console.error("賞与設定の追加に失敗しました:", e);
-      // ユーザーに通知（askなどを流用しても良いでしょう）
-      alert("エラーが発生したため、保存を中断しました。");
+      dialog.error(`賞与を追加できませんでした（何も保存していません）。\n${e}`);
     }
   };
 
   const deleteSetting = async (id: number) => {
     if (!db) return;
-    const ok = await ask("賞与設定を削除しますか？", { title: '削除確認', kind: 'warning' });
+    // 確定した賞与は消さない（消すと確定結果 bonus_results も一緒に消え、年末調整・源泉徴収票の1年分の集計から黙って抜けるため）
+    const setting = settings.find(s => s.id === id);
+    const results = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM bonus_results WHERE bonus_setting_id = ?", [id]);
+    if (setting?.is_closed || Number(results?.[0]?.n) > 0) {
+      return dialog.warning(
+        `「${setting?.name ?? "この賞与"}」は確定済みのため、消せません。\n` +
+        `確定した賞与は、年末調整・源泉徴収票・源泉徴収簿の1年分の集計に入っています（支払った記録として残してください）。\n` +
+        `間違えて作った賞与を消すときは、先に「確定を取り消す」をしてください。`
+      );
+    }
+    const ok = await ask("賞与設定を削除しますか？\n入れた金額も一緒に消えます。", { title: '削除確認', kind: 'warning' });
     if (ok) {
       await db.execute("DELETE FROM bonus_settings WHERE id = ?", [id]);
       if (selectedSettingId === id) setSelectedSettingId(null);
@@ -446,24 +450,34 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     );
     if (!ok) return;
     try {
-      await db.execute("BEGIN");
-      await db.execute("DELETE FROM bonus_results WHERE bonus_setting_id = ?", [selectedSetting.id]);
-      for (const { staff, calc } of rows) {
-        await db.execute(
-          `INSERT INTO bonus_results (bonus_setting_id, staff_id, total_earnings, hyojun_bonus, health_insurance, nursing_insurance,
-             child_support, welfare_pension, emp_insurance, income_tax, custom_deductions, net_pay, is_nursing)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [selectedSetting.id, staff.id, calc.totalEarnings, calc.hyojunBonus, calc.healthInsurance, calc.nursingInsurance,
-           calc.childSupport, calc.welfarePension, calc.empInsurance, calc.incomeTax, calc.customDeductions, calc.netPay, calc.isNursing ? 1 : 0]
-        );
-      }
-      await db.execute("UPDATE bonus_settings SET is_closed = 1 WHERE id = ?", [selectedSetting.id]);
-      await db.execute("COMMIT");
+      // 前の結果を消して保存し直すまでを、1つのトランザクションでまとめて行う（途中で失敗したら、前の結果のまま。utils/dbBatch.ts）
+      await executeBatch(db, buildFinalizeBonusStatements(selectedSetting.id, rows));
       await loadSettings();
     } catch (e) {
-      await db.execute("ROLLBACK");
       console.error("賞与の確定に失敗しました:", e);
-      alert("賞与の確定に失敗しました: " + e);
+      dialog.error(`賞与を確定できませんでした（前の確定の状態のままです）。\n${e}`);
+    }
+  };
+
+  /**
+   * 選んでいる賞与の確定を取り消す：確定結果（bonus_results）を消し、計算中に戻す
+   * 取り消すと、年末調整・源泉徴収票・源泉徴収簿の1年分の集計から外れる。間違えて作った賞与を消すときや、支給日を直すときに使う
+   */
+  const unfinalizeBonus = async () => {
+    if (!db || !selectedSetting) return;
+    const ok = await ask(
+      `「${selectedSetting.name}」の確定を取り消します。\n` +
+      `取り消すと、この賞与は年末調整・源泉徴収票・源泉徴収簿の1年分の集計から外れます。支払った賞与なら、直したあと必ずもう一度確定してください。\n` +
+      `よろしいですか？`,
+      { title: '賞与の確定を取り消す', kind: 'warning' }
+    );
+    if (!ok) return;
+    try {
+      await executeBatch(db, buildUnfinalizeBonusStatements(selectedSetting.id));
+      await loadSettings();
+    } catch (e) {
+      console.error("賞与の確定の取り消しに失敗しました:", e);
+      dialog.error(`確定を取り消せませんでした（確定したままです）。\n${e}`);
     }
   };
 
@@ -492,6 +506,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     staffValues, saveStaffValue, calcBonusForStaff,
     bonusStaffList,
     finalizeBonus,
+    unfinalizeBonus,
     rateWarnings,
   };
 };

@@ -24,6 +24,8 @@ tauri-plugin-fs = "2"
 # データ処理関連
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 会社ファイルへの書き込みを1つのトランザクションでまとめる（execute_batch。tauri-plugin-sql と同じ sqlx を使う）
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 
 # 🆕 パスワード暗号化（Argon2）関連
 argon2 = "0.5"

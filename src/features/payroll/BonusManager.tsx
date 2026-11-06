@@ -129,6 +129,7 @@ export default function BonusManager({ db, staffList }: Props) {
     calcBonusForStaff,
     bonusStaffList,
     finalizeBonus,
+    unfinalizeBonus,
     rateWarnings
   } = useBonusManager(db, staffList);
   const selectedSetting = settings.find(s => s.id === selectedSettingId);
@@ -628,9 +629,18 @@ export default function BonusManager({ db, staffList }: Props) {
                 >
                   {selectedSetting.is_closed ? "確定し直す" : "この賞与を確定"}
                 </button>
+                {selectedSetting.is_closed ? (
+                  <button
+                    onClick={unfinalizeBonus}
+                    title="確定結果を消して、計算中に戻します（年末調整などの集計から外れます）。間違えて作った賞与を消すときや、支給日を直すときに使います"
+                    style={{ padding: "8px 12px", border: "1px solid #94a3b8", borderRadius: 6, color: "#475569", backgroundColor: "white", cursor: "pointer" }}
+                  >
+                    確定を取り消す
+                  </button>
+                ) : null}
                 <span style={{ fontSize: 12, color: "#64748b" }}>
                   {selectedSetting.is_closed
-                    ? "確定済みです。金額を直したときは、もう一度確定してください（年末調整の集計に使います）。"
+                    ? "確定済みです。金額を直したときは、もう一度確定してください（年末調整の集計に使います）。確定した賞与は、消すことも支給日を変えることもできません（先に確定を取り消してください）。"
                     : "確定すると、年末調整の1年分の集計に入ります。"}
                 </span>
               </div>

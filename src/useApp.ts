@@ -1,6 +1,6 @@
 // @ts-ignore
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { mkdir, readDir, remove } from "@tauri-apps/plugin-fs";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { copyFile, exists, mkdir, readDir, remove } from "@tauri-apps/plugin-fs";
 import { documentDir, join } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Database from "@tauri-apps/plugin-sql";
@@ -11,6 +11,7 @@ import { APP_DIR_NAME, BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, 
 import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
 import { prepareCompanyFile } from "./utils/migrations";
+import { backupFileName, backupsToDelete, companyBaseName, isBackupFile, restoredFileName } from "./utils/backupFiles";
 import { useMessageDialog } from "./components/MessageDialog";
 import { lockVault } from "./features/mynumber/myNumberVault";
 
@@ -65,7 +66,43 @@ export const useApp = () => {
       filters: [{ name: APP_PROJECT_NAME, extensions: [EXT_MAIN, EXT_BACKUP] }], // 👈 バックアップ(.qb)も開けるように追加！
       defaultPath: qFolder // 👈 「開く」時もQフォルダを初期位置にする
     });
-    if (typeof filePath === "string") await loadDatabase(filePath);
+    if (typeof filePath !== "string") return;
+    if (isBackupFile(filePath)) {
+      await openBackupCopy(filePath, qFolder);
+      return;
+    }
+    await loadDatabase(filePath);
+  };
+
+  /**
+   * バックアップ（.qb）は直接開かずに、写しの会社ファイル（.qp）を作って開く（utils/backupFiles.ts）
+   * 直接開くと、表の更新やログの書き込みでバックアップの中身が変わり、閉じたときにバックアップのバックアップもできてしまうため
+   */
+  const openBackupCopy = async (backupPath: string, qFolder: string) => {
+    const ok = await ask(
+      "バックアップ（.qb）は、そのまま開かずに、写しの会社ファイル（.qp）を作って開きます（バックアップのファイルは変えません）。\n" +
+      "次の画面で、写しの保存先と名前を選んでください。",
+      { title: "バックアップを開く", kind: "info" }
+    );
+    if (!ok) return;
+    const dest = await save({
+      filters: [{ name: APP_PROJECT_NAME, extensions: [EXT_MAIN] }],
+      defaultPath: await join(qFolder, restoredFileName(backupPath)),
+    });
+    if (!dest) return;
+    try {
+      // いまある会社ファイルには上書きしない（その会社ファイルの作業中のファイル（-wal）が残っていると、壊れることがあるため）
+      if (await exists(dest)) {
+        await dialog.warning("同じ名前のファイルがあります。上書きはしないので、別の名前を選んでください。");
+        return;
+      }
+      await copyFile(backupPath, dest);
+    } catch (e) {
+      console.error("バックアップの写しを作れませんでした:", e);
+      await dialog.error(`バックアップの写しを作れませんでした。\n${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    await loadDatabase(dest);
   };
 
   // 🆕 共通のロード処理（ここが今の useEffect の中身を移植した場所）
@@ -188,56 +225,38 @@ export const useApp = () => {
         // 2. フォルダがなければ作成
         await mkdir(backupDir, { recursive: true });
 
-        // 3. 日付つきのファイル名を作成
-        const now = new Date();
-        const timestamp = now.getFullYear().toString() + 
-          (now.getMonth() + 1).toString().padStart(2, '0') + 
-          now.getDate().toString().padStart(2, '0') + "_" +
-          now.getHours().toString().padStart(2, '0') +
-          now.getMinutes().toString().padStart(2, '0');
-
-        // 🆕 ファイル名から拡張子を切り離す
-        const rawFileName = dbPath.split(/[\\/]/).pop() || "data.qp";
-        const baseName = rawFileName.replace(/\.[^/.]+$/, ""); // 一番右のドット以降を削除
-
-        // 🆕 カッコいい名前： "会社名_20260502_0750.qb"
-        const backupFileName = `${baseName}_${timestamp}.${EXT_BACKUP}`;
-        const targetPath = await join(backupDir, backupFileName);
+        // 3. 日付つきのファイル名を作成："会社名_20260502_075012.qb"（秒まで入れる。utils/backupFiles.ts）
+        const baseName = companyBaseName(dbPath);
+        const targetPath = await join(backupDir, backupFileName(baseName, new Date()));
 
         // 4. 【魔法の1行】SQLiteに「自分自身を別名で書き出せ」と命令する
         // これなら -wal ファイルの内容も自動で統合され、1つのファイルになります。
-        // 区切り文字を念のため / に統一します。
-        const safePath = targetPath.replace(/\\/g, '/');
-        await db.execute(`VACUUM INTO '${safePath}'`);
-        console.log("バックアップ成功:", safePath);
+        // 書き出す先は ? で渡す（ファイル名やフォルダ名に ' があっても書き出せるように）
+        await db.execute("VACUUM INTO ?", [targetPath]);
+        console.log("バックアップ成功:", targetPath);
 
         // 🆕 6. 世代管理ロジックの開始
         // DBから設定された世代数を取得
         const configRes = await db.select<any[]>(
           "SELECT backup_generations FROM company WHERE id = 1"
         );
-        const maxGenerations = configRes[0]?.backup_generations || 10; // デフォルト10
 
-        // バックアップフォルダ内のファイル一覧を取得
+        // この会社ファイルのバックアップだけを新しい順に並べ、設定数を超えた古いものを消す
+        // （名前の頭が同じ別の会社ファイルのバックアップは、数えない・消さない）
         const entries = await readDir(backupDir);
-        
-        // 今回対象とするファイル（同じ会社のバックアップファイル）を抽出してソート
-        const backupFiles = entries
-          .filter(e => e.isFile && e.name.startsWith(baseName) && e.name.endsWith(`.${EXT_BACKUP}`))
-          .sort((a, b) => (a.name < b.name ? 1 : -1)); // 降順（新しい順）に並び替え
-
-        // 設定数を超えている古いファイルを削除
-        if (backupFiles.length > maxGenerations) {
-          const filesToDelete = backupFiles.slice(maxGenerations);
-          for (const file of filesToDelete) {
-            const deletePath = await join(backupDir, file.name);
-            await remove(deletePath);
-            console.log("古いバックアップを削除しました:", file.name);
-          }
+        const filesToDelete = backupsToDelete(entries.filter(e => e.isFile).map(e => e.name), baseName, configRes[0]?.backup_generations);
+        for (const name of filesToDelete) {
+          await remove(await join(backupDir, name));
+          console.log("古いバックアップを削除しました:", name);
         }
 
       } catch (err) {
         console.error("バックアップに失敗しました:", err);
+        // 知らせないと、バックアップが作られていないことに気づけない（閉じる前に OK を押してもらう）
+        await dialog.error(
+          `会社ファイルのバックアップを作れませんでした（会社ファイルはそのまま閉じます）。\n` +
+          `書類フォルダの「${APP_DIR_NAME}/${BACKUP_DIR_NAME}」に書き込めるか、空き容量があるかを確かめてください。\n${err instanceof Error ? err.message : String(err)}`
+        );
       } finally {
         // 5. バックアップが終わってから、あるいは失敗しても、接続は必ず閉じる
         await db.close();

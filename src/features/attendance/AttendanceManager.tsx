@@ -69,6 +69,13 @@ export default function AttendanceManager(props: AttendanceManagerProps) {
                     <span style={{ color: "#3498db", fontWeight: "bold", fontSize: "14px" }}>読み込み中...</span>
                   </div>
                 )}
+                {/* 給与を確定した月は、勤怠を変えられない（確定した給与と勤怠が食い違わないように） */}
+                {am.isClosed && (
+                  <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 6, backgroundColor: "#fef3c7", color: "#92400e", fontSize: 13 }}>
+                    この人の{am.targetYear}年{am.targetMonth}月支給分の給与は確定済みのため、勤怠を変えられません。
+                    直すときは、給与明細で「確定を取り消す」をしてから勤怠を直し、給与を確定し直してください。
+                  </div>
+                )}
                 <AttendanceTable am={am} />
 
                 <SummaryBoard am={am} />

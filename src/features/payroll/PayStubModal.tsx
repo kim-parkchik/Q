@@ -17,7 +17,7 @@ interface Props {
 
 export default function PayStubModal(props: Props) {
   const {
-    salary, extras, setExtras, isSaved, handleSaveResult,
+    salary, extras, setExtras, isSaved, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
     monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays,
@@ -62,13 +62,24 @@ export default function PayStubModal(props: Props) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
-            <button 
-              onClick={handleSaveResult} 
+            <button
+              onClick={handleSaveResult}
+              title={isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
               style={{ ...S.printBtnS, flex: 1, backgroundColor: isSaved ? "#27ae60" : "#8e44ad" }}
             >
-              {isSaved ? "✅ 確定済み" : "💾 給与確定"}
+              {isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
             </button>
+            {isSaved && (
+              <button onClick={handleCancelResult} style={{ ...S.printBtnS, flex: 1, backgroundColor: "#64748b" }}>
+                確定を取り消す
+              </button>
+            )}
           </div>
+          {isSaved && (
+            <div style={{ marginTop: 6, fontSize: 12, color: "#475569" }}>
+              確定した月の勤怠は、勤怠の画面で変えられません。勤怠を直すときは「確定を取り消す」をしてから直し、もう一度確定してください。
+            </div>
+          )}
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}

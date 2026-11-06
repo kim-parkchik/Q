@@ -263,6 +263,7 @@ export const DB_SCHEMAS = [
   );`,
 
   // 13. 給与確定フラグ
+  // ※ いまは使っていない（給与を確定したかは、その人・その月の salary_results があるかで見る。勤怠の画面のロックも同じ）
   `CREATE TABLE IF NOT EXISTS salary_closings (
     target_year INTEGER NOT NULL,
     target_month INTEGER NOT NULL,

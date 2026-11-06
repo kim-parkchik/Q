@@ -10,6 +10,11 @@ import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 
+/** 給与を確定した月の勤怠を変えようとしたときの知らせ */
+export const CLOSED_MESSAGE =
+  "この人のこの月（支給月）の給与は確定済みのため、勤怠を変えられません。\n" +
+  "直すときは、給与明細で「確定を取り消す」をしてから勤怠を直し、給与を確定し直してください。";
+
 export function useAttendanceManager({ db, staffList, targetYear, targetMonth }: any) {
   const toast = useToast();
   const dialog = useMessageDialog();
@@ -209,10 +214,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
    * @returns 保存できたら true
    */
   const finalizeAttendance = async (date: string, quiet = false): Promise<boolean> => {
-    if (isClosed) {
-      if (!quiet) dialog.warning("この月は給与確定済みのため、変更できません。");
-      return false;
-    }
+    if (await blockedByConfirmedSalary(quiet)) return false;
     if (!db || !selectedStaffId || !selectedStaff) return false;
     
     const row = monthlyWorkData[date];
@@ -294,7 +296,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // --- 1日のデータをDBの状態に戻す（キャンセル処理） ---
   const unfinalizeAttendance = async (date: string) => {
-    if (isClosed) return dialog.warning("給与確定済みの月は、確定を解除できません。");
+    if (await blockedByConfirmedSalary()) return;
     if (!db || !selectedStaffId) return;
 
     try {
@@ -325,8 +327,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     
     if (targetDates.length === 0) {
       toast.info("保存が必要な入力はありません");
-      return; 
+      return;
     }
+    if (await blockedByConfirmedSalary()) return;
 
     // 2. 対象がある場合のみ Loading 開始
     if (isLoading) return; 
@@ -481,19 +484,47 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     );
   };
 
+  // --- この人のこの月（支給月）の給与を確定しているか ---
+  // 確定した給与（salary_results）があれば、その計算期間の勤怠は変えられない（確定した給与と勤怠が食い違わないように）。
+  // 直すときは、給与明細で「確定を取り消す」をしてから直し、確定し直す
+  const isSalaryConfirmed = useCallback(async (): Promise<boolean> => {
+    if (!db || !selectedStaffId || !targetYear || !targetMonth) return false;
+    const res = await db.select(
+      "SELECT COUNT(*) AS n FROM salary_results WHERE staff_id = ? AND target_year = ? AND target_month = ?",
+      [selectedStaffId, targetYear, targetMonth]
+    ) as any[];
+    return Number(res?.[0]?.n) > 0;
+  }, [db, selectedStaffId, targetYear, targetMonth]);
+
   const checkMonthStatus = useCallback(async () => {
-    if (!db || !targetYear || !targetMonth) return;
     try {
-      const res = await db.select(
-        "SELECT is_closed FROM salary_closings WHERE target_year = ? AND target_month = ?",
-        [targetYear, targetMonth]
-      ) as any[];
-      setIsClosed(res?.[0]?.is_closed === 1);
+      setIsClosed(await isSalaryConfirmed());
     } catch (e) {
       console.error("確定状況取得エラー:", e);
-      setIsClosed(false);
+      // 確かめられないときは、変えられないようにする
+      setIsClosed(true);
+      dialog.error(`給与の確定の状況を読み込めなかったため、勤怠を変えられないようにしています。\n${e}`);
     }
-  }, [db, targetYear, targetMonth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSalaryConfirmed]);
+
+  /** 勤怠を変える前に、給与を確定していないかを表から確かめる（確定していれば知らせて true） */
+  const blockedByConfirmedSalary = async (quiet = false): Promise<boolean> => {
+    let confirmed = isClosed;
+    if (!confirmed) {
+      try {
+        confirmed = await isSalaryConfirmed();
+      } catch (e) {
+        console.error("確定状況取得エラー:", e);
+        confirmed = true;
+      }
+    }
+    if (confirmed) {
+      setIsClosed(true);
+      if (!quiet) dialog.warning(CLOSED_MESSAGE);
+    }
+    return confirmed;
+  };
 
   // --- 打刻ログのエクスポート ---
   const handleExportRawCSV = async () => {
@@ -538,13 +569,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
       if (!data.length) return dialog.warning("この計算期間の勤怠データはありません。");
 
-      // CSVに確定状態の列を追加
+      // CSVに確定状態の列を追加（その日の勤怠を確定したか）
       const csvData = data.map(row => ({
         ...row,
-        "確定ステータス": isClosed ? "確定済み" : "未確定"
+        "確定ステータス": Number(row.is_finalized) === 1 ? "確定済み" : "未確定"
       }));
 
-      const statusLabel = isClosed ? "" : "_【未確定あり】";
+      const statusLabel = data.every(row => Number(row.is_finalized) === 1) ? "" : "_【未確定あり】";
       const filename = `勤怠詳細_${targetYear}年${targetMonth}月支給分${statusLabel}.csv`;
 
       const csvContent = generateAttendanceCSV(csvData); 
@@ -559,10 +590,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
   // --- CSVインポート ---
   const handleImportCSV = async () => {
-    if (isClosed) {
-      dialog.warning("この月はすでに給与確定されているため、取り込めません。");
-      return;
-    }
+    // 取り込むのは打刻の列（csv_…）だけで、確定した日は上書きしない（下の WHERE is_finalized = 0）。
+    // 給与は確定した日の勤怠だけで計算し、給与を確定した月の日は確定できないので、確定した給与とは食い違わない
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.csv';
