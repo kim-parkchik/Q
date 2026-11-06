@@ -244,6 +244,8 @@ export const DB_SCHEMAS = [
     fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0）
     fixed_overtime_excess INTEGER DEFAULT 0,    -- 時間外労働の割増賃金が固定残業代を超えた差額（超過分として払った額）
     non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う）
+    absence_deduction INTEGER,                  -- 欠勤控除の額（月給制。v8 より前に確定した給与は NULL）
+    prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
 
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,
@@ -343,6 +345,7 @@ export const DB_SCHEMAS = [
     tax_calc_method TEXT DEFAULT 'table', -- 源泉所得税の計算方法 'table':月額表 / 'densanki':電算機計算の特例
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
+    absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,
 

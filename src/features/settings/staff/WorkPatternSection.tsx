@@ -94,9 +94,9 @@ export default function WorkPatternSection({ cm }: Props) {
                         </select>
                     
                         <p style={{ fontSize: "10px", color: "#64748b", marginTop: "4px", lineHeight: "1.4" }}>
-                            {targetPatternId === 0 
-                                ? "※欠勤控除などを行わない完全月給制の場合などに選択します。" 
-                                : "※休日設定から年間稼働日数を算出し、欠勤判定に使用します。"}
+                            {targetPatternId === 0
+                                ? "※下の契約曜日を所定労働日として数えます（祝日も出勤日）。欠勤控除をしない完全月給制は、会社設定の給与規定グループで選びます。"
+                                : "※カレンダーの休日から所定労働日を数え、残業代の時給・欠勤控除・日割りに使います。"}
                         </p>
                     </div>
 

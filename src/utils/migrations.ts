@@ -100,6 +100,15 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "commute_setting", "TEXT");
     },
   },
+  {
+    version: 8,
+    description: "給与規定グループに欠勤控除のしかた（初めは計算期間の所定労働日数で割る）を、確定した給与に欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う）を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "absence_deduction_method", "TEXT DEFAULT 'workdays'");
+      await addColumnIfMissing(db, "salary_results", "absence_deduction", "INTEGER");
+      await addColumnIfMissing(db, "salary_results", "prescribed_work_days", "INTEGER");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

@@ -84,6 +84,11 @@ describe("支払基礎日数", () => {
     test("月給制で欠勤した日があれば、所定労働日数 − 欠勤日数", () => {
         const rows = [{ work_date: "2026-04-06", work_type: "absent" }, { work_date: "2026-04-07", work_type: "absent" }];
         expect(paymentBasisDays("monthly", period, rows, 22)).toBe(20);
+        expect(paymentBasisDays("monthly", period, rows, 22, true)).toBe(20);
+    });
+    test("欠勤控除をしない月給制（完全月給制）は、欠勤があっても暦日数（日本年金機構 算定基礎届の記入・提出ガイドブック：欠勤日数分だけ給料が差し引かれる場合だけ）", () => {
+        const rows = [{ work_date: "2026-04-06", work_type: "absent" }, { work_date: "2026-04-07", work_type: "absent" }];
+        expect(paymentBasisDays("monthly", period, rows, 22, false)).toBe(30);
     });
     test("時給制は、働いた日と有給休暇の日の数", () => {
         const rows = [
@@ -143,6 +148,21 @@ describe("確定した給与と勤怠から、1人ずつの値を作る", () => 
         const [r] = buildSanteiInputs([{ ...monthly, id: "B", wage_type: "hourly" }], 2026, [endOfMonth],
             [salary("B", 4, 120000)], attendance);
         expect(r.months[0].days).toBe(2);
+    });
+    test("月給制で欠勤控除をした月：確定したときに残した計算期間の所定労働日数（会社カレンダー）− 欠勤日数", () => {
+        // 2026年5月は祝日が平日に3日あり、所定労働日は18日（土日を除いた日数は21日）
+        const absent = (date: string) => ({ staff_id: "A", work_date: date, work_type: "absent", work_hours: 0 });
+        const attendance = [absent("2026-05-11"), absent("2026-05-12")];
+        const deducted = { ...salary("A", 5, 266668), absence_deduction: 33332, prescribed_work_days: 18 };
+        const [r] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth], [deducted], attendance);
+        expect(r.months[1]).toMatchObject({ month: 5, days: 16 });
+        // 欠勤控除をしない設定（完全月給制）で確定した月は、暦日数
+        const notDeducted = { ...salary("A", 5, 300000), absence_deduction: 0, prescribed_work_days: 18 };
+        const [full] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth], [notDeducted], attendance);
+        expect(full.months[1]).toMatchObject({ month: 5, days: 31 });
+        // 欠勤控除の額・所定労働日数を残していない前の給与は、土日を除いた日数（21日）− 欠勤日数
+        const [old] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth], [salary("A", 5, 271430)], attendance);
+        expect(old.months[1]).toMatchObject({ month: 5, days: 19 });
     });
     test("計算期間の途中で入社した月は「途中入社で日割り」", () => {
         const [r] = buildSanteiInputs([{ ...monthly, id: "A", join_date: "2026-04-10" }], 2026, [endOfMonth],

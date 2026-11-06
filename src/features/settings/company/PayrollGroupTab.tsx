@@ -26,7 +26,8 @@ import {
 import type { CompanyManagerState } from '../useCompanyManager';
 import { TAX_CALC_METHOD_LABELS, type TaxCalcMethod } from '../../../utils/incomeTax';
 import {
-    PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, toProrationMethod, toSocialInsCollection, type ProrationMethod, type SocialInsCollection,
+    ABSENCE_DEDUCTION_METHOD_LABELS, PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection,
+    type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection,
 } from '../../../utils/calcSalary';
 
 interface Props {
@@ -50,6 +51,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgSocialInsCollection,
         pgProrationMethod,
         setPgProrationMethod,
+        pgAbsenceDeductionMethod,
+        setPgAbsenceDeductionMethod,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -89,6 +92,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 所得税: {TAX_CALC_METHOD_LABELS[(pg.tax_calc_method === "densanki" ? "densanki" : "table") as TaxCalcMethod]}
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                         / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
+                                        / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
                                     </span>
                                 </div>
                             </div>
@@ -224,6 +228,26 @@ export default function PayrollGroupTab({ cm }: Props) {
                         月給制の人の基本給と、給与項目のうち「固定（毎月同額）」の支給項目を日割りします（1円未満は切り上げ）。
                         固定残業代・通勤手当・「変動」の項目は日割りしないので、規程で日割りするなら金額を直してください。
                         所定労働日数は、会社カレンダー（従業員の出勤曜日）から数えます。
+                    </p>
+
+                    <label style={miniLabelStyle}>月給制の人の欠勤控除</label>
+                    <select
+                        value={pgAbsenceDeductionMethod}
+                        onChange={e => setPgAbsenceDeductionMethod(e.target.value as AbsenceDeductionMethod)}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="workdays">{ABSENCE_DEDUCTION_METHOD_LABELS.workdays}（月給 × 欠勤日数 ÷ 計算期間の所定労働日数）</option>
+                        <option value="annual">{ABSENCE_DEDUCTION_METHOD_LABELS.annual}（月給 × 欠勤日数 ÷（1年間の所定労働日数 ÷ 12））</option>
+                        <option value="none">{ABSENCE_DEDUCTION_METHOD_LABELS.none}（欠勤があっても月給を満額払う）</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        勤怠で「欠勤」にした日の分を月給から引くしかたです。法律では決まっていないので、会社の賃金規程（就業規則）に合わせて選んでください。
+                        「計算期間の所定労働日数」は、1日分の額が月ごとに変わり、所定労働日をすべて休むと月給をちょうど全額引きます。
+                        「1年間の月平均」は、1日分の額が1年を通して同じで、残業代の時給と同じ日数で割ります
+                        （厚生労働省のモデル就業規則（第45条第2項）は、月給の場合「基本給 ÷ 1か月平均所定労働時間数」で1時間あたりの額を出す形です）。
+                        どちらも1円未満は切り捨て、引く額はその月の基本給までにします。所定労働日数は会社カレンダー（従業員の出勤曜日）から数えます。
+                        引くのは基本給の分だけです（手当の分も引く規程なら、その額を給与項目の控除で入れてください）。
+                        欠勤控除をした月の算定・月変の支払基礎日数は、計算期間の所定労働日数から欠勤日数を引いた日数になります（完全月給制は暦日数）。
                     </p>
 
                     <div style={{ display: "flex", gap: "10px" }}>

@@ -50,6 +50,14 @@
  *        https://www.check-roudou.mhlw.go.jp/qa/roudousya/chingin/q3.html
  *        （月給（各種手当を含んだ合計）÷ 1年間における1か月平均所定労働時間数）
  *
+ * 欠勤控除（月給制の人だけ。absenceDeductionOf）:
+ *  - 勤怠で「欠勤」の日の分を、月給から引く。割る日数は給与規定グループで選ぶ（法律では決まっておらず、会社の賃金規程による）
+ *    ・計算期間の所定労働日数（会社カレンダーで数える。extras.periodWorkDays）
+ *    ・1年間の月平均の所定労働日数（1年間の所定労働日数 ÷ 12。残業代の時給と同じ日数）
+ *    ・引かない（完全月給制）
+ *  - 1円未満は切り捨て、引く額はその月に払う基本給まで。日割りした月も、日割りする前の月給で計算する
+ *  出典：厚生労働省「モデル就業規則（令和7年12月版）」第45条（欠勤等の扱い。月給は 基本給 ÷ 1か月平均所定労働時間数 で1時間あたりを出す）
+ *
  * 日給制:
  *  - 所定労働日（出勤・半休）に働いた日に、日給を払う。所定休日・法定休日の労働には日給を払わず、
  *    月給制と同じく、働いた時間を残業（1.0倍・1.25倍）・休日労働（1.35倍）として払う。欠勤・公休の日は払わない
@@ -98,9 +106,14 @@ export interface SalaryExtras {
   collectRetirementMonth?: boolean;
   /** 計算期間の途中で入社・退職した人の日割り（給与規定グループの設定。省略時はしない） */
   prorationMethod?: ProrationMethod;
+  /** 月給制の人の欠勤控除のしかた（給与規定グループの設定。省略時は計算期間の所定労働日数で割る） */
+  absenceDeductionMethod?: AbsenceDeductionMethod;
   /** 給与の計算期間（YYYY-MM-DD。日割りに使う） */
   period?: { start: string; end: string } | null;
-  /** 計算期間の所定労働日数と、そのうち在籍した日の所定労働日数（所定労働日数で日割りするとき） */
+  /**
+   * 計算期間の所定労働日数と、そのうち在籍した日の所定労働日数（呼び出し側が会社カレンダーから数える）
+   * periodWorkDays は、所定労働日数で日割りするときと欠勤控除に使い、確定した結果に残す（算定・月変の支払基礎日数）
+   */
   periodWorkDays?: number | null;
   employedWorkDays?: number | null;
   /**
@@ -136,7 +149,18 @@ export interface SalaryResult {
   holidayWorkHours: number;     // 法定休日の労働時間
   paidLeaveHours: number;       // 有給休暇の時間（時給制で賃金を払う時間）
   basePay: number;
+  /** 欠勤控除（月給制の人だけ。給与規定グループの設定で計算する） */
   absenceDeduction: number;
+  /** 欠勤した日数（勤怠で「欠勤」の日） */
+  absenceDays: number;
+  /** 欠勤控除のしかた（給与規定グループの設定） */
+  absenceDeductionMethod: AbsenceDeductionMethod;
+  /** 欠勤控除の計算式（明細に出す。月給制で欠勤がなければ null） */
+  absenceDeductionDetail: string | null;
+  /** 欠勤控除の注意（会社カレンダーを読み込めていない など。なければ null） */
+  absenceDeductionNote: string | null;
+  /** 計算期間の所定労働日数（会社カレンダーから数えたもの。わからなければ null）。確定した結果に残し、算定・月変の支払基礎日数に使う */
+  periodWorkDays: number | null;
   statutoryOvertimePay: number;   // 法定内残業代（割増なし）
   standardOvertimePay: number;
   highOvertimePay: number;
@@ -427,8 +451,10 @@ export const checkInsuredOnBonusDate = (
 };
 
 /**
- * 月給制の、その月の所定労働日数（欠勤控除に使う。1年間の所定労働日数がわからないときは、残業代の時給にも使う）
- * 従業員に月の所定労働日数があればそれを、なければその月の土日を除いた日数を使う
+ * その月の土日を除いた日数（会社カレンダーを読み込めていないときの代わり。祝日・会社カレンダーは見ない）
+ * 1年間の所定労働日数がわからないときの残業代の時給、計算期間の所定労働日数がわからないときの欠勤控除と、
+ * 計算期間の所定労働日数を残していない確定した給与の支払基礎日数（utils/santei.ts）に使う
+ * 従業員に月の所定労働日数（monthly_work_days）があればそれを使う
  */
 export const prescribedWorkDays = (staff: any, year: number, month: number): number => {
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -559,10 +585,11 @@ export const saveSalaryResult = async (
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
+      absence_deduction, prescribed_work_days,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -577,6 +604,8 @@ export const saveSalaryResult = async (
       fixed_overtime_allowance = excluded.fixed_overtime_allowance,
       fixed_overtime_excess = excluded.fixed_overtime_excess,
       non_fixed_earnings = excluded.non_fixed_earnings,
+      absence_deduction = excluded.absence_deduction,
+      prescribed_work_days = excluded.prescribed_work_days,
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
       health_insurance = excluded.health_insurance,
@@ -600,6 +629,8 @@ export const saveSalaryResult = async (
     result.standardPremiumHours, result.highPremiumHours,
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
     result.fixedOvertimeAllowance, result.fixedOvertimeExcess, result.nonFixedEarnings,
+    // 欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う。utils/santei.ts）
+    result.absenceDeduction, result.periodWorkDays,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
@@ -717,6 +748,91 @@ export const PRORATION_METHOD_LABELS: Record<ProrationMethod, string> = {
 
 export const toProrationMethod = (value: unknown): ProrationMethod =>
   (value === 'workdays' || value === 'calendar' ? value : 'none');
+
+/**
+ * 月給制の人の欠勤控除のしかた（給与規定グループの設定。決め方は法律にはなく、会社の賃金規程で決める）
+ * ・workdays：月給 × 欠勤日数 ÷ 計算期間の所定労働日数（会社カレンダーで数える。1日分の額は月ごとに変わる）
+ * ・annual：月給 × 欠勤日数 ÷ 1年間の月平均の所定労働日数（1年間の所定労働日数 ÷ 12。残業代の時給と同じ日数で、1日分の額は1年を通して同じ）
+ *   （厚生労働省「モデル就業規則（令和7年12月版）」第45条第2項：月給の場合、控除する賃金の1時間あたりの金額は
+ *    基本給 ÷ 1か月平均所定労働時間数。1日の所定労働時間が同じなら、この日数で割るのと同じになる）
+ * ・none：欠勤控除をしない（完全月給制）
+ */
+export type AbsenceDeductionMethod = 'workdays' | 'annual' | 'none';
+
+export const ABSENCE_DEDUCTION_METHOD_LABELS: Record<AbsenceDeductionMethod, string> = {
+  workdays: '計算期間の所定労働日数で割る',
+  annual: '1年間の月平均の所定労働日数で割る',
+  none: '欠勤控除をしない（完全月給制）',
+};
+
+/** 設定がない・知らない値は「計算期間の所定労働日数で割る」 */
+export const toAbsenceDeductionMethod = (value: unknown): AbsenceDeductionMethod =>
+  (value === 'annual' || value === 'none' ? value : 'workdays');
+
+/** 欠勤控除の額と、明細に出す計算式・注意 */
+export interface AbsenceDeduction {
+  amount: number;
+  /** 計算式（欠勤がなければ null。欠勤控除をしない設定なら、その説明） */
+  detail: string | null;
+  /** 注意（会社カレンダーを読み込めていない・完全月給制で欠勤がある など。なければ null） */
+  note: string | null;
+}
+
+/**
+ * 月給制の人の欠勤控除（1円未満切り捨て）。引く額は、その月に払う基本給（日割りしたときは日割りした額）まで
+ * @param monthlyWage    月給（日割りする前の額）
+ * @param absentDays     欠勤した日数（勤怠で「欠勤」の日）
+ * @param basePay        その月に払う基本給（引く額の上限）
+ * @param periodWorkDays 計算期間の所定労働日数（呼び出し側が会社カレンダーから数える。読み込めていなければ null）
+ * @param annualWorkDays 1年間の所定労働日数（読み込めていなければ null）
+ * @param fallbackDays   会社カレンダーを読み込めていないときに割る日数（その月の土日を除いた日数）
+ */
+export const absenceDeductionOf = (
+  method: AbsenceDeductionMethod,
+  monthlyWage: number,
+  absentDays: number,
+  basePay: number,
+  periodWorkDays: number | null | undefined,
+  annualWorkDays: number | null | undefined,
+  fallbackDays: number,
+): AbsenceDeduction => {
+  if (absentDays <= 0 || monthlyWage <= 0) return { amount: 0, detail: null, note: null };
+  if (method === 'none') {
+    return { amount: 0, detail: `欠勤 ${absentDays}日：欠勤控除をしない設定（完全月給制）なので、月給をそのまま支給します`, note: null };
+  }
+  const wage = `月給 ¥${monthlyWage.toLocaleString()} × 欠勤 ${absentDays}日`;
+  // 割り算を最後にして、端数の誤差が出ないようにする
+  const byFallback = (reason: string) => ({
+    raw: Math.floor((monthlyWage * absentDays) / fallbackDays),
+    detail: `${wage} ÷ この月の土日を除いた日数 ${fallbackDays}日`,
+    note: `${reason}、この月の土日を除いた日数で割っています（従業員画面の出勤曜日・会社カレンダーを確かめてください）。` as string | null,
+  });
+  let r: { raw: number; detail: string; note: string | null };
+  if (method === 'annual') {
+    r = annualWorkDays && annualWorkDays > 0
+      ? {
+        // 月給 ÷ (1年間の所定労働日数 ÷ 12) × 欠勤日数
+        raw: Math.floor((monthlyWage * absentDays * 12) / annualWorkDays),
+        detail: `${wage} ÷ 1年間の月平均の所定労働日数（${annualWorkDays}日 ÷ 12）`,
+        note: null,
+      }
+      : byFallback('1年間の所定労働日数がわからないため');
+  } else if (periodWorkDays === null || periodWorkDays === undefined) {
+    r = byFallback('会社カレンダーを読み込めていないため');
+  } else if (periodWorkDays <= 0) {
+    return { amount: 0, detail: null, note: '計算期間に所定労働日がないため、欠勤控除をしていません（従業員画面の出勤曜日・会社カレンダーを確かめてください）。' };
+  } else {
+    r = {
+      raw: Math.floor((monthlyWage * absentDays) / periodWorkDays),
+      detail: `${wage} ÷ 計算期間の所定労働日数 ${periodWorkDays}日`,
+      note: null,
+    };
+  }
+  const cap = Math.max(0, Math.floor(basePay));
+  return r.raw > cap
+    ? { amount: cap, detail: `${r.detail} ＝ ¥${r.raw.toLocaleString()} → 基本給の ¥${cap.toLocaleString()} まで`, note: r.note }
+    : { amount: r.raw, detail: r.detail, note: r.note };
+};
 
 /** 日割りの割合（在籍した日数 ÷ 計算期間の日数） */
 export interface Proration {
@@ -869,6 +985,9 @@ export const calculateSalary = (
   let holidayWorkPay = 0;       // 法定休日労働の手当
   let paidLeavePay = 0;         // 有給休暇の賃金（時給制）
   let absenceDeduction = 0;
+  let absenceDeductionDetail: string | null = null;
+  let absenceDeductionNote: string | null = null;
+  const absenceDeductionMethod = toAbsenceDeductionMethod(extras.absenceDeductionMethod);
   let totalOvertimeHours = 0;       // 法定外残業（割増対象）の累計
   let totalStatutoryOvertimeHours = 0; // 法定内残業の累計
   let standardPremiumHours = 0; // ★追加
@@ -959,18 +1078,19 @@ export const calculateSalary = (
       // 計算期間の途中で入社・退職した月は、日割りする（残業代の時給・欠勤控除は、日割りする前の月給で計算する）
       basePay = prorate(monthlyWage, proration);
 
-      // 所定労働日数の確定
-      const prescribedDays = prescribedWorkDays(staff, targetYear, targetMonth);
-
       // 残業代の時給：(月給 ＋ 残業代の時給に入れる手当) ÷ 1年間における1か月平均所定労働時間
       hourlyRate = overtimeBaseHours > 0 ? (monthlyWage + overtimeBaseAllowances) / overtimeBaseHours : 0;
       overtimeHourlyRate = hourlyRate;
 
-      // ── 【ここを修正】 欠勤控除 ──
-      // 先ほど算出した actualAbsentDays を使ってダイレクトに計算
-      absenceDeduction = actualAbsentDays > 0
-        ? Math.floor((monthlyWage / prescribedDays) * actualAbsentDays)
-        : 0;
+      // 欠勤控除：給与規定グループの設定で、計算期間の所定労働日数か、1年間の月平均の所定労働日数で割る（absenceDeductionOf）
+      // 会社カレンダーを読み込めていないときだけ、その月の土日を除いた日数で割る
+      const absence = absenceDeductionOf(
+        absenceDeductionMethod, monthlyWage, actualAbsentDays, basePay,
+        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth),
+      );
+      absenceDeduction = absence.amount;
+      absenceDeductionDetail = absence.detail;
+      absenceDeductionNote = absence.note;
     }
 
     for (const row of sorted) {
@@ -1255,6 +1375,11 @@ export const calculateSalary = (
     // --- 支給額 (Earnings) ---
     basePay: Math.floor(basePay),
     absenceDeduction,
+    absenceDays: actualAbsentDays,
+    absenceDeductionMethod,
+    absenceDeductionDetail,
+    absenceDeductionNote,
+    periodWorkDays: extras.periodWorkDays ?? null,
     statutoryOvertimePay: Math.floor(statutoryOvertimePay),
     standardOvertimePay: Math.floor(standardOvertimePay),
     highOvertimePay: Math.floor(highOvertimePay),

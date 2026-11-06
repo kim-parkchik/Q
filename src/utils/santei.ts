@@ -11,11 +11,16 @@
  *   ・使える月がなければ、従前の標準報酬月額のまま
  *   ・途中入社で、日割りのため1か月分の給与が支払われていない月は、日数に関係なく除く（修正平均）
  * ■ 支払基礎日数：時給制・日給制は出勤日数（有給休暇の日も含む）、月給制は給与の計算期間の暦日数
- *   （月給制で欠勤した日の分を引いた月は、所定労働日数から欠勤日数を引いた日数）
+ *   （月給制で欠勤した日の分を引いた月は、所定労働日数から欠勤日数を引いた日数。所定労働日数は、給与を確定したときに
+ *    会社カレンダーから数えて残した計算期間の日数。欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
  * ■ 決まった標準報酬月額は、9月分から翌年8月分まで使う
  * 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20121017.html （定時決定）
  *       https://www.nenkin.go.jp/service/kounen/info/jireishokai/henreisantei.html （途中入社の月・短時間就労者・短時間労働者）
  *       https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20150515-02.html （支払基礎日数：出勤日数・暦日数）
+ *       日本年金機構「算定基礎届の記入・提出ガイドブック（令和8年度）」（4）支払基礎日数とは（2026-11-07 に確認）
+ *       https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20121017.files/santei.guide.book.pdf
+ *       （月給制は暦日数。ただし、欠勤日数分だけ給料が差し引かれる場合は、就業規則、給与規程等に基づき事業所が定めた日数から、
+ *        欠勤日数を控除した日数。Q では「事業所が定めた日数」を、計算期間の所定労働日数（会社カレンダー）とする）
  * ※ 平均額は1円未満を切り捨てて表示する。等級表の境目は整数の金額で「〇円以上」なので、切り捨てても等級は変わらない。
  */
 
@@ -105,18 +110,22 @@ export const decideTeiji = (
 /**
  * 支払基礎日数
  * ・時給制・日給制：出勤日数（働いた時間がある日と、有給休暇の日）
- * ・月給制：給与の計算期間の暦日数。欠勤した日があれば（欠勤控除をした月は）所定労働日数 − 欠勤日数
- * @param rows 給与の計算期間の確定済み勤怠
+ * ・月給制：給与の計算期間の暦日数。欠勤控除をした月は、所定労働日数 − 欠勤日数
+ *   （欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
+ * @param rows             給与の計算期間の確定済み勤怠
+ * @param prescribedDays   計算期間の所定労働日数（確定した給与に残した、会社カレンダーから数えた日数）
+ * @param absenceDeducted  欠勤控除をしたか（確定した給与に欠勤控除の額を残していないときは undefined。欠勤があれば、したとみなす）
  */
 export const paymentBasisDays = (
   wageType: string,
   period: { startStr: string; endStr: string },
   rows: { work_date: string; work_type?: string; work_hours?: number | string }[],
   prescribedDays: number,
+  absenceDeducted?: boolean,
 ): number => {
   if (wageType === 'monthly') {
     const absent = rows.filter((r) => r.work_type === 'absent').length;
-    if (absent > 0) return Math.max(0, prescribedDays - absent);
+    if (absent > 0 && absenceDeducted !== false) return Math.max(0, prescribedDays - absent);
     const start = new Date(`${period.startStr}T00:00:00`);
     const end = new Date(`${period.endStr}T00:00:00`);
     return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
@@ -176,6 +185,10 @@ export interface SalaryRecord {
   fixed_overtime_allowance?: number | null;
   /** 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。わからないときは null） */
   non_fixed_earnings?: number | null;
+  /** 確定したときの欠勤控除の額（会社ファイルの形式 v8 より前に確定した給与は null） */
+  absence_deduction?: number | null;
+  /** 確定したときの計算期間の所定労働日数（会社カレンダーから数えたもの。わからないときは null） */
+  prescribed_work_days?: number | null;
 }
 
 /** 確定した勤怠（支払基礎日数を数えるのに使う項目） */
@@ -208,11 +221,19 @@ export const monthFigures = (
   }
   const rows = attendance.filter((a) =>
     String(a.staff_id) === String(staff.id) && a.work_date >= period.startStr && a.work_date <= period.endStr);
+  // 欠勤控除をした月の「所定労働日数」は、確定したときに会社カレンダーから数えて残した日数
+  // （残していない前の給与は、その月の土日を除いた日数）。欠勤控除をしたかも、確定したときの額で見る
+  const prescribedDays = salary.prescribed_work_days === null || salary.prescribed_work_days === undefined
+    ? prescribedWorkDays(staff, year, month)
+    : Number(salary.prescribed_work_days);
+  const absenceDeducted = salary.absence_deduction === null || salary.absence_deduction === undefined
+    ? undefined
+    : Number(salary.absence_deduction) > 0;
   return {
     figures: {
       month,
       // 給与形態は、その月の分の履歴の値（utils/staffHistory.ts）
-      days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedWorkDays(staff, year, month)),
+      days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedDays, absenceDeducted),
       amount: Number(salary.total_earnings) || 0,
       // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
       partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,

@@ -407,6 +407,82 @@ describe("年末調整の過不足額の精算（12月の給与で）", () => {
     });
 });
 
+describe("欠勤控除（月給制。給与規定グループで、計算期間の所定労働日数か1年間の月平均で割るか、しないかを選ぶ）", () => {
+    // 2026年5月：祝日（5月4日〜6日）が平日に3日あり、会社カレンダーの所定労働日は18日（土日を除いた日数は21日）
+    const mayWorkDays = ["01", "07", "08", "11", "12", "13", "14", "15", "18", "19", "20", "21", "22", "25", "26", "27", "28", "29"];
+    const absentInMay = (dates: string[]) => dates.map((d) => ({ work_date: `2026-05-${d}`, work_hours: 0, night_hours: 0, work_type: "absent" }));
+    const calcMay = (rows: any[], o: Partial<SalaryExtras> = {}) => calculateSalary(monthly, rows, extras(o), 2026, 5, company);
+
+    test("計算期間の所定労働日数で割る（初めの設定）：5月に1日休むと 300,000 ÷ 18日 = 16,666円", () => {
+        expect(mayWorkDays).toHaveLength(18);
+        const r = calcMay(absentInMay(["11"]), { periodWorkDays: 18 });
+        expect(r.absenceDeductionMethod).toBe("workdays");
+        expect(r.absenceDays).toBe(1);
+        expect(r.absenceDeduction).toBe(16666);
+        expect(r.absenceDeductionDetail).toBe("月給 ¥300,000 × 欠勤 1日 ÷ 計算期間の所定労働日数 18日");
+        expect(r.absenceDeductionNote).toBeNull();
+        expect(r.periodWorkDays).toBe(18);
+    });
+    test("所定労働日をすべて休むと、月給をちょうど全額引く（いままでは土日を除いた21日で割り、257,142円しか引かなかった）", () => {
+        const r = calcMay(absentInMay(mayWorkDays), { periodWorkDays: 18 });
+        expect(r.absenceDeduction).toBe(300000);
+        expect(r.totalEarnings).toBe(0);
+    });
+    test("1年間の月平均の所定労働日数で割る：300,000 × 12 ÷ 245日 = 14,693円（5月も6月も同じ）", () => {
+        const o = { absenceDeductionMethod: "annual" as const, annualWorkDays: 245 };
+        const r = calcMay(absentInMay(["11"]), { ...o, periodWorkDays: 18 });
+        expect(r.absenceDeduction).toBe(14693);
+        expect(r.absenceDeductionDetail).toBe("月給 ¥300,000 × 欠勤 1日 ÷ 1年間の月平均の所定労働日数（245日 ÷ 12）");
+        expect(calc(monthly, [day("08", 0, "absent")], { ...o, periodWorkDays: 22 }).absenceDeduction).toBe(14693);
+    });
+    test("1年間の月平均で割って月給を超えるときは、基本給までにする（6月の所定労働日22日をすべて休む → 323,265円 → 300,000円）", () => {
+        const june = ["01", "02", "03", "04", "05", "08", "09", "10", "11", "12", "15", "16", "17", "18", "19", "22", "23", "24", "25", "26", "29", "30"];
+        const r = calc(monthly, june.map((d) => day(d, 0, "absent")), { absenceDeductionMethod: "annual", annualWorkDays: 245, periodWorkDays: 22 });
+        expect(r.absenceDeduction).toBe(300000);
+        expect(r.absenceDeductionDetail).toContain("＝ ¥323,265 → 基本給の ¥300,000 まで");
+        expect(r.totalEarnings).toBe(0);
+    });
+    test("欠勤控除をしない（完全月給制）：欠勤があっても月給をそのまま払う", () => {
+        const r = calcMay(absentInMay(["11", "12"]), { absenceDeductionMethod: "none", periodWorkDays: 18 });
+        expect(r.absenceDeduction).toBe(0);
+        expect(r.absenceDays).toBe(2);
+        expect(r.totalEarnings).toBe(300000);
+        expect(r.absenceDeductionDetail).toBe("欠勤 2日：欠勤控除をしない設定（完全月給制）なので、月給をそのまま支給します");
+    });
+    test("会社カレンダー・1年間の所定労働日数を読み込めていないときは、その月の土日を除いた日数で割り、知らせる", () => {
+        const noCalendar = calc(monthly, [day("08", 0, "absent")]);
+        expect(noCalendar.absenceDeduction).toBe(13636); // 300,000 ÷ 22日
+        expect(noCalendar.absenceDeductionNote).toContain("会社カレンダーを読み込めていない");
+        expect(noCalendar.periodWorkDays).toBeNull();
+        const noAnnual = calc(monthly, [day("08", 0, "absent")], { absenceDeductionMethod: "annual", periodWorkDays: 22 });
+        expect(noAnnual.absenceDeduction).toBe(13636);
+        expect(noAnnual.absenceDeductionNote).toContain("1年間の所定労働日数がわからない");
+        const noWorkDay = calc(monthly, [day("08", 0, "absent")], { periodWorkDays: 0 });
+        expect(noWorkDay.absenceDeduction).toBe(0);
+        expect(noWorkDay.absenceDeductionNote).toContain("所定労働日がない");
+    });
+    test("欠勤がなければ、計算式も注意も出さない。時給制・日給制の人は欠勤控除をしない（働いた分だけ払う）", () => {
+        const r = calc(monthly, weekdays(), { periodWorkDays: 22 });
+        expect([r.absenceDeduction, r.absenceDeductionDetail, r.absenceDeductionNote]).toEqual([0, null, null]);
+        expect(calc(hourly, [day("08", 0, "absent")], { periodWorkDays: 22 }).absenceDeduction).toBe(0);
+    });
+    test("確定した結果に、欠勤控除の額と計算期間の所定労働日数を残す（算定・月変の支払基礎日数に使う）", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
+        db.exec("INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) VALUES (1, '全社', 99, 0, 25)");
+        db.exec("INSERT INTO social_insurance_groups (id, name) VALUES (1, '協会けんぽ')");
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        // 給与規定グループの欠勤控除の初めの値は「計算期間の所定労働日数で割る」
+        expect(db.query("SELECT absence_deduction_method AS m FROM payroll_groups").get()).toEqual({ m: "workdays" });
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const r = calcMay(absentInMay(["11", "12"]), { periodWorkDays: 18 });
+        expect(await saveSalaryResult(asyncDb, "S001", 2026, 5, r, monthly)).toEqual({ success: true });
+        expect(db.query("SELECT absence_deduction AS a, prescribed_work_days AS p, total_earnings AS t FROM salary_results").get())
+            .toEqual({ a: 33333, p: 18, t: 300000 - 33333 });
+    });
+});
+
 describe("計算期間の途中で入社・退職した人の日割り（会社の規程。モデル就業規則 第46条第2項は所定労働日数）", () => {
     const june = { start: "2026-06-01", end: "2026-06-30" };
     test("日割りしない設定・期間の途中でない人は、日割りしない", () => {
@@ -912,8 +988,8 @@ describe("残業代の時給（1年間における1か月平均所定労働時�
         expect(r.overtimeBaseHours).toBe(176);
         expect(r.standardOvertimePay).toBe(17045); // 300,000 ÷ 176 × 1.25 × 8 = 17,045.45…
     });
-    test("欠勤控除は、今までどおりその月の所定労働日数で日割りする", () => {
-        const r = calc(monthly, [day("08", 0, "absent")], annual);
+    test("欠勤控除は、1年間の所定労働日数を渡しても、初めの設定（計算期間の所定労働日数）で割る", () => {
+        const r = calc(monthly, [day("08", 0, "absent")], { ...annual, periodWorkDays: 22 });
         expect(r.absenceDeduction).toBe(13636); // 300,000 ÷ 22日
     });
     test("「残業代の時給に入れる」手当は月給に足して割る。外した手当（家族手当など）と控除項目は入れない", () => {

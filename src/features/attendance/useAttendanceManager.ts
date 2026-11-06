@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
-import { calculateSalary, calcDetailedDiff, loadCustomItems, loadWeekCarryOver, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
+import { calculateSalary, calcDetailedDiff, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
@@ -455,6 +455,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         annualWorkDays: workDays.annual,
         // 計算期間の途中で入社・退職した月給制の人の日割り（給与規定グループの設定）
         prorationMethod: toProrationMethod(currentGroup?.proration_method),
+        // 月給制の人の欠勤控除（給与規定グループの設定。計算期間の所定労働日数か、1年間の月平均で割る）
+        absenceDeductionMethod: toAbsenceDeductionMethod(currentGroup?.absence_deduction_method),
         period: periodStart ? { start: periodStart, end: periodEnd } : null,
         periodWorkDays: workDays.period,
         employedWorkDays: workDays.employed,

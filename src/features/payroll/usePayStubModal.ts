@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
-import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toProrationMethod, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
+import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
@@ -77,9 +77,9 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
-        ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string }[];
+        ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; absence_deduction_method?: string }[];
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
         setExtras(p => ({
           ...p,
@@ -87,6 +87,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           socialInsCollection: toSocialInsCollection(rows?.[0]?.social_ins_collection),
           collectRetirementMonth: Number(rows?.[0]?.is_next_month) !== 1,
           prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
+          absenceDeductionMethod: toAbsenceDeductionMethod(rows?.[0]?.absence_deduction_method),
         }));
       } catch (e) {
         console.error("給与規定グループの設定の読み込みエラー:", e);
@@ -216,6 +217,12 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     .map(r => String(r.work_date))
     .sort(), [attendanceData, calendarCtx, staff.wage_type]);
 
+  // 会社カレンダーで休みの日に「欠勤」を入れた日（月給制で欠勤控除をする人）。欠勤控除に数えているので、休みの日なら「公休」にしてもらう
+  const absentOnCalendarHolidays = useMemo(() => !calendarCtx || staff.wage_type !== 'monthly' || salary.absenceDeductionMethod === 'none' ? [] : attendanceData
+    .filter(r => r.work_type === 'absent' && !isPrescribedWorkDay(new Date(`${r.work_date}T00:00:00`), calendarCtx))
+    .map(r => String(r.work_date))
+    .sort(), [attendanceData, calendarCtx, staff.wage_type, salary.absenceDeductionMethod]);
+
   // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
   // 月給は「1年間における1月平均所定労働時間」で割る
   const monthlyAverageHours = extras.annualWorkDays ? extras.annualWorkDays * dailyHours / 12 : null;
@@ -317,6 +324,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     empInsMaster,
     minimumWageCheck,
     workOnCalendarHolidays,
+    absentOnCalendarHolidays,
     yearEndYear,
     flatTaxTotal,
     fmtH

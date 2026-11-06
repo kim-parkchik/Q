@@ -1,7 +1,7 @@
 import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';
-import { PREFECTURES } from '../../utils/calcSalary';
+import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES } from '../../utils/calcSalary';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
@@ -21,7 +21,7 @@ export default function PayStubModal(props: Props) {
     salary, extras, setExtras, isSaved, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
-    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays,
+    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays,
   } = usePayStubModal(props);
   /** "2026-11-29" → "11月29日" */
   const md = (date: string) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日`;
@@ -93,6 +93,12 @@ export default function PayStubModal(props: Props) {
               所定休日の出勤なら、勤怠の画面で「所定休日出勤」にして確定し直してください（振替で所定労働日にした日なら、このままで構いません）。
             </div>
           )}
+          {absentOnCalendarHolidays.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              ⚠ 会社カレンダーで休みの日に「欠勤」を入れた日があります（{absentOnCalendarHolidays.map(md).join("・")}）。
+              この日も欠勤控除に数えています。休みの日なら、勤怠の画面で「公休」にして確定し直してください。
+            </div>
+          )}
           {wageMismatchDays > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               ⚠ 勤怠を確定したときの{staff.wage_type === "daily" ? "日給" : "時給"}が、基本給の履歴のこの月の値（{Number(staff.base_wage).toLocaleString()}円）と違う日が{wageMismatchDays}日あります。
@@ -104,6 +110,18 @@ export default function PayStubModal(props: Props) {
               {salary.proration
                 ? `計算期間の途中で入社・退職したため、月給${salary.customEarningLines.length > 0 ? "と固定の支給項目" : ""}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。固定残業代・通勤手当は日割りしていません。`
                 : `⚠ ${salary.prorationNote}`}
+            </div>
+          )}
+          {(salary.absenceDeductionDetail || salary.absenceDeductionNote) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              {salary.absenceDeductionDetail && (
+                <div>
+                  {salary.absenceDeduction > 0
+                    ? `欠勤控除（給与規定グループの設定：${ABSENCE_DEDUCTION_METHOD_LABELS[salary.absenceDeductionMethod]}）：${salary.absenceDeductionDetail}（1円未満切り捨て）`
+                    : salary.absenceDeductionDetail}
+                </div>
+              )}
+              {salary.absenceDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.absenceDeductionNote}</div>}
             </div>
           )}
           {salary.socialInsCollection === "next" && (
@@ -238,7 +256,7 @@ export default function PayStubModal(props: Props) {
                   
                   {/* 欠勤控除 */}
                   {salary.absenceDeduction > 0 && (
-                    <tr><td style={{...S.tdS, color: "#c0392b"}}>欠勤控除</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.absenceDeduction.toLocaleString()}</td></tr>
+                    <tr><td style={{...S.tdS, color: "#c0392b"}}>欠勤控除({salary.absenceDays}日)</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.absenceDeduction.toLocaleString()}</td></tr>
                   )}
 
                   {/* 残業手当の内訳分け */}

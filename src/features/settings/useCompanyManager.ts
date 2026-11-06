@@ -12,7 +12,7 @@ import { fetchAddressByZip } from "../../utils/addressUtils";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import type { TaxCalcMethod } from "../../utils/incomeTax";
-import { toProrationMethod, toSocialInsCollection, type ProrationMethod, type SocialInsCollection } from "../../utils/calcSalary";
+import { toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection } from "../../utils/calcSalary";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -58,6 +58,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgTaxMethod, setPgTaxMethod] = useState<TaxCalcMethod>("table"); // 源泉所得税の計算方法
     const [pgSocialInsCollection, setPgSocialInsCollection] = useState<SocialInsCollection>("current"); // 社会保険料の徴収（当月・翌月）
     const [pgProrationMethod, setPgProrationMethod] = useState<ProrationMethod>("none"); // 途中入社・退職の日割り
+    const [pgAbsenceDeductionMethod, setPgAbsenceDeductionMethod] = useState<AbsenceDeductionMethod>("workdays"); // 月給制の人の欠勤控除
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
 
@@ -334,6 +335,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTaxMethod(pg.tax_calc_method === "densanki" ? "densanki" : "table");
         setPgSocialInsCollection(toSocialInsCollection(pg.social_ins_collection));
         setPgProrationMethod(toProrationMethod(pg.proration_method));
+        setPgAbsenceDeductionMethod(toAbsenceDeductionMethod(pg.absence_deduction_method));
     };
 
     // フォームのリセット（キャンセル時）
@@ -346,6 +348,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTaxMethod("table");
         setPgSocialInsCollection("current");
         setPgProrationMethod("none");
+        setPgAbsenceDeductionMethod("workdays");
     };
 
     // 計算用のヘルパー
@@ -507,14 +510,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod]
                 );
             }
             resetPgForm();
@@ -823,6 +826,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgSocialInsCollection,
         pgProrationMethod,
         setPgProrationMethod,
+        pgAbsenceDeductionMethod,
+        setPgAbsenceDeductionMethod,
         setPgPaymentDay,
         editingPgId,
         setEditingPgId,
