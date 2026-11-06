@@ -20,8 +20,10 @@ export default function PayStubModal(props: Props) {
     salary, extras, setExtras, isSaved, handleSaveResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
-    monthStaff, wageMismatchDays, empInsMaster,
+    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays,
   } = usePayStubModal(props);
+  /** "2026-11-29" → "11月29日" */
+  const md = (date: string) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日`;
   // この給与から引いた社会保険料の月（翌月徴収なら前月の分）
   const insMonthLabel = salary.socialInsMonths.map(ym => { const [y, m] = ym.split('-').map(Number); return `${y}年${m}月分`; }).join("と");
   // 給与形態・基本給・扶養人数は、この月の分の履歴の値
@@ -70,6 +72,13 @@ export default function PayStubModal(props: Props) {
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
+          {workOnCalendarHolidays.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              ⚠ 会社カレンダーで休みの日に「出勤」で入れて働いた日があります（{workOnCalendarHolidays.map(md).join("・")}）。
+              「出勤」の日は所定労働日として計算します（所定労働時間の分は{staff.wage_type === "daily" ? "日給" : "月給"}に入っているとみなし、週40時間を超えた時間も割増分だけを払います）。
+              所定休日の出勤なら、勤怠の画面で「所定休日出勤」にして確定し直してください（振替で所定労働日にした日なら、このままで構いません）。
             </div>
           )}
           {wageMismatchDays > 0 && (
@@ -317,6 +326,26 @@ export default function PayStubModal(props: Props) {
               </div>
             );
           })()}
+
+          {/* 週40時間：前の計算期間の日も数えた・所定労働時間の中の時間外労働は割増分だけを払った */}
+          {salary.isOvertimeEligible && (salary.weekCarryOver
+            || (salary.overtimeWithinScheduleHours > 0 && (staff.wage_type !== "hourly" || salary.overtimeBaseAllowances > 0))) && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              {salary.weekCarryOver && (
+                <div>
+                  週40時間は、前の計算期間の日（{md(salary.weekCarryOver.from)}〜{md(salary.weekCarryOver.to)}）に働いた {fmtH(salary.weekCarryOver.hours)} も合わせて数えています（その日の給与は、前の計算期間の分として支給済みです）。
+                </div>
+              )}
+              {salary.overtimeWithinScheduleHours > 0 && (staff.wage_type !== "hourly" || salary.overtimeBaseAllowances > 0) && (
+                <div>
+                  時間外労働のうち {fmtH(salary.overtimeWithinScheduleHours)} は所定労働時間の中の時間（週40時間を超えた所定労働日の時間など）で、
+                  {staff.wage_type === "hourly"
+                    ? "手当の分の通常の賃金は月額の手当で支給しているので、手当の分も割増分（25%。月60時間を超えた分は50%）だけを支給します。"
+                    : `通常の賃金は${staff.wage_type === "monthly" ? "月給" : "日給"}で支給しているので、割増分（25%。月60時間を超えた分は50%）だけを支給します。`}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 残業代の対象外（管理監督者など） */}
           {!salary.isOvertimeEligible && (

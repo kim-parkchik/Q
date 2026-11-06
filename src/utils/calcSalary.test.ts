@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
     calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, prorate, prorationOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
-    getInsuranceByAge, splitByWeights, heiLimitDate, type SalaryExtras,
+    getInsuranceByAge, splitByWeights, heiLimitDate, loadWeekCarryOver, weekCarryOverRange, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
 import { calcDailyHeiTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
@@ -618,6 +618,125 @@ describe("週40時間を超えた残業", () => {
     });
 });
 
+// 所定労働時間の中の法定外残業は、通常の賃金（1.0倍）を月給・日給で払っているので、割増分だけを払う（同じ時間に通常の賃金を2回払わない）
+// 計算期間をまたぐ週は、前の計算期間の日の時間も週40時間に数える（労働基準法32条・37条）
+describe("週40時間（所定労働時間の中の時間外労働・計算期間をまたぐ週）", () => {
+    /** 6月8日（月）〜13日（土）。水曜を所定休日にして、6日とも8時間働いた週（48時間。週40時間を超えるのは土曜の8時間） */
+    const midWeekOff = () => [day("08", 8), day("09", 8), day("10", 8, "holiday_work"), day("11", 8), day("12", 8), day("13", 8)];
+    /** 日給 9,600円・所定8時間（残業代の時給 1,200円）・社保未加入 */
+    const daily = {
+        wage_type: "daily", base_wage: 9600, scheduled_work_hours: 8,
+        commute_type: "none", commute_amount: 0, standard_remuneration: 0, birthday: "1980-01-10",
+    };
+    /** 計算期間 6月10日（水）〜。6月8日（月）・9日（火）は前の計算期間 */
+    const period = { start: "2026-06-10", end: "2026-07-09" };
+    const fromWednesday = () => [day("10", 8), day("11", 8), day("12", 8), day("13", 8, "holiday_work")];
+
+    test("月給：週の途中の所定休日に働いても、土曜に働いたときと支給合計は同じ（通常の賃金を2回払わない）", () => {
+        const mid = calc(monthly, midWeekOff());
+        // 水曜の8時間は所定の外で、週40時間以内 → 法定内残業 1.0倍：1,704.54… × 8 = 13,636.36…円
+        expect(mid.statutoryOvertimePay).toBe(13636);
+        // 土曜の8時間は所定の中で、週40時間を超える → 割増分だけ：1,704.54… × 0.25 × 8 = 3,409.09…円
+        expect(mid.standardOvertimePay).toBe(3409);
+        expect(mid.standardPremiumHours).toBe(8);
+        expect(mid.overtimeWithinScheduleHours).toBe(8);
+        const sat = calc(monthly, [...weekdays(), day("13", 8, "holiday_work")]);
+        expect(sat.overtimeWithinScheduleHours).toBe(0);
+        expect(mid.totalEarnings).toBe(sat.totalEarnings);
+        expect(mid.totalEarnings).toBe(317045); // 300,000 ＋ 1,704.54… × 1.25 × 8
+    });
+    test("日給：週の途中の所定休日に働いても、二重に払わない", () => {
+        // 月火木金土の5日分の日給 ＋ 水曜 1,200 × 8（法定内残業）＋ 土曜の割増分 1,200 × 0.25 × 8
+        const r = calc(daily, midWeekOff().map((x) => ({ ...x, actual_base_wage: 9600 })));
+        expect(r.basePay).toBe(48000);
+        expect(r.statutoryOvertimePay).toBe(9600);
+        expect(r.standardOvertimePay).toBe(2400);
+        expect(r.overtimeWithinScheduleHours).toBe(8);
+        // 土曜に所定休日出勤したとき（48,000 ＋ 1,200 × 1.25 × 8）と同じ
+        expect(r.totalEarnings).toBe(60000);
+    });
+    test("時給：所定労働日の週40時間超は、手当の分も割増分だけ（時給の分は、これまでどおり割増分だけ）", () => {
+        // 1年間 240日 × 8時間 ÷ 12 = 160時間。役職手当 16,000円 ÷ 160 = 100円
+        // 月〜土の6日を「出勤」で8時間ずつ → 土曜の8時間は週40時間超で所定の中：(1,200 ＋ 100) × 0.25 × 8 = 2,600円
+        const allowance = [{ name: "役職手当", amount: 16000, type: "earning" as const }];
+        const sixDays = [...weekdays(), day("13", 8)];
+        const r = calc(hourly, sixDays, { annualWorkDays: 240, customItems: allowance });
+        expect(r.standardOvertimePay).toBe(2600);
+        expect(r.overtimeWithinScheduleHours).toBe(8);
+        expect(calc(hourly, sixDays).standardOvertimePay).toBe(2400); // 手当がなければ 1,200 × 0.25 × 8
+    });
+    test("所定労働時間が週40時間を超える人（1日7時間 × 6日）は、40時間を超えた2時間に割増分だけを払う", () => {
+        const seven = { ...monthly, scheduled_work_hours: 7 };
+        const r = calc(seven, ["08", "09", "10", "11", "12", "13"].map((d) => day(d, 7)));
+        // 残業代の時給 300,000 ÷ (22日 × 7時間) = 1,948.05…円。土曜の2時間：1,948.05… × 0.25 × 2 = 974.02…円
+        expect(r.standardPremiumHours).toBe(2);
+        expect(r.overtimeWithinScheduleHours).toBe(2);
+        expect(r.standardOvertimePay).toBe(974);
+        expect(r.statutoryOvertimePay).toBe(0);
+    });
+    test("月60時間を超えた時間が所定労働時間の中なら、50%増の分だけを払う", () => {
+        // 6月1日〜19日の平日15日に12時間ずつ（日の残業 4時間 × 15日 ＝ 60時間）。22日〜27日は水曜を所定休日にして6日とも8時間
+        const long = ["01", "02", "03", "04", "05", "08", "09", "10", "11", "12", "15", "16", "17", "18", "19"].map((d) => day(d, 12));
+        const week4 = [day("22", 8), day("23", 8), day("24", 8, "holiday_work"), day("25", 8), day("26", 8), day("27", 8)];
+        const r = calc(monthly, [...long, ...week4]);
+        const rate = r.overtimeHourlyRate;
+        expect([r.standardPremiumHours, r.highPremiumHours, r.overtimeWithinScheduleHours]).toEqual([60, 8, 8]);
+        expect(r.standardOvertimePay).toBe(Math.floor(rate * 1.25 * 60));
+        expect(r.highOvertimePay).toBe(Math.floor(rate * 0.5 * 8)); // 27日（土）：60時間を超え、所定の中の時間
+        expect(r.statutoryOvertimePay).toBe(Math.floor(rate * 8));  // 24日（水）：所定の外で、週40時間以内
+    });
+    test("計算期間をまたぐ週は、前の計算期間の日の時間も週40時間に数える（その日の分は払わない）", () => {
+        const r = calc(monthly, fromWednesday(), { period, weekCarryOver: [day("08", 8), day("09", 8)] });
+        // 8日〜12日で40時間 → 13日（土）の8時間が週40時間超：1,704.54… × 1.25 × 8 = 17,045.45…円
+        expect(r.standardPremiumHours).toBe(8);
+        expect(r.standardOvertimePay).toBe(17045);
+        expect(r.statutoryOvertimePay).toBe(0);
+        expect(r.totalWorkHours).toBe(32);
+        expect(r.weekCarryOver).toEqual({ from: "2026-06-07", to: "2026-06-09", hours: 16 });
+        // 前の計算期間の日を渡さないと、週40時間を超えない（土曜は法定内残業 1.0倍：1,704.54… × 8）
+        const without = calc(monthly, fromWednesday(), { period });
+        expect(without.standardPremiumHours).toBe(0);
+        expect(without.statutoryOvertimePay).toBe(13636);
+        expect(without.weekCarryOver).toBeNull();
+    });
+    test("時給：前の計算期間の日も数えて、週40時間を超えた時間に割増を払う", () => {
+        const r = calc(hourly, fromWednesday(), { period, weekCarryOver: [day("08", 8), day("09", 8)] });
+        expect(r.basePay).toBe(1200 * 32);
+        expect(r.standardOvertimePay).toBe(2400); // 1,200 × 0.25 × 8
+    });
+    test("前の計算期間の日のうち、ほかの週の日・計算期間の日・法定休日の労働は数えない", () => {
+        const carry = [day("06", 8), day("07", 8, "statutory_holiday"), day("08", 8), day("10", 8)];
+        const r = calc(monthly, fromWednesday(), { period, weekCarryOver: carry });
+        expect(r.weekCarryOver).toEqual({ from: "2026-06-07", to: "2026-06-09", hours: 8 });
+        expect(r.standardPremiumHours).toBe(0); // 8時間 ＋ 32時間 ＝ 40時間なので、週40時間を超えない
+    });
+    test("前の計算期間の日の範囲：計算期間の初めの日がある週のうち、初めの日より前の日", () => {
+        expect(weekCarryOverRange("2026-12-01", 0)).toEqual({ from: "2026-11-29", to: "2026-11-30" }); // 12月1日は火曜
+        expect(weekCarryOverRange("2026-11-01", 0)).toBeNull(); // 11月1日は日曜（週の最初の日）
+        expect(weekCarryOverRange("2026-12-01", 1)).toEqual({ from: "2026-11-30", to: "2026-11-30" }); // 週の起算が月曜
+        expect(weekCarryOverRange("", 0)).toBeNull();
+    });
+    test("前の計算期間の日の、確定した勤怠だけを読む", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000), ('S002', '佐藤', 300000)");
+        const add = db.prepare("INSERT INTO attendance (staff_id, work_date, work_hours, work_type, is_finalized) VALUES (?, ?, ?, ?, ?)");
+        add.run("S001", "2026-11-28", 8, "normal", 1);       // 前の週
+        add.run("S001", "2026-11-29", 5, "holiday_work", 1);
+        add.run("S001", "2026-11-30", 8, "normal", 1);
+        add.run("S001", "2026-12-01", 8, "normal", 1);       // 計算期間の日
+        add.run("S002", "2026-11-30", 8, "normal", 1);       // ほかの人
+        const asyncDb = { select: async (sql: string, params: any[]) => db.prepare(sql).all(...params) };
+        const rows = await loadWeekCarryOver(asyncDb, "S001", "2026-12-01", 0);
+        expect(rows.map((r) => [r.work_date, r.work_hours, r.work_type])).toEqual([
+            ["2026-11-29", 5, "holiday_work"], ["2026-11-30", 8, "normal"],
+        ]);
+        db.exec("UPDATE attendance SET is_finalized = 0 WHERE work_date = '2026-11-29'");
+        expect((await loadWeekCarryOver(asyncDb, "S001", "2026-12-01", 0)).map((r) => r.work_date)).toEqual(["2026-11-30"]);
+        expect(await loadWeekCarryOver(asyncDb, "S001", "2026-11-01", 0)).toEqual([]); // 週の最初の日から始まる期間
+    });
+});
+
 describe("固定残業代（月給制。時間外労働の割増賃金に当てる）", () => {
     // 2026年6月の所定労働日は22日 → 時間単価 300,000 ÷ (22日 × 8時間) = 1,704.54…円
     const fixed = { ...monthly, fixed_overtime_hours: 14, fixed_overtime_allowance: 30000 };
@@ -797,7 +916,7 @@ describe("残業代の時給（1年間における1か月平均所定労働時�
         // 1年間 240日 × 8時間 ÷ 12 = 160時間。役職手当 16,000円 ÷ 160 = 100円
         // 時間外8時間：(1,200 × 0.25 ＋ 100 × 1.25) × 8 = 3,400円、深夜2時間：(1,200 ＋ 100) × 0.25 × 2 = 650円
         const allowance = [{ name: "役職手当", amount: 16000, type: "earning" as const }];
-        const rows = [day("08", 8, "normal", { night_hours: 2 }), ...weekdays().slice(1), day("13", 8)];
+        const rows = [day("08", 8, "normal", { night_hours: 2 }), ...weekdays().slice(1), day("13", 8, "holiday_work")];
         const r = calc(hourly, rows, { annualWorkDays: 240, customItems: allowance });
         expect(r.overtimeHourlyRate).toBe(1300);
         expect(r.basePay).toBe(57600);

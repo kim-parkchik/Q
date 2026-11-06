@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
-import { calculateSalary, loadCustomItems, saveSalaryResult, toProrationMethod, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
+import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toProrationMethod, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
-import { countPrescribedWorkDays, loadCalendarContext } from '../../utils/annualWorkDays';
+import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
@@ -141,6 +141,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   const periodStart: string = staff.periodStart || `${year}-${String(month).padStart(2, '0')}-01`;
   const dailyHours = Number(staff.scheduled_work_hours) || 0;
   // 会社カレンダーから、1年間の所定労働日数と、計算期間の所定労働日数・そのうち在籍した日の所定労働日数（日割り）を数える
+  const [calendarCtx, setCalendarCtx] = useState<CalendarContext | null>(null);
   useEffect(() => {
     let cancelled = false;
     setExtras(p => ({ ...p, annualWorkDays: undefined }));
@@ -149,8 +150,9 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       let days: number | null = null;
       let periodWorkDays: number | null = null;
       let employedWorkDays: number | null = null;
+      let ctx: CalendarContext | null = null;
       try {
-        const ctx = await loadCalendarContext(db, staff);
+        ctx = await loadCalendarContext(db, staff);
         const y = periodEnd.slice(0, 4);
         days = countPrescribedWorkDays(ctx, `${y}-01-01`, `${y}-12-31`);
         periodWorkDays = countPrescribedWorkDays(ctx, periodStart, periodEnd);
@@ -161,11 +163,39 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
         console.error("会社カレンダー（所定労働日数）の読み込みエラー:", e);
       }
       if (!cancelled) {
+        setCalendarCtx(ctx);
         setExtras(p => ({ ...p, annualWorkDays: days, period: { start: periodStart, end: periodEnd }, periodWorkDays, employedWorkDays }));
       }
     })();
     return () => { cancelled = true; };
   }, [db, staff.calendar_pattern_id, staff.work_days, staff.join_date, staff.retirement_date, periodStart, periodEnd]);
+
+  // 週40時間の累計に足す、前の計算期間の日（計算期間の初めの日がある週のうち、初めの日より前の日）の確定した勤怠
+  // undefined：読み込み中（この間は確定しない）
+  const weekStartDay = Number(companySettings?.week_start_day ?? 0);
+  useEffect(() => {
+    let cancelled = false;
+    setExtras(p => ({ ...p, weekCarryOver: undefined }));
+    (async () => {
+      if (!db) return;
+      let rows: NonNullable<SalaryExtras['weekCarryOver']> = [];
+      try {
+        rows = await loadWeekCarryOver(db, staff.id, periodStart, weekStartDay);
+      } catch (e) {
+        console.error("前の計算期間の勤怠（週40時間）の読み込みエラー:", e);
+      }
+      if (!cancelled) setExtras(p => ({ ...p, weekCarryOver: rows }));
+    })();
+    return () => { cancelled = true; };
+  }, [db, staff.id, periodStart, weekStartDay]);
+
+  // 会社カレンダーで休みの日に「出勤」で入れて働いた日。「出勤」の日は所定労働日として計算する
+  // （所定労働時間の分は月給・日給に入っているとみなし、週40時間を超えても割増分だけを払う）ので、所定休日の出勤なら「所定休日出勤」にする
+  const workOnCalendarHolidays = useMemo(() => !calendarCtx || staff.wage_type === 'hourly' ? [] : attendanceData
+    .filter(r => (r.work_type || 'normal') === 'normal' && (Number(r.work_hours) || 0) > 0
+      && !isPrescribedWorkDay(new Date(`${r.work_date}T00:00:00`), calendarCtx))
+    .map(r => String(r.work_date))
+    .sort(), [attendanceData, calendarCtx, staff.wage_type]);
 
   // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
   // 月給は「1年間における1月平均所定労働時間」で割る
@@ -206,8 +236,9 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   // 保存処理
   const handleSaveResult = async () => {
     if (!db || !staff) return;
-    if (extras.annualWorkDays === undefined || extras.socialInsCollection === undefined || extras.prorationMethod === undefined) {
-      alert("給与規定グループの設定・1年間の所定労働日数を読み込んでいます。少し待ってから、もう一度確定してください。");
+    if (extras.annualWorkDays === undefined || extras.socialInsCollection === undefined || extras.prorationMethod === undefined
+      || extras.weekCarryOver === undefined) {
+      alert("給与規定グループの設定・1年間の所定労働日数・前の計算期間の勤怠（週40時間）を読み込んでいます。少し待ってから、もう一度確定してください。");
       return;
     }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
@@ -237,6 +268,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     rateWarnings,
     empInsMaster,
     minimumWageCheck,
+    workOnCalendarHolidays,
     yearEndYear,
     flatTaxTotal,
     fmtH

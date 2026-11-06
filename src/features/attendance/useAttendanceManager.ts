@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
-import { calculateSalary, calcDetailedDiff, loadCustomItems, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
+import { calculateSalary, calcDetailedDiff, loadCustomItems, loadWeekCarryOver, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
@@ -384,6 +384,19 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     return () => { cancelled = true; };
   }, [db, selectedStaff, periodStart, periodEnd, targetYear]);
 
+  // --- 週40時間の累計に足す、前の計算期間の日（計算期間の初めの日がある週のうち、初めの日より前の日）の確定した勤怠（給与明細と同じ） ---
+  const [weekCarryOver, setWeekCarryOver] = useState<NonNullable<SalaryExtras['weekCarryOver']>>([]);
+  const weekStartDay = Number(companySettings?.week_start_day ?? 0);
+  useEffect(() => {
+    let cancelled = false;
+    setWeekCarryOver([]);
+    if (!db || !selectedStaff || !periodStart) return;
+    loadWeekCarryOver(db, selectedStaff.id, periodStart, weekStartDay)
+      .then((rows) => { if (!cancelled) setWeekCarryOver(rows); })
+      .catch((e) => console.error("前の計算期間の勤怠（週40時間）の読み込みエラー:", e));
+    return () => { cancelled = true; };
+  }, [db, selectedStaff, periodStart, weekStartDay]);
+
   // --- 給与集計 ---
   const calcResult = useMemo(() => {
     // 1. 初期値をエンジン側の戻り値の構造と合わせる
@@ -442,6 +455,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         period: periodStart ? { start: periodStart, end: periodEnd } : null,
         periodWorkDays: workDays.period,
         employedWorkDays: workDays.employed,
+        // 週40時間の累計に、前の計算期間の日も足す
+        weekCarryOver,
         // 社会保険料の徴収（給与規定グループの設定。翌月徴収の退職月は、当月払いなら退職した月の分も引く）
         socialInsCollection: toSocialInsCollection(currentGroup?.social_ins_collection),
         collectRetirementMonth: Number(currentGroup?.is_next_month) !== 1,
@@ -453,7 +468,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {
