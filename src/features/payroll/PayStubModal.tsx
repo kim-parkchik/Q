@@ -4,6 +4,7 @@ import * as Master from '../../constants';
 import { PREFECTURES } from '../../utils/calcSalary';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
+import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
 
 interface Props {
   db: any;
@@ -401,7 +402,7 @@ export default function PayStubModal(props: Props) {
             ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
             厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月からの料率で計算。
             健康保険・介護保険・子ども・子育て支援金・厚生年金は{insMonthLabel}（{salary.socialInsCollection === "next" ? "翌月徴収" : "当月徴収"}）。
-            所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : salary.taxColumn === "hei" ? "日額表（丙欄。働いた日ごと）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額まで課税対象外。住民税は手入力値。
+            所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : salary.taxColumn === "hei" ? "日額表（丙欄。働いた日ごと）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額（{COMMUTE_METHOD_LABELS[salary.commuteMethod]}・1か月 ¥{salary.commuteTaxFreeLimit.toLocaleString()}）まで課税対象外。住民税は手入力値。
           </div>
         </div>
       </div>

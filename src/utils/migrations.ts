@@ -93,6 +93,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "my_numbers", "number_hash", "TEXT");
     },
   },
+  {
+    version: 7,
+    description: "従業員に、通勤の方法・片道の距離・定期代・有料道路・駐車場等を追加（通勤手当の非課税限度額に使う。初めは空で、電車・バスなどとして計算する）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "commute_setting", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

@@ -567,6 +567,26 @@ describe("通勤手当は非課税限度額まで所得税の対象外", () => {
         expect(r.nonTaxableCommute).toBe(150000);
         expect(r.taxableAmount).toBe(350000);
     });
+    test("マイカー通勤の人は、片道の距離の区分の額まで（2026年6月：片道12kmなら 7,300円。超えた分は課税）", () => {
+        const car = { ...monthly, commute_type: "monthly", commute_amount: 10000, commute_setting: JSON.stringify({ method: "vehicle", distanceKm: 12 }) };
+        const r = calc(car, []);
+        expect(r.commuteMethod).toBe("vehicle");
+        expect(r.commuteTaxFreeLimit).toBe(7300);
+        expect(r.nonTaxableCommute).toBe(7300);
+        expect(r.taxableAmount).toBe(300000 + 10000 - 7300);
+    });
+    test("マイカー通勤で片道2km未満の人は、通勤手当の全額に所得税がかかる", () => {
+        const near = { ...monthly, commute_type: "monthly", commute_amount: 5000, commute_setting: JSON.stringify({ method: "vehicle", distanceKm: 1.5, parking: 3000 }) };
+        const r = calc(near, []);
+        expect(r.nonTaxableCommute).toBe(0);
+        expect(r.taxableAmount).toBe(305000);
+    });
+    test("日額で払う人も、1か月の合計を限度額と比べる（片道12km：日額500円 × 20日 ＝ 10,000円のうち 7,300円）", () => {
+        const days = Array.from({ length: 20 }, (_, i) => day(String(i + 1).padStart(2, "0"), 8));
+        const r = calc({ ...hourly, commute_type: "daily", commute_amount: 500, commute_setting: JSON.stringify({ method: "vehicle", distanceKm: 12 }) }, days);
+        expect(r.commutePay).toBe(10000);
+        expect(r.nonTaxableCommute).toBe(7300);
+    });
 });
 
 describe("法定休日・所定休日の出勤", () => {

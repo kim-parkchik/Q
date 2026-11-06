@@ -5,6 +5,7 @@
 import { XCircle, Car, TrainFront, Banknote } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
+import { COMMUTE_METHOD_LABELS, describeCommuteLimit, type CommuteMethod, type CommuteSetting } from '../../../utils/commuteAllowance';
 
 interface Props {
     cm: StaffManagerState;
@@ -24,6 +25,8 @@ export default function EmploymentSection({ cm }: Props) {
         setTargetCommuteType,
         targetCommuteAmount,
         setTargetCommuteAmount,
+        targetCommuteSetting,
+        setTargetCommuteSetting,
         branches,
         payrollGroups,
         targetPayrollGroupId,
@@ -171,12 +174,79 @@ export default function EmploymentSection({ cm }: Props) {
                             color: targetCommuteType === "none" ? "#cbd5e1" : "#7f8c8d",
                             pointerEvents: "none" // 単位をクリックしてもinputが反応するように
                         }}>
-                            {targetCommuteType === "daily" ? "円 / 日" : 
+                            {targetCommuteType === "daily" ? "円 / 日" :
                             targetCommuteType === "monthly" ? "円 / 月" : "―"}
                         </span>
                     </div>
                 </div>
             </div>
+
+            {/* 通勤の方法（通勤手当のうち所得税がかからない額＝非課税限度額に使う。utils/commuteAllowance.ts） */}
+            {targetCommuteType !== "none" && (
+                <CommuteSettingFields setting={targetCommuteSetting} onChange={setTargetCommuteSetting} />
+            )}
         </>
+    );
+}
+
+/** 円・km の入力欄（空は 0） */
+const NumberField = ({ label, value, unit, step, onChange }: { label: string; value: number; unit: string; step?: string; onChange: (v: number) => void }) => (
+    <div style={{ flex: 1, minWidth: "110px" }}>
+        <label style={{ ...labelStyle, fontSize: "11px" }}>{label}</label>
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+            <input
+                type="number" min={0} step={step ?? "1"}
+                value={value || ""} placeholder="0"
+                onChange={e => onChange(Math.max(0, Number(e.target.value) || 0))}
+                style={{ ...inputStyle, paddingRight: "48px", textAlign: "right" }}
+            />
+            <span style={{ position: "absolute", right: "10px", fontSize: "11px", color: "#7f8c8d", pointerEvents: "none" }}>{unit}</span>
+        </div>
+    </div>
+);
+
+/** 通勤の方法・片道の距離・定期代・有料道路・駐車場等と、いまの非課税限度額 */
+function CommuteSettingFields({ setting, onChange }: { setting: CommuteSetting; onChange: (s: CommuteSetting) => void }) {
+    const set = (patch: Partial<CommuteSetting>) => onChange({ ...setting, ...patch });
+    const now = new Date();
+    const usesVehicle = setting.method !== "transit";
+    return (
+        <div style={{ marginTop: "8px", padding: "8px", border: "1px solid #e2e8f0", borderRadius: "6px", backgroundColor: "#f8fafc" }}>
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <div style={{ flex: 2, minWidth: "200px" }}>
+                    <label style={{ ...labelStyle, fontSize: "11px" }}>通勤の方法（所得税がかからない額に使う）</label>
+                    <select value={setting.method} onChange={e => set({ method: e.target.value as CommuteMethod })} style={inputStyle}>
+                        {(Object.keys(COMMUTE_METHOD_LABELS) as CommuteMethod[]).map(m => (
+                            <option key={m} value={m}>{COMMUTE_METHOD_LABELS[m]}</option>
+                        ))}
+                    </select>
+                </div>
+                {usesVehicle && (
+                    <NumberField label="マイカーなどの片道の距離" value={setting.distanceKm} unit="km" step="0.1" onChange={v => set({ distanceKm: v })} />
+                )}
+                {setting.method === "both" && (
+                    <NumberField label="電車・バスなどの定期代など" value={setting.transitFare} unit="円/月" onChange={v => set({ transitFare: Math.floor(v) })} />
+                )}
+                {usesVehicle && (
+                    <NumberField label="有料道路の料金" value={setting.toll} unit="円/月" onChange={v => set({ toll: Math.floor(v) })} />
+                )}
+                {usesVehicle && (
+                    <NumberField label="駐車場・駐輪場の料金" value={setting.parking} unit="円/月" onChange={v => set({ parking: Math.floor(v) })} />
+                )}
+            </div>
+            <div style={{ fontSize: "11px", color: "#475569", marginTop: "6px", lineHeight: 1.6 }}>
+                所得税がかからない額（{now.getFullYear()}年{now.getMonth() + 1}月に支払う分）：{describeCommuteLimit(setting, now.getFullYear(), now.getMonth() + 1)}
+                {usesVehicle && (
+                    <div style={{ color: "#64748b" }}>
+                        片道の距離は、ふだん通る道で測った距離です（2km未満は全額に所得税がかかります）。
+                        駐車場・駐輪場は、勤め先や通勤に使う駅などの近くのものだけで、自宅の近くのものは入れません（令和8年4月に支払う分から、月5,000円まで足せます）。
+                        金額は1か月当たりで入れてください（3か月分・1年分の料金は、月数で割った額）。
+                    </div>
+                )}
+                {setting.method === "transit" && (
+                    <div style={{ color: "#64748b" }}>マイカー・自転車などで通勤する人は、通勤の方法を選び直してください（電車・バスなどのままだと、月15万円まで所得税がかからない計算になります）。</div>
+                )}
+            </div>
+        </div>
     );
 }

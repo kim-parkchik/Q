@@ -70,6 +70,7 @@ import {
 import { calcDailyHeiTaxByTable, calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
 import { checkLeaveExemptMonth, parseLeavePeriods } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
+import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -180,6 +181,9 @@ export interface SalaryResult {
   nonFixedEarnings: number;
   /** 通勤手当のうち所得税がかからない額 */
   nonTaxableCommute: number;
+  /** 通勤手当の非課税限度額（1か月当たり。通勤の方法・片道の距離などで決まる。utils/commuteAllowance.ts）と、その通勤の方法 */
+  commuteTaxFreeLimit: number;
+  commuteMethod: CommuteMethod;
   /** 所得税の対象になる支給額（支給合計 − 非課税の通勤手当） */
   taxableAmount: number;
   healthInsurance: number;
@@ -1205,9 +1209,12 @@ export const calculateSalary = (
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
   const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
-  // 通勤手当は非課税限度額（月15万円）まで所得税がかからない
-  // ※ マイカー・自転車通勤は距離に応じた限度額になるが、今は交通機関の限度額で計算する
-  const nonTaxableCommute = Math.min(commutePay, Master.getTaxMaster(targetYear).DEFAULT_COMMUTING_TAX_FREE_LIMIT);
+  // 通勤手当は、その人の非課税限度額まで所得税がかからない（utils/commuteAllowance.ts）
+  // 電車・バスなどだけの人は月15万円まで、マイカー・自転車などの人は片道の距離の区分の額（＋駐車場等・有料道路、両方の人は＋運賃等）まで
+  // 限度額の表は、給与を支払う年月で選ぶ（令和7年4月・令和8年4月に改正）
+  const commuteSetting = parseCommuteSetting(staff.commute_setting);
+  const commuteLimit = commuteLimitOf(commuteSetting, targetYear, targetMonth);
+  const nonTaxableCommute = Math.min(commutePay, commuteLimit.limit);
   const taxableAmount = totalEarnings - nonTaxableCommute;
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
   // 扶養控除等申告書を出していない人は乙欄（扶養人数は「従たる給与についての扶養控除等申告書」の人数）
@@ -1274,6 +1281,8 @@ export const calculateSalary = (
     totalEarnings,
     nonFixedEarnings,
     nonTaxableCommute,
+    commuteTaxFreeLimit: commuteLimit.limit,
+    commuteMethod: commuteSetting.method,
     taxableAmount,
 
     // --- 控除額 (Deductions) ---

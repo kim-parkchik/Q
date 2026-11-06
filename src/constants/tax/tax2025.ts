@@ -13,7 +13,7 @@
  * 1. 月額表（monthlyTable2025.ts）と、電算機計算の特例（月額表の代わりに使える計算式）
  * 2. 賞与に対する源泉徴収税額の算出率の表（bonusTaxTable2025.ts）
  * 3. 日額表の丙欄（dailyHeiTable2025.ts）
- * 4. 通勤手当非課税限度額
+ * ※ 通勤手当の非課税限度額は constants/tax/commuteLimits.ts（国税庁の資料から自動生成。給与を支払う年月で選ぶ）
  */
 
 import { MONTHLY_TABLE_2025 } from './monthlyTable2025';
@@ -59,12 +59,6 @@ export const DENSANKI = {
   ] as [number, number, number][],
 };
 
-/**
- * 通勤手当の非課税限度額 (月額) 
- * ※CompanyManagerで設定する「非課税限度額」のデフォルト値等に使用
- */
-export const DEFAULT_COMMUTING_TAX_FREE_LIMIT = 150000;
-
 export const TAX_2025 = {
   MASTER_YEAR,
   MASTER_MONTH,
@@ -75,5 +69,4 @@ export const TAX_2025 = {
   BONUS_TABLE: BONUS_TAX_TABLE_2025,
   /** 日額表の丙欄（国税庁のExcelから自動生成） */
   DAILY_HEI_TABLE: DAILY_HEI_TABLE_2025,
-  DEFAULT_COMMUTING_TAX_FREE_LIMIT,
 };

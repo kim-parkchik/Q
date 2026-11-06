@@ -24,9 +24,9 @@ const header = (db: Database) => ({
 });
 
 describe("会社ファイルの形式（2026-11-03 の形を v1 とする）", () => {
-    test("v1 から始めて、今の最新は v6", () => {
+    test("v1 から始めて、今の最新は v7", () => {
         expect(BASE_DB_VERSION).toBe(1);
-        expect(LATEST_DB_VERSION).toBe(6);
+        expect(LATEST_DB_VERSION).toBe(7);
     });
     test("新しいファイル：表を作り、Q の印と最新の番号を付ける（更新は実行しない）", async () => {
         const db = new Database(":memory:");
@@ -80,7 +80,7 @@ describe("更新（マイグレーション）", () => {
     test("v2: 従業員に住民税の年度ごとの額の列を足す（初めは空。今までの月額はそのまま）", async () => {
         const db = v1File();
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(5);
+        expect(applied).toHaveLength(6);
         expect(applied[0]).toStartWith("v2:");
         expect(db.query("SELECT resident_tax AS t, resident_tax_schedule AS s FROM staff").get()).toEqual({ t: 7000, s: null });
         expect(header(db)).toEqual({ id: Q_FILE_ID, version: LATEST_DB_VERSION });
@@ -91,7 +91,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("ALTER TABLE staff ADD COLUMN resident_tax_schedule TEXT");
         db.exec("PRAGMA user_version = 2");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(4);
+        expect(applied).toHaveLength(5);
         expect(applied[0]).toStartWith("v3:");
         expect(db.query("SELECT resident_tax_municipality AS m FROM staff").get()).toEqual({ m: null });
     });
@@ -103,7 +103,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO users (login_id, display_name, password_hash, role) VALUES ('admin', '管理者', 'x', 'admin')");
         db.exec("PRAGMA user_version = 3");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(3);
+        expect(applied).toHaveLength(4);
         expect(applied[0]).toStartWith("v4:");
         expect(db.query("SELECT my_number_access AS a FROM users").get()).toEqual({ a: 0 });
         // マイナンバーの表は、開くときに作られる
@@ -117,7 +117,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO resident_tax_municipalities (code, designation_number) VALUES ('131016', 'AB-12345')");
         db.exec("PRAGMA user_version = 4");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(2);
+        expect(applied).toHaveLength(3);
         expect(applied[0]).toStartWith("v5:");
         expect(db.query("SELECT designation_number AS d, atena_number AS a, special_due AS s FROM resident_tax_municipalities").get())
             .toEqual({ d: "AB-12345", a: null, s: 0 });
@@ -130,11 +130,25 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO my_numbers (staff_id, person, number) VALUES ('S001', 'self', '123456789018')");
         db.exec("PRAGMA user_version = 5");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(2);
         expect(applied[0]).toStartWith("v6:");
         expect(db.query("SELECT number, number_hash AS h FROM my_numbers").get()).toEqual({ number: "123456789018", h: null });
         // 鍵の表は、開くときに作られる
         expect(db.query("SELECT COUNT(*) AS n FROM my_number_keys").get()).toEqual({ n: 0 });
+    });
+    test("v7: v6 の会社ファイルの従業員に、通勤の方法などの列を足す（初めは空。電車・バスなどとして計算する）", async () => {
+        const db = v1File();
+        db.exec("ALTER TABLE staff ADD COLUMN resident_tax_schedule TEXT");
+        db.exec("ALTER TABLE staff ADD COLUMN resident_tax_municipality TEXT");
+        db.exec("ALTER TABLE staff ADD COLUMN commute_type TEXT DEFAULT 'monthly'");
+        db.exec("ALTER TABLE staff ADD COLUMN commute_amount INTEGER DEFAULT 20000");
+        db.exec("PRAGMA user_version = 6");
+        const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
+        expect(applied).toHaveLength(1);
+        expect(applied[0]).toStartWith("v7:");
+        expect(db.query("SELECT commute_type AS t, commute_amount AS a, commute_setting AS s FROM staff").get())
+            .toEqual({ t: "monthly", a: 20000, s: null });
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 7 });
     });
 });
 

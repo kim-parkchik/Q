@@ -120,8 +120,9 @@ export const DB_SCHEMAS = [
     is_overtime_eligible INTEGER DEFAULT 1,
     fixed_overtime_hours REAL DEFAULT 0.0,
     fixed_overtime_allowance INTEGER DEFAULT 0,
-    commute_type TEXT DEFAULT 'none', 
-    commute_amount INTEGER DEFAULT 0, 
+    commute_type TEXT DEFAULT 'none',
+    commute_amount INTEGER DEFAULT 0,
+    commute_setting TEXT,              -- 通勤の方法・片道の距離・定期代・有料道路・駐車場等（JSON。非課税限度額に使う。詳しくは utils/commuteAllowance.ts）
     dependents INTEGER DEFAULT 0, 
     tax_column TEXT DEFAULT 'kou', -- 源泉所得税の欄（kou: 甲欄 / otsu: 乙欄 / hei: 丙欄）
     resident_tax INTEGER DEFAULT 0,    -- 住民税の月額（以前の入れ方。下の年度の額を入れていない月に使う）
