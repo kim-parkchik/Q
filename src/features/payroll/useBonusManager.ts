@@ -9,8 +9,14 @@ import { calcPremium } from '../../utils/socialInsurance';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 import { checkLeaveExemptBonus, parseLeavePeriods } from '../../utils/leaveExemption';
 import { executeBatch } from '../../utils/dbBatch';
+import { cappedBonusStandard, earlierBonusTotals, prevSalaryStatusOf, type OtherBonus, type PrevSalaryStatus } from '../../utils/bonusInsurance';
+import { getPeriodForPayMonth, type PayrollGroupForPeriod } from '../../utils/payrollPeriod';
+import { groupOf } from '../../utils/santei';
 import { buildAddBonusSettingStatements, buildFinalizeBonusStatements, buildUnfinalizeBonusStatements } from '../../utils/bonusResults';
 import { useMessageDialog } from '../../components/MessageDialog';
+
+/** 前の月（賞与の所得税の「前月の給与」は、賞与を支払う月の前月中に支払った給与） */
+const prevMonthOf = (year: number, month: number) => (month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 });
 
 // --- Types ---
 interface BonusSetting {
@@ -38,8 +44,12 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
   const [activeItemIds, setActiveItemIds] = useState<number[]>([]); // 🆕 選択中の賞与で有効な項目のID
   // const [activeItemIdsMap, setActiveItemIdsMap] = useState<Record<number, number[]>>({});
   const [staffValues, setStaffValues] = useState<Record<string, Record<number, number>>>({});
-  const [annualBonusTotals, setAnnualBonusTotals] = useState<Record<string, number>>({});
+  /** 同じ年度のほかの賞与（従業員ID → 賞与ごとの標準賞与額） */
+  const [otherBonuses, setOtherBonuses] = useState<Record<string, OtherBonus[]>>({});
+  /** 前月に支払った給与の、社会保険料等を引いた額（確定した給与がある人だけ。従業員ID → 額） */
   const [prevMonthTaxBases, setPrevMonthTaxBases] = useState<Record<string, number>>({});
+  /** 給与規定グループ（前月に支払う給与の計算期間を出すのに使う） */
+  const [payrollGroups, setPayrollGroups] = useState<(PayrollGroupForPeriod & { id: number })[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [companySettings, setCompanySettings] = useState<any>({});
 
@@ -99,30 +109,53 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     setStaffValues(map);
   }, [db]);
 
-  // --- 年度累計・前月給与ロード (既存ママ) ---
-  const loadAnnualBonusTotals = useCallback(async (year: number, currentSettingId: number) => {
+  // --- 同じ年度のほかの賞与（標準賞与額の上限の累計に使う。utils/bonusInsurance.ts）・前月給与ロード ---
+  // 1人ずつ・賞与ごとの標準賞与額（1回ごとに1,000円未満切り捨て）。確定した賞与は確定した額、まだの賞与は、その賞与で有効な支給項目の合計
+  // 前に支払ったものだけを累計するかどうかは、計算のとき（calcBonusForStaff）に支給日で決める
+  const loadOtherBonuses = useCallback(async (year: number, currentSettingId: number) => {
     if (!db) return;
     const fiscalYearStart = `${year}-04-01`;
     const fiscalYearEnd = `${year + 1}-03-31`;
-    const res = await db.select<any[]>(
-      `SELECT staff_id, SUM(amount) as raw_total FROM bonus_staff_values 
-        JOIN bonus_item_master ON bonus_staff_values.item_id = bonus_item_master.id
-        JOIN bonus_settings ON bonus_staff_values.bonus_setting_id = bonus_settings.id
-        WHERE bonus_settings.payment_date BETWEEN ? AND ? AND bonus_item_master.type = 'earning' AND bonus_settings.id != ?
-        GROUP BY staff_id`, [fiscalYearStart, fiscalYearEnd, currentSettingId]
+    const entered = await db.select<{ setting_id: number; payment_date: string; staff_id: string; total: number }[]>(
+      `SELECT s.id AS setting_id, s.payment_date, v.staff_id, SUM(v.amount) AS total
+         FROM bonus_settings s
+         JOIN bonus_staff_values v ON v.bonus_setting_id = s.id
+         JOIN bonus_item_master m ON m.id = v.item_id AND m.type = 'earning'
+         JOIN bonus_setting_items si ON si.bonus_setting_id = s.id AND si.item_id = v.item_id
+        WHERE s.payment_date BETWEEN ? AND ? AND s.id != ?
+        GROUP BY s.id, v.staff_id`,
+      [fiscalYearStart, fiscalYearEnd, currentSettingId]
     );
-    const map: Record<string, number> = {};
-    res.forEach(r => { map[r.staff_id] = Math.floor((r.raw_total || 0) / 1000) * 1000; });
-    setAnnualBonusTotals(map);
+    const finalized = await db.select<{ setting_id: number; payment_date: string; staff_id: string; hyojun_bonus: number }[]>(
+      `SELECT r.bonus_setting_id AS setting_id, s.payment_date, r.staff_id, r.hyojun_bonus
+         FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id
+        WHERE s.payment_date BETWEEN ? AND ? AND s.id != ?`,
+      [fiscalYearStart, fiscalYearEnd, currentSettingId]
+    );
+    const byKey = new Map<string, { staffId: string; bonus: OtherBonus }>();
+    for (const r of entered) {
+      byKey.set(`${r.setting_id}:${r.staff_id}`, {
+        staffId: String(r.staff_id),
+        bonus: { settingId: Number(r.setting_id), paymentDate: r.payment_date, standard: Math.floor((Number(r.total) || 0) / 1000) * 1000 },
+      });
+    }
+    for (const r of finalized) {
+      byKey.set(`${r.setting_id}:${r.staff_id}`, {
+        staffId: String(r.staff_id),
+        bonus: { settingId: Number(r.setting_id), paymentDate: r.payment_date, standard: Number(r.hyojun_bonus) || 0 },
+      });
+    }
+    const map: Record<string, OtherBonus[]> = {};
+    for (const { staffId, bonus } of byKey.values()) (map[staffId] ??= []).push(bonus);
+    setOtherBonuses(map);
   }, [db]);
 
   const loadPrevMonthSalary = useCallback(async (year: number, month: number) => {
     if (!db) return;
-    let prevY = year; let prevM = month - 1;
-    if (prevM === 0) { prevY--; prevM = 12; }
+    const prev = prevMonthOf(year, month);
     const res = await db.select<any[]>(
-      `SELECT staff_id, (taxable_amount - social_ins_total) as tax_base FROM salary_results 
-        WHERE CAST(target_year AS INTEGER) = ? AND CAST(target_month AS INTEGER) = ?`, [prevY, prevM]
+      `SELECT staff_id, (taxable_amount - social_ins_total) as tax_base FROM salary_results
+        WHERE CAST(target_year AS INTEGER) = ? AND CAST(target_month AS INTEGER) = ?`, [prev.year, prev.month]
     );
     const map: Record<string, number> = {};
     res.forEach(r => { map[r.staff_id] = r.tax_base || 0; });
@@ -136,6 +169,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     loadItems();
     db.select<any[]>("SELECT * FROM branches ORDER BY id ASC").then(setBranches);
     db.select<any[]>("SELECT * FROM company WHERE id = 1").then(res => { if (res?.[0]) setCompanySettings(res[0]); });
+    db.select<any[]>("SELECT id, closing_day, is_next_month FROM payroll_groups ORDER BY id ASC").then(res => setPayrollGroups(res ?? []));
   }, [db, loadSettings, loadItems]);
 
   useEffect(() => {
@@ -143,13 +177,13 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       loadActiveItemIds(selectedSettingId); 
       loadStaffValues(selectedSettingId);
       const fiscalYear = selectedSetting.target_month >= 4 ? selectedSetting.target_year : selectedSetting.target_year - 1;
-      loadAnnualBonusTotals(fiscalYear, selectedSettingId);
+      loadOtherBonuses(fiscalYear, selectedSettingId);
       loadPrevMonthSalary(selectedSetting.target_year, selectedSetting.target_month);
     }else {
       // 何も選択されていないときは空にする
       setActiveItemIds([]);
     }
-  }, [selectedSettingId, selectedSetting, loadActiveItemIds, loadStaffValues, loadAnnualBonusTotals, loadPrevMonthSalary]);
+  }, [selectedSettingId, selectedSetting, loadActiveItemIds, loadStaffValues, loadOtherBonuses, loadPrevMonthSalary]);
 
   // --- Actions ---
   // 🆕 賞与設定の編集を開始する
@@ -356,9 +390,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const isNursing = isHealthTarget && byAge.nursing;
 
     const sInsType = companySettings.round_social_ins || 'floor';
-    const currentYearTotal = annualBonusTotals[staff.id] ?? 0;
+    // この賞与より前に支払った賞与の標準賞与額の累計（後で支払う賞与は入れない。utils/bonusInsurance.ts）
+    const earlier = earlierBonusTotals(staff, otherBonuses[String(staff.id)] ?? [], { settingId: selectedSetting.id, paymentDate: payDate });
     // 健康保険・介護保険・子ども・子育て支援金の標準賞与額は、年度（4月〜翌3月）の累計で573万円まで
-    const healthHyojun = Math.min(hyojunBonus, Math.max(0, ins.HEALTH_INS_ANNUAL_LIMIT - currentYearTotal));
+    const healthHyojun = cappedBonusStandard(hyojunBonus, earlier.health, ins.HEALTH_INS_ANNUAL_LIMIT);
 
     // 本人負担分 = 標準賞与額 × 料率 ÷ 2（介護保険は「健康保険＋介護保険」でまとめて計算し、健康保険料を引く）
     const healthInsurance = isHealthTarget ? calcPremium(healthHyojun, healthRate, sInsType) : 0;
@@ -369,8 +404,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       ? calcPremium(healthHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType)
       : 0;
 
-    // 厚生年金の標準賞与額は1回150万円まで
-    const pensionHyojun = Math.min(hyojunBonus, ins.PENSION_INS_SINGLE_LIMIT);
+    // 厚生年金の標準賞与額は1か月150万円まで（同じ月に前にも支払っていれば、合わせて150万円まで）
+    const pensionHyojun = cappedBonusStandard(hyojunBonus, earlier.pensionSameMonth, ins.PENSION_INS_SINGLE_LIMIT);
     const welfarePension = isPensionTarget ? calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType) : 0;
 
     const empInsType = staff.employment_insurance_type || companySettings.default_emp_ins_type || 'general';
@@ -382,21 +417,41 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
     // 源泉所得税：国税庁の算出率の表（前月の給与がない・賞与が前月の給与の10倍を超えるときは月額表）で計算する
     // ※ 前月の給与は、前月支給分として確定した給与（非課税の通勤手当を除いた額 − 社会保険料）を使う
+    //   前月に給与を払うはずなのに確定していない人は、前月の給与がないものとして計算してしまうので、画面と確定のときに知らせる
     // 扶養控除等申告書を出していない人は乙欄（丙欄の人の賞与も乙欄。所得税法186条1項2号）
     // 扶養親族等の数は、賞与を支払う月の分の履歴の値（utils/staffHistory.ts）
     const dependents = staffAsOf(staff, payYear, payMonth).dependents;
-    const incomeTax = calcBonusWithholdingTax(Math.max(0, totalEarnings - socialTotal), prevMonthTaxBases[staff.id] || 0, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
-      
+    const prevMonthTaxBase = prevMonthTaxBases[String(staff.id)] ?? 0;
+    const bonusAfterSocial = Math.max(0, totalEarnings - socialTotal);
+    const incomeTax = calcBonusWithholdingTax(bonusAfterSocial, prevMonthTaxBase, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
+    const prevSalaryStatus = prevSalaryStatusOfStaff(staff);
+    // 算出率の表を使わず、月額表を使う方法で計算したか（前月の給与がない・賞与が前月の給与の10倍を超える）
+    const taxByMonthlyTable = totalEarnings > 0 && (Math.floor(prevMonthTaxBase) <= 0 || bonusAfterSocial > Math.floor(prevMonthTaxBase) * 10);
+
     // 🆕 カスタム控除も有効なものだけ合計
     const customDeductions = deductionItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
     const totalDeductions = socialTotal + incomeTax + customDeductions;
 
     return {
-      totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, childSupport, welfarePension, 
+      totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, childSupport, welfarePension,
       empInsurance, incomeTax, customDeductions, totalDeductions,
-      netPay: totalEarnings - totalDeductions, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled
+      netPay: totalEarnings - totalDeductions, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled,
+      /** この賞与より前に支払った賞与の健康保険の標準賞与額の累計と、この賞与の健康保険・厚生年金の標準賞与額（上限で切った額） */
+      earlierHealthTotal: earlier.health, healthHyojun, pensionHyojun,
+      prevSalaryStatus, taxByMonthlyTable,
     };
   };
+
+  /** 前月（賞与を支払う月の前月）に支払った給与の状況。前月に支払う給与の計算期間に在籍していたのに確定していなければ unconfirmed */
+  const prevSalaryStatusOfStaff = (staff: any): PrevSalaryStatus => {
+    if (!selectedSetting) return "none";
+    const { year, month } = prevMonthOf(selectedSetting.target_year, selectedSetting.target_month);
+    const group = groupOf(staff, payrollGroups);
+    return prevSalaryStatusOf(staff, String(staff.id) in prevMonthTaxBases, group ? getPeriodForPayMonth(group, year, month) : null, year, month);
+  };
+
+  /** 前月（給与を支払った月）。画面の知らせに使う */
+  const prevMonth = selectedSetting ? prevMonthOf(selectedSetting.target_year, selectedSetting.target_month) : null;
 
   // 編集ボタンを押した時
   const startEdit = (item: any) => {
@@ -443,10 +498,18 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const rows = bonusStaffList
       .map(staff => ({ staff, calc: calcBonusForStaff(staff) }))
       .filter((r): r is { staff: any; calc: NonNullable<ReturnType<typeof calcBonusForStaff>> } => !!r.calc && r.calc.totalEarnings > 0);
+    // 前月に給与を払うはずなのに確定していない人は、前月の給与がないものとして所得税を計算している
+    const unconfirmed = rows.filter(r => r.calc.prevSalaryStatus === 'unconfirmed').map(r => r.staff.name);
+    const prev = prevMonthOf(selectedSetting.target_year, selectedSetting.target_month);
     const ok = await ask(
       `「${selectedSetting.name}」を確定します（支給がある${rows.length}人）。\n` +
-      `確定した賞与は、年末調整の1年分の集計に入ります。金額を直したときは、もう一度確定してください。`,
-      { title: '賞与の確定', kind: 'info' }
+      `確定した賞与は、年末調整の1年分の集計に入ります。金額を直したときは、もう一度確定してください。` +
+      (unconfirmed.length > 0
+        ? `\n\n⚠ 次の人は、前月（${prev.year}年${prev.month}月）に支払う給与がまだ確定していないため、前月の給与がないものとして所得税を計算しています：\n` +
+          `${unconfirmed.join("・")}\n` +
+          `前月の給与を確定してから、この賞与を確定するのをすすめます（休職などで前月に給与を払っていない人は、このままで構いません）。このまま確定しますか？`
+        : ""),
+      { title: '賞与の確定', kind: unconfirmed.length > 0 ? 'warning' : 'info' }
     );
     if (!ok) return;
     try {
@@ -508,5 +571,6 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     finalizeBonus,
     unfinalizeBonus,
     rateWarnings,
+    prevMonth,
   };
 };

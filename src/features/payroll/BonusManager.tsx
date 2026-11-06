@@ -3,10 +3,11 @@
  *
  * 賞与の法的ポイント:
  *  - 標準賞与額 = 賞与支給額（1,000円未満切り捨て）
- *  - 健康保険料 = 標準賞与額 × 料率（年度累計573万円上限）
- *  - 厚生年金保険料 = 標準賞与額 × 料率（1回あたり150万円上限）
+ *  - 健康保険料 = 標準賞与額 × 料率（年度の累計573万円が上限。この賞与より前に支払った賞与と合わせて数える。utils/bonusInsurance.ts）
+ *  - 厚生年金保険料 = 標準賞与額 × 料率（1か月150万円が上限。同じ月に2回以上支払ったときは合わせて）
  *  - 雇用保険料 = 賞与支給額 × 料率（標準賞与額でなく実額にかける）
- *  - 所得税 = 前月の社会保険料控除後給与 × 係数（賞与用の税率）
+ *  - 所得税 = （賞与 − 社会保険料等）× 算出率（率は、前月に支払った給与の社会保険料等控除後の額と扶養親族等の数で決まる。
+ *    前月の給与がない・賞与が前月の給与の10倍を超えるときは、月額表を使う方法。utils/incomeTax.ts）
  */
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
@@ -73,13 +74,6 @@ const SwitchRow = ({
   </label>
 );
 
-/**
- * 賞与所得税の計算（前月給与0円ケース対応版）
- * @param bonusAfterSocial 社会保険料控除後の賞与額
- * @param prevMonthTaxBase 前月の社保控除後給与（ない場合は0）
- * @param dependents 扶養人数
- */
-
 export default function BonusManager({ db, staffList }: Props) {
   // 分割代入で必要なものをすべて取り出す
   const {
@@ -130,7 +124,8 @@ export default function BonusManager({ db, staffList }: Props) {
     bonusStaffList,
     finalizeBonus,
     unfinalizeBonus,
-    rateWarnings
+    rateWarnings,
+    prevMonth
   } = useBonusManager(db, staffList);
   const selectedSetting = settings.find(s => s.id === selectedSettingId);
 
@@ -677,6 +672,21 @@ export default function BonusManager({ db, staffList }: Props) {
             </div>
           )}
 
+          {/* 前月に給与を払うはずなのに、まだ確定していない人（前月の給与がないものとして所得税を計算している） */}
+          {selectedSettingId && items.length > 0 && prevMonth && (() => {
+            const names = bonusStaffList
+              .filter(s => { const c = calcBonusForStaff(s); return !!c && c.totalEarnings > 0 && c.prevSalaryStatus === "unconfirmed"; })
+              .map(s => s.name);
+            return names.length > 0 ? (
+              <div style={{ ...S.card, marginBottom: 16, backgroundColor: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: 13 }}>
+                ⚠ 次の人は、前月（{prevMonth.year}年{prevMonth.month}月）に支払う給与がまだ確定していないため、前月の給与がないものとして所得税を計算しています（月額表を使う方法）：{names.join("・")}
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  給与明細で前月の給与を確定してから、この賞与を確定してください。休職などで前月に給与を払っていない人は、このままで構いません。
+                </div>
+              </div>
+            ) : null;
+          })()}
+
           {selectedSettingId && items.length > 0 && (
             <div style={{ overflowX: "auto" }}>
               <table style={S.table}>
@@ -736,7 +746,15 @@ export default function BonusManager({ db, staffList }: Props) {
                           ¥{calc.totalEarnings.toLocaleString()}
                         </td>
                         {/* 自動計算控除 */}
-                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isHealthTarget ? "#666" : "#bbb" }}>¥{calc.healthInsurance.toLocaleString()}</td>
+                        <td
+                          style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isHealthTarget ? "#666" : "#bbb" }}
+                          title={calc.isHealthTarget ? `この賞与より前に支払った賞与の、年度の標準賞与額の累計：${calc.earlierHealthTotal.toLocaleString()}円／この賞与の健康保険の標準賞与額：${calc.healthHyojun.toLocaleString()}円` : undefined}
+                        >
+                          ¥{calc.healthInsurance.toLocaleString()}
+                          {calc.isHealthTarget && calc.healthHyojun < calc.hyojunBonus && (
+                            <div style={{ fontSize: 10, color: "#b45309" }}>年度の上限（573万円）まで</div>
+                          )}
+                        </td>
                         {/* 介護保険（条件付きで色変更） */}
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isNursing ? "#c0392b" : "#bbb" }}>
                           ¥{calc.nursingInsurance.toLocaleString()}
@@ -745,9 +763,22 @@ export default function BonusManager({ db, staffList }: Props) {
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.childSupport > 0 ? "#666" : "#bbb" }}>
                           ¥{calc.childSupport.toLocaleString()}
                         </td>
-                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isPensionTarget ? "#666" : "#bbb" }}>¥{calc.welfarePension.toLocaleString()}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isPensionTarget ? "#666" : "#bbb" }}>
+                          ¥{calc.welfarePension.toLocaleString()}
+                          {calc.isPensionTarget && calc.pensionHyojun < calc.hyojunBonus && (
+                            <div style={{ fontSize: 10, color: "#b45309" }}>同じ月で150万円まで</div>
+                          )}
+                        </td>
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isEmploymentInsEnrolled ? "#666" : "#bbb" }}>¥{calc.empInsurance.toLocaleString()}</td>
-                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>¥{calc.incomeTax.toLocaleString()}</td>
+                        <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>
+                          ¥{calc.incomeTax.toLocaleString()}
+                          {calc.totalEarnings > 0 && calc.prevSalaryStatus === "unconfirmed" && (
+                            <div style={{ fontSize: 10, color: "#b45309" }}>⚠ 前月の給与が未確定</div>
+                          )}
+                          {calc.totalEarnings > 0 && calc.prevSalaryStatus !== "unconfirmed" && calc.taxByMonthlyTable && (
+                            <div style={{ fontSize: 10, color: "#94a3b8" }}>月額表で計算</div>
+                          )}
+                        </td>
                         {/* カスタム控除入力欄 */}
                         {deductionItems.map(item => (
                           <td key={item.id} style={S.td}>
@@ -787,7 +818,10 @@ export default function BonusManager({ db, staffList }: Props) {
               社保・雇用保険に加入していない人と、75歳の誕生月から（健康保険・介護保険・支援金）・70歳に達した月から（厚生年金）の人には、その保険料はかかりません（灰色の欄）。
               入社日より前に支払う賞与と、退職した月に支払う賞与（月末退職を除く）にも、社会保険料はかかりません（雇用保険料はかかります）。
               産休・育休で免除される月に支払う賞与も同じです（育休は、期間が1か月を超えるときだけ）。
-              所得税は前月課税給与が不明な場合、簡便的に0円ベースで計算（過少になる場合があります）。
+              健康保険の573万円は、この賞与より前に同じ年度（4月〜翌年3月）に支払った賞与の標準賞与額と合わせた上限です（後で支払う賞与は数えません。育休などで保険料が免除された賞与も数えます）。
+              厚生年金の150万円は、同じ月に2回以上支払ったときは合わせた上限です。
+              所得税は、前月に支払った給与（社会保険料等を引いた額）と扶養親族等の数から、算出率の表の率で計算します。前月の給与がない人と、賞与が前月の給与の10倍を超える人は、月額表を使う方法で計算します（国税庁「賞与に対する源泉徴収税額の算出率の表」の備考）。
+              前月の給与は確定した給与から読むので、前月の給与を先に確定してください。
               確定後は「賞与支払届」を年金事務所・健康保険組合に提出してください。
             </div>
           )}
