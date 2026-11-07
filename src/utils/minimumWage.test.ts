@@ -2,8 +2,9 @@
  * 最低賃金のチェック（minimumWage.ts）と、1年間の所定労働日数（annualWorkDays.ts）のテスト
  * 実行方法: bun test
  *
- * 最低賃金のデータは、厚生労働省「地域別最低賃金の全国一覧」のページから自動で作ったもの（constants/minimumWage.ts）。
- * 期待値は同じページの表の値（東京・秋田・岩手）。
+ * 最低賃金のデータは、厚生労働省「平成14年度から令和８年度までの地域別最低賃金改定状況」（Excel）と
+ * 「地域別最低賃金の全国一覧」のページから自動で作ったもの（constants/minimumWage.ts）。
+ * 期待値は同じ Excel・ページの表の値（東京・青森・秋田・岩手）。
  */
 import { describe, expect, test } from "bun:test";
 import { MINIMUM_WAGES } from "../constants/minimumWage";
@@ -15,13 +16,19 @@ describe("最低賃金のデータ", () => {
     test("47都道府県そろっていて、名前は保険料率と同じ書き方", () => {
         expect(Object.keys(MINIMUM_WAGES).sort()).toEqual(Object.keys(INSURANCE_2026.KENPO_RATES).sort());
     });
-    test("どの都道府県も、発効日・金額とも年度の順に上がっている（令和3〜8年度の6件）", () => {
+    test("どの都道府県も令和元年度（2019年10月の発効日）からあり、発効日・金額とも年度の順に上がっている", () => {
         for (const entries of Object.values(MINIMUM_WAGES)) {
-            expect(entries).toHaveLength(6);
+            expect(entries[0].from.startsWith("2019-10-")).toBe(true);
             for (let i = 1; i < entries.length; i++) {
                 expect(entries[i].from > entries[i - 1].from).toBe(true);
                 expect(entries[i].amount).toBeGreaterThan(entries[i - 1].amount);
             }
+        }
+    });
+    test("令和2年度に金額を据え置いた7都道府県（Excel で令和元年度と金額・発効日が同じ）は令和元年度の分が続くので7件、ほかは令和元〜8年度の8件", () => {
+        const kept = ["北海道", "東京", "静岡", "京都", "大阪", "広島", "山口"];
+        for (const [pref, entries] of Object.entries(MINIMUM_WAGES)) {
+            expect(entries).toHaveLength(kept.includes(pref) ? 7 : 8);
         }
     });
 });
@@ -37,8 +44,17 @@ describe("その日の最低賃金", () => {
         expect(minimumWageOn("秋田", "2026-03-30")?.amount).toBe(951);
         expect(minimumWageOn("秋田", "2026-03-31")?.amount).toBe(1031);
     });
+    test("令和元年度・令和2年度（東京は令和2年度に据え置いたので、2021年9月30日まで1,013円。青森は2020年10月3日から793円）", () => {
+        expect(minimumWageOn("東京", "2019-10-01")).toEqual({ from: "2019-10-01", amount: 1013 });
+        expect(minimumWageOn("東京", "2020-10-01")?.amount).toBe(1013);
+        expect(minimumWageOn("東京", "2021-09-30")?.amount).toBe(1013);
+        expect(minimumWageOn("東京", "2021-10-01")?.amount).toBe(1041);
+        expect(minimumWageOn("青森", "2020-01-31")).toEqual({ from: "2019-10-04", amount: 790 });
+        expect(minimumWageOn("青森", "2020-10-02")?.amount).toBe(790);
+        expect(minimumWageOn("青森", "2020-10-03")?.amount).toBe(793);
+    });
     test("データより前の日・知らない都道府県は null", () => {
-        expect(minimumWageOn("東京", "2021-09-30")).toBeNull();
+        expect(minimumWageOn("東京", "2019-09-30")).toBeNull();
         expect(minimumWageOn("東京都", "2026-10-01")).toBeNull();
         expect(minimumWageOn(null, "2026-10-01")).toBeNull();
     });
@@ -73,8 +89,11 @@ describe("最低賃金以上か", () => {
         const perHour = baseWagePerHour("monthly", 200000, 8, (245 * 8) / 12);
         expect(checkMinimumWage("東京", "2026-03-01", perHour)).toMatchObject({ ok: false, minimum: { amount: 1226 } });
     });
+    test("Q で計算できるいちばん古い年（2020年）の給与も比べられる：東京・2020年4月1日は1,013円なので、時給1,000円は下回る", () => {
+        expect(checkMinimumWage("東京", "2020-04-01", 1000)).toMatchObject({ ok: false, minimum: { from: "2019-10-01", amount: 1013 } });
+    });
     test("比べられないとき（データなし・時間あたりにできない）は null", () => {
-        expect(checkMinimumWage("東京", "2020-04-01", 1000)).toBeNull();
+        expect(checkMinimumWage("東京", "2019-09-30", 1000)).toBeNull();
         expect(checkMinimumWage("東京", "2026-10-15", null)).toBeNull();
     });
     test("表示の文", () => {
