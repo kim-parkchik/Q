@@ -25,7 +25,8 @@
  */
 import * as Master from "../constants";
 
-type DensankiMaster = typeof Master.TAX_2026.DENSANKI;
+/** 電算機計算の特例の表（constants/tax/densanki20XX.ts。国税庁の PDF から自動生成） */
+type DensankiMaster = Master.DensankiTable;
 
 /** 給与所得控除の額（1円未満切り上げ） */
 export const calcEmploymentDeduction = (amount: number, m: DensankiMaster = Master.TAX_2026.DENSANKI): number => {

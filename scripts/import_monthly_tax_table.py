@@ -3,16 +3,79 @@
 国税庁の「給与所得の源泉徴収税額表（月額表）」Excel から、Q で使うデータファイル（TypeScript）を作る。
 
 使い方:
-    pip install xlrd
+    pip install xlrd   （.xls を読むときだけ要る。.xlsx は Python の標準ライブラリだけで読む）
     python3 scripts/import_monthly_tax_table.py tax-tables/月額表_令和8年分.xls 2026 src/constants/tax/monthlyTable2026.ts \
         https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2026/01.htm
 
 ・AI や手作業で数字を書き写さないための道具。数字はすべて Excel から機械的に読み取る。
 ・国税庁の様式が変わって読み取れない場合は、エラーで止まる（中途半端なデータは作らない）。
+・令和9年分から、国税庁の月額表は .xlsx になった。.xls（xlrd）と同じ形（数は float、文字は str、空は ""）で読む。
 """
 import re
 import sys
-import xlrd
+import posixpath
+import unicodedata
+import zipfile
+import xml.etree.ElementTree as ET
+
+NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+REL_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+PKG_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+class XlsxSheet:
+    """
+    .xlsx の1枚目のシートを、xlrd のシートと同じ使い方（cell_value(行, 列)・nrows・ncols。行・列は0から）で読む。
+    数の欄は float、文字の欄は str（ふりがなは入れない）、空の欄は ""（xlrd と同じ）
+    """
+
+    def __init__(self, path):
+        with zipfile.ZipFile(path) as z:
+            workbook = ET.fromstring(z.read("xl/workbook.xml"))
+            first = workbook.find(f"{NS}sheets/{NS}sheet")
+            assert first is not None, "シートがありません"
+            rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+            target = next(r.get("Target") for r in rels.findall(f"{PKG_REL_NS}Relationship") if r.get("Id") == first.get(f"{REL_NS}id"))
+            sheet_path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
+            shared = []
+            if "xl/sharedStrings.xml" in z.namelist():
+                for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall(f"{NS}si"):
+                    # 文字は si/t か si/r/t にある。ふりがな（si/rPh/t）は入れない
+                    shared.append("".join(t.text or "" for t in si.findall(f"{NS}t")) + "".join(t.text or "" for t in si.findall(f"{NS}r/{NS}t")))
+            sheet = ET.fromstring(z.read(sheet_path))
+        self.cells = {}
+        for row in sheet.iter(f"{NS}row"):
+            for c in row.findall(f"{NS}c"):
+                m = re.fullmatch(r"([A-Z]+)(\d+)", c.get("r"))
+                col = 0
+                for ch in m.group(1):
+                    col = col * 26 + (ord(ch) - 64)
+                r, col = int(m.group(2)) - 1, col - 1
+                kind, v = c.get("t"), c.find(f"{NS}v")
+                if kind == "s" and v is not None:
+                    value = shared[int(v.text)]
+                elif kind == "inlineStr":
+                    value = "".join(t.text or "" for t in c.iter(f"{NS}t"))
+                elif kind in ("str", "e") and v is not None:
+                    value = v.text or ""
+                elif kind in (None, "n", "b") and v is not None and v.text is not None:
+                    value = float(v.text)
+                else:
+                    continue
+                self.cells[(r, col)] = value
+        self.nrows = max((r for r, _ in self.cells), default=-1) + 1
+        self.ncols = max((c for _, c in self.cells), default=-1) + 1
+
+    def cell_value(self, r, c):
+        return self.cells.get((r, c), "")
+
+
+def open_sheet(path):
+    """1枚目のシート（.xlsx は標準ライブラリで、.xls は xlrd で読む）"""
+    if str(path).lower().endswith(".xlsx"):
+        return XlsxSheet(path)
+    import xlrd
+    return xlrd.open_workbook(path).sheet_by_index(0)
 
 
 def to_int(v):
@@ -23,7 +86,7 @@ def to_int(v):
 
 
 def parse(path):
-    sheet = xlrd.open_workbook(path).sheet_by_index(0)
+    sheet = open_sheet(path)
     title = str(sheet.cell_value(0, 1)).strip()
     cells = lambda r: [sheet.cell_value(r, c) for c in range(sheet.ncols)]
 
@@ -62,16 +125,28 @@ def parse(path):
 
     text = "\n".join(str(sheet.cell_value(r, c)) for r in range(sheet.nrows) for c in range(sheet.ncols))
     text = text.replace("\n", "")
-    # 甲欄：「N円を超える金額のR％に相当する金額を加算した金額」だけが書かれたセル
-    #   （乙欄の説明は「259,200円に、…」で始まるので区別できる）
+    # 列ごとに、文字の欄を上から順につないだもの（単位の「円」だけの欄は入れない）。
+    # 説明の文は同じ列の何行かに分かれて書いてあり、どこで分かれるかは年によって違う（令和9年分は「…金額のう」「ち740,000円…」）
+    def column_text(c):
+        parts = [str(sheet.cell_value(r, c)).strip() for r in range(sheet.nrows) if isinstance(sheet.cell_value(r, c), str)]
+        return "".join(p for p in parts if p != "円")
+    columns = [column_text(c) for c in range(sheet.ncols)]
+    # 甲欄：「N円の場合の税額に、その月の社会保険料等控除後の給与等の金額のうちN円を超える金額のR％に相当する金額を加算した金額」
+    #   （乙欄の説明は「259,000円に、…」で始まるので区別できる）
     kou_rates = {}
-    for r in range(sheet.nrows):
-        for c in range(sheet.ncols):
-            m = re.fullmatch(r"\s*([\d,]+)円を超える金額の([\d.]+)％に相当する金額を加算した金額\s*", str(sheet.cell_value(r, c)))
-            if m:
-                amount = int(m.group(1).replace(",", ""))
-                assert amount not in kou_rates, f"{amount}円の率が2回出てきました"
-                kou_rates[amount] = float(m.group(2))
+    for col in columns:
+        for base, over, rate in re.findall(r"([\d,]+)円の場合の税額に、その月の社会保険料等控除後の給与等の金額の(?:うち)?([\d,]+)円を超える金額の([\d.]+)％に相当する金額を加算した金額", col):
+            assert base == over, f"{base}円の場合の税額に、{over}円を超える金額の率を足す文になっています"
+            amount = int(base.replace(",", ""))
+            assert amount not in kou_rates, f"{amount}円の率が2回出てきました"
+            kou_rates[amount] = float(rate)
+    # 扶養親族等が7人を超えるとき（甲欄）と、従たる給与についての扶養控除等申告書があるとき（乙欄）に、1人ごとに引く額
+    normalized = [re.sub(r"\s+", "", unicodedata.normalize("NFKC", col)) for col in columns]
+    kou_extra = {int(x.replace(",", "")) for col in normalized for x in re.findall(r"扶養親族等の数が7人を超える場合には、扶養親族等の数が7人の場合の税額から、その7人を超える1人ごとに([\d,]+)円を控除した金額", col)}
+    otsu_extra = {int(x.replace(",", "")) for col in normalized for x in re.findall(r"扶養親族等の数に応じ、扶養親族等1人ごとに([\d,]+)円を、上の各欄によって求めた税額から控除した金額", col)}
+    assert len(kou_extra) == 1, f"扶養親族等が7人を超えるときに1人ごとに引く額が1つに決まりません: {kou_extra}"
+    assert otsu_extra == kou_extra, f"甲欄（7人を超えるとき）と乙欄（従たる給与の申告書）で、1人ごとに引く額が違います: {kou_extra} / {otsu_extra}"
+    per_extra_dependent = next(iter(kou_extra))
     # 乙欄：「X円に、…のうちN円を超える金額のR％」
     otsu_rules = {int(a.replace(",", "")): (int(base.replace(",", "")), float(rate))
                   for base, a, rate in re.findall(r"([\d,]+)円に、その月の社会保険料等控除後の給与等の金額のうち([\d,]+)円を超える金額の([\d.]+)％", text)}
@@ -89,14 +164,14 @@ def parse(path):
     # 乙欄の「〇円未満は給与の3.063%」
     m = re.search(r"給与等の金額の([\d.]+)％に相当する金額", text)
     otsu_low_rate = float(m.group(1)) if m else None
-    return title, zero_below, rows, anchors, otsu_rules, otsu_low_rate
+    return title, zero_below, rows, anchors, otsu_rules, otsu_low_rate, per_extra_dependent
 
 
 def main():
     src, year, out = sys.argv[1], sys.argv[2], sys.argv[3]
     # 4つ目の引数：出典として記載する国税庁のページのURL
     source_url = sys.argv[4] if len(sys.argv) > 4 else "https://www.nta.go.jp/publication/pamph/gensen/"
-    title, zero_below, rows, anchors, otsu_rules, otsu_low_rate = parse(src)
+    title, zero_below, rows, anchors, otsu_rules, otsu_low_rate, per_extra_dependent = parse(src)
     lines = []
     lines.append("/**")
     lines.append(f" * {title}（月額表）")
@@ -131,7 +206,7 @@ def main():
     lines.append(f"  /** 乙欄：表の最初の金額未満は、給与 × この率% */")
     lines.append(f"  otsuLowRate: {otsu_low_rate},")
     lines.append("  /** 扶養親族等が7人を超える場合、1人ごとに差し引く額 */")
-    lines.append("  perExtraDependent: 1610,")
+    lines.append(f"  perExtraDependent: {per_extra_dependent},")
     lines.append("};")
     open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     print(f"{title}: {len(rows)}行, 高額部分の基準額 {len(anchors)}個 → {out}")

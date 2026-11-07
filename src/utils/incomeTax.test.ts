@@ -10,7 +10,11 @@
  */
 import { describe, expect, test } from "bun:test";
 import { calcMonthlyWithholdingTax, calcEmploymentDeduction, calcBasicDeduction, calcMonthlyTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax, calcDailyHeiTaxByTable, calcHeiWithholdingTax, toTaxColumn } from "./incomeTax";
-import { TAX_2025, TAX_2026, getTaxMaster } from "../constants/tax";
+import { TAX_2020, TAX_2025, TAX_2026, TAX_2027, getTaxMaster, getTaxMasterWarnings } from "../constants/tax";
+import { DENSANKI_EXAMPLES_2027 } from "../constants/tax/densanki2027";
+import { DENSANKI_EXAMPLES_2026 } from "../constants/tax/densanki2026";
+import { DENSANKI_EXAMPLES_2025 } from "../constants/tax/densanki2025";
+import { DENSANKI_EXAMPLES_2020 } from "../constants/tax/densanki2020";
 
 const near = (actual: number, expected: number, tolerance = 30) =>
     expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
@@ -129,11 +133,76 @@ describe("令和7年分（2025年）月額表（甲欄）との照合", () => {
 });
 
 describe("支払った年で税額表を切り替える", () => {
-    test("2025年は令和7年分、2026年は令和8年分", () => {
+    test("2020年は令和2年分、2021〜2025年は令和7年分、2026年は令和8年分、2027年からは令和9年分", () => {
         expect(getTaxMaster(2025).DENSANKI.BASIC_DEDUCTION[0][1]).toBe(40000);
         expect(getTaxMaster(2026).DENSANKI.BASIC_DEDUCTION[0][1]).toBe(48334);
-        expect(getTaxMaster(2027).DENSANKI.BASIC_DEDUCTION[0][1]).toBe(48334); // 新しい表ができるまでは最新を使う
+        expect(getTaxMaster(2020)).toBe(TAX_2020);
+        expect(getTaxMaster(2021)).toBe(TAX_2025);
+        expect(getTaxMaster(2025)).toBe(TAX_2025);
+        expect(getTaxMaster(2026)).toBe(TAX_2026);
+        expect(getTaxMaster(2027)).toBe(TAX_2027);
+        expect(getTaxMaster(2028)).toBe(TAX_2027); // 新しい表ができるまでは最新を使う（画面に注意を出す）
     });
+    test("2020年分は、月額表・日額表・賞与の表は令和7年分と同じで、電算機計算の特例だけ令和2年分の資料を使う", () => {
+        expect(TAX_2020.MONTHLY_TABLE).toBe(TAX_2025.MONTHLY_TABLE);
+        expect(TAX_2020.DAILY_HEI_TABLE).toBe(TAX_2025.DAILY_HEI_TABLE);
+        expect(TAX_2020.BONUS_TABLE).toBe(TAX_2025.BONUS_TABLE);
+        expect(TAX_2020.DENSANKI.title).toContain("令和2年分");
+        // 令和2年分と令和3年～令和7年分の資料は、表の数字が同じ（2020年分の税額は、前と変わらない）
+        for (const key of ["EMPLOYMENT_DEDUCTION", "DEPENDENT_DEDUCTION", "BASIC_DEDUCTION", "TAX_RATES"] as const) {
+            expect(TAX_2020.DENSANKI[key]).toEqual(TAX_2025.DENSANKI[key]);
+        }
+    });
+    test("2020〜2028年は、その年に使える電算機計算の特例の資料を使う（PDF の「令和○年分」。「以降」は終わりの年がない）", () => {
+        for (let year = 2020; year <= 2028; year++) {
+            const { years } = getTaxMaster(year).DENSANKI;
+            expect(years.from <= year && year <= (years.to ?? Infinity)).toBe(true);
+        }
+    });
+    test("登録していない年は、注意を出す", () => {
+        expect(getTaxMasterWarnings(2020)).toEqual([]);
+        expect(getTaxMasterWarnings(2027)).toEqual([]);
+        expect(getTaxMasterWarnings(2028)[0]).toContain("2027年分の表で計算しています");
+        expect(getTaxMasterWarnings(2019)[0]).toContain("2020年分の表で計算しています");
+    });
+});
+
+describe("電算機計算の特例：国税庁の PDF の計算例と同じ税額になる", () => {
+    // 計算例は、PDF からデータと一緒に自動で読み取ったもの（scripts/import_densanki.py）
+    const cases = [
+        { name: "令和9年分以降", master: TAX_2027, examples: DENSANKI_EXAMPLES_2027 },
+        { name: "令和8年分", master: TAX_2026, examples: DENSANKI_EXAMPLES_2026 },
+        { name: "令和3年〜令和7年分", master: TAX_2025, examples: DENSANKI_EXAMPLES_2025 },
+        { name: "令和2年分", master: TAX_2020, examples: DENSANKI_EXAMPLES_2020 },
+    ];
+    for (const { name, master, examples } of cases) {
+        test(`${name}：特例計算による税額（計算例 ${examples.length}つ）`, () => {
+            expect(examples.length).toBeGreaterThanOrEqual(3);
+            for (const ex of examples) {
+                expect(calcMonthlyWithholdingTax(ex.amount, ex.dependents, master.DENSANKI)).toBe(ex.densankiTax);
+            }
+        });
+        test(`${name}：月額表甲欄の税額（扶養8人・74万円を超える給与を含む）`, () => {
+            for (const ex of examples) {
+                expect(calcMonthlyTaxByTable(ex.amount, ex.dependents, master.MONTHLY_TABLE)).toBe(ex.tableTax);
+            }
+        });
+        // 月額表の税額は、行の金額の真ん中で計算してある（PDF の「差異」の1）。行の真ん中の金額では、式とほとんど同じになる。
+        // 月額表（Excel）と電算機計算の特例（PDF）は別のファイルなので、どちらかを読み違えていれば大きくずれる
+        test(`${name}：月額表の行の真ん中の金額では、式と月額表の差が、ほとんど10円以内（どれも100円以内）`, () => {
+            let total = 0, within10 = 0;
+            for (const [from, to] of master.MONTHLY_TABLE.rows) {
+                for (let dep = 0; dep <= 7; dep++) {
+                    const mid = (from + to) / 2;
+                    const diff = Math.abs(calcMonthlyWithholdingTax(mid, dep, master.DENSANKI) - calcMonthlyTaxByTable(mid, dep, master.MONTHLY_TABLE));
+                    expect(diff).toBeLessThanOrEqual(100);
+                    total++;
+                    if (diff <= 10) within10++;
+                }
+            }
+            expect(within10 / total).toBeGreaterThanOrEqual(0.95);
+        });
+    }
 });
 
 // ─────────────────────────────────────────────────────────────

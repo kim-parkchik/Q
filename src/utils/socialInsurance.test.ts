@@ -271,10 +271,11 @@ describe("料率・税額表が登録されていない月は、注意を出す"
         ]);
         expect(getInsuranceMaster(2027, 4).WARNINGS).toHaveLength(2);
     });
-    test("源泉徴収税額表は2020〜2026年分が登録済み", () => {
+    test("源泉徴収税額表は2020〜2027年分が登録済み", () => {
         expect(getTaxMasterWarnings(2020)).toEqual([]);
         expect(getTaxMasterWarnings(2026)).toEqual([]);
+        expect(getTaxMasterWarnings(2027)).toEqual([]);
         expect(getTaxMasterWarnings(2019)[0]).toContain("2019年分の源泉徴収税額表が登録されていない");
-        expect(getTaxMasterWarnings(2027)[0]).toContain("2027年分の源泉徴収税額表がまだ登録されていない");
+        expect(getTaxMasterWarnings(2028)[0]).toContain("2028年分の源泉徴収税額表がまだ登録されていない");
     });
 });
