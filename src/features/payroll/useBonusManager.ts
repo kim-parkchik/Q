@@ -411,7 +411,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // ð
     const empInsType = staff.employment_insurance_type || companySettings.default_emp_ins_type || 'general';
     const empRate = ins.LABOR_INSURANCE_RATES[empInsType as Master.EmpInsType] || ins.LABOR_INSURANCE_RATES.general;
     const empInsurance = isEmploymentInsEnrolled
-      ? calcPremium(totalEarnings, empRate[0] * 100, companySettings.round_emp_ins || 'round', 1)
+      ? calcPremium(totalEarnings, empRate[0] * 100, companySettings.round_emp_ins || 'currency_law', 1)
       : 0;
 
     const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;

@@ -80,7 +80,19 @@ describe("社会保険料（本人負担分）の端数処理（協会けんぽ�
         const db = new Database(":memory:");
         for (const s of DB_SCHEMAS) db.exec(s);
         db.exec("INSERT INTO company (id, name) VALUES (1, 'テスト株式会社')");
-        expect(db.query("SELECT round_social_ins AS s, round_overtime AS o FROM company").get()).toEqual({ s: "currency_law", o: "round" });
+        expect(db.query("SELECT round_social_ins AS s, round_emp_ins AS e, round_overtime AS o FROM company").get())
+            .toEqual({ s: "currency_law", e: "currency_law", o: "round" });
+    });
+});
+
+describe("雇用保険料（本人負担分）の端数処理（厚生労働省「雇用保険被保険者からの雇用保険料の控除方法」：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ。特約があればそれによる）", () => {
+    test("厚生労働省の例：賃金 255,935円 × 4/1,000 ＝ 1,023.74円 → 1,024円", () => {
+        expect(calcPremium(255935, 0.4, LAW, 1)).toBe(1024);
+    });
+    test("会社の設定がなければ原則で計算する（2026年6月・一般の事業 5/1,000：300,100円 × 5/1,000 ＝ 1,500.5円 → 1,500円。いままでは四捨五入して1,501円）", () => {
+        const pay = { ...monthly, base_wage: 300100, standard_remuneration: 0 };
+        expect(calc(pay, [], {}, { week_start_day: 0, round_overtime: "round" }).empInsurance).toBe(1500);
+        expect(calc(pay, [], {}, { ...company, round_emp_ins: "round" }).empInsurance).toBe(1501);
     });
 });
 

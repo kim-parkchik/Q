@@ -42,7 +42,7 @@ export const DB_SCHEMAS = [
     labor_ins_num TEXT,
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
-    round_emp_ins TEXT DEFAULT 'round',
+    round_emp_ins TEXT DEFAULT 'currency_law', -- 雇用保険料（本人負担分）の端数：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ（厚生労働省）。特約があれば round など
     default_emp_ins_type TEXT DEFAULT 'general', -- 会社全体の雇用保険区分
     week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
     is_small_business INTEGER DEFAULT 0, -- 中小企業（2023年3月までの月60時間超の割増は25%でよかった）

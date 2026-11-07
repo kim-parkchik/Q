@@ -103,18 +103,23 @@ export default function RoundingTab({ cm }: Props) {
                                 <HardHat size={16} color="#2980b9" /> 雇用保険料（個人負担分）
                             </strong>
                             <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
-                                ※50銭以下切り捨て、51銭以上切り上げルール。
+                                ※給与から引くときは、50銭以下切り捨て・50銭を超えたら切り上げ（厚生労働省「雇用保険被保険者からの雇用保険料の控除方法」）。慣習的な取扱いなどの特約があれば、それによります。賞与の保険料にも使います。
                             </small>
+                            {roundEmpIns !== "currency_law" && (
+                                <small style={{ color: "#b45309", marginLeft: "22px", display: "block", marginTop: "4px" }}>
+                                    原則と違う設定です。端数の扱いを決めた特約がなければ「原則」にしてください。
+                                </small>
+                            )}
                         </div>
                         <select 
                             value={roundEmpIns} 
                             onChange={e => setRoundEmpIns(e.target.value)} 
                             style={{ ...inputStyle, width: "320px", flexShrink: 0 }}
                         >
-                            <option value="currency_law">法的原則：0.51円以上切上</option>
-                            <option value="round">四捨五入（50銭ルールに近い）</option>
-                            <option value="floor">切り捨て</option>
-                            <option value="ceil">切り上げ</option>
+                            <option value="currency_law">原則（50銭以下切り捨て・50銭超切り上げ）</option>
+                            <option value="round">四捨五入（特約がある場合。50銭ちょうどは切り上げ）</option>
+                            <option value="floor">切り捨て（特約がある場合）</option>
+                            <option value="ceil">切り上げ（特約がある場合）</option>
                         </select>
                     </div>
                 </div>

@@ -212,7 +212,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
                 setRoundOvertime(c.round_overtime || "round");
                 setRoundSocialIns(c.round_social_ins || "currency_law");
-                setRoundEmpIns(c.round_emp_ins || "round");
+                setRoundEmpIns(c.round_emp_ins || "currency_law");
                 if (c.name) setHasSavedOnce(true);
             }
             const resB = await db.select<any[]>("SELECT * FROM branches ORDER BY id ASC");
@@ -233,7 +233,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setSavedRounding({
                     roundOvertime: c.round_overtime || "round",
                     roundSocialIns: c.round_social_ins || "currency_law",
-                    roundEmpIns: c.round_emp_ins || "round",
+                    roundEmpIns: c.round_emp_ins || "currency_law",
                 });
             }
             const resPG = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");

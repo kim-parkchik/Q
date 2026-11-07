@@ -1348,7 +1348,8 @@ export const calculateSalary = (
   const empInsKey = (staff.employment_insurance_type || companySettings?.default_emp_ins_type || 'general') as Master.EmpInsType;
   const empRates = ins.LABOR_INSURANCE_RATES[empInsKey] || ins.LABOR_INSURANCE_RATES.general;
   const empInsurance = isEmploymentInsEnrolled
-    ? calcPremium(totalEarnings, empRates[0] * 100, companySettings?.round_emp_ins || 'round', 1)
+    // 端数：会社の設定（なければ、賃金から引くときの原則の50銭以下切り捨て・50銭1厘以上切り上げ。厚生労働省「雇用保険被保険者からの雇用保険料の控除方法」）
+    ? calcPremium(totalEarnings, empRates[0] * 100, companySettings?.round_emp_ins || 'currency_law', 1)
     : 0;
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
