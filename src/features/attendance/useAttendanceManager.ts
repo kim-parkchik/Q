@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dayjs from "dayjs";
-import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
+import { generateAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, calcDetailedDiff, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { staffAsOf } from "../../utils/staffHistory";
@@ -613,81 +613,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     }
   };
 
-  // --- CSVインポート ---
-  const handleImportCSV = async () => {
-    // 取り込むのは打刻の列（csv_…）だけで、確定した日は上書きしない（下の WHERE is_finalized = 0）。
-    // 給与は確定した日の勤怠だけで計算し、給与を確定した月の日は確定できないので、確定した給与とは食い違わない
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.csv';
-
-    input.onchange = async (e: any) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const text = event.target?.result as string;
-          // parseAttendanceCSV の中で trim 処理がされているか確認が必要ですが、
-          // ここでは row から値を取り出す際に念のため trim() を検討します。
-          const rows = parseAttendanceCSV(text);
-          if (rows.length === 0) {
-            dialog.warning("取り込めるデータがありませんでした。\nCSVの見出し行（スタッフID・日付・出勤・退勤 など）を確認してください。");
-            return;
-          }
-
-          let imported = 0;        // 取り込めた行
-          let skippedFinalized = 0; // 確定済みのため上書きしなかった行
-          let skippedInvalid = 0;   // スタッフIDか日付が空の行
-          for (const row of rows) {
-            const sId = row["スタッフID"];
-            const date = row["日付"];
-            if (!sId || !date) { skippedInvalid++; continue; }
-
-            // CSVの日本語ヘッダー名を指定して確実に取得
-            const valEntry  = row["出勤"];
-            const valExit   = row["退勤"];
-            const valBStart = row["休憩始"];
-            const valBEnd   = row["休憩終"];
-            const valOut    = row["外出"];
-            const valReturn = row["戻り"];
-
-            const result = await db.execute(
-              `INSERT INTO attendance (
-                staff_id, work_date, 
-                csv_entry_time, csv_exit_time, 
-                csv_break_start, csv_break_end, 
-                csv_out_time, csv_return_time,
-                work_type, is_finalized
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'normal', 0)
-              ON CONFLICT(staff_id, work_date) DO UPDATE SET
-                csv_entry_time = excluded.csv_entry_time,
-                csv_exit_time = excluded.csv_exit_time,
-                csv_break_start = excluded.csv_break_start,
-                csv_break_end = excluded.csv_break_end,
-                csv_out_time = excluded.csv_out_time,
-                csv_return_time = excluded.csv_return_time
-              WHERE is_finalized = 0`,
-              [sId, date, valEntry || "", valExit || "", valBStart || "", valBEnd || "", valOut || "", valReturn || ""]
-            );
-            // 確定済みの日は WHERE is_finalized = 0 で更新されないため、影響行数 0 になる
-            if ((result?.rowsAffected ?? 1) > 0) imported++;
-            else skippedFinalized++;
-          }
-          await loadMonthlyData(); 
-          toast.success(`「${file.name}」から${imported}件を取り込みました`);
-          if (skippedFinalized > 0) toast.info(`確定済みの${skippedFinalized}件は上書きしませんでした`);
-          if (skippedInvalid > 0) toast.info(`スタッフIDか日付が空の${skippedInvalid}行は読み飛ばしました`);
-        } catch (err) {
-          console.error(err);
-          dialog.error(`CSVの取り込み中にエラーが発生しました。\n${err}`);
-        }
-      };
-      reader.readAsText(file, 'utf-8');
-    };
-    input.click();
-  };
+  // CSV の取り込みは AttendanceImportButton.tsx（取り込む前に、まとめを出して確かめる）
 
   // --- 会社設定と拠点の都道府県を読み込む（給与計算エンジンに必要） ---
   // ※ リファクタリング時に読み込み処理が抜けていたため復元
@@ -759,7 +685,6 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     saveAllMonthlyData,
     handleExportRawCSV,
     handleExportFullCSV,
-    handleImportCSV,
     unfinalizeAttendance,
     loadMonthlyData,
     checkRemainingPaidLeave

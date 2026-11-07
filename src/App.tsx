@@ -24,7 +24,8 @@ import {
   FileDown, 
   Banknote, 
   UserCog, 
-  LogOut 
+  LogOut,
+  QrCode
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -36,6 +37,7 @@ import LoginScreen from "./features/auth/LoginScreen";
 import AttendanceManager from "./features/attendance/AttendanceManager";
 import CalendarManager from "./features/attendance/CalendarManager";
 import PaidLeaveManager from "./features/attendance/PaidLeaveManager";
+import TimeQardManager from "./features/timeqard/TimeQardManager";
 
 // payroll フォルダ
 import PaySlipManager from "./features/payroll/PaySlipManager";
@@ -69,6 +71,7 @@ const TAB_NAMES: Record<string, string> = {
   paid_leave: "有給休暇管理",
   custom_items: "給与項目設定",
   attendance: "勤怠・月次給与",
+  timeqard: "TimeQard（打刻）",
   bonus: "賞与計算",
   santei: "算定基礎（定時決定）",
   zuiji: "月変（随時改定）",
@@ -93,6 +96,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   paid_leave: <Palmtree size={18} />,
   custom_items: <Settings size={18} />,
   attendance: <Timer size={18} />,
+  timeqard: <QrCode size={18} />,
   bonus: <Coins size={18} />,
   santei: <ClipboardList size={18} />,
   zuiji: <TrendingUp size={18} />,
@@ -251,6 +255,7 @@ function App() {
             "paid_leave", 
             "custom_items", 
             "attendance", 
+            "timeqard",
             "bonus", 
             "santei",
             "zuiji",
@@ -266,7 +271,7 @@ function App() {
             "payslip"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -368,6 +373,9 @@ function App() {
                   targetMonth={targetMonth}
                   setTargetMonth={setTargetMonth}
                 />
+              )}
+              {activeTab === "timeqard" && db && (
+                <TimeQardManager db={db} staffList={staffList} currentUser={currentUser} />
               )}
               {activeTab === "bonus" && db && (
                 <BonusManager db={db} staffList={staffList} />

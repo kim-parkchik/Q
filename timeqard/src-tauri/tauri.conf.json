@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TimeQard",
+  "version": "0.1.0",
+  "identifier": "jp.payroll.timeqard",
+  "build": {
+    "beforeDevCommand": "cd .. && bun run timeqard:dev",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "cd .. && bun run timeqard:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TimeQard",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "app", "dmg", "deb", "appimage"],
+    "category": "Business",
+    "shortDescription": "Q の打刻のソフト",
+    "longDescription": "TimeQard（タイムカード）は、入口などに置いたパソコン1台で、従業員が出勤・退勤などを押すソフトです。押した記録は CSV にして、給与ソフト Q の勤怠に取り込みます。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
+    },
+    "windows": {
+      "nsis": {
+        "languages": ["Japanese"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

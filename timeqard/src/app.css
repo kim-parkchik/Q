@@ -1,0 +1,119 @@
+/* TimeQard の画面（古いパソコンでも軽いように、動きの多い飾りは使わない） */
+:root {
+  --navy: #0b2a55;
+  --blue: #0055a4;
+  --ink: #1b2430;
+  --sub: #5b6675;
+  --line: #d9dee5;
+  --bg: #f3f5f8;
+  --ok: #1e7d32;
+  --ng: #c62828;
+  --warn: #b26a00;
+  --entry: #1565c0;
+  --exit: #c62828;
+  --break: #6a1b9a;
+  --out: #e65100;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; }
+body { overflow: hidden; user-select: none; -webkit-user-select: none; }
+input, textarea, select { user-select: text; -webkit-user-select: text; font: inherit; }
+button { font: inherit; cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.45; }
+
+.screen { height: 100%; display: flex; flex-direction: column; }
+.header { background: var(--navy); color: #fff; display: flex; align-items: center; gap: 16px; padding: 10px 20px; }
+.header .company { font-size: 20px; font-weight: bold; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header .sub { font-size: 13px; opacity: 0.8; }
+.header button { background: transparent; color: #fff; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 6px; padding: 6px 12px; font-size: 14px; }
+
+.clock { text-align: center; padding: 14px 0 6px; }
+.clock .date { font-size: 26px; color: var(--sub); }
+.clock .time { font-size: 96px; font-weight: bold; letter-spacing: 0.02em; line-height: 1.05; color: var(--navy); font-variant-numeric: tabular-nums; }
+.clock .time small { font-size: 40px; color: var(--sub); margin-left: 6px; }
+
+.main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 8px 20px 20px; overflow: auto; }
+
+.notice { width: min(900px, 100%); border-radius: 10px; padding: 12px 18px; margin: 6px 0; font-size: 18px; }
+.notice.ok { background: #e8f5e9; color: var(--ok); border: 2px solid #a5d6a7; }
+.notice.ng { background: #ffebee; color: var(--ng); border: 2px solid #ef9a9a; }
+.notice.warn { background: #fff8e1; color: var(--warn); border: 2px solid #ffe082; }
+.notice .row { display: flex; align-items: center; gap: 14px; }
+.notice .row .text { flex: 1; }
+
+.idle { text-align: center; margin-top: 18px; }
+.idle .prompt { font-size: 34px; font-weight: bold; margin: 10px 0 6px; }
+.idle .hint { font-size: 16px; color: var(--sub); margin-bottom: 18px; }
+
+.big-btn { border: none; border-radius: 14px; color: #fff; font-size: 30px; font-weight: bold; padding: 22px 40px; min-width: 260px; }
+.mid-btn { border: none; border-radius: 12px; color: #fff; font-size: 22px; font-weight: bold; padding: 14px 24px; min-width: 150px; }
+.plain-btn { background: #fff; color: var(--ink); border: 2px solid var(--line); border-radius: 12px; font-size: 20px; padding: 12px 22px; }
+.link-btn { background: transparent; border: none; color: var(--blue); text-decoration: underline; font-size: 15px; padding: 4px; }
+
+.k-entry { background: var(--entry); }
+.k-exit { background: var(--exit); }
+.k-break_start, .k-break_end { background: var(--break); }
+.k-out, .k-return { background: var(--out); }
+
+.person { width: min(900px, 100%); background: #fff; border-radius: 16px; padding: 18px 24px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+.person .name { font-size: 36px; font-weight: bold; }
+.person .meta { font-size: 18px; color: var(--sub); margin-top: 2px; }
+.person .state { display: inline-block; font-size: 18px; font-weight: bold; border-radius: 20px; padding: 3px 14px; background: #e3f2fd; color: var(--entry); margin-left: 10px; vertical-align: middle; }
+.person .today { font-size: 16px; color: var(--sub); margin: 8px 0 14px; }
+.person .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; }
+
+.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: flex; align-items: center; justify-content: center; z-index: 10; }
+.modal { background: #fff; border-radius: 16px; padding: 22px 26px; width: min(720px, 94vw); max-height: 92vh; overflow: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); }
+.modal h2 { margin: 0 0 10px; font-size: 24px; }
+.modal .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 18px; }
+
+.id-display { font-size: 44px; font-weight: bold; text-align: center; letter-spacing: 0.08em; border: 3px solid var(--line); border-radius: 12px; padding: 10px; min-height: 76px; font-variant-numeric: tabular-nums; }
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+.keypad button { font-size: 30px; padding: 14px 0; border-radius: 12px; border: 2px solid var(--line); background: #fff; }
+
+.field { margin: 12px 0; }
+.field > label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 16px; }
+.field input[type="text"], .field input[type="password"], .field input[type="date"], .field select { font-size: 18px; padding: 8px 10px; border: 2px solid var(--line); border-radius: 8px; }
+.choice { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.choice button { font-size: 18px; padding: 8px 16px; border-radius: 10px; border: 2px solid var(--line); background: #fff; }
+.choice button.on { border-color: var(--blue); background: #e3f2fd; color: var(--blue); font-weight: bold; }
+
+/* 管理の画面 */
+.admin { height: 100%; display: flex; flex-direction: column; }
+.admin .tabs { display: flex; gap: 4px; padding: 10px 20px 0; background: #fff; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.admin .tabs button { border: none; background: transparent; padding: 10px 16px; font-size: 16px; border-bottom: 3px solid transparent; }
+.admin .tabs button.on { border-bottom-color: var(--blue); color: var(--blue); font-weight: bold; }
+.admin .body { flex: 1; overflow: auto; padding: 18px 24px; }
+.admin .card { background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+.admin h3 { margin: 0 0 10px; font-size: 18px; }
+.admin p, .admin li { font-size: 14px; line-height: 1.7; color: #333; }
+.admin table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.admin th { text-align: left; background: #f5f7fa; border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
+.admin td { border-bottom: 1px solid #eee; padding: 6px 8px; vertical-align: top; }
+.admin .btn { border: none; border-radius: 8px; background: var(--blue); color: #fff; padding: 9px 18px; font-size: 15px; font-weight: bold; }
+.admin .btn.gray { background: #6b7684; }
+.admin .btn.red { background: var(--ng); }
+.admin .check { display: flex; align-items: center; gap: 8px; font-size: 15px; margin: 8px 0; }
+.admin .check input { width: 20px; height: 20px; }
+.tag { display: inline-block; font-size: 12px; border-radius: 10px; padding: 1px 8px; margin-left: 6px; }
+.tag.id { background: #fff3e0; color: var(--out); }
+.tag.cancel { background: #eceff1; color: #546e7a; }
+.tag.req { background: #f3e5f5; color: var(--break); }
+.muted { color: var(--sub); }
+
+.setup { max-width: 760px; margin: 0 auto; padding: 30px 24px; overflow: auto; height: 100%; }
+.setup h1 { font-size: 28px; margin: 0 0 6px; color: var(--navy); }
+.setup .step { background: #fff; border-radius: 14px; padding: 18px 22px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+.setup .step h2 { margin: 0 0 8px; font-size: 20px; }
+.setup p, .setup li { font-size: 15px; line-height: 1.75; }
+.error-text { color: var(--ng); font-weight: bold; margin: 8px 0; white-space: pre-wrap; }
+
+/* カメラ（打刻カードの QR コードを読む） */
+.camera.inline { width: min(360px, 90%); margin: 6px auto 14px; text-align: center; }
+.camera.hidden { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+.camera video { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; background: #1b2430; transform: scaleX(-1); }
+.camera-label { font-size: 14px; color: var(--sub); margin-top: 4px; }

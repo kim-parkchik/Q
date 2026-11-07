@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>打刻カードの見本（確かめ用）</title>
+    <style>
+      body { margin: 0; background: #888; }
+      /* 印刷したときと同じ並び（Q の CardPrintSheet.tsx の印刷用の決まりと同じ） */
+      .tq-page { width: 210mm; height: 297mm; box-sizing: border-box; padding: 11mm 14mm; display: grid;
+        grid-template-columns: 91mm 91mm; grid-template-rows: repeat(5, 55mm); background: #fff; margin: 10mm auto; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./cards.tsx"></script>
+  </body>
+</html>

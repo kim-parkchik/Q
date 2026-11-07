@@ -1,0 +1,5 @@
+# Cargo が作るもの
+/target/
+
+# Tauri が作るもの
+/gen/schemas

@@ -6,6 +6,7 @@ import { FileSpreadsheet, FileDown, FileUp } from 'lucide-react';
 import { modernIconBtnStyle } from "../../../styles/styles";
 import { S } from '../AttendanceManager.styles';
 import type { AttendanceViewModel } from './types';
+import AttendanceImportButton from '../AttendanceImportButton';
 
 interface Props {
   am: AttendanceViewModel;
@@ -16,7 +17,7 @@ export default function CsvTab({ am }: Props) {
     payrollPeriod,
     handleExportRawCSV,
     handleExportFullCSV,
-    handleImportCSV,
+    loadMonthlyData,
   } = am;
 
   return (
@@ -69,13 +70,11 @@ export default function CsvTab({ am }: Props) {
         <div style={{ flex: 1, padding: "15px", border: "1px solid #eee", borderRadius: "8px" }}>
           <h4 style={{ marginTop: 0 }}><FileDown size={20} style={S.iconWrapper} /> インポート</h4>
           <p style={{ fontSize: "12px", color: "#888", marginBottom: "10px" }}>
-            ファイル内の日付に基づき、全期間のデータを一括で取り込みます。
+            ファイル内の日付に基づき、全期間のデータを一括で取り込みます（TimeQard で書き出した打刻の CSV も、ここで取り込めます）。
           </p>
-          <button onClick={handleImportCSV} style={{ ...modernIconBtnStyle("#2980b9"), width: "100%" }}>
-            <FileDown size={16} style={S.iconWrapper} /> CSVファイルを読み込む
-          </button>
+          <AttendanceImportButton db={am.db} staffList={am.staffList} onImported={loadMonthlyData} style={{ width: "100%", margin: 0 }} />
           <p style={{ fontSize: "11px", color: "#d35400", marginTop: "10px", fontWeight: "bold" }}>
-            ※給与確定済みの期間は上書きされません。
+            ※取り込む前に、入れる日数・Q にない ID・読めない行などのまとめを出して確かめます。確定した日は上書きしません。
           </p>
         </div>
 

@@ -53,3 +53,29 @@ export const saveCsvFile = async (content: string, defaultFileName: string): Pro
     await writeFile(path, data);
     return { path, name: baseName(path) };
 };
+
+/**
+ * 文字のファイル（JSON など）を、UTF-8（BOM なし）で保存する
+ * @param filter 保存ダイアログで選べるファイルの種類（例: { name: "JSON", extensions: ["json"] }）
+ * @returns 保存したファイルの情報。キャンセルされたら null
+ */
+export const saveTextFile = async (
+    content: string,
+    defaultFileName: string,
+    filter: { name: string; extensions: string[] }
+): Promise<SavedFile | null> => {
+    let defaultPath = defaultFileName;
+    try {
+        const exportDir = await join(await documentDir(), APP_DIR_NAME, EXPORT_DIR_NAME);
+        await mkdir(exportDir, { recursive: true });
+        defaultPath = await join(exportDir, defaultFileName);
+    } catch (e) {
+        console.warn("出力フォルダの準備に失敗しました:", e);
+    }
+
+    const path = await save({ title: "保存先を選んでください", defaultPath, filters: [filter] });
+    if (!path) return null; // キャンセル
+
+    await writeFile(path, new TextEncoder().encode(content));
+    return { path, name: baseName(path) };
+};

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Mac：TimeQard の Info.plist に足すもの（Tauri が、この場所の Info.plist を合わせる） -->
+<plist version="1.0">
+<dict>
+  <!-- カメラを使ってよいかを聞くときに出す説明 -->
+  <key>NSCameraUsageDescription</key>
+  <string>打刻カードの QR コードを、カメラで読み取るために使います。映像は保存せず、どこにも送りません。</string>
+</dict>
+</plist>

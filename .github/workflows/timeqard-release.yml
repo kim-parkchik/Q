@@ -1,0 +1,103 @@
+# TimeQard のインストーラーを作り、GitHub の Releases に置く
+#
+# 「timeqard-v0.1.0」のような名前のタグを GitHub に送ると動く（Actions の画面から手で動かすこともできる）。
+# Windows（.exe）・Mac（.dmg。Intel と Apple シリコンの両方で動くもの）・Ubuntu（.deb と .AppImage）を作る。
+# Ubuntu 用は 22.04 で作る（22.04 以上で動くように。WebKitGTK 4.1 を使う）。
+# 署名はまだしていない（入れ方は timeqard/README.md）。
+name: TimeQard release
+
+on:
+  push:
+    tags:
+      - "timeqard-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "置き場所にするタグ（例：timeqard-v0.1.0）"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: Releases の場所を作る
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: まだなければ作る（下書き。全部そろってから公開する）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "TimeQard ${TAG#timeqard-v}" \
+              --notes "TimeQard（タイムカード）${TAG#timeqard-v}。入れ方は https://github.com/${{ github.repository }}/blob/main/timeqard/README.md を見てください。"
+          fi
+
+  build:
+    name: 作る（${{ matrix.name }}）
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ""
+            files: timeqard/src-tauri/target/release/bundle/nsis/*.exe
+          - name: Mac
+            os: macos-latest
+            args: "--target universal-apple-darwin"
+            files: timeqard/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - name: Ubuntu
+            os: ubuntu-22.04
+            args: ""
+            files: timeqard/src-tauri/target/release/bundle/deb/*.deb timeqard/src-tauri/target/release/bundle/appimage/*.AppImage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ubuntu で要るもの
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: timeqard/src-tauri -> target
+
+      - name: 部品を入れる
+        run: bun install --frozen-lockfile
+
+      - name: テスト
+        run: bun test shared timeqard src/utils/attendanceImport.test.ts src/features/timeqard
+
+      - name: 作る
+        run: bun run timeqard:tauri build ${{ matrix.args }}
+
+      - name: Releases に置く
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" ${{ matrix.files }} --clobber
+
+  publish:
+    name: 公開する
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下書きを公開する
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$TAG" --draft=false
