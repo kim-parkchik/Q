@@ -211,7 +211,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
                 setRoundOvertime(c.round_overtime || "round");
-                setRoundSocialIns(c.round_social_ins || "floor");
+                setRoundSocialIns(c.round_social_ins || "currency_law");
                 setRoundEmpIns(c.round_emp_ins || "round");
                 if (c.name) setHasSavedOnce(true);
             }
@@ -232,7 +232,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 });
                 setSavedRounding({
                     roundOvertime: c.round_overtime || "round",
-                    roundSocialIns: c.round_social_ins || "floor",
+                    roundSocialIns: c.round_social_ins || "currency_law",
                     roundEmpIns: c.round_emp_ins || "round",
                 });
             }

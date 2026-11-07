@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
     calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, prorate, prorationOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
-    getInsuranceByAge, splitByWeights, heiLimitDate, loadWeekCarryOver, weekCarryOverRange, type SalaryExtras,
+    getInsuranceByAge, splitByWeights, splitRoundedTotal, heiLimitDate, loadWeekCarryOver, weekCarryOverRange, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
 import { calcDailyHeiTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax } from "./incomeTax";
@@ -64,6 +64,23 @@ describe("社会保険の加入・未加入", () => {
         expect(r.healthInsurance).toBe(calcPremium(300000, INSURANCE_2026.KENPO_RATES["東京"][1], LAW));
         expect(r.welfarePension).toBe(27450); // 300,000 × 18.3% ÷ 2
         expect(r.childSupport).toBe(345);     // 300,000 × 0.23% ÷ 2
+    });
+});
+
+describe("社会保険料（本人負担分）の端数処理（協会けんぽの保険料額表：給与から引くときは50銭以下切り捨て・50銭超切り上げ。特約があればそれによる）", () => {
+    // 子ども・子育て支援金：標準報酬月額 58,000円 × 0.23% ÷ 2 ＝ 66.7円
+    const small = { ...monthly, standard_remuneration: 58000, social_insurance_group_id: 1 };
+    test("会社の設定がなければ原則で計算する（66.7円 → 67円。いままでは切り捨てて66円）", () => {
+        expect(calc(small, [], {}, { week_start_day: 0, round_overtime: "round" }).childSupport).toBe(67);
+    });
+    test("特約で「切り捨て」にしている会社は、切り捨てる", () => {
+        expect(calc(small, [], {}, { ...company, round_social_ins: "floor" }).childSupport).toBe(66);
+    });
+    test("新しい会社ファイルの初めの値は、原則（currency_law）", () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO company (id, name) VALUES (1, 'テスト株式会社')");
+        expect(db.query("SELECT round_social_ins AS s, round_overtime AS o FROM company").get()).toEqual({ s: "currency_law", o: "round" });
     });
 });
 
@@ -483,6 +500,38 @@ describe("欠勤控除（月給制。給与規定グループで、計算期間�
     });
 });
 
+describe("給与明細の行を足すと、ちょうど支給合計になる（時間外・休日・深夜の手当ごとに、1か月の合計で端数を処理する。基発第150号）", () => {
+    /** 給与明細の支給項目の行を足した額（固定残業代がある人は、時間外手当の代わりに固定残業代と超過分の行） */
+    const lineSum = (r: ReturnType<typeof calc>) => r.basePay - r.absenceDeduction + r.statutoryOvertimePay
+        + (r.fixedOvertimeAllowance > 0 ? r.fixedOvertimeAllowance + r.fixedOvertimeExcess : r.standardOvertimePay + r.highOvertimePay)
+        + r.holidayWorkPay + r.paidLeavePay + r.nightPay + r.commutePay + r.allowanceAmount + r.customEarnings;
+
+    test("月給301,234円・9.3時間（深夜0.3時間）の日：時間外 2,781.28…円 → 2,781円、深夜 128.37…円 → 128円（いままでは2つを合わせて四捨五入し、合計が1円多かった）", () => {
+        const r = calc({ ...monthly, base_wage: 301234 }, [day("08", 9.3, "normal", { night_hours: 0.3 })]);
+        expect(r.standardOvertimePay).toBe(2781);
+        expect(r.nightPay).toBe(128);
+        expect(r.totalEarnings).toBe(301234 + 2781 + 128);
+        expect(lineSum(r)).toBe(r.totalEarnings);
+    });
+    test("いろいろな勤務・給与形態でも、行の合計と支給合計が同じ", () => {
+        const nights = { night_hours: 2.7 };
+        const cases = [
+            calc({ ...monthly, base_wage: 287654 }, [...weekdays({ work_hours: 10.4 }), day("13", 6.3, "holiday_work"), day("14", 7.7, "statutory_holiday", nights)]),
+            calc({ ...monthly, base_wage: 312345, fixed_overtime_hours: 5, fixed_overtime_allowance: 10000 }, weekdays({ work_hours: 11.6, night_hours: 1.3 })),
+            calc({ ...hourly, base_wage: 1163 }, weekdays({ work_hours: 9.45, night_hours: 0.55 }), { customItems: [{ name: "職務手当", amount: 12345, type: "earning" }] }),
+            calc({ ...monthly, wage_type: "daily", base_wage: 11111 }, [...weekdays({ work_hours: 8.9 }), day("14", 5.25, "statutory_holiday", nights)]),
+        ];
+        for (const r of cases) expect(lineSum(r)).toBe(r.totalEarnings);
+    });
+    test("端数を処理した合計を、もとの額に近くなるように行に分ける（端数の大きい行に1円を足す）", () => {
+        expect(splitRoundedTotal(134659, [127840.909, 6818.18])).toEqual([127841, 6818]);
+        expect(splitRoundedTotal(3, [0.6, 0.7, 0.8])).toEqual([1, 1, 1]);
+        expect(splitRoundedTotal(1, [0.6, 0.6])).toEqual([1, 0]);
+        expect(splitRoundedTotal(500, [500, 0])).toEqual([500, 0]);
+        expect(splitRoundedTotal(0, [])).toEqual([]);
+    });
+});
+
 describe("計算期間の途中で入社・退職した人の日割り（会社の規程。モデル就業規則 第46条第2項は所定労働日数）", () => {
     const june = { start: "2026-06-01", end: "2026-06-30" };
     test("日割りしない設定・期間の途中でない人は、日割りしない", () => {
@@ -777,8 +826,11 @@ describe("週40時間（所定労働時間の中の時間外労働・計算期�
         const r = calc(monthly, [...long, ...week4]);
         const rate = r.overtimeHourlyRate;
         expect([r.standardPremiumHours, r.highPremiumHours, r.overtimeWithinScheduleHours]).toEqual([60, 8, 8]);
-        expect(r.standardOvertimePay).toBe(Math.floor(rate * 1.25 * 60));
-        expect(r.highOvertimePay).toBe(Math.floor(rate * 0.5 * 8)); // 27日（土）：60時間を超え、所定の中の時間
+        const standard = rate * 1.25 * 60, high = rate * 0.5 * 8; // 127,840.90…円 と 6,818.18…円
+        expect(r.highOvertimePay).toBe(Math.floor(high)); // 27日（土）：60時間を超え、所定の中の時間
+        // 時間外労働の手当（25%・50%）は合わせて四捨五入し（134,659.09…円 → 134,659円）、端数の大きい25%の行に1円を足す
+        expect(r.standardOvertimePay + r.highOvertimePay).toBe(Math.round(standard + high));
+        expect(r.standardOvertimePay).toBe(Math.floor(standard) + 1);
         expect(r.statutoryOvertimePay).toBe(Math.floor(rate * 8));  // 24日（水）：所定の外で、週40時間以内
     });
     test("計算期間をまたぐ週は、前の計算期間の日の時間も週40時間に数える（その日の分は払わない）", () => {

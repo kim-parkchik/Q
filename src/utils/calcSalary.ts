@@ -709,7 +709,8 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
   const isLeaveExemptMonth = checkLeaveExemptMonth(parseLeavePeriods(staff.leave_periods), year, month);
   const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
   const healthRate = (ins.KENPO_RATES[prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
-  const sInsType = companySettings?.round_social_ins || 'floor';
+  // 社会保険料（本人負担分）の端数：会社の設定（なければ、給与から引くときの原則の50銭以下切り捨て・50銭超切り上げ）
+  const sInsType = companySettings?.round_social_ins || 'currency_law';
   const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
   let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
@@ -882,6 +883,28 @@ export const prorationOf = (
     return { proration: null, note: '計算期間に所定労働日がないため、日割りしていません（従業員画面の出勤曜日・会社カレンダーを確かめてください）' };
   }
   return { proration: { method, numerator: Math.min(employedWorkDays, periodWorkDays), denominator: periodWorkDays }, note: null };
+};
+
+/**
+ * 端数を処理した合計（total。円）を、もとの額（1円未満の端数がある）に近くなるように、円単位の行に分ける
+ * それぞれの行を切り捨て、合計に足りない分を、切り捨てた端数の大きい行から1円ずつ足す（行の合計は total になる）
+ * 例：127,840.90円 と 6,818.18円（合計 134,659.09円 → 四捨五入で 134,659円）→ 127,841円 と 6,818円
+ */
+export const splitRoundedTotal = (total: number, parts: number[]): number[] => {
+  if (parts.length === 0) return [];
+  const result = parts.map((p) => Math.floor(p));
+  let rest = total - result.reduce((s, v) => s + v, 0);
+  const order = parts
+    .map((p, i) => ({ i, frac: p - Math.floor(p) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let k = 0; rest > 0; k = (k + 1) % order.length, rest--) result[order[k].i] += 1;
+  // 合計が切り捨てた額の合計より小さいとき（端数処理では起きない）は、うしろの行から引く
+  for (let i = result.length - 1; rest < 0 && i >= 0; i--) {
+    const take = Math.min(result[i], -rest);
+    result[i] -= take;
+    rest += take;
+  }
+  return result;
 };
 
 /**
@@ -1261,32 +1284,33 @@ export const calculateSalary = (
   const customDeductions = customDeductionLines.reduce((s, i) => s + i.amount, 0);
 
   // ── 支給合計 ──────────────────────────────────────────────
-  // const premiums = standardOvertimePay + highOvertimePay + nightPay;
-  // const roundedPremiums = applyRounding(premiums, companySettings?.round_overtime || 'round');
-  // const roundedStatutory = applyRounding(statutoryOvertimePay, companySettings?.round_overtime || 'round');
+  // 1円未満の端数は、会社の設定（残業代の端数処理）で、法定内残業・時間外労働・休日労働・深夜労働の手当ごとに、1か月の合計で処理する
+  // （1か月の時間外労働・休日労働・深夜業の「おのおのの割増賃金の総額」の端数は、50銭未満切り捨て・50銭以上切り上げにしてよい。基発第150号）
+  // 明細の行にはこの処理した額を出し、支給合計は明細の行の合計にする（行を足すと、ちょうど支給合計になる）
+  // 出典：鹿児島労働局「時間外労働・休日労働・深夜労働 Q10」https://jsite.mhlw.go.jp/kagoshima-roudoukyoku/yokuaru_goshitsumon/kyushokuchu/0310.html
+  //       厚生労働省「確かめよう労働条件」Q&A https://www.check-roudou.mhlw.go.jp/qa/roudousya/chingin/q3.html （5 端数処理の方法について）
   const roundOvertime = companySettings?.round_overtime || 'round';
-  const roundedStatutory = applyRounding(statutoryOvertimePay || 0, roundOvertime);
+  const statutoryLine = applyRounding(statutoryOvertimePay || 0, roundOvertime);
+  // 時間外労働の手当（25%・50%）は、合わせて1つの総額として端数を処理し、明細の2行に分ける（2行の合計が総額になる）
+  const overtimeLegalTotal = applyRounding((standardOvertimePay || 0) + (highOvertimePay || 0), roundOvertime);
+  const [standardLine, highLine] = splitRoundedTotal(overtimeLegalTotal, [standardOvertimePay || 0, highOvertimePay || 0]);
+  const holidayLine = applyRounding(holidayWorkPay || 0, roundOvertime);
+  const nightLine = applyRounding(nightPay || 0, roundOvertime);
 
   // 固定残業代（月給制の人だけ）：時間外労働の割増賃金の代わりに定額を払い、法定の計算額が上回る分だけ足す
   const fixedOvertimeAllowance = staff.wage_type === 'monthly'
     ? Math.max(0, Math.floor(Number(staff.fixed_overtime_allowance) || 0))
     : 0;
   const fixedOvertimeHours = fixedOvertimeAllowance > 0 ? Math.max(0, Number(staff.fixed_overtime_hours) || 0) : 0;
-  let fixedOvertimeExcess = 0;
-  let roundedPremiums: number;
-  if (fixedOvertimeAllowance > 0) {
-    const legalOvertimePay = applyRounding((standardOvertimePay || 0) + (highOvertimePay || 0), roundOvertime);
-    fixedOvertimeExcess = Math.max(0, legalOvertimePay - fixedOvertimeAllowance);
-    roundedPremiums = fixedOvertimeAllowance + fixedOvertimeExcess
-      + applyRounding((holidayWorkPay || 0) + (nightPay || 0), roundOvertime);
-  } else {
-    roundedPremiums = applyRounding((standardOvertimePay || 0) + (highOvertimePay || 0) + (holidayWorkPay || 0) + (nightPay || 0), roundOvertime);
-  }
+  const fixedOvertimeExcess = fixedOvertimeAllowance > 0 ? Math.max(0, overtimeLegalTotal - fixedOvertimeAllowance) : 0;
+  // 時間外労働の手当として払う額（固定残業代がある人は、固定残業代 ＋ 超過分）と、休日・深夜の手当
+  const roundedPremiums = (fixedOvertimeAllowance > 0 ? fixedOvertimeAllowance + fixedOvertimeExcess : overtimeLegalTotal)
+    + holidayLine + nightLine;
 
   const totalEarnings = Math.floor(basePay || 0)
                     - (absenceDeduction || 0)
-                    + (roundedStatutory || 0)
-                    + (roundedPremiums || 0)
+                    + statutoryLine
+                    + roundedPremiums
                     + Math.floor(paidLeavePay || 0)
                     + (commutePay || 0)
                     + (allowanceAmount || 0)
@@ -1297,7 +1321,7 @@ export const calculateSalary = (
   // 出典：日本年金機構 年金用語集「固定的賃金」https://www.nenkin.go.jp/service/yougo/kagyo/koteitekichingin.html
   //       「非固定的賃金」https://www.nenkin.go.jp/service/yougo/hagyo/hikoteitekichingin.html
   // ※ 名称でなく実態で判断するものなので、月変の年間平均の画面で直せるようにしている
-  const nonFixedEarnings = (roundedStatutory || 0) + (roundedPremiums || 0) - fixedOvertimeAllowance
+  const nonFixedEarnings = statutoryLine + roundedPremiums - fixedOvertimeAllowance
     + customItems.filter(i => i.type === 'earning' && !i.fixed).reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
   // ── 社会保険料 ──────────────────────────────────────────────
@@ -1380,10 +1404,11 @@ export const calculateSalary = (
     absenceDeductionDetail,
     absenceDeductionNote,
     periodWorkDays: extras.periodWorkDays ?? null,
-    statutoryOvertimePay: Math.floor(statutoryOvertimePay),
-    standardOvertimePay: Math.floor(standardOvertimePay),
-    highOvertimePay: Math.floor(highOvertimePay),
-    holidayWorkPay: Math.floor(holidayWorkPay),
+    // 明細の行（端数を処理した額。行を足すと支給合計になる）
+    statutoryOvertimePay: statutoryLine,
+    standardOvertimePay: standardLine,
+    highOvertimePay: highLine,
+    holidayWorkPay: holidayLine,
     fixedOvertimeAllowance,
     fixedOvertimeHours,
     fixedOvertimeExcess,
@@ -1394,7 +1419,7 @@ export const calculateSalary = (
     overtimeBaseHoursIsAnnual,
     dailyWageDays,
     appliedDependents: isHei ? 0 : Number(extras.dependents) || 0,
-    nightPay: Math.floor(nightPay),
+    nightPay: nightLine,
     paidLeavePay: Math.floor(paidLeavePay),
     commutePay,
     allowanceAmount,

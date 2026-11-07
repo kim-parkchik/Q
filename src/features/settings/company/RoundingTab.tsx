@@ -54,7 +54,7 @@ export default function RoundingTab({ cm }: Props) {
                                 <Clock size={16} color="#e67e22" /> 残業代・深夜手当
                             </strong>
                             <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
-                                ※1ヶ月の合計額に対して適用されます。
+                                ※1か月の時間外・休日・深夜（と法定内残業）の手当ごとの合計に使います（基発第150号）。明細の行を足すと支給合計になります。
                             </small>
                         </div>
                         <select 
@@ -62,8 +62,8 @@ export default function RoundingTab({ cm }: Props) {
                             onChange={e => setRoundOvertime(e.target.value)} 
                             style={{ ...inputStyle, width: "320px", flexShrink: 0 }}
                         >
-                            <option value="round">四捨五入（0.50円以上切上 / 労基法容認）</option>
-                            <option value="currency_law">法的原則（0.51円以上切上 / 通貨単位法）</option>
+                            <option value="round">50銭以上切り上げ（四捨五入。通貨法・基発第150号の方法）</option>
+                            <option value="currency_law">50銭以下切り捨て（50銭ちょうどは切り捨て）</option>
                             <option value="ceil">常に切り上げ（従業員に有利）</option>
                             <option value="floor">常に切り捨て（⚠️未払いのリスクあり）</option>
                         </select>
@@ -76,17 +76,23 @@ export default function RoundingTab({ cm }: Props) {
                                 <ShieldCheck size={16} color="#27ae60" /> 社会保険料（個人負担分）
                             </strong>
                             <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
-                                ※通貨単位法により、50銭以下切り捨てが一般的です。
+                                ※給与から引くときは、50銭以下切り捨て・50銭を超えたら切り上げ（協会けんぽの保険料額表）。労使の特約があれば、それによります。賞与の保険料にも使います。
                             </small>
+                            {roundSocialIns !== "currency_law" && (
+                                <small style={{ color: "#b45309", marginLeft: "22px", display: "block", marginTop: "4px" }}>
+                                    原則と違う設定です。端数の扱いを決めた労使の特約がなければ「原則」にしてください。
+                                </small>
+                            )}
                         </div>
                         <select 
                             value={roundSocialIns} 
                             onChange={e => setRoundSocialIns(e.target.value)} 
                             style={{ ...inputStyle, width: "320px", flexShrink: 0 }}
                         >
-                            <option value="floor">切り捨て（一般的）</option>
+                            <option value="currency_law">原則（50銭以下切り捨て・50銭超切り上げ）</option>
+                            <option value="floor">切り捨て（特約がある場合）</option>
                             <option value="round">四捨五入（特約がある場合）</option>
-                            <option value="ceil">切り上げ</option>
+                            <option value="ceil">切り上げ（特約がある場合）</option>
                         </select>
                     </div>
 

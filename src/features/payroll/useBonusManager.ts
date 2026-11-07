@@ -389,7 +389,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const isPensionTarget = isInsured && byAge.pension;
     const isNursing = isHealthTarget && byAge.nursing;
 
-    const sInsType = companySettings.round_social_ins || 'floor';
+    const sInsType = companySettings.round_social_ins || 'currency_law';
     // この賞与より前に支払った賞与の標準賞与額の累計（後で支払う賞与は入れない。utils/bonusInsurance.ts）
     const earlier = earlierBonusTotals(staff, otherBonuses[String(staff.id)] ?? [], { settingId: selectedSetting.id, paymentDate: payDate });
     // 健康保険・介護保険・子ども・子育て支援金の標準賞与額は、年度（4月〜翌3月）の累計で573万円まで
