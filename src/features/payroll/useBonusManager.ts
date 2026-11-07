@@ -8,7 +8,7 @@ import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
 import { branchPrefectureOf } from '../../utils/branchPrefecture';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
-import { checkLeaveExemptBonus, parseLeavePeriods } from '../../utils/leaveExemption';
+import { checkLeaveExemptBonus, exemptLeavePeriodsOf } from '../../utils/leaveExemption';
 import { executeBatch } from '../../utils/dbBatch';
 import { cappedBonusStandard, earlierBonusTotals, prevSalaryStatusOf, type OtherBonus, type PrevSalaryStatus } from '../../utils/bonusInsurance';
 import { getPeriodForPayMonth, type PayrollGroupForPeriod } from '../../utils/payrollPeriod';
@@ -381,10 +381,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const byAge = getInsuranceByAge(staff.birthday || '', payYear, payMonth);
     // 入社日より前・資格喪失日（退職日の翌日）がある月に支払った賞与には、どの社会保険料もかからない（支給日で判定する）
     const payDate = selectedSetting.payment_date || `${payYear}-${String(payMonth).padStart(2, '0')}-01`;
-    // 産休・育休で免除される月に支払った賞与にもかからない（育休は、期間が1か月を超えるときだけ）
+    // 産休・育休で免除される月に支払った賞与にもかからない（育休は、期間が1か月を超えるときだけ。役員の育休は免除されない）
     const isInsured = isSocialInsEnrolled
       && checkInsuredOnBonusDate(staff.join_date, staff.retirement_date, payDate)
-      && !checkLeaveExemptBonus(parseLeavePeriods(staff.leave_periods), payDate);
+      && !checkLeaveExemptBonus(exemptLeavePeriodsOf(staff), payDate);
     const isHealthTarget = isInsured && byAge.health;
     const isPensionTarget = isInsured && byAge.pension;
     const isNursing = isHealthTarget && byAge.nursing;

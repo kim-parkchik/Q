@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { RESIDENT_TAX_NOTICE_CSV_FIELDS } from "../constants/residentTaxNoticeCsvLayout";
 import {
-  compareWithSchedule, decodeNoticeFile, matchNoticeRecord, parseResidentTaxNotice, withNoticeAmounts,
+  compareWithSchedule, decodeNoticeFile, matchNoticeRecord, parseResidentTaxNotice, sameNoticeName, withNoticeAmounts,
 } from "./residentTaxNotice";
 
 const SAMPLE = [
@@ -72,14 +72,28 @@ describe("従業員との結び付け", () => {
     { id: "3", name: "申告 太郎" },
     { id: "4", name: "申告　太郎" },
   ];
-  test("受給者番号が従業員IDと同じ人", () => {
-    expect(matchNoticeRecord(records[0], staff)).toEqual({ staffId: "1000011000011000011000016", how: "number", candidates: [] });
+  test("受給者番号が従業員IDと同じで、氏名も同じ人", () => {
+    expect(matchNoticeRecord(records[0], staff)).toEqual({ staffId: "1000011000011000011000016", how: "number", candidates: [], numberNameMismatch: null });
   });
   test("受給者番号がなければ、氏名（空白を除く）が同じ人が1人だけのとき", () => {
-    expect(matchNoticeRecord(records[1], staff)).toEqual({ staffId: "2", how: "name", candidates: [] });
+    expect(matchNoticeRecord(records[1], staff)).toEqual({ staffId: "2", how: "name", candidates: [], numberNameMismatch: null });
   });
   test("同じ氏名が2人以上なら決めずに候補を出す", () => {
-    expect(matchNoticeRecord(records[2], staff)).toEqual({ staffId: null, how: null, candidates: ["3", "4"] });
+    expect(matchNoticeRecord(records[2], staff)).toEqual({ staffId: null, how: null, candidates: ["3", "4"], numberNameMismatch: null });
+  });
+  test("受給者番号が従業員IDと同じでも、氏名が違えば結び付けない（前のソフトの番号が、ほかの人のIDと同じだったときなど）", () => {
+    // 申告一郎さんの受給者番号が、Q では別の人（山田 次郎）の従業員IDになっている
+    const other = [{ id: "1000011000011000011000016", name: "山田 次郎" }, { id: "9", name: "申告 一郎" }];
+    expect(matchNoticeRecord(records[0], other)).toEqual({ staffId: null, how: null, candidates: ["9"], numberNameMismatch: "1000011000011000011000016" });
+    // 氏名が同じ人がいなくても、結び付けない
+    expect(matchNoticeRecord(records[0], [other[0]])).toEqual({ staffId: null, how: null, candidates: [], numberNameMismatch: "1000011000011000011000016" });
+  });
+  test("どちらかの氏名が空なら比べられないので、受給者番号で結び付ける", () => {
+    expect(matchNoticeRecord(records[0], [{ id: "1000011000011000011000016", name: "" }]).staffId).toBe("1000011000011000011000016");
+    expect(sameNoticeName("申告　一郎", "申告一郎")).toBe(true);
+    expect(sameNoticeName("ｼﾝｺｸ ｲﾁﾛｳ", "シンコクイチロウ")).toBe(true);
+    expect(sameNoticeName("申告一郎", "申告次郎")).toBe(false);
+    expect(sameNoticeName("", "申告一郎")).toBeNull();
   });
 });
 

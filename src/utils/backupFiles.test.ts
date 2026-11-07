@@ -3,7 +3,7 @@
  * 実行方法: bun test
  */
 import { describe, expect, test } from "bun:test";
-import { backupFileName, backupsToDelete, companyBaseName, isBackupFile, isBackupOf, restoredFileName } from "./backupFiles";
+import { backupFileName, backupsBeforeEncryption, backupsToDelete, backupTimeOf, companyBaseName, isBackupFile, isBackupOf, restoredFileName } from "./backupFiles";
 
 describe("バックアップの名前", () => {
     test("会社ファイルの名前（拡張子を除く）", () => {
@@ -61,5 +61,27 @@ describe("バックアップを開く（写しの会社ファイルを作る）"
         expect(isBackupFile("/a/b.qb")).toBe(true);
         expect(isBackupFile("/a/b.QB")).toBe(true);
         expect(isBackupFile("/a/b.qp")).toBe(false);
+    });
+});
+
+describe("マイナンバーの暗号化を始める前のバックアップ", () => {
+    test("名前から、バックアップを作った日時を読む（以前の秒のない名前は00秒）", () => {
+        expect(backupTimeOf("山田商店_20261106_120130.qb", "山田商店")).toBe("2026-11-06 12:01:30");
+        expect(backupTimeOf("山田商店_20261106_1201.qb", "山田商店")).toBe("2026-11-06 12:01:00");
+        expect(backupTimeOf("山田商店2_20261106_120130.qb", "山田商店")).toBeNull();
+        expect(backupTimeOf("山田商店_20261106_120130_復元_20261107_090000.qb", "山田商店")).toBeNull();
+    });
+    test("暗号化を始めた日時より前に作ったものと、始めてからのものに分ける（その会社ファイルのものだけ。古い順）", () => {
+        const files = [
+            "山田商店_20261107_180000.qb", "山田商店_20261105_1730.qb", "山田商店_20261106_120130.qb",
+            "山田商店2_20261101_090000.qb", "メモ.txt",
+        ];
+        expect(backupsBeforeEncryption(files, "山田商店", "2026-11-06 15:00:00")).toEqual({
+            before: ["山田商店_20261105_1730.qb", "山田商店_20261106_120130.qb"],
+            after: ["山田商店_20261107_180000.qb"],
+        });
+    });
+    test("暗号化を始めたのと同じ秒に作ったバックアップは、始めてからのもの（閉じたときに作るので）", () => {
+        expect(backupsBeforeEncryption(["会社_20261106_150000.qb"], "会社", "2026-11-06 15:00:00")).toEqual({ before: [], after: ["会社_20261106_150000.qb"] });
     });
 });

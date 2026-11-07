@@ -293,6 +293,18 @@ describe("産休・育休中の社会保険料の免除（決まりは leaveExem
         expect(r.isLeaveExemptMonth).toBe(false);
         expect(r.healthInsurance).toBe(calc(monthly, []).healthInsurance);
     });
+    test("給与計算：役員は、育休の期間を入れても保険料を引く（産休は免除する）", () => {
+        // 役員はふつう労働者に当たらず、育児・介護休業法の育児休業等を取れないので、育児休業等の免除を受けられない（日本年金機構）
+        const childcare = JSON.stringify([{ type: "childcare", start: "2026-05-20", end: "2027-03-31" }]);
+        const r = calc({ ...monthly, is_executive: 1, leave_periods: childcare }, []);
+        expect(r.isLeaveExemptMonth).toBe(false);
+        expect([r.healthInsurance, r.childSupport, r.welfarePension])
+            .toEqual([calc(monthly, []).healthInsurance, calc(monthly, []).childSupport, calc(monthly, []).welfarePension]);
+        const maternity = JSON.stringify([{ type: "maternity", start: "2026-05-20", end: "2026-08-31" }]);
+        const m = calc({ ...monthly, is_executive: 1, leave_periods: maternity }, []);
+        expect(m.isLeaveExemptMonth).toBe(true);
+        expect([m.healthInsurance, m.welfarePension]).toEqual([0, 0]);
+    });
 });
 
 describe("源泉所得税の乙欄", () => {

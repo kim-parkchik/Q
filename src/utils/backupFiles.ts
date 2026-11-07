@@ -7,6 +7,9 @@
  *   バックアップから作った写し（「山田商店_20261106_120130_復元.qp」）のバックアップは、数えない・消さない
  * ■ バックアップを開くとき：.qb は直接開かずに、写しの会社ファイル（.qp）を作って開く（restoredFileName）。
  *   開くと、表の更新やログの書き込みでバックアップの中身が変わってしまうため
+ * ■ マイナンバーの暗号化を始める前に作ったバックアップには、暗号化していない番号が残る。
+ *   マイナンバーの画面で、その会社ファイルのバックアップのうち、名前の日時が暗号化を始めた日時より前のものを出し、消せるようにする
+ *   （backupsBeforeEncryption。名前の日時は、会社ファイルを閉じてバックアップを作った時刻）
  */
 import { EXT_BACKUP, EXT_MAIN } from "../constants/appConfig";
 
@@ -43,6 +46,31 @@ export const backupsToDelete = (fileNames: string[], baseName: string, keep: unk
     .filter((name) => isBackupOf(name, baseName))
     .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)) // 新しい順（名前の後ろが日時なので、名前の順でよい）
     .slice(generations);
+};
+
+/**
+ * バックアップを作った日時（名前から読む。"山田商店_20261106_120130.qb" → "2026-11-06 12:01:30"）
+ * 以前の秒のない名前（「_HHMM」）は 00 秒とする。その会社ファイルのバックアップでなければ null
+ */
+export const backupTimeOf = (fileName: string, baseName: string): string | null => {
+  if (!isBackupOf(fileName, baseName)) return null;
+  const m = fileName.slice(baseName.length).match(/^_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})?\./);
+  return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6] ?? "00"}` : null;
+};
+
+/**
+ * その会社ファイルのバックアップを、マイナンバーの暗号化を始める前のものと、始めてからのものに分ける（どちらも古い順）
+ * @param startedAt 暗号化を始めた日時（my_number_keys.created_at。"YYYY-MM-DD HH:MM:SS"。バックアップの名前と同じく、その PC の時刻）
+ */
+export const backupsBeforeEncryption = (fileNames: string[], baseName: string, startedAt: string): { before: string[]; after: string[] } => {
+  const list = fileNames
+    .map((name) => ({ name, time: backupTimeOf(name, baseName) }))
+    .filter((x): x is { name: string; time: string } => x.time !== null)
+    .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+  return {
+    before: list.filter((x) => x.time < startedAt).map((x) => x.name),
+    after: list.filter((x) => x.time >= startedAt).map((x) => x.name),
+  };
 };
 
 /** バックアップから作る写しの会社ファイルの名前。"山田商店_20261106_120130.qb" → "山田商店_20261106_120130_復元.qp" */

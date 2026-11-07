@@ -95,6 +95,17 @@ describe("産休・育休の期間から候補を探す", () => {
         const [c] = findLeaveEndCandidates([staff], 2026, [group], [], []);
         expect(c.followedBy).toContain("育児休業等終了時改定はできません");
     });
+    test("役員の育休は候補に出さない（育児休業等ではないので、育休終了時改定はできない）。役員の産休は出す", () => {
+        const leaves: LeavePeriod[] = [
+            { type: "maternity", start: "2025-10-01", end: "2026-01-20" },
+            { type: "childcare", start: "2026-01-21", end: "2026-03-31" },
+        ];
+        // 役員の育休は育児休業等ではないので、産休の終了日の翌日から育休を始めても、産休終了時改定はできる
+        const [c, ...rest] = findLeaveEndCandidates([staffWith(leaves, { is_executive: 1 })], 2026, [group], [], []);
+        expect(rest).toHaveLength(0);
+        expect([c.leave.type, c.nextDay, c.followedBy]).toEqual(["maternity", "2026-01-21", null]);
+        expect(findLeaveEndCandidates([staffWith(leaves)], 2026, [group], [], []).map((x) => x.leave.type)).toEqual(["maternity", "childcare"]);
+    });
     test("育休を延長して別の期間で入れたときは、続けた育休の終わりで判定する", () => {
         const staff = staffWith([
             { type: "childcare", start: "2025-10-01", end: "2026-03-31" },

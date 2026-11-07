@@ -2,8 +2,6 @@ import Database from "@tauri-apps/plugin-sql";
 import {
   BaseDirectory,
   mkdir,
-  exists,
-  readTextFile,
   writeTextFile
 } from "@tauri-apps/plugin-fs";
 import {
@@ -66,37 +64,24 @@ export const writeLog = async (
     }
   }
 
-  // ファイル
+  // ファイル（書類/Q/Logs の「年-月.qlog」）
+  // 1行を、ファイルの終わりに書き足す（append）。読み込んでから全部を書き戻すと、2つの記録を同時に書いたときに、
+  // あとから書き戻したほうが先に書いた行を消してしまう。書き足すなら、どちらの行も残る（ファイルがなければ作る）
   try {
     await mkdir(logDir, {
       baseDir: BaseDirectory.Document,
       recursive: true
     });
 
-    let current = "";
-
-    const fileExists = await exists(logPath, {
-      baseDir: BaseDirectory.Document
-    });
-
-    if (fileExists) {
-      current = await readTextFile(logPath, {
-        baseDir: BaseDirectory.Document
-      });
-    }
-
     const line =
       `[${now}] [${level}] [${category}] ${message}` +
       (userName ? ` (${userName})` : "") +
       "\n";
 
-    await writeTextFile(
-      logPath,
-      current + line,
-      {
-        baseDir: BaseDirectory.Document
-      }
-    );
+    await writeTextFile(logPath, line, {
+      baseDir: BaseDirectory.Document,
+      append: true
+    });
 
   } catch (err) {
     console.error("ファイルログ書き込み失敗:", err);

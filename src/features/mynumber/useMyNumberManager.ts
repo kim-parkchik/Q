@@ -8,6 +8,11 @@ import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
+// remove は、番号を消す remove（この画面の操作）と名前が同じなので removeFile にする
+import { readDir, remove as removeFile } from "@tauri-apps/plugin-fs";
+import { documentDir, join } from "@tauri-apps/api/path";
+import { APP_DIR_NAME, BACKUP_DIR_NAME } from "../../constants/appConfig";
+import { backupsBeforeEncryption, companyBaseName } from "../../utils/backupFiles";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { buildMyNumberList, myNumberError, normalizeMyNumber, SELF_KEY, type MyNumberEntry, type MyNumberStaffRow } from "../../utils/myNumber";
@@ -16,6 +21,18 @@ import { parseDeclaration } from "../../utils/nenchoDeclaration";
 import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "./myNumberStore";
 import { useMyNumberUnlock, useVaultState } from "./MyNumberUnlock";
 import { changeVaultPassword, loadKeyRecord, lockVault, recoverVault, renewVaultRecoveryKey, setupVault } from "./myNumberVault";
+
+/** 暗号化を始める前に作ったバックアップ（その会社ファイルのもの。暗号化していない番号が入っている） */
+export interface PlainBackups {
+  /** 暗号化を始めた日時（"YYYY-MM-DD HH:MM:SS"） */
+  startedAt: string;
+  /** バックアップのフォルダ（書類/Q/Backup） */
+  dir: string;
+  /** 暗号化を始める前に作ったもの（古い順） */
+  before: string[];
+  /** 暗号化を始めてから作ったもの */
+  after: string[];
+}
 
 export interface MyNumberLog {
   at: string;
@@ -30,7 +47,10 @@ const whoOf = (row: MyNumberStaffRow, e: MyNumberEntry) => (e.key === SELF_KEY ?
 const newPasswordError = (password: string, confirm: string) =>
   passwordError(password) ?? (password !== confirm ? "確認のために入れたパスワードが違います。" : null);
 
-export function useMyNumberManager(db: Database, staffList: any[], user: MyNumberUser | null) {
+/**
+ * @param companyPath 開いている会社ファイルの場所（暗号化を始める前のバックアップを探すため。わからなければ探さない）
+ */
+export function useMyNumberManager(db: Database, staffList: any[], user: MyNumberUser | null, companyPath: string | null = null) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const unlock = useMyNumberUnlock();
@@ -46,12 +66,36 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
   /** 見せる回復用キー（見せ終わったら消す） */
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [plainBackups, setPlainBackups] = useState<PlainBackups | null>(null);
+
+  /** 暗号化を始める前に作った、この会社ファイルのバックアップを探す（名前の日時と、暗号化を始めた日時を比べる） */
+  const loadPlainBackups = async (): Promise<PlainBackups | null> => {
+    if (!companyPath) return null;
+    const keyRows = await db.select<any[]>("SELECT created_at FROM my_number_keys WHERE id = 1");
+    const startedAt = String(keyRows?.[0]?.created_at ?? "");
+    if (!startedAt) return null;
+    const dir = await join(await documentDir(), APP_DIR_NAME, BACKUP_DIR_NAME);
+    let names: string[] = [];
+    try {
+      names = (await readDir(dir)).filter((e) => e.isFile).map((e) => e.name);
+    } catch {
+      names = []; // バックアップのフォルダがまだない
+    }
+    return { startedAt, dir, ...backupsBeforeEncryption(names, companyBaseName(companyPath), startedAt) };
+  };
 
   const load = async () => {
     const ok = await hasMyNumberAccess(db, user);
     setAccess(ok);
     if (!ok) return;
-    setSetUp((await loadKeyRecord(db)) !== null);
+    const keyRecord = await loadKeyRecord(db);
+    setSetUp(keyRecord !== null);
+    try {
+      setPlainBackups(keyRecord ? await loadPlainBackups() : null);
+    } catch (e) {
+      console.error("暗号化を始める前のバックアップを探せませんでした", e);
+      setPlainBackups(null);
+    }
     const c = await db.select<any[]>("SELECT name FROM company WHERE id = 1");
     const d = await db.select<any[]>("SELECT staff_id, year, declaration FROM year_end_adjustments");
     const r = await db.select<any[]>("SELECT staff_id, person, name, relation FROM my_numbers");
@@ -179,6 +223,56 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
     }
   };
 
+  /**
+   * 暗号化を始める前に作ったバックアップを消す（暗号化していない番号が入っているため。消したことは記録に残す）
+   * 消したバックアップの日の会社ファイルには戻せなくなるので、一覧を見せて確かめてから消す
+   */
+  const removePlainBackups = async () => {
+    const target = plainBackups;
+    if (!target || target.before.length === 0) return;
+    const ok = await ask(
+      `暗号化を始める前に作ったバックアップ${target.before.length}個を消します。\n\n`
+      + target.before.map((name) => `・${name}`).join("\n")
+      + "\n\nこれらには、そのときに登録していたマイナンバーが、暗号化しないまま入っています。"
+      + "消したバックアップは元に戻せず、その日の会社ファイルにも戻せなくなります。"
+      + (target.after.length === 0
+        ? "\n\n暗号化を始めてからのバックアップは、まだありません。消すと、この会社ファイルを閉じてバックアップが作られるまで、バックアップが1つもなくなります。"
+        : "")
+      + "\n\n消しますか？",
+      { title: "暗号化を始める前のバックアップを消す", kind: "warning", okLabel: "消す", cancelLabel: "やめる" }
+    );
+    if (!ok) return;
+    if (!(await hasMyNumberAccess(db, user))) {
+      dialog.warning("マイナンバーを扱える印がありません（管理者がシステム設定で付けます）");
+      return;
+    }
+    setBusy(true);
+    const removed: string[] = [];
+    const failed: string[] = [];
+    try {
+      for (const name of target.before) {
+        try {
+          await removeFile(await join(target.dir, name));
+          removed.push(name);
+        } catch (err) {
+          console.error(err);
+          failed.push(name);
+        }
+      }
+      if (removed.length > 0) {
+        await logMyNumber(db, user, `暗号化を始める前のバックアップを${removed.length}個消しました（${removed.join("、")}）`);
+      }
+      if (failed.length > 0) {
+        dialog.error(`消せなかったバックアップがあります（ほかのアプリで開いていないか確かめてください）。\n${failed.join("\n")}`);
+      } else {
+        toast.success(`暗号化を始める前のバックアップを${removed.length}個消しました`);
+      }
+    } finally {
+      setBusy(false);
+      await load().catch((e) => console.error(e));
+    }
+  };
+
   /** 暗号化を始める（パスワードを決める。登録済みの番号は暗号化する） */
   const setup = (password: string, confirm: string) =>
     keyAction(newPasswordError(password, confirm), async () => {
@@ -241,8 +335,8 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
   const closeVault = () => lockVault("manual");
 
   return {
-    access, setUp, vault, rows, logs, busy, companyName, recoveryKey,
+    access, setUp, vault, rows, logs, busy, companyName, recoveryKey, plainBackups,
     closeRecoveryKey: () => setRecoveryKey(null),
-    reveal, save, remove, setup, recover, changePassword, renewRecovery, openVault, closeVault,
+    reveal, save, remove, setup, recover, changePassword, renewRecovery, openVault, closeVault, removePlainBackups,
   };
 }

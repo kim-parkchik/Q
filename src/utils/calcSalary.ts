@@ -76,7 +76,7 @@ import {
   getWeekKey
 } from './timeUtils';
 import { calcDailyHeiTaxByTable, calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
-import { checkLeaveExemptMonth, parseLeavePeriods } from './leaveExemption';
+import { checkLeaveExemptMonth, exemptLeavePeriodsOf } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
 import * as Master from '../constants';
@@ -707,8 +707,8 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
   const byAge = getInsuranceByAge(staff.birthday || '', year, month);
   // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
   const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
-  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts）
-  const isLeaveExemptMonth = checkLeaveExemptMonth(parseLeavePeriods(staff.leave_periods), year, month);
+  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）
+  const isLeaveExemptMonth = checkLeaveExemptMonth(exemptLeavePeriodsOf(staff), year, month);
   const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
   // 健康保険の料率は都道府県（協会けんぽの支部）ごと。都道府県がわからなければ（拠点の都道府県が未登録など）、
   // 健康保険料・介護保険料は計算しない（ほかの都道府県で仮に計算しない）。画面で知らせ、確定できないようにする

@@ -171,6 +171,22 @@ describe("入力と保存", () => {
     });
 });
 
+describe("役員（育休の保険料は免除されない）", () => {
+    test("役員の育休は、特例を終わらせず、免除の月でもないので、下回っていればみなされる", () => {
+        const leaves: LeavePeriod[] = [{ type: "childcare", start: "2025-04-01", end: "2025-09-30" }];
+        const s = { standard_remuneration_history: history(["", 300000], ["2025-04", 200000]) };
+        const e = entry({ childBirthday: "2025-03-01", start: "2025-03-01" });
+        // 役員でなければ、保険料が免除される育休を始めたので、その日の翌日がある月の前月（3月）で終わる
+        const [worker] = judgeYouikuEntries(staffWith(s, leaves), [e], TODAY);
+        expect([worker.endReason, ym(worker.lastYm)]).toEqual(["childcare_leave", "2025-03"]);
+        const [exec] = judgeYouikuEntries(staffWith({ ...s, is_executive: 1 }, leaves), [e], TODAY);
+        expect(exec.endReason).toBe("age3");
+        const during = exec.months.filter((m) => m.year === 2025 && m.month >= 4 && m.month <= 9);
+        expect(during).toHaveLength(6);
+        expect(during.every((m) => !m.exempt && m.deemed)).toBe(true);
+    });
+});
+
 describe("申出ができそうな人", () => {
     test("育休が終わった後に標準報酬月額が下がった人を出す。その日からの特例を登録すれば出ない", () => {
         const [c, ...rest] = findYouikuCandidates([mother], TODAY);

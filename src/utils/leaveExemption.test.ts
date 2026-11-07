@@ -8,8 +8,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-    checkLeaveExemptBonus, checkLeaveExemptMonth, parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod,
-    type LeavePeriod,
+    canExemptLeave, checkLeaveExemptBonus, checkLeaveExemptMonth, exemptLeavePeriodsOf, parseLeavePeriods, stringifyLeavePeriods,
+    validateLeavePeriod, type LeavePeriod,
 } from "./leaveExemption";
 
 const maternity = (start: string, end = ""): LeavePeriod => ({ type: "maternity", start, end });
@@ -91,6 +91,26 @@ describe("産休から育休へ続けて休むとき", () => {
     test("産休の月と育休の月を合わせて免除する", () => {
         const leaves = [maternity("2026-03-01", "2026-06-10"), childcare("2026-06-11", "2027-06-10")];
         expect(exemptMonths2026(leaves)).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    });
+});
+
+describe("役員（育児休業等の免除は受けられない。産前産後休業は受けられる）", () => {
+    // 日本年金機構「従業員（健康保険・厚生年金保険の被保険者）が育児休業等を取得・延長したときの手続き」4．留意事項（1）
+    const leaves = [maternity("2026-03-01", "2026-06-10"), childcare("2026-06-11", "2027-06-10")];
+    const executive = { is_executive: 1, leave_periods: stringifyLeavePeriods(leaves) };
+    test("役員の育休は、免除に使う期間に入れない（産休は入れる）", () => {
+        expect(exemptLeavePeriodsOf(executive)).toEqual([leaves[0]]);
+        expect(exemptMonths2026(exemptLeavePeriodsOf(executive))).toEqual([3, 4, 5]);
+        expect(checkLeaveExemptBonus(exemptLeavePeriodsOf(executive), "2026-07-10")).toBe(false);
+        expect(canExemptLeave(executive, childcare("2026-06-11"))).toBe(false);
+        expect(canExemptLeave(executive, maternity("2026-03-01"))).toBe(true);
+    });
+    test("役員でなければ、育休も免除に使う（is_executive が 0・空・文字の \"0\" でも同じ）", () => {
+        for (const is_executive of [0, null, undefined, "0", ""]) {
+            expect(exemptLeavePeriodsOf({ ...executive, is_executive })).toEqual(leaves);
+        }
+        expect(exemptLeavePeriodsOf({ ...executive, is_executive: "1" })).toEqual([leaves[0]]);
+        expect(exemptLeavePeriodsOf(null)).toEqual([]);
     });
 });
 

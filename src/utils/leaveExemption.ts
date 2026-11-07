@@ -13,7 +13,10 @@
  *   ・賞与は、1つ目の決まりで免除になる月に支払ったもので、育児休業等の期間が1か月を超えるときだけ免除する
  *     （令和4年9月30日以前に開始した育児休業等は、1か月以下でも免除）
  *   ・続けて取った2つ以上の育児休業等は、1つの育児休業等とみなす
- *   ・役員（事業主等）は、育児休業等の免除を受けられない（産前産後休業は受けられる）
+ *   ・役員（事業主等）は、育児休業等の免除を受けられない（産前産後休業は受けられる）。免除を受けられるのは
+ *     育児・介護休業法に基づく育児休業等の期間に限り、役員はふつう労働者に当たらず、その育児休業等を取れないため
+ *     （日本年金機構「従業員（健康保険・厚生年金保険の被保険者）が育児休業等を取得・延長したときの手続き」4．留意事項（1））。
+ *     給与・賞与・養育特例・育児休業等終了時改定は、どれも exemptLeavePeriodsOf で読んだ期間を使う
  * 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/menjo/sankyu-menjo/20140509-02.html
  *       https://www.nenkin.go.jp/service/kounen/hokenryo/menjo/ikuji-menjo/20140327-05.html
  *       https://www.nenkin.go.jp/oshirase/taisetu/2022/202210/100302.html （令和4年10月の改正）
@@ -50,6 +53,17 @@ export const parseLeavePeriods = (json: unknown): LeavePeriod[] => {
     return [];
   }
 };
+
+/** その人がその休業で、保険料の免除を受けられるか（役員の育児休業等は受けられない。産前産後休業は受けられる） */
+export const canExemptLeave = (staff: { is_executive?: unknown } | null | undefined, leave: Pick<LeavePeriod, 'type'>): boolean =>
+  !(leave.type === 'childcare' && Number(staff?.is_executive) === 1);
+
+/**
+ * 保険料の免除に使う期間：従業員の leave_periods のうち、その人が免除を受けられる休業だけ
+ * （役員は育児休業等を除く。従業員の画面には、入れた期間をそのまま出す）
+ */
+export const exemptLeavePeriodsOf = (staff: { leave_periods?: unknown; is_executive?: unknown } | null | undefined): LeavePeriod[] =>
+  parseLeavePeriods(staff?.leave_periods).filter((p) => canExemptLeave(staff, p));
 
 /** 保存用の JSON。期間がなければ空文字 */
 export const stringifyLeavePeriods = (leaves: LeavePeriod[]): string =>

@@ -44,7 +44,7 @@
 import dayjs from 'dayjs';
 import * as Master from '../constants';
 import { birthdayAt, checkInsuredMonth, checkSocialInsEnrolled, getInsuranceByAge } from './calcSalary';
-import { checkLeaveExemptMonth, parseLeavePeriods, type LeavePeriod } from './leaveExemption';
+import { canExemptLeave, checkLeaveExemptMonth, exemptLeavePeriodsOf, type LeavePeriod } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
 
 export interface YouikuEntry {
@@ -136,7 +136,7 @@ export const pensionStandardAt = (staff: any, year: number, month: number): numb
 
 /** 保険料が免除される休業か（1か月でも免除される月がある。役員は育児休業等の免除を受けられない） */
 const isExemptLeave = (staff: any, leave: LeavePeriod) => {
-  if (leave.type === 'childcare' && Number(staff.is_executive) === 1) return false;
+  if (!canExemptLeave(staff, leave)) return false;
   const from = idxOfDate(leave.start);
   const to = leave.end ? idxOfDate(dayjs(leave.end).add(1, 'day').format('YYYY-MM-DD')) : from;
   for (let i = from; i <= to; i++) {
@@ -251,7 +251,8 @@ const periodOf = (staff: any, entry: YouikuEntry, others: YouikuEntry[], leaves:
  * @param today   今日（YYYY-MM-DD）。今月までの月を出し、申出をまだしていないときは今月に申し出たとして2年を数える
  */
 export const judgeYouikuEntries = (staff: any, entries: YouikuEntry[], today: string): YouikuJudgement[] => {
-  const leaves = parseLeavePeriods(staff.leave_periods);
+  // 保険料の免除に使う期間（役員の育児休業等は免除されないので入れない）
+  const leaves = exemptLeavePeriodsOf(staff);
   const todayIdx = idxOfDate(today);
   const valid = entries.filter((e) => validateYouikuEntry(e) === null);
   const judged = new Map<YouikuEntry, { judgement: YouikuJudgement; period: Period }>();
@@ -361,7 +362,7 @@ export const findYouikuCandidates = (staffList: any[], today: string): YouikuCan
   const todayIdx = idxOfDate(today);
   const result: YouikuCandidate[] = [];
   for (const staff of staffList) {
-    const leaves = parseLeavePeriods(staff.leave_periods);
+    const leaves = exemptLeavePeriodsOf(staff); // 役員の育児休業等は免除されないので入れない
     const registered = parseYouikuEntries(staff.youiku_tokurei).map((e) => (e.start ? idxOfDate(e.start) : null));
     for (const leave of leaves) {
       if (!leave.end || !isExemptLeave(staff, leave)) continue;

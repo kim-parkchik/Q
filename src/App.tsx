@@ -150,6 +150,7 @@ const AnimatedLogo = () => {
 function App() {
   const {
     db,
+    dbPath, // 開いている会社ファイルの場所（マイナンバーの画面で、暗号化を始める前のバックアップを探す）
     createNewProject, // 🆕 追加
     openProject,      // 🆕 追加
     closeProject,     // 🆕 追加
@@ -411,7 +412,7 @@ function App() {
                 <ResidentTaxPaymentManager db={db} staffList={staffList} />
               )}
               {activeTab === "mynumber" && db && (
-                <MyNumberManager db={db} staffList={staffList} currentUser={currentUser} />
+                <MyNumberManager db={db} staffList={staffList} currentUser={currentUser} companyPath={dbPath} />
               )}
               {activeTab === "payslip" && db && (
                 <PaySlipManager 

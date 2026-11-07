@@ -22,12 +22,13 @@
  *       厚生年金保険法23条の2・23条の3（e-Gov法令検索 https://laws.e-gov.go.jp/law/329AC0000000115）
  *
  * Q では、従業員画面に入れた産休・育休の期間（leave_periods）のうち、終了日の翌日がその年にあるものを候補にする。
+ * 役員の育休は候補にしない（役員はふつう労働者に当たらず、育児・介護休業法の育児休業等を取れない。utils/leaveExemption.ts）。
  * 同じ種類の休業が終了日の翌日から続くとき（育休の延長を別の期間で入れたときなど）は、続けた休業の終わりで判定する。
  * 等級は健康保険の等級で判定する。
  */
 import dayjs from 'dayjs';
 import type { PayrollGroupForPeriod } from './payrollPeriod';
-import { parseLeavePeriods, type LeavePeriod, type LeaveType } from './leaveExemption';
+import { exemptLeavePeriodsOf, type LeavePeriod, type LeaveType } from './leaveExemption';
 import {
   gradeOfStandard, groupOf, lookupGrade, monthFigures,
   type AttendanceRecord, type SalaryRecord, type SanteiWorkerKind,
@@ -139,7 +140,8 @@ export const findLeaveEndCandidates = (
 ): LeaveEndCandidate[] => {
   const result: LeaveEndCandidate[] = [];
   for (const staff of staffList) {
-    const leaves = parseLeavePeriods(staff.leave_periods).sort((a, b) => a.start.localeCompare(b.start));
+    // 役員の育児休業等は、育児・介護休業法の育児休業等ではないので入れない（育児休業等終了時改定もできない）
+    const leaves = exemptLeavePeriodsOf(staff).sort((a, b) => a.start.localeCompare(b.start));
     for (const leave of leaves) {
       if (!leave.end) continue;
       const nextDay = nextDayOf(leave.end);

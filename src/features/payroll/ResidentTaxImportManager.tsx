@@ -48,6 +48,7 @@ function Row({ r, staffList, choose, toggle }: { r: ImportRow; staffList: any[];
         <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2, whiteSpace: "nowrap" }}>
           {r.match.how === "number" && r.staffId === r.match.staffId ? "受給者番号で見つけました"
             : r.match.how === "name" && r.staffId === r.match.staffId ? "氏名で見つけました"
+            : r.match.numberNameMismatch && !r.staffId ? "受給者番号の人と氏名が違います。選んでください"
             : r.match.candidates.length > 1 && !r.staffId ? "同じ氏名の人が複数います。選んでください"
             : !r.staffId ? "見つかりません。選んでください" : "選んだ人"}
         </div>

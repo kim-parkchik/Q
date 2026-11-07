@@ -13,7 +13,7 @@ import { useToast } from "../../components/Toast";
 import { localGovByCode, type LocalGov } from "../../utils/localGov";
 import { fiscalYearOf, residentTaxScheduleOf, stringifyResidentTaxSchedule } from "../../utils/residentTax";
 import {
-  compareWithSchedule, decodeNoticeFile, matchNoticeRecord, parseResidentTaxNotice, withNoticeAmounts,
+  compareWithSchedule, decodeNoticeFile, matchNoticeRecord, parseResidentTaxNotice, sameNoticeName, withNoticeAmounts,
   type NoticeMatch, type NoticeRecord,
 } from "../../utils/residentTaxNotice";
 
@@ -97,6 +97,13 @@ export function useResidentTaxImportManager(db: Database, staffList: any[], onDa
     base.forEach((r) => r.staffId && count.set(r.staffId, (count.get(r.staffId) ?? 0) + 1));
     return base.map((r) => {
       const notes = [...r.record.warnings];
+      const byNumber = r.match.numberNameMismatch ? staffList.find((s) => String(s.id) === r.match.numberNameMismatch) : null;
+      if (byNumber && r.staffId !== r.match.numberNameMismatch) {
+        notes.push(`受給者番号（${r.record.staffNumber}）は${byNumber.name}さん（${byNumber.id}）の従業員IDと同じですが、氏名が違うので結び付けていません`);
+      }
+      if (r.staff && sameNoticeName(r.staff.name, r.record.name) === false) {
+        notes.push(`通知の氏名（${r.record.name}）と、選んだ人の氏名（${r.staff.name}）が違います。同じ人か確かめてください`);
+      }
       if (!r.municipality) notes.push(`市町村コード ${r.record.code} は、Q の一覧にありません`);
       if (r.staffId && (count.get(r.staffId) ?? 0) > 1) notes.push("同じ従業員に、2行以上が結び付いています。どちらかを外してください");
       const own = String(r.staff?.resident_tax_municipality ?? "").trim();
@@ -122,7 +129,8 @@ export function useResidentTaxImportManager(db: Database, staffList: any[], onDa
     if (targets.length === 0) return;
     const ok = await ask(
       `${targets.length}人の${fiscalYear}年度（${fiscalYear}年6月分〜${fiscalYear + 1}年5月分）の住民税を、通知の額にします。\n\n`
-      + targets.map((r) => `・${r.staff.name}：年税額 ${r.record.annual.toLocaleString()}円（6月分 ${r.record.amounts[0].toLocaleString()}円）`).join("\n")
+      + targets.map((r) => `・${r.staff.name}${sameNoticeName(r.staff.name, r.record.name) === false ? `（通知の氏名：${r.record.name}）` : ""}`
+        + `：年税額 ${r.record.annual.toLocaleString()}円（6月分 ${r.record.amounts[0].toLocaleString()}円）`).join("\n")
       + "\n\n確定した給与明細の住民税は変わりません。",
       { title: "住民税を入れる", kind: "info" }
     );

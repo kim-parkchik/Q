@@ -9,6 +9,17 @@ import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
 import { ask } from '@tauri-apps/plugin-dialog';
 
+/** 明細を開いたときに読むもの（給与規定グループの設定などのほか）。読み込み中・読み込めなかったときは確定しない */
+type LoadPart = "group" | "items" | "yearEnd" | "flatTax";
+type LoadStatus = "loading" | "ok" | "error";
+const LOAD_PARTS: LoadPart[] = ["group", "items", "yearEnd", "flatTax"];
+const LOAD_PART_LABELS: Record<LoadPart, string> = {
+  group: "給与規定グループの設定",
+  items: "給与項目",
+  yearEnd: "年末調整の過不足額",
+  flatTax: "定額減税の残り",
+};
+
 // 型定義
 interface UsePayStubProps {
   db: any;
@@ -50,6 +61,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     customItems: [],
   });
 
+  // 給与規定グループの設定・給与項目・年末調整の過不足額・定額減税の残りの読み込み（読み込み中・読み込めなかったときは確定しない）
+  const [loadStatus, setLoadStatus] = useState<Record<LoadPart, LoadStatus>>({ group: "loading", items: "loading", yearEnd: "loading", flatTax: "loading" });
+  const markLoad = (part: LoadPart, status: LoadStatus) => setLoadStatus(p => (p[part] === status ? p : { ...p, [part]: status }));
+
   // ヘルパー関数: 時間のフォーマット
   const fmtH = (num: number) => {
     const h = Math.floor(num);
@@ -57,30 +72,38 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     return `${h}:${String(m).padStart(2, '0')}`;
   };
 
-  // カスタム項目の読み込み
+  // 給与項目の読み込み（ほかの人の明細に切り替えたときに、前の人の項目で確定しないように、読み終わるまで確定しない）
   useEffect(() => {
-    const load = async () => {
+    let cancelled = false;
+    markLoad("items", "loading");
+    (async () => {
       if (!db) return;
       try {
         const items = await loadCustomItems(db, staff.id);
+        if (cancelled) return;
         setExtras(p => ({ ...p, customItems: items }));
+        markLoad("items", "ok");
       } catch (e) {
         console.error("customItems 読み込みエラー:", e);
+        if (!cancelled) markLoad("items", "error");
       }
-    };
-    load();
+    })();
+    return () => { cancelled = true; };
   }, [db, staff.id]);
 
   // 源泉所得税の計算方法と社会保険料の徴収（給与規定グループの設定）を読み込む
   // 翌月徴収で退職する月の給与は、当月払いのグループなら（この後に給与を払わないので）退職した月の分も引くのを初めの値にする
   useEffect(() => {
-    const loadGroupSettings = async () => {
+    let cancelled = false;
+    markLoad("group", "loading");
+    (async () => {
       if (!db) return;
       try {
         const rows = await db.select(
           "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
         ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; absence_deduction_method?: string }[];
+        if (cancelled) return;
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
         setExtras(p => ({
           ...p,
@@ -90,41 +113,51 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
           absenceDeductionMethod: toAbsenceDeductionMethod(rows?.[0]?.absence_deduction_method),
         }));
+        markLoad("group", "ok");
       } catch (e) {
         console.error("給与規定グループの設定の読み込みエラー:", e);
+        if (!cancelled) markLoad("group", "error");
       }
-    };
-    loadGroupSettings();
+    })();
+    return () => { cancelled = true; };
   }, [db, staff.payroll_group_id]);
 
   // 定額減税（令和6年6月〜）：その人の減税額の合計から、前の月までの確定済みの給与で差し引いた額を引いた残り
   // ※ 前の月の給与を確定してから次の月を確定すること（確定した額をもとに繰り越すため）
   const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, year, month, toTaxColumn(staff.tax_column));
   useEffect(() => {
-    const loadFlatTaxReduction = async () => {
-      if (!db || flatTaxTotal === 0) {
-        setExtras(p => ({ ...p, flatTaxReductionRemaining: 0 }));
-        return;
-      }
+    let cancelled = false;
+    if (!db || flatTaxTotal === 0) {
+      setExtras(p => ({ ...p, flatTaxReductionRemaining: 0 }));
+      markLoad("flatTax", "ok");
+      return;
+    }
+    markLoad("flatTax", "loading");
+    (async () => {
       try {
         const rows = await db.select(
           "SELECT COALESCE(SUM(flat_tax_reduction), 0) AS used FROM salary_results WHERE staff_id = ? AND target_year = ? AND target_month < ?",
           [staff.id, year, month]
         ) as { used: number }[];
+        if (cancelled) return;
         const used = Number(rows?.[0]?.used) || 0;
         setExtras(p => ({ ...p, flatTaxReductionRemaining: Math.max(0, flatTaxTotal - used) }));
+        markLoad("flatTax", "ok");
       } catch (e) {
         console.error("定額減税の読み込みエラー:", e);
+        if (!cancelled) markLoad("flatTax", "error");
       }
-    };
-    loadFlatTaxReduction();
+    })();
+    return () => { cancelled = true; };
   }, [db, staff.id, year, month, flatTaxTotal]);
 
   // 年末調整の過不足額：この月に支払う給与で精算すると決めた年末調整があれば、その過不足額を載せる
   // （精算する給与を決めていなければ、その年の12月に支払う給与で精算する）
   const [yearEndYear, setYearEndYear] = useState<number | null>(null);
   useEffect(() => {
-    const loadYearEnd = async () => {
+    let cancelled = false;
+    markLoad("yearEnd", "loading");
+    (async () => {
       if (!db) return;
       try {
         const rows = await db.select(
@@ -132,16 +165,19 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
            WHERE staff_id = ? AND COALESCE(settle_year, year) = ? AND COALESCE(settle_month, 12) = ?`,
           [staff.id, year, month]
         ) as { year: number; result: string | null }[];
+        if (cancelled) return;
         const row = rows?.[0];
         let difference = 0;
         try { difference = row?.result ? Number(JSON.parse(row.result).difference) || 0 : 0; } catch { difference = 0; }
         setYearEndYear(row ? Number(row.year) : null);
         setExtras(p => ({ ...p, yearEndSettlement: difference }));
+        markLoad("yearEnd", "ok");
       } catch (e) {
         console.error("年末調整の読み込みエラー:", e);
+        if (!cancelled) markLoad("yearEnd", "error");
       }
-    };
-    loadYearEnd();
+    })();
+    return () => { cancelled = true; };
   }, [db, staff.id, year, month]);
 
   // 給与計算
@@ -260,12 +296,23 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + customDeductionItems.length;
   const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
 
+  // まだ読み込んでいるもの・読み込めなかったもの（どちらかがあれば確定しない。明細の額が足りないかもしれないため）
+  const loadingParts = [
+    ...(extras.annualWorkDays === undefined ? ["1年間の所定労働日数"] : []),
+    ...(extras.weekCarryOver === undefined ? ["前の計算期間の勤怠（週40時間）"] : []),
+    ...LOAD_PARTS.filter(part => loadStatus[part] === "loading").map(part => LOAD_PART_LABELS[part]),
+  ];
+  const loadErrors = LOAD_PARTS.filter(part => loadStatus[part] === "error").map(part => LOAD_PART_LABELS[part]);
+
   // 保存処理
   const handleSaveResult = async () => {
     if (!db || !staff) return;
-    if (extras.annualWorkDays === undefined || extras.socialInsCollection === undefined || extras.prorationMethod === undefined
-      || extras.weekCarryOver === undefined) {
-      alert("給与規定グループの設定・1年間の所定労働日数・前の計算期間の勤怠（週40時間）を読み込んでいます。少し待ってから、もう一度確定してください。");
+    if (loadErrors.length > 0) {
+      alert(`${loadErrors.join("・")}を読み込めなかったので、確定できません（明細の額が足りないかもしれません）。\n給与明細を閉じて、開き直してください。`);
+      return;
+    }
+    if (loadingParts.length > 0) {
+      alert(`${loadingParts.join("・")}を読み込んでいます。少し待ってから、もう一度確定してください。`);
       return;
     }
     if (salary.prefectureUnknown) {
@@ -322,6 +369,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     extras,
     setExtras,
     isSaved,
+    loadingParts,
+    loadErrors,
     handleSaveResult,
     handleCancelResult,
     wageLabel,

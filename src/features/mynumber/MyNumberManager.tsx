@@ -19,6 +19,8 @@ interface Props {
   db: Database;
   staffList: any[];
   currentUser: MyNumberUser | null;
+  /** 開いている会社ファイルの場所（暗号化を始める前のバックアップを探すため） */
+  companyPath?: string | null;
 }
 
 type Z = ReturnType<typeof useMyNumberManager>;
@@ -129,7 +131,8 @@ function SetupCard({ z, plainCount }: { z: Z; plainCount: number }) {
         扶養控除等申告書など、番号が書いてある書類は保存期間まで残してください。
         {plainCount > 0 && (
           <>
-            <br />・いま登録してある{plainCount}件は、決めたときに暗号化します。それより前に作ったバックアップ（.qb）には、暗号化していない番号が残ります。
+            <br />・いま登録してある{plainCount}件は、決めたときに暗号化します。それより前に作ったバックアップ（.qb）には、暗号化していない番号が残ります
+            （暗号化を始めたあと、この画面で消せます）。
           </>
         )}
       </p>
@@ -141,6 +144,33 @@ function SetupCard({ z, plainCount }: { z: Z; plainCount: number }) {
           {z.busy ? "暗号化しています…" : "暗号化を始める"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** 暗号化を始める前に作ったバックアップ（暗号化していない番号が入っている）を出し、消せるようにする */
+function PlainBackupsCard({ z }: { z: Z }) {
+  const b = z.plainBackups;
+  if (!b || b.before.length === 0) return null;
+  const [date, time] = b.startedAt.split(" ");
+  return (
+    <div style={{ ...card, borderLeft: "4px solid #f59e0b" }}>
+      <div style={title}>暗号化を始める前のバックアップ（{b.before.length}個）</div>
+      <p style={note}>
+        マイナンバーの暗号化を始めた{dateJa(date)}{time ? ` ${time.slice(0, 5)}` : ""}より前に作った、この会社ファイルのバックアップ（.qb）です。
+        そのときに登録していた番号は、暗号化しないまま入っているので、バックアップが持ち出されると読めてしまいます。
+        要らなければ消してください（消したバックアップは元に戻せず、その日の会社ファイルにも戻せなくなります）。
+        <br />・暗号化を始めてからのバックアップ：{b.after.length}個
+        {b.after.length === 0 && "（会社ファイルを閉じると作られます。一度閉じて開き直してから消すと、バックアップがなくなる間ができません）"}
+      </p>
+      <ul style={{ ...note, margin: "6px 0 0 0", paddingLeft: 20 }}>
+        {b.before.map((name) => <li key={name}>{name}</li>)}
+      </ul>
+      <button type="button" disabled={z.busy}
+        style={{ ...mainButton, backgroundColor: "#dc2626", marginTop: 10, opacity: z.busy ? 0.6 : 1 }}
+        onClick={z.removePlainBackups}>
+        これらのバックアップを消す
+      </button>
     </div>
   );
 }
@@ -216,8 +246,8 @@ function KeySettingsCard({ z }: { z: Z }) {
   );
 }
 
-export default function MyNumberManager({ db, staffList, currentUser }: Props) {
-  const z = useMyNumberManager(db, staffList, currentUser);
+export default function MyNumberManager({ db, staffList, currentUser, companyPath = null }: Props) {
+  const z = useMyNumberManager(db, staffList, currentUser, companyPath);
 
   if (z.access === null || (z.access && z.setUp === null)) return <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>確かめています…</div>;
   if (!z.access) {
@@ -265,6 +295,8 @@ export default function MyNumberManager({ db, staffList, currentUser }: Props) {
       </div>
 
       {!z.setUp && <SetupCard z={z} plainCount={registered} />}
+
+      {z.setUp && <PlainBackupsCard z={z} />}
 
       {z.setUp && z.rows.map((row) => (
         <div key={row.staffId} style={card}>

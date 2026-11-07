@@ -9,7 +9,7 @@ import dayjs from "dayjs";
 import { Plus, Trash2 } from "lucide-react";
 import { useYouikuTokureiManager } from "./useYouikuTokureiManager";
 import { YOUIKU_END_REASON_LABELS, type YouikuEntry, type YouikuJudgement, type YouikuMonth } from "../../utils/youikuTokurei";
-import { parseLeavePeriods } from "../../utils/leaveExemption";
+import { exemptLeavePeriodsOf } from "../../utils/leaveExemption";
 import { LEAVE_TYPE_LABELS } from "../../utils/leaveEndRevision";
 
 interface Props {
@@ -173,7 +173,7 @@ function EntryEditor({ staff, j, z }: { staff: any; j: YouikuJudgement; z: Retur
   const e = j.entry;
   const set = (patch: Partial<YouikuEntry>) => z.updateEntry(j.index, patch);
   // 養育特例開始年月日の候補：子の生年月日・入社日・保険料が免除される休業の終了日の翌日
-  const leaveEnds = parseLeavePeriods(staff.leave_periods)
+  const leaveEnds = exemptLeavePeriodsOf(staff)
     .filter((l) => l.end && (!e.childBirthday || l.end >= e.childBirthday))
     .map((l) => ({ label: `${LEAVE_TYPE_LABELS[l.type]}の終了日の翌日`, date: nextDay(l.end) }));
   const hasExempt = j.months.some((m) => m.exempt);

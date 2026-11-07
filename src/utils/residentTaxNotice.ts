@@ -9,7 +9,9 @@
  *     （eLTAX「特別徴収税額通知（特別徴収義務者用）を確認するには」）→ ZIP を開いてから CSV を選ぶ
  * ■ 年度は CSV に書かれていないので、画面で選ぶ。月割額の並び（6月分〜翌年5月分）は utils/residentTax.ts の年度と同じ。
  *   通知をした市区町村を、その年度の納付先にする
- * ■ 従業員との結び付け：受給者番号（給与支払報告書の CSV に書いた従業員ID）。合わなければ、漢字氏名（空白を除く）が同じ人が1人だけのとき
+ * ■ 従業員との結び付け：受給者番号（給与支払報告書の CSV に書いた従業員ID）が同じで、漢字氏名も同じ人（どちらかの氏名が空なら比べない）。
+ *   番号が同じでも氏名が違えば、結び付けずに選んでもらう（前のソフトで書いた番号が、ほかの人の従業員IDと同じになることがあるため）。
+ *   番号で見つからなければ、漢字氏名（空白を除く）が同じ人が1人だけのとき
  * ■ 個人番号（項番8）は読まない（保存も表示もしない）
  */
 import { RESIDENT_TAX_NOTICE_CSV_FIELDS } from "../constants/residentTaxNoticeCsvLayout";
@@ -107,24 +109,36 @@ export const parseResidentTaxNotice = (text: string): { records: NoticeRecord[];
 
 const nameKey = (s: unknown) => String(s ?? "").normalize("NFKC").replace(/\s/g, "");
 
+/** 通知の氏名と従業員の氏名が同じか（空白・全角と半角の違いは見ない）。どちらかが空なら比べられないので null */
+export const sameNoticeName = (a: unknown, b: unknown): boolean | null => {
+  const x = nameKey(a);
+  const y = nameKey(b);
+  return x && y ? x === y : null;
+};
+
 export interface NoticeMatch {
   /** 結び付けた従業員（なければ null） */
   staffId: string | null;
   /** どう結び付けたか */
   how: "number" | "name" | null;
-  /** 氏名が同じ人が2人以上いて、決められなかったときの候補 */
+  /** 氏名が同じ人の候補（2人以上いて決められなかったとき・受給者番号の人と氏名が違ったとき） */
   candidates: string[];
+  /** 受給者番号が従業員IDと同じなのに、氏名が違った人（自動では結び付けない） */
+  numberNameMismatch: string | null;
 }
 
 /** 1行ごとに、従業員を探す */
 export const matchNoticeRecord = (r: NoticeRecord, staff: { id: string | number; name?: string | null }[]): NoticeMatch => {
+  let numberNameMismatch: string | null = null;
   if (r.staffNumber) {
     const s = staff.find((x) => String(x.id) === r.staffNumber);
-    if (s) return { staffId: String(s.id), how: "number", candidates: [] };
+    if (s && sameNoticeName(s.name, r.name) !== false) return { staffId: String(s.id), how: "number", candidates: [], numberNameMismatch: null };
+    if (s) numberNameMismatch = String(s.id);
   }
-  const same = staff.filter((x) => nameKey(x.name) && nameKey(x.name) === nameKey(r.name));
-  if (same.length === 1) return { staffId: String(same[0].id), how: "name", candidates: [] };
-  return { staffId: null, how: null, candidates: same.map((x) => String(x.id)) };
+  const same = staff.filter((x) => sameNoticeName(x.name, r.name) === true);
+  // 受給者番号の人と氏名が違うときは、氏名が同じ人が1人でも決めない（どちらが正しいか、選んでもらう）
+  if (same.length === 1 && !numberNameMismatch) return { staffId: String(same[0].id), how: "name", candidates: [], numberNameMismatch: null };
+  return { staffId: null, how: null, candidates: same.map((x) => String(x.id)), numberNameMismatch };
 };
 
 /** その年度の12か月を通知の額にし、納付先を通知をした市区町村にする（ほかの年度はそのまま） */

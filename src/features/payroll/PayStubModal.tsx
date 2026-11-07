@@ -19,7 +19,7 @@ interface Props {
 
 export default function PayStubModal(props: Props) {
   const {
-    salary, extras, setExtras, isSaved, handleSaveResult, handleCancelResult,
+    salary, extras, setExtras, isSaved, loadingParts, loadErrors, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
     monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem,
@@ -67,13 +67,19 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              disabled={salary.prefectureUnknown}
+              disabled={salary.prefectureUnknown || loadingParts.length > 0 || loadErrors.length > 0}
               title={salary.prefectureUnknown
                 ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
+                : loadErrors.length > 0 ? `${loadErrors.join("・")}を読み込めなかったので、確定できません`
+                : loadingParts.length > 0 ? `${loadingParts.join("・")}を読み込んでいます`
                 : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
-              style={{ ...S.printBtnS, flex: 1, backgroundColor: salary.prefectureUnknown ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad", cursor: salary.prefectureUnknown ? "not-allowed" : "pointer" }}
+              style={{
+                ...S.printBtnS, flex: 1,
+                backgroundColor: salary.prefectureUnknown || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
+                cursor: salary.prefectureUnknown || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
+              }}
             >
-              {isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
+              {loadingParts.length > 0 && loadErrors.length === 0 ? "読み込んでいます…" : isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
             </button>
             {isSaved && (
               <button onClick={handleCancelResult} style={{ ...S.printBtnS, flex: 1, backgroundColor: "#64748b" }}>
@@ -84,6 +90,11 @@ export default function PayStubModal(props: Props) {
           {isSaved && (
             <div style={{ marginTop: 6, fontSize: 12, color: "#475569" }}>
               確定した月の勤怠は、勤怠の画面で変えられません。勤怠を直すときは「確定を取り消す」をしてから直し、もう一度確定してください。
+            </div>
+          )}
+          {loadErrors.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ {loadErrors.join("・")}を読み込めませんでした。この明細の額は足りないかもしれないので、確定できません。給与明細を閉じて、開き直してください。
             </div>
           )}
           {rateWarnings.length > 0 && (
