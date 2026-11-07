@@ -44,7 +44,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     allowanceName: "役職手当",
     allowanceAmount: 0,
     residentTax: residentTaxFor(staff, year, month), // この月に支給する給与の分（年度ごとの額。utils/residentTax.ts）
-    prefecture: Master.toKenpoPrefName(staff.prefecture) ?? "京都",
+    // 健康保険料率に使う都道府県：拠点の都道府県（わからなければ空。明細の画面で知らせ、選んでもらうまで健康保険料を計算しない）
+    prefecture: Master.toKenpoPrefName(staff.prefecture) ?? "",
     dependents: Number(staff.dependents) || 0,
     customItems: [],
   });
@@ -267,6 +268,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       alert("給与規定グループの設定・1年間の所定労働日数・前の計算期間の勤怠（週40時間）を読み込んでいます。少し待ってから、もう一度確定してください。");
       return;
     }
+    if (salary.prefectureUnknown) {
+      alert("都道府県がわからないため、健康保険料と介護保険料を計算していません。\n「都道府県」で健康保険料率に使う都道府県を選んでから、確定してください。");
+      return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
     if (result.success) {
       setIsSaved(true);
@@ -304,9 +309,15 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     }
   };
 
+  // 拠点の都道府県がわからないとき、その理由と直し方（給与明細の一覧から開いたとき。usePaySlipManager.ts）
+  const branchPrefectureProblem: string | null = Master.toKenpoPrefName(staff.prefecture)
+    ? null
+    : (staff.prefectureProblem ?? "この人の拠点の都道府県がわかりません。会社の設定で、拠点の都道府県を登録してください。");
+
   return {
     monthStaff: staff,
     wageMismatchDays,
+    branchPrefectureProblem,
     salary,
     extras,
     setExtras,

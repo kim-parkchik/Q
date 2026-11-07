@@ -9,6 +9,7 @@ import { useToast } from "../../components/Toast";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
+import { branchPrefectureOf } from "../../utils/branchPrefecture";
 
 /** 給与を確定した月の勤怠を変えようとしたときの知らせ */
 export const CLOSED_MESSAGE =
@@ -22,7 +23,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   const [selectedStaffId, setSelectedStaffId] = useState("");
   const [monthlyWorkData, setMonthlyWorkData] = useState<Record<string, any>>({});
   const [companySettings, setCompanySettings] = useState<any>(null);
-  const [branchPrefecture, setBranchPrefecture] = useState<string>("京都");
+  // 拠点の都道府県（健康保険料率に使う）。わからなければ空（京都などで仮に計算しない。この画面には社会保険料を出していない）
+  const [branchPrefecture, setBranchPrefecture] = useState<string>("");
   const [remainingPaidLeave, setRemainingPaidLeave] = useState<number>(0);
   const [holidays, setHolidays] = useState<Record<string, string>>({});
   const [companyHolidays, setCompanyHolidays] = useState<Record<string, number>>({});
@@ -674,18 +676,14 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       const configData = await db.select("SELECT * FROM company WHERE id = 1") as any[];
       if (configData?.length > 0) setCompanySettings(configData[0]);
 
-      if (selectedStaff?.branch_id) {
+      if (selectedStaff) {
+        // 拠点を選んでいない人は本店（給与明細と同じ）。前に選んでいた人の都道府県が残らないように、毎回決め直す
+        const branchId = Number(selectedStaff.branch_id) || 1;
         const branchData = await db.select(
-          "SELECT prefecture FROM branches WHERE id = ?",
-          [selectedStaff.branch_id]
+          "SELECT id, name, prefecture FROM branches WHERE id = ?",
+          [branchId]
         ) as any[];
-        const pref = Master.toKenpoPrefName(branchData?.[0]?.prefecture);
-        if (pref) {
-          setBranchPrefecture(pref);
-        } else {
-          console.warn(`拠点の都道府県が未設定または不明です（${branchData?.[0]?.prefecture}）。京都の料率で仮計算します。`);
-          setBranchPrefecture("京都");
-        }
+        setBranchPrefecture(branchPrefectureOf(branchData ?? [], branchId).prefecture ?? "");
       }
     } catch (e) {
       console.error("Company/branch load error:", e);

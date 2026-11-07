@@ -6,6 +6,7 @@ import * as Master from '../../constants';
 import { calcBonusWithholdingTax, toTaxColumn } from '../../utils/incomeTax';
 import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
+import { branchPrefectureOf } from '../../utils/branchPrefecture';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 import { checkLeaveExemptBonus, parseLeavePeriods } from '../../utils/leaveExemption';
 import { executeBatch } from '../../utils/dbBatch';
@@ -362,16 +363,15 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const totalEarnings = earningItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
     const hyojunBonus = Math.floor(totalEarnings / 1000) * 1000;
 
-    const branch = branches.find(b => b.id === staff.branch_id);
-    const pref = Master.toKenpoPrefName(branch?.prefecture) ?? "京都";
-    if (!Master.toKenpoPrefName(branch?.prefecture)) {
-      console.warn(`拠点の都道府県が未設定または不明です（${branch?.prefecture}）。京都の料率で仮計算します。`);
-    }
+    // 健康保険料率は、拠点の都道府県（協会けんぽの支部）ごと。拠点を選んでいない人は本店（給与明細と同じ）
+    // わからなければ健康保険料・介護保険料は計算せず、画面で知らせて確定できないようにする（京都などで仮に計算しない）
+    const branchPref = branchPrefectureOf(branches, staff.branch_id);
     // 賞与を支給する月の料率を使う（健康保険は3月分から、雇用保険は4月から新年度）
     const payYear = selectedSetting.target_year;
     const payMonth = selectedSetting.target_month;
     const ins = Master.getInsuranceMaster(payYear, payMonth);
-    const healthRate = (ins.KENPO_RATES[pref] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
+    const kenpoRate = branchPref.prefecture ? ins.KENPO_RATES[branchPref.prefecture] : undefined;
+    const healthRate = kenpoRate ? kenpoRate[1] : null; // 合計の料率(%)
 
     // 社会保険・雇用保険に加入していない人からは引かない（給与と同じ判定）
     const isSocialInsEnrolled = checkSocialInsEnrolled(staff, payYear, payMonth);
@@ -396,8 +396,9 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const healthHyojun = cappedBonusStandard(hyojunBonus, earlier.health, ins.HEALTH_INS_ANNUAL_LIMIT);
 
     // 本人負担分 = 標準賞与額 × 料率 ÷ 2（介護保険は「健康保険＋介護保険」でまとめて計算し、健康保険料を引く）
-    const healthInsurance = isHealthTarget ? calcPremium(healthHyojun, healthRate, sInsType) : 0;
-    const nursingInsurance = isNursing
+    const prefectureUnknown = isHealthTarget && healthRate === null;
+    const healthInsurance = isHealthTarget && healthRate !== null ? calcPremium(healthHyojun, healthRate, sInsType) : 0;
+    const nursingInsurance = isNursing && healthRate !== null
       ? calcPremium(healthHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType) - healthInsurance
       : 0;
     const childSupport = isHealthTarget && Master.isChildSupportMonth(ins, payYear, payMonth) && ins.CHILD_SUPPORT_RATE
@@ -439,6 +440,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       /** この賞与より前に支払った賞与の健康保険の標準賞与額の累計と、この賞与の健康保険・厚生年金の標準賞与額（上限で切った額） */
       earlierHealthTotal: earlier.health, healthHyojun, pensionHyojun,
       prevSalaryStatus, taxByMonthlyTable,
+      /** 健康保険料がかかるのに、拠点の都道府県がわからないので、健康保険料・介護保険料を計算していない（確定できない） */
+      prefectureUnknown, prefectureProblem: branchPref.problem,
     };
   };
 
@@ -498,6 +501,15 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const rows = bonusStaffList
       .map(staff => ({ staff, calc: calcBonusForStaff(staff) }))
       .filter((r): r is { staff: any; calc: NonNullable<ReturnType<typeof calcBonusForStaff>> } => !!r.calc && r.calc.totalEarnings > 0);
+    // 拠点の都道府県がわからない人は、健康保険料・介護保険料を計算していないので、確定できない
+    const unknownPrefecture = rows.filter(r => r.calc.prefectureUnknown);
+    if (unknownPrefecture.length > 0) {
+      return dialog.warning(
+        `次の人は、拠点の都道府県がわからないため、健康保険料と介護保険料を計算していません。\n` +
+        `会社の設定や従業員の設定で直してから、確定してください。\n\n` +
+        unknownPrefecture.map(r => `・${r.staff.name}：${r.calc.prefectureProblem ?? ""}`).join("\n")
+      );
+    }
     // 前月に給与を払うはずなのに確定していない人は、前月の給与がないものとして所得税を計算している
     const unconfirmed = rows.filter(r => r.calc.prevSalaryStatus === 'unconfirmed').map(r => r.staff.name);
     const prev = prevMonthOf(selectedSetting.target_year, selectedSetting.target_month);

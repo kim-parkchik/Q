@@ -4,6 +4,7 @@ import * as Master from '../../constants';
 import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES } from '../../utils/calcSalary';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
+import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
 
 interface Props {
@@ -21,7 +22,7 @@ export default function PayStubModal(props: Props) {
     salary, extras, setExtras, isSaved, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
-    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays,
+    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem,
   } = usePayStubModal(props);
   /** "2026-11-29" → "11月29日" */
   const md = (date: string) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日`;
@@ -49,6 +50,7 @@ export default function PayStubModal(props: Props) {
             <div>
               <label style={S.labelS}>都道府県</label>
               <select value={extras.prefecture} onChange={e => setExtras(p => ({ ...p, prefecture: e.target.value }))} style={S.inputS}>
+                {!extras.prefecture && <option value="">（選んでください）</option>}
                 {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
@@ -65,8 +67,11 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              title={isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
-              style={{ ...S.printBtnS, flex: 1, backgroundColor: isSaved ? "#27ae60" : "#8e44ad" }}
+              disabled={salary.prefectureUnknown}
+              title={salary.prefectureUnknown
+                ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
+                : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
+              style={{ ...S.printBtnS, flex: 1, backgroundColor: salary.prefectureUnknown ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad", cursor: salary.prefectureUnknown ? "not-allowed" : "pointer" }}
             >
               {isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
             </button>
@@ -84,6 +89,19 @@ export default function PayStubModal(props: Props) {
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
+          {salary.prefectureUnknown && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ {PREFECTURE_UNKNOWN_EFFECT}「都道府県」で、健康保険料率に使う都道府県を選んでください。選ぶまで確定できません。
+              {branchPrefectureProblem && <div style={{ fontWeight: "normal" }}>{branchPrefectureProblem}</div>}
+            </div>
+          )}
+          {!salary.prefectureUnknown && branchPrefectureProblem && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              ⚠ {branchPrefectureProblem}
+              {extras.prefecture && `この明細は、「都道府県」で選んだ${extras.prefecture}の料率で計算しています。`}
+              最低賃金は、拠点の都道府県がわからないため比べていません。
             </div>
           )}
           {workOnCalendarHolidays.length > 0 && (
@@ -417,7 +435,9 @@ export default function PayStubModal(props: Props) {
           </div>
 
           <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
-            ※ 健康保険料は協会けんぽ{extras.prefecture}支部の{insMaster.MASTER_YEAR}年{insMaster.MASTER_MONTH}月分からの料率、
+            ※ {salary.prefectureUnknown
+              ? "健康保険料・介護保険料は、都道府県がわからないため計算していません。"
+              : `健康保険料は協会けんぽ${extras.prefecture}支部の${insMaster.MASTER_YEAR}年${insMaster.MASTER_MONTH}月分からの料率、`}
             厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月からの料率で計算。
             健康保険・介護保険・子ども・子育て支援金・厚生年金は{insMonthLabel}（{salary.socialInsCollection === "next" ? "翌月徴収" : "当月徴収"}）。
             所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : salary.taxColumn === "hei" ? "日額表（丙欄。働いた日ごと）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額（{COMMUTE_METHOD_LABELS[salary.commuteMethod]}・1か月 ¥{salary.commuteTaxFreeLimit.toLocaleString()}）まで課税対象外。住民税は手入力値。

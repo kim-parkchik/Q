@@ -259,6 +259,8 @@ export interface SalaryResult {
   isSocialInsEnrolled: boolean;
   /** 雇用保険に加入しているか */
   isEmploymentInsEnrolled: boolean;
+  /** 健康保険料がかかるのに、都道府県がわからない（extras.prefecture が空・知らない名前）ので、健康保険料・介護保険料を計算していない（0円）。確定できない */
+  prefectureUnknown: boolean;
 }
 
 /**
@@ -708,21 +710,28 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
   // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts）
   const isLeaveExemptMonth = checkLeaveExemptMonth(parseLeavePeriods(staff.leave_periods), year, month);
   const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
-  const healthRate = (ins.KENPO_RATES[prefecture] ?? ins.KENPO_RATES["京都"])[1]; // 合計の料率(%)
+  // 健康保険の料率は都道府県（協会けんぽの支部）ごと。都道府県がわからなければ（拠点の都道府県が未登録など）、
+  // 健康保険料・介護保険料は計算しない（ほかの都道府県で仮に計算しない）。画面で知らせ、確定できないようにする
+  const kenpoRate = ins.KENPO_RATES[prefecture];
+  const healthRate = kenpoRate ? kenpoRate[1] : null; // 合計の料率(%)
   // 社会保険料（本人負担分）の端数：会社の設定（なければ、給与から引くときの原則の50銭以下切り捨て・50銭超切り上げ）
   const sInsType = companySettings?.round_social_ins || 'currency_law';
   const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
   let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
+  /** 健康保険料がかかる月なのに、都道府県がわからないので計算していない */
+  const healthRateMissing = isSocialInsMonth && byAge.health && healthRate === null;
   if (isSocialInsMonth && byAge.health) {
-    // 健康保険料
-    healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
+    if (healthRate !== null) {
+      // 健康保険料
+      healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
 
-    // 介護保険料（40〜64歳）
-    // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
-    if (byAge.nursing) {
-      const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
-      nursingInsurance = combined - healthInsurance;
+      // 介護保険料（40〜64歳）
+      // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
+      if (byAge.nursing) {
+        const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
+        nursingInsurance = combined - healthInsurance;
+      }
     }
 
     // 子ども・子育て支援金（令和8年4月分から。健康保険と同じ標準報酬月額に支援金率を掛ける）
@@ -735,7 +744,7 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
     const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
     welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
   }
-  return { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, healthInsurance, nursingInsurance, childSupport, welfarePension };
+  return { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, healthInsurance, nursingInsurance, childSupport, welfarePension, healthRateMissing };
 };
 
 /** 計算期間の途中で入社・退職した人の日割り：none: しない / workdays: 所定労働日数で / calendar: 暦日数で */
@@ -1468,5 +1477,6 @@ export const calculateSalary = (
     hyojunHoshu,
     isSocialInsEnrolled,
     isEmploymentInsEnrolled,
+    prefectureUnknown: perMonth.some((p) => p.healthRateMissing),
   };
 };

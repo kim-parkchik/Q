@@ -672,6 +672,21 @@ export default function BonusManager({ db, staffList }: Props) {
             </div>
           )}
 
+          {/* 拠点の都道府県がわからない人（健康保険料・介護保険料を計算していない。確定できない） */}
+          {selectedSettingId && items.length > 0 && (() => {
+            const unknown = bonusStaffList
+              .map(s => ({ s, c: calcBonusForStaff(s) }))
+              .filter(({ c }) => !!c && c.totalEarnings > 0 && c.prefectureUnknown);
+            return unknown.length > 0 ? (
+              <div style={{ ...S.card, marginBottom: 16, backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13 }}>
+                ⚠ 次の人は、拠点の都道府県がわからないため、健康保険料と介護保険料を計算していません（0円）。直すまで、この賞与は確定できません。
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  {unknown.map(({ s, c }) => <div key={s.id}>・{s.name}：{c?.prefectureProblem}</div>)}
+                </div>
+              </div>
+            ) : null;
+          })()}
+
           {/* 前月に給与を払うはずなのに、まだ確定していない人（前月の給与がないものとして所得税を計算している） */}
           {selectedSettingId && items.length > 0 && prevMonth && (() => {
             const names = bonusStaffList
@@ -751,6 +766,9 @@ export default function BonusManager({ db, staffList }: Props) {
                           title={calc.isHealthTarget ? `この賞与より前に支払った賞与の、年度の標準賞与額の累計：${calc.earlierHealthTotal.toLocaleString()}円／この賞与の健康保険の標準賞与額：${calc.healthHyojun.toLocaleString()}円` : undefined}
                         >
                           ¥{calc.healthInsurance.toLocaleString()}
+                          {calc.prefectureUnknown && (
+                            <div style={{ fontSize: 10, color: "#b91c1c" }}>⚠ 都道府県が不明</div>
+                          )}
                           {calc.isHealthTarget && calc.healthHyojun < calc.hyojunBonus && (
                             <div style={{ fontSize: 10, color: "#b45309" }}>年度の上限（573万円）まで</div>
                           )}

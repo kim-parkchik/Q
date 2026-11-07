@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import * as Master from "../../constants";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
+import { branchPrefectureOf } from "../../utils/branchPrefecture";
 
 export function usePaySlipManager(db: any, staffList: any[], initialYear: number, initialMonth: number) {
   const [year, setYear] = useState(initialYear);
@@ -80,13 +80,6 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
     });
   }, [staffList, allAttendance, showRetired, onlyHasAttendance]);
 
-  // 県名の整形（ヘルパー関数）
-  const getPrefecture = (branchId: number): string => {
-    const branch = branches.find((b) => b.id === branchId);
-    const pref = Master.toKenpoPrefName(branch?.prefecture);
-    if (!pref) console.warn(`拠点の都道府県が未設定または不明です（${branch?.prefecture}）。京都の料率で仮計算します。`);
-    return pref ?? "京都";
-  };
 
   // 個別スタッフデータのロード（モーダル用）
   const loadStaffData = async (staff: any) => {
@@ -102,7 +95,9 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
         [staff.id, period.startStr, period.endStr]
       );
       setAttendanceData(res || []);
-      setSelectedStaff({ ...staff, prefecture: getPrefecture(staff.branch_id || 1), periodLabel: period.displayRange, periodStart: period.startStr, periodEnd: period.endStr });
+      // 拠点の都道府県（健康保険料率・最低賃金に使う）。わからなければ空にして、明細の画面で知らせる（京都などで仮に計算しない）
+      const { prefecture, problem } = branchPrefectureOf(branches, staff.branch_id);
+      setSelectedStaff({ ...staff, prefecture: prefecture ?? "", prefectureProblem: problem, periodLabel: period.displayRange, periodStart: period.startStr, periodEnd: period.endStr });
       setShowModal(true);
     } catch (err) {
       console.error("勤怠詳細のロードに失敗しました:", err);

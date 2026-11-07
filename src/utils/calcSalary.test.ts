@@ -43,6 +43,26 @@ const weekdays = (o: Record<string, unknown> = {}) => ["08", "09", "10", "11", "
 const calc = (staff: any, rows: any[], o: Partial<SalaryExtras> = {}, comp: any = company) =>
     calculateSalary(staff, rows, extras(o), 2026, 6, comp);
 
+describe("拠点の都道府県がわからないとき（健康保険料率は都道府県ごと。ほかの都道府県で仮に計算しない）", () => {
+    test("健康保険料・介護保険料は計算せず（0円）、prefectureUnknown で知らせる。厚生年金・雇用保険はいつもどおり", () => {
+        const older = { ...monthly, birthday: "1980-06-15" }; // 46歳（介護保険の対象）
+        const known = calc(older, []);
+        const r = calc(older, [], { prefecture: "" });
+        expect(known.prefectureUnknown).toBe(false);
+        expect(known.healthInsurance).toBeGreaterThan(0);
+        expect(known.nursingInsurance).toBeGreaterThan(0);
+        expect(r.prefectureUnknown).toBe(true);
+        expect([r.healthInsurance, r.nursingInsurance]).toEqual([0, 0]);
+        expect(r.welfarePension).toBe(known.welfarePension);
+        expect(r.empInsurance).toBe(known.empInsurance);
+        // 知らない書き方（東京都）も、わからないとして扱う（呼ぶ側で 東京 にしてから渡す）
+        expect(calc(older, [], { prefecture: "東京都" }).prefectureUnknown).toBe(true);
+    });
+    test("健康保険料がかからない人（社会保険に入っていない）なら、都道府県がわからなくても知らせない", () => {
+        expect(calc(hourly, [], { prefecture: "" }).prefectureUnknown).toBe(false);
+    });
+});
+
 describe("社会保険の加入・未加入", () => {
     test("標準報酬月額が0（未加入・対象外）の人からは、健康保険・介護保険・支援金・厚生年金を引かない", () => {
         const rows = Array.from({ length: 12 }, (_, i) => day(String(i + 1).padStart(2, "0"), 4));
