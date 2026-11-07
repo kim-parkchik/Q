@@ -10,6 +10,7 @@ import PeriodSelector from "./manager/PeriodSelector";
 import StaffSelectBar from "./manager/StaffSelectBar";
 import AttendanceTable from "./manager/AttendanceTable";
 import SummaryBoard from "./manager/SummaryBoard";
+import PaidLeaveNotice from "./manager/PaidLeaveNotice";
 
 export default function AttendanceManager(props: AttendanceManagerProps) {
   const am: AttendanceViewModel = {
@@ -76,6 +77,7 @@ export default function AttendanceManager(props: AttendanceManagerProps) {
                     直すときは、給与明細で「確定を取り消す」をしてから勤怠を直し、給与を確定し直してください。
                   </div>
                 )}
+                <PaidLeaveNotice am={am} />
                 <AttendanceTable am={am} />
 
                 <SummaryBoard am={am} />

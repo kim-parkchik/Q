@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV, parseAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, calcDetailedDiff, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
@@ -10,6 +10,10 @@ import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 import { branchPrefectureOf } from "../../utils/branchPrefecture";
+import {
+  collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
+  type AttendanceLeaveRow, type LeaveGrantRow, type ManualLeaveRecord,
+} from "../../utils/paidLeave";
 
 /** 給与を確定した月の勤怠を変えようとしたときの知らせ */
 export const CLOSED_MESSAGE =
@@ -25,7 +29,11 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   const [companySettings, setCompanySettings] = useState<any>(null);
   // 拠点の都道府県（健康保険料率に使う）。わからなければ空（京都などで仮に計算しない。この画面には社会保険料を出していない）
   const [branchPrefecture, setBranchPrefecture] = useState<string>("");
-  const [remainingPaidLeave, setRemainingPaidLeave] = useState<number>(0);
+  // 有給の付与・確定した勤怠・前の記録（有給の残りを数える。有給の画面と同じ読み方）
+  const [paidLeaveData, setPaidLeaveData] = useState<{
+    staffId: string; grants: LeaveGrantRow[]; attendance: AttendanceLeaveRow[]; manual: ManualLeaveRecord[];
+  } | null>(null);
+  const paidLeaveSeq = useRef(0);
   const [holidays, setHolidays] = useState<Record<string, string>>({});
   const [companyHolidays, setCompanyHolidays] = useState<Record<string, number>>({});
   const [activeFilters, setActiveFilters] = useState<string[]>(["active"]);
@@ -104,32 +112,44 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     return list;
   }, [payrollPeriod]);
 
-  // --- 有給残日数の計算 ---
+  // --- 有給の残り（有給の画面と同じ数え方。給与と同じく、確定した日の勤怠で数える。utils/paidLeave.ts） ---
   const checkRemainingPaidLeave = useCallback(async () => {
-    if (!db || !selectedStaffId) return;
+    const seq = ++paidLeaveSeq.current;
+    if (!db || !selectedStaffId) {
+      setPaidLeaveData(null);
+      return;
+    }
     try {
-      const today = new Date().toISOString().split("T")[0];
-      const grants = await db.select(
-        "SELECT SUM(days_granted) as total FROM paid_leave_grants WHERE staff_id = ? AND expiry_date >= ?",
-        [selectedStaffId, today]
-      ) as any[];
-      
-      const used = await db.select(`
-        SELECT 
-          SUM(CASE WHEN work_type = 'paid_full' THEN 1.0 WHEN work_type = 'paid_half' THEN 0.5 ELSE 0 END) as used_days,
-          SUM(paid_leave_hours) as used_hours
-        FROM attendance WHERE staff_id = ?`,
-        [selectedStaffId]
-      ) as any[];
-
-      const totalGranted = grants[0]?.total || 0;
-      const daysFromType = used[0]?.used_days || 0;
-      const daysFromHours = (used[0]?.used_hours || 0) / 8;
-      setRemainingPaidLeave(totalGranted - (daysFromType + daysFromHours));
+      const loaded = await loadPaidLeaveData(db, selectedStaffId);
+      if (seq !== paidLeaveSeq.current) return; // 読み込み中にほかの人を選んだ
+      setPaidLeaveData({ staffId: selectedStaffId, ...loaded });
     } catch (e) {
       console.error("Paid leave check error:", e);
     }
   }, [db, selectedStaffId]);
+
+  // 計算期間の終わりの日の時点の残りと、この期間に残りが足りない有給の日
+  const paidLeave = useMemo(() => {
+    if (!paidLeaveData || paidLeaveData.staffId !== selectedStaffId) return null;
+    const { hours, assumed } = leaveHoursPerDay(selectedStaff?.scheduled_work_hours);
+    const { taken } = collectLeaveTaken(paidLeaveData.attendance, paidLeaveData.manual);
+    const asOf = payrollPeriod?.endStr ?? dayjs().format("YYYY-MM-DD");
+    const summary = summarizePaidLeave(paidLeaveData.grants, taken, hours, asOf);
+    const inPeriod = payrollPeriod
+      ? summary.taken.filter(t => t.date >= payrollPeriod.startStr && t.date <= payrollPeriod.endStr)
+      : [];
+    return {
+      hasGrants: summary.hasGrants,
+      asOf,
+      remainingText: formatLeaveMinutes(summary.remainingMinutes, hours),
+      hoursAssumed: assumed,
+      leaveInPeriod: inPeriod.length > 0,
+      hourlyLeaveInPeriod: inPeriod.some(t => t.hours > 0),
+      shortages: inPeriod
+        .filter(t => t.shortageMinutes > 0)
+        .map(t => ({ date: t.date, amount: formatTakenAmount(t), shortage: formatLeaveMinutes(t.shortageMinutes, hours) })),
+    };
+  }, [paidLeaveData, selectedStaffId, selectedStaff, payrollPeriod]);
 
   // --- 勤怠データの読み込み ---
   const loadMonthlyData = useCallback(async () => {
@@ -313,6 +333,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         ...prev,
         [date]: { ...prev[date], is_finalized: 0 }
       }));
+      await checkRemainingPaidLeave();
     } catch (e) {
       console.error(e);
       dialog.error(`${date} の確定を解除できませんでした。`);
@@ -725,7 +746,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     isLoading,
     isClosed,
     monthlyWorkData, setMonthlyWorkData, dateList, payrollPeriod,
-    remainingPaidLeave,
+    paidLeave,
     holidays,
     companyHolidays,
     activeFilters, setActiveFilters,

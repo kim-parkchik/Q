@@ -188,11 +188,12 @@ export const DB_SCHEMAS = [
     grant_date TEXT NOT NULL,
     expiry_date TEXT NOT NULL,
     days_granted REAL NOT NULL,
-    days_used REAL DEFAULT 0,
+    days_used REAL DEFAULT 0,  -- 使っていない（前の有給の画面で使っていた。いまは確定した勤怠から数える。utils/paidLeave.ts）
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,
 
-  // 9. 有給取得履歴
+  // 9. 有給取得履歴（前の有給の画面の「消化を記録する」で入れたもの。いまは入れない。
+  //    その日に確定した勤怠がないときだけ、有給を取った日として数える）
   `CREATE TABLE IF NOT EXISTS paid_leave_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     staff_id TEXT NOT NULL,
