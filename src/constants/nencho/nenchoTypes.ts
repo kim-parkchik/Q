@@ -77,7 +77,11 @@ export interface NenchoMaster {
   taxableLimit: number;
   /** 課税給与所得金額の端数を切り捨てる単位 */
   taxableRoundTo: number;
-  /** 年調年税額 = 年調所得税額 × ratePercent%（roundTo 円未満切り捨て） */
+  /**
+   * 年調年税額 = 年調所得税額 × ratePercent%（roundTo 円未満切り捨て）
+   * 令和8年分までは復興特別所得税を、令和9年分からは防衛特別所得税と復興特別所得税を含む額（どちらも102.1%。
+   * 国税庁「源泉所得税の改正のあらまし」令和8年4月 8ページ）。名前の reconstruction は復興特別所得税から
+   */
   reconstruction: { ratePercent: number; roundTo: number };
 }
 

@@ -173,3 +173,27 @@ describe("過不足と対象外", () => {
         expect(getNenchoMaster(2025)).toBeNull();
     });
 });
+
+/**
+ * 令和9年分の表は、国税庁「令和9年分 年末調整のしかた」が出てから PDF で作る（nencho-tables/README.md）。
+ * そのときに、国税庁「源泉所得税の改正のあらまし」（令和8年4月。https://www.nta.go.jp/publication/pamph/gensen/2026kaisei.pdf）
+ * でわかっていることと合うかを確かめる。表ができるまでは飛ばす。
+ * 合わなければ、令和9年度の税制改正などで変わっていないかを確かめる（令和8年度の改正は、令和8年分の年末調整から使われた）
+ */
+describe("令和9年分の表（令和8年4月の「源泉所得税の改正のあらまし」と照らし合わせる）", () => {
+    const m27 = getNenchoMaster(2027);
+    test.skipIf(m27 === null)("ひとり親控除は38万円（改正前：35万円。令和9年分以後。あらまし5ページ 6⑴）", () => {
+        expect(m27!.deductions.singleParent).toBe(380000);
+    });
+    test.skipIf(m27 === null)("年調年税額は、防衛特別所得税と復興特別所得税を含めて、年調所得税額 × 102.1%（あらまし8ページ 3）", () => {
+        expect(m27!.reconstruction.ratePercent).toBe(102.1);
+        expect(m27!.reconstruction).toEqual(NENCHO_2026.reconstruction);
+    });
+    test.skipIf(m27 === null)(
+        "ほかは令和8年分と同じ（基礎控除・給与所得控除は「令和8・9年分」の額。23歳未満の扶養親族がいるときの生命保険料控除の特例は令和9年分まで延長。あらまし1・2・6ページ）",
+        () => {
+            const sameAs2026 = { ...m27!, year: NENCHO_2026.year, deductions: { ...m27!.deductions, singleParent: NENCHO_2026.deductions.singleParent } };
+            expect(sameAs2026).toEqual(NENCHO_2026);
+        },
+    );
+});

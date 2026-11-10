@@ -86,7 +86,7 @@ export interface NenchoResult {
   housingLoanCredit: number;
   /** 年調所得税額 */
   annualIncomeTax: number;
-  /** 年調年税額（復興特別所得税を含む） */
+  /** 年調年税額（令和8年分までは復興特別所得税を、令和9年分からは防衛特別所得税と復興特別所得税を含む） */
   annualTax: number;
   withheldTax: number;
   /** 過不足額（＋なら超過額＝本人に還付、−なら不足額＝本人から徴収） */
@@ -216,7 +216,8 @@ export const calcNencho = (input: NenchoInput, m: NenchoMaster): NenchoResult =>
   const calculatedTax = calculatedTaxOf(taxableIncome, m);
   const housingLoanCredit = Math.min(nonNeg(input.housingLoanCredit), calculatedTax);
   const annualIncomeTax = calculatedTax - housingLoanCredit;
-  // 年調所得税額 × 102.1%（小数の誤差を避けるため、率を10倍の整数にして計算する）
+  // 年調所得税額 × 102.1%（小数の誤差を避けるため、率を10倍の整数にして計算する。
+  // 令和9年分からの防衛特別所得税1%と復興特別所得税1.1%も、合わせて102.1%で同じ）
   const rate10 = Math.round(m.reconstruction.ratePercent * 10);
   const annualTax = floorTo(Math.floor((annualIncomeTax * rate10) / 1000), m.reconstruction.roundTo);
   const withheldTax = nonNeg(input.withheldTax);
