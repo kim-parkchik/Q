@@ -4,7 +4,7 @@
  */
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { NENCHO_YEARS, settleOptions, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
+import { NENCHO_SCREEN_YEARS, NENCHO_YEARS, settleOptions, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
 import NenchoDeclarationForm from "./NenchoDeclarationForm";
 import NenchoResultPanel from "./NenchoResultPanel";
 import { toTaxColumn } from "../../utils/incomeTax";
@@ -25,7 +25,9 @@ export default function NenchoManager({ db, staffList }: Props) {
       <div style={card}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <select value={z.year} onChange={(e) => z.setYear(Number(e.target.value))} style={{ padding: "8px 10px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14 }}>
-            {NENCHO_YEARS.map((y) => <option key={y} value={y}>{y}年分（令和{y - 2018}年分）</option>)}
+            {NENCHO_SCREEN_YEARS.map((y) => (
+              <option key={y} value={y}>{y}年分（令和{y - 2018}年分）{NENCHO_YEARS.includes(y) ? "" : "：退職した人などの申告書だけ"}</option>
+            ))}
           </select>
           {z.isLoading && <span style={{ fontSize: 12, color: "#64748b" }}>読み込み中…</span>}
         </div>
@@ -36,6 +38,14 @@ export default function NenchoManager({ db, staffList }: Props) {
           <br />過不足額の精算の手順：①その年最後（12月）の給与を、いつもどおり確定する → ②ここで申告書を入れて保存する →
           ③12月の給与明細を開き直すと過不足額（還付・徴収）が載るので、もう一度確定する（12月の給与の税額計算を省略しない方法）。
         </p>
+        {!z.master && (
+          <p style={{ fontSize: 12, color: "#b45309", margin: "10px 0 0 0", lineHeight: 1.7, backgroundColor: "#fffbeb", padding: "8px 10px", borderRadius: 6 }}>
+            ⚠ {z.year}年分（令和{z.year - 2018}年分）は、年末調整の表がまだありません。国税庁の令和{z.year - 2018}年分の「年末調整のしかた」が出たら（例年は秋）、表を入れて年末調整ができるようにします。
+            {z.sourceFormAvailable && (
+              <> いまは、年の途中で退職した人・乙欄の人など、年末調整をしない人の扶養控除等申告書の内容だけを入れられます（「源泉徴収票」の画面で、配偶者・扶養親族の欄に書くため）。</>
+            )}
+          </p>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
@@ -69,7 +79,7 @@ export default function NenchoManager({ db, staffList }: Props) {
         {/* 選んだ人 */}
         {!z.selected ? (
           <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>左の一覧から従業員を選んでください。</div>
-        ) : z.selected.exclusion && ["kou", "otsu"].includes(toTaxColumn(z.selected.staff.tax_column)) && z.master && z.draft ? (
+        ) : z.selected.exclusion && ["kou", "otsu"].includes(toTaxColumn(z.selected.staff.tax_column)) && z.sourceFormAvailable && z.draft ? (
           // 年末調整をしない甲欄の人（年の途中で退職した人など）：扶養控除等申告書の内容だけを入れる（源泉徴収票の配偶者・扶養親族の欄に書く）
           // 乙欄の人：従たる給与についての扶養控除等申告書の内容（源泉徴収票の「従」の欄に書く）
           <div style={card}>
@@ -113,7 +123,11 @@ export default function NenchoManager({ db, staffList }: Props) {
           </div>
         ) : z.selected.exclusion ? (
           <div style={{ ...card, fontSize: 13, color: "#b45309" }}>{z.selected.staff.name}さん：{z.selected.exclusion}</div>
-        ) : z.master && z.draft && (
+        ) : !z.master ? (
+          <div style={{ ...card, fontSize: 13, color: "#b45309", lineHeight: 1.7 }}>
+            {z.selected.staff.name}さん：{z.year}年分の年末調整は、年末調整の表を入れてからできます（国税庁の令和{z.year - 2018}年分の「年末調整のしかた」が出たら。例年は秋）。
+          </div>
+        ) : z.draft && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, alignItems: "start" }}>
             <div style={card}>
               <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 10 }}>{z.selected.staff.name}さん（{z.year}年分）</div>

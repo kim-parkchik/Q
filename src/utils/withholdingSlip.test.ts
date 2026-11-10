@@ -7,9 +7,14 @@
  * どの扶養親族が障害者か）は、記載例の控除額・人数と合うように置いた仮の値（コメントに「仮」と書く）。
  */
 import { describe, expect, test } from "bun:test";
-import { GENSEN_2026, NENCHO_2026 } from "../constants/nencho";
+import {
+    GENSEN_2026, NENCHO_2026, PROVISIONAL_SLIP_YEAR, deriveProvisionalSlipMaster, getNenchoMaster, getProvisionalSlipMaster, getWithholdingSlipMaster,
+    type WithholdingSlipMaster,
+} from "../constants/nencho";
 import { classifyDependent, emptyDeclaration, type DeclaredDependent, type NenchoDeclaration } from "./nenchoDeclaration";
-import { buildWithholdingSlip, housingLoanKindDescription, specificRelativeCode, specificRelativeCodeByIncome, type SlipSource } from "./withholdingSlip";
+import {
+    buildWithholdingSlip, classifySourceDependent, housingLoanKindDescription, specificRelativeCode, specificRelativeCodeByIncome, type SlipSource,
+} from "./withholdingSlip";
 import { formatWareki, toWareki } from "./wareki";
 
 const nm = NENCHO_2026;
@@ -386,5 +391,91 @@ describe("乙欄の人：従たる給与についての扶養控除等申告書�
     test("申告書を入れていなければ、今までどおり空欄", () => {
         const none = slipOf({ staff: otsuStaff, totals });
         expect([none.declared, none.spouseMark.secondary, none.secondaryCounts.other]).toEqual([false, false, null]);
+    });
+});
+
+describe("令和9年分：手引が出る前は、年末調整をしない人の源泉徴収票だけを、令和8年分の手引の書き方で作る", () => {
+    const pm = getProvisionalSlipMaster(2027)!;
+    // 令和9年3月31日に退職した人（年末調整をしない）。生年月日・所得の見積額は仮
+    const staff = { name: "国税 直樹", address: "東京都", birthday: "1980-01-01", join_date: "2015-04-01", retirement_date: "2027-03-31" };
+    const totals = { salary: 900000, socialInsurance: 130000, withheldTax: 18000, salaryMonths: [1, 2, 3], bonusCount: 0 };
+    const source: NenchoDeclaration = {
+        ...emptyDeclaration(),
+        spouse: { name: "国税 優子", furigana: "コクゼイ ユウコ", birthday: "1982-04-01", totalIncome: 500000, disability: "none", livingTogether: true },
+        dependents: [
+            dep("国税 一郎", "2007-04-01", { relation: "子", totalIncome: 600000 }), // 令和9年12月31日に20歳・見積額60万円
+            dep("国税 三郎", "2017-06-01", { relation: "子" }),                      // 10歳：16歳未満
+        ],
+    };
+    const slip2027 = (o: Partial<SlipSource> = {}) => buildWithholdingSlip({ year: 2027, staff, company, totals, declaration: null, ...o }, null, pm);
+
+    test("仮の書き方を使うのは、手引から作った区分がまだない、すぐ次の年分（令和9年分）だけ。年末調整の表もまだない", () => {
+        expect(PROVISIONAL_SLIP_YEAR).toBe(2027);
+        expect(getWithholdingSlipMaster(2027)).toBeNull();
+        expect(getNenchoMaster(2027)).toBeNull();
+        expect(getProvisionalSlipMaster(2026)).toBeNull();
+        expect(getProvisionalSlipMaster(2028)).toBeNull();
+        expect(pm.provisional?.basedOn).toBe(2026);
+    });
+    test("年で決まるところだけを動かす：生年月日の境目を1年ずらし、扶養親族の所得の線は1年を通して62万円。ほかは令和8年分の手引のまま", () => {
+        expect(pm.year).toBe(2027);
+        expect(pm.minorBornOnOrAfter).toBe("2010-01-03");
+        expect(pm.youngBornOnOrAfter).toBe("2012-01-02");
+        expect(pm.withoutAdjustment).toEqual({ ...gm.withoutAdjustment, earlierUntil: "12-31", earlierIncomeLimit: 620000 });
+        const rest = ({ year, minorBornOnOrAfter, youngBornOnOrAfter, withoutAdjustment, provisional, ...m }: WithholdingSlipMaster) => m;
+        expect(rest(pm)).toEqual(rest(gm));
+    });
+    test("年末調整の表がなくても、年の途中で退職した人の源泉徴収票を作れる（扶養控除等申告書の記載に応じて書く）", () => {
+        const s = slip2027({ sourceDeclaration: source });
+        expect([s.year, s.adjusted, s.declared]).toEqual([2027, false, true]);
+        expect([s.payment, s.withholdingTax, s.socialInsurance]).toEqual([900000, 18000, 130000]);
+        expect(s.employmentIncome).toBeNull();
+        expect(s.joinRetire).toEqual({ joined: false, retired: true, date: { era: "令和", year: 9, month: 3, day: 31 } });
+        expect(s.spouseMark).toEqual({ has: true, secondary: false, elderly: false });
+        expect(s.spouseTotalIncome).toBe(500000);
+        expect(s.dependentCounts).toEqual({ specific: 1, elderly: null, elderlyTogether: null, other: null, specificRelative: null });
+        expect(s.dependents.map((p) => [p.name, p.code])).toEqual([["国税 一郎", "00"]]);
+        expect(s.youngCount).toBe(1);
+    });
+    test("見積額60万円の20歳の子：令和9年分は62万円以下なので特定扶養親族。令和8年分の年末調整をしない人は、11月30日以前の線（58万円）で特定親族", () => {
+        expect(classifySourceDependent(source.dependents[0], 2027, pm)).toBe("specific");
+        expect(classifySourceDependent({ ...source.dependents[0], birthday: "2006-04-01" }, 2026, gm)).toBe("specificRelative");
+        expect(specificRelativeCodeByIncome(600000, pm)).toBe("");
+        expect(specificRelativeCodeByIncome(630000, pm)).toBe("10");
+    });
+    test("画面には、仮の書き方であることを先に知らせる（印刷する欄には出さない）", () => {
+        const s = slip2027();
+        expect(s.warnings[0]).toContain("令和9年分の「給与所得の源泉徴収票等の法定調書の作成と提出の手引」がまだ出ていない");
+        expect(s.warnings[0]).toContain("令和8年分の手引の書き方");
+        expect(s.warnings[1]).toContain("1年を通して620,000円");
+        expect(s.remarks).toEqual([]);
+    });
+    test("未成年者は平成22年1月3日以後に生まれた人（令和8年分の境目を1年ずらす）", () => {
+        expect(slip2027({ staff: { ...staff, birthday: "2010-01-03" } }).marks.minor).toBe(true);
+        expect(slip2027({ staff: { ...staff, birthday: "2010-01-02" } }).marks.minor).toBe(false);
+    });
+    test("年末調整の表がない年分では、年末調整をした人の源泉徴収票は作らない（年末調整のあとで作る）", () => {
+        expect(() => slip2027({ declaration: emptyDeclaration() })).toThrow("2027年分の年末調整の表がない");
+    });
+});
+
+/**
+ * 令和9年分の手引から gensen2027.ts を作ったら、仮の書き方と照らし合わせる（作るまでは飛ばす）。
+ * 違えば、仮の書き方で渡した令和9年分の源泉徴収票（年の途中で退職した人など）を確かめて、必要なら作り直して渡す
+ */
+describe("令和9年分の手引から作った区分と、仮の書き方の照らし合わせ", () => {
+    const official = getWithholdingSlipMaster(2027);
+    /** 年末調整をしない人の源泉徴収票に使うところ */
+    const usedWithoutAdjustment = (m: WithholdingSlipMaster) => ({
+        residentCode: m.residentCode,
+        spouseIncomeLimit: m.withoutAdjustment.spouseIncomeLimit,
+        incomeLimit: m.withoutAdjustment.earlierIncomeLimit,
+        specificRelativeLimit: m.withoutAdjustment.specificRelativeLimit,
+        specificRelativeCodes: m.specificRelativeCodes,
+        minorBornOnOrAfter: m.minorBornOnOrAfter,
+        youngBornOnOrAfter: m.youngBornOnOrAfter,
+    });
+    test.skipIf(official === null)("年末調整をしない人の源泉徴収票に使うところが、仮の書き方と同じ", () => {
+        expect(usedWithoutAdjustment(official!)).toEqual(usedWithoutAdjustment(deriveProvisionalSlipMaster(GENSEN_2026, 2027)));
     });
 });

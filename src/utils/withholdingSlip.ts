@@ -11,6 +11,8 @@
  *     特定親族）で数え、扶養親族の所得の線は11月30日以前に出された申告書の線（58万円）で読む（手引「4 用語の説明」。constants の withoutAdjustment）。
  *     本人の合計所得金額が900万円以下であることは、申告書を出した本人が確かめている前提にする。配偶者（特別）控除の額などは書かない
  *   ・入れていなければ空欄にして、画面に注意を出す
+ * ■ 国税庁の手引がまだ出ていない、すぐ次の年分（令和9年分）：年末調整をしない人だけを、前の年分の手引の書き方で作る
+ *   （年末調整の表 nm は null。区分は constants/nencho の getProvisionalSlipMaster。画面に知らせを出す）
  *
  * 出典：国税庁「令和8年分 給与所得の源泉徴収票等の法定調書の作成と提出の手引」第2章 3 各欄の記載要領（記載例1〜4）
  *       https://www.nta.go.jp/publication/pamph/hotei/tebiki2026/index.htm
@@ -20,7 +22,7 @@
 import type { NenchoMaster, WithholdingSlipMaster } from "../constants/nencho";
 import { calcNencho, specificRelativeDeduction, type NenchoInput, type NenchoResult } from "./nencho";
 import {
-  ageAtYearEnd, buildNenchoInput, classifyDependent, dependentIncomeLimit,
+  ageAtYearEnd, buildNenchoInput, classifyDependent, classifyDependentByLimits, dependentIncomeLimit,
   type DeclaredDependent, type DeclaredPerson, type DependentKind, type NenchoDeclaration, type YearTotals,
 } from "./nenchoDeclaration";
 import { toTaxColumn } from "./incomeTax";
@@ -150,9 +152,9 @@ export const specificRelativeCodeByIncome = (income: number, gm: WithholdingSlip
     .map((c, i) => (i === 0 ? { ...c, over: gm.withoutAdjustment.earlierIncomeLimit } : c))
     .find((c) => income > c.over && income <= c.upTo)?.resident ?? "";
 
-/** 年末調整をしない人の扶養親族の分け方（扶養控除等申告書の記載に応じて。源泉控除対象親族かどうか） */
-export const classifySourceDependent = (d: DeclaredDependent, year: number, nm: NenchoMaster, gm: WithholdingSlipMaster): DependentKind =>
-  classifyDependent(d, year, nm, { income: gm.withoutAdjustment.earlierIncomeLimit, specificRelative: gm.withoutAdjustment.specificRelativeLimit });
+/** 年末調整をしない人の扶養親族の分け方（扶養控除等申告書の記載に応じて。源泉控除対象親族かどうか。年末調整の表は使わない） */
+export const classifySourceDependent = (d: DeclaredDependent, year: number, gm: WithholdingSlipMaster): DependentKind =>
+  classifyDependentByLimits(d, year, { income: gm.withoutAdjustment.earlierIncomeLimit, specificRelative: gm.withoutAdjustment.specificRelativeLimit });
 
 /** 住宅借入金等特別控除区分の、受給者交付用の書き方（住（特）など） */
 export const housingLoanKindLabel = (code: string, gm: WithholdingSlipMaster): string =>
@@ -235,10 +237,14 @@ const fillDependents = (
   for (const x of young.slice(4)) overflow.push(`(${++n})${x.name}（年少）`);
 };
 
-/** 源泉徴収票の各欄を作る */
-export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: WithholdingSlipMaster): WithholdingSlip => {
+/**
+ * 源泉徴収票の各欄を作る
+ * @param nm 年末調整の表（手引が出る前の年分は null。そのときは年末調整をしない人の源泉徴収票だけを作れる）
+ */
+export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster | null, gm: WithholdingSlipMaster): WithholdingSlip => {
   const { year, staff, company, totals } = src;
-  const warnings: string[] = [];
+  // 手引が出る前の仮の書き方なら、そのことを先に知らせる（画面だけ。印刷はしない）
+  const warnings: string[] = [...(gm.provisional?.notes ?? [])];
   /** 摘要（5人目からの扶養親族等は、ほかのことより前に書く） */
   const overflow: string[] = [];
   const remarks: string[] = [];
@@ -256,6 +262,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
   /** 年末調整をしない人の扶養控除等申告書（年末調整の対象外になった人は、年末調整の申告書を使う） */
   let sourceDecl = src.sourceDeclaration ?? null;
   if (decl) {
+    if (!nm) throw new Error(`${year}年分の年末調整の表がないので、年末調整をした人の源泉徴収票は作れません`);
     input = buildNenchoInput(decl, totals, year, nm);
     result = calcNencho(input, nm);
     if (!result.eligible) {
@@ -324,7 +331,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
     warnings,
   };
 
-  if (decl && input && result) {
+  if (decl && input && result && nm) {
     const d = result.deductions;
     const p = decl.previousJob;
     slip.payment = totals.salary + (Number(p.salary) || 0);
@@ -435,7 +442,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       slip.spouse = person(s, gm.residentCode);
       slip.spouseMark = { has: false, secondary: true, elderly: (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
     }
-    const kindOf = (dep: DeclaredDependent) => classifySourceDependent(dep, year, nm, gm);
+    const kindOf = (dep: DeclaredDependent) => classifySourceDependent(dep, year, gm);
     const deps = sourceDecl.dependents.filter((dep) => kindOf(dep) !== "young");
     fillDependents(slip, deps, gm, kindOf,
       (dep) => specificRelativeCodeByIncome(Math.max(0, Number(dep.totalIncome) || 0), gm) || null, disabilityCounter(), overflow);
@@ -471,7 +478,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster, gm: With
       }
       if (income <= w.earlierIncomeLimit) disabled.add(s); // 同一生計配偶者
     }
-    fillDependents(slip, sourceDecl.dependents, gm, (dep) => classifySourceDependent(dep, year, nm, gm),
+    fillDependents(slip, sourceDecl.dependents, gm, (dep) => classifySourceDependent(dep, year, gm),
       (dep) => specificRelativeCodeByIncome(Math.max(0, Number(dep.totalIncome) || 0), gm) || null, disabled, overflow);
     slip.marks.selfSpecialDisabled = sourceDecl.self.disability === "special";
     slip.marks.selfDisabled = sourceDecl.self.disability === "general";

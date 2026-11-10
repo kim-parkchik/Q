@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { getNenchoMaster, type NenchoMaster } from "../../constants/nencho";
+import { PROVISIONAL_SLIP_YEAR, getNenchoMaster, getProvisionalSlipMaster, getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
 import { calcNencho, type NenchoResult } from "../../utils/nencho";
 import {
   buildNenchoInput, nenchoExclusion, parseDeclaration, settlementStatusOf, sumYearTotals, validateDeclaration,
@@ -16,6 +16,12 @@ import { useToast } from "../../components/Toast";
 
 /** 年末調整の表を用意している年分（いまは令和8年分だけ） */
 export const NENCHO_YEARS = [2026].filter((y) => getNenchoMaster(y) !== null);
+
+/**
+ * 年末調整の画面で選べる年分：年末調整の表がある年分と、手引が出る前のすぐ次の年分（令和9年分）。
+ * すぐ次の年分は、年末調整をしない人（年の途中で退職した人・乙欄の人）の扶養控除等申告書の内容だけを入れる（源泉徴収票に書くため）
+ */
+export const NENCHO_SCREEN_YEARS = [...new Set([...NENCHO_YEARS, PROVISIONAL_SLIP_YEAR])].sort((a, b) => a - b);
 
 export interface NenchoStaffRow {
   staff: any;
@@ -191,8 +197,11 @@ export function useNenchoManager(db: Database, staffList: any[]) {
     }
   };
 
+  /** 年末調整をしない人の扶養控除等申告書を入れられる（手引の区分がある年分と、手引が出る前のすぐ次の年分） */
+  const sourceFormAvailable = getWithholdingSlipMaster(year) !== null || getProvisionalSlipMaster(year) !== null;
+
   return {
-    year, setYear, master, isLoading, isSaving,
+    year, setYear, master, sourceFormAvailable, isLoading, isSaving,
     rows, selected, select, draft, setDraft, errors, result, save, saveSource, settle, setSettle,
   };
 }

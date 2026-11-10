@@ -44,6 +44,13 @@ export default function WithholdingSlipManager({ db, staffList }: Props) {
           令和9年1月からは、給与支払報告書を出せば、税務署に源泉徴収票を出したことになります。
           <br />渡す期限：翌年1月31日まで（年の途中で退職した人は、退職の日から1か月以内）。
         </p>
+        {z.provisional && (
+          <p style={{ fontSize: 12, color: "#b45309", margin: "10px 0 0 0", lineHeight: 1.7, backgroundColor: "#fffbeb", padding: "8px 10px", borderRadius: 6 }}>
+            ⚠ {z.year}年分（令和{z.year - 2018}年分）は、国税庁の手引がまだ出ていないので、年の途中で退職した人・乙欄・丙欄の人など、
+            年末調整をしない人の源泉徴収票だけを、令和{z.provisional.basedOn - 2018}年分の手引の書き方で作ります（扶養親族の欄は、「年末調整」の画面で
+            {z.year}年分の扶養控除等申告書の内容を入れると書けます）。年末調整をする人の源泉徴収票は、年末調整のあとで作ります。
+          </p>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
@@ -69,7 +76,9 @@ export default function WithholdingSlipManager({ db, staffList }: Props) {
         </div>
 
         {/* 選んだ人の源泉徴収票 */}
-        {!z.selected || !z.slip ? (
+        {z.unavailable ? (
+          <div style={{ ...card, color: "#b45309", fontSize: 13, lineHeight: 1.7 }}>{z.unavailable}</div>
+        ) : !z.selected || !z.slip ? (
           <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>左の一覧から従業員を選んでください。</div>
         ) : (
           <div style={card}>

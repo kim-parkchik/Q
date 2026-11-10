@@ -5,13 +5,20 @@
 import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { getNenchoMaster, getWithholdingSlipMaster } from "../../constants/nencho";
+import { PROVISIONAL_SLIP_YEAR, getNenchoMaster, getProvisionalSlipMaster, getWithholdingSlipMaster } from "../../constants/nencho";
 import { buildWithholdingSlip, type WithholdingSlip } from "../../utils/withholdingSlip";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { EMPTY_NENCHO_DATA, NENCHO_YEARS, buildNenchoRows, loadNenchoData, type NenchoData, type NenchoStaffRow } from "./useNenchoManager";
 
-/** 源泉徴収票を作れる年分（年末調整の表と、源泉徴収票の区分の両方を用意している年分） */
-export const SLIP_YEARS = NENCHO_YEARS.filter((y) => getWithholdingSlipMaster(y) !== null);
+/** 年末調整の表と、手引から作った区分の両方を用意している年分（年末調整をした人の源泉徴収票・給与支払報告書を作れる） */
+export const OFFICIAL_SLIP_YEARS = NENCHO_YEARS.filter((y) => getWithholdingSlipMaster(y) !== null);
+
+/**
+ * 源泉徴収票の画面で選べる年分：上の年分と、手引が出る前のすぐ次の年分（令和9年分）。
+ * すぐ次の年分は、年の途中で退職した人など、年末調整をしない人の源泉徴収票だけを、前の年分の手引の書き方で作る
+ * （退職の日以後1か月以内に渡すため。所得税法226条1項。constants/nencho の getProvisionalSlipMaster）
+ */
+export const SLIP_YEARS = [...new Set([...OFFICIAL_SLIP_YEARS, PROVISIONAL_SLIP_YEAR])].sort((a, b) => a - b);
 
 export interface SlipStaffRow extends NenchoStaffRow {
   /** その年に支払った給与・賞与がある */
@@ -34,9 +41,11 @@ export const statusOf = (r: NenchoStaffRow, paid: boolean): { status: string; at
 
 export function useWithholdingSlipManager(db: Database, staffList: any[]) {
   const dialog = useMessageDialog();
-  const [year, setYear] = useState(SLIP_YEARS[SLIP_YEARS.length - 1] ?? new Date().getFullYear());
+  // はじめは、年末調整をした人の源泉徴収票まで作れる、いちばん新しい年分
+  const [year, setYear] = useState(OFFICIAL_SLIP_YEARS[OFFICIAL_SLIP_YEARS.length - 1] ?? new Date().getFullYear());
   const master = getNenchoMaster(year);
-  const slipMaster = getWithholdingSlipMaster(year);
+  // 手引から作った区分（手引が出る前のすぐ次の年分は、前の年分の手引の書き方）
+  const slipMaster = getWithholdingSlipMaster(year) ?? getProvisionalSlipMaster(year);
   const [data, setData] = useState<NenchoData>(EMPTY_NENCHO_DATA);
   const [company, setCompany] = useState<{ name?: string; address?: string; phone?: string }>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -67,15 +76,24 @@ export function useWithholdingSlipManager(db: Database, staffList: any[]) {
 
   const rows: SlipStaffRow[] = useMemo(() => buildNenchoRows(staffList, data, year, master).map((r) => {
     const paid = r.totals.salary > 0 || r.totals.withheldTax > 0;
-    return { ...r, paid, ...statusOf(r, paid) };
+    // 年末調整の表がない年分の、年末調整をする人：源泉徴収票は年末調整のあとで作る
+    const later = !master && paid && !r.exclusion;
+    return { ...r, paid, ...(later ? { status: "年末調整のあとで作る", attention: false } : statusOf(r, paid)) };
   }), [staffList, data, year, master]);
 
   const selected = rows.find((r) => String(r.staff.id) === selectedId) ?? null;
 
+  /** 選んだ人の源泉徴収票を、まだ作れない理由（年末調整の表がない年分の、年末調整をする人） */
+  const unavailable = selected && slipMaster && !master && !selected.exclusion
+    ? `${selected.staff.name}さんは年末調整をする人なので、${year}年分（令和${year - 2018}年分）の源泉徴収票は年末調整のあとで作ります。`
+      + `国税庁の令和${year - 2018}年分の「年末調整のしかた」が出て（例年は秋）、Q に年末調整の表を入れると作れます。`
+    : null;
+
   /** 選んだ人の源泉徴収票と、画面にだけ出す注意 */
   const slip: WithholdingSlip | null = useMemo(() => {
-    if (!selected || !master || !slipMaster) return null;
-    const adjusted = !selected.exclusion && selected.saved;
+    // 年末調整の表がない年分は、年末調整をしない人（年の途中で退職した人・乙欄・丙欄）だけ作る
+    if (!selected || !slipMaster || (!master && !selected.exclusion)) return null;
+    const adjusted = !!master && !selected.exclusion && selected.saved;
     const s = buildWithholdingSlip({
       year,
       staff: selected.staff,
@@ -100,5 +118,5 @@ export function useWithholdingSlipManager(db: Database, staffList: any[]) {
     return { ...s, warnings: [...notes, ...s.warnings] };
   }, [selected, master, slipMaster, year, company]);
 
-  return { year, setYear, isLoading, rows, selected, select: setSelectedId, slip };
+  return { year, setYear, isLoading, rows, selected, select: setSelectedId, slip, unavailable, provisional: slipMaster?.provisional ?? null };
 }

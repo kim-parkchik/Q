@@ -24,10 +24,13 @@ import { localGovLabel } from "../../utils/localGov";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { EMPTY_NENCHO_DATA, buildNenchoRows, loadNenchoData, type NenchoData } from "./useNenchoManager";
-import { SLIP_YEARS, statusOf } from "./useWithholdingSlipManager";
+import { OFFICIAL_SLIP_YEARS, statusOf } from "./useWithholdingSlipManager";
 
-/** 給与支払報告書を作れる年分（源泉徴収票と同じ） */
-export const REPORT_YEARS = SLIP_YEARS;
+/**
+ * 給与支払報告書を作れる年分（年末調整の表と、手引から作った区分の両方がある年分）
+ * 源泉徴収票の画面の、手引が出る前の年分（仮の書き方）は入れない（給与支払報告書を出すのは翌年1月31日までで、そのころには手引が出ている）
+ */
+export const REPORT_YEARS = OFFICIAL_SLIP_YEARS;
 
 export interface ReportRow extends ReportPerson {
   /** 年末調整の状況（源泉徴収票の画面と同じ） */

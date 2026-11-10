@@ -2,10 +2,11 @@
  * 年末調整：申告書の内容を入れる欄
  * （扶養控除等申告書・基礎控除申告書・配偶者控除等申告書・保険料控除申告書・住宅借入金等特別控除申告書・前の勤め先の源泉徴収票）
  * sourceOnly：年末調整をしない人の扶養控除等申告書（本人・配偶者・扶養親族）だけ。源泉徴収票の配偶者・扶養親族の欄に書く（utils/withholdingSlip.ts）
+ *   年末調整の表がない、手引が出る前の年分（令和9年分）は、これだけを入れられる（区分は前の年分の手引の書き方。getProvisionalSlipMaster）
  * secondary：乙欄の人の従たる給与についての扶養控除等申告書（配偶者・扶養親族だけ。所得税法195条）
  */
 import { Plus, Trash2 } from "lucide-react";
-import { getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
+import { getProvisionalSlipMaster, getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
 import {
   DEPENDENT_KIND_LABELS, ageAtYearEnd, classifyDependent,
   type DeclaredDependent, type DisabilityKind, type DependentKind, type HousingLoan, type NenchoDeclaration, type YearTotals,
@@ -15,7 +16,8 @@ import { classifySourceDependent, housingLoanKindDescription } from "../../utils
 
 interface Props {
   year: number;
-  master: NenchoMaster;
+  /** 年末調整の表（ない年分は null。そのときは sourceOnly・secondary だけで使う） */
+  master: NenchoMaster | null;
   draft: NenchoDeclaration;
   setDraft: (d: NenchoDeclaration) => void;
   totals: YearTotals;
@@ -75,12 +77,13 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
     set({ dependents: draft.dependents.map((d, k) => (k === i ? { ...d, ...patch } : d)) });
   const setLoan = (i: number, patch: Partial<HousingLoan>) =>
     set({ housingLoans: draft.housingLoans.map((h, k) => (k === i ? { ...h, ...patch } : h)) });
-  const slipMaster = getWithholdingSlipMaster(year);
+  // 手引から作った区分（手引が出る前の年分は、前の年分の手引の書き方）
+  const slipMaster = getWithholdingSlipMaster(year) ?? getProvisionalSlipMaster(year);
   const housingLoanKinds = slipMaster?.housingLoanKinds ?? [];
   const w = slipMaster?.withoutAdjustment;
   /** 扶養親族の分け方（年末調整をしない人は、源泉控除対象親族かどうか） */
   const kindOf = (d: DeclaredDependent): DependentKind =>
-    sourceOnly && slipMaster ? classifySourceDependent(d, year, master, slipMaster) : classifyDependent(d, year, master);
+    sourceOnly && slipMaster ? classifySourceDependent(d, year, slipMaster) : master ? classifyDependent(d, year, master) : "none";
   const missingMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter((mo) => !totals.salaryMonths.includes(mo));
   const reiwa = year - 2018;
 
@@ -187,7 +190,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
         <p style={h}>扶養親族・特定親族（{secondary ? "従たる給与についての扶養控除等申告書" : sourceOnly ? "扶養控除等申告書" : "扶養控除等申告書・特定親族特別控除申告書"}）</p>
         {draft.dependents.map((d, i) => {
           const kind = kindOf(d);
-          const amount = sourceOnly ? null : kindAmount(kind, d, master);
+          const amount = sourceOnly || !master ? null : kindAmount(kind, d, master);
           const age = ageAtYearEnd(d.birthday, year);
           return (
             <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginBottom: 8 }}>
@@ -232,14 +235,19 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
             {secondary
               ? "この給与で控除する源泉控除対象親族を入れてください（16歳未満の子は、従たる給与の申告書には書かないので、入れても源泉徴収票には書きません）。"
               : "16歳未満の子も入れてください（源泉徴収票の16歳未満の扶養親族の欄に書きます）。"}
-            区分は{year}年12月31日の年齢と所得の見積額で決まります。年末調整をしない人は、{year}年{w.earlierUntil.replace("-", "月").replace(/^0/, "")}日以前に出された申告書の線で読み、
+            区分は{year}年12月31日の年齢と所得の見積額で決まります。
+            {w.earlierIncomeLimit !== w.currentIncomeLimit
+              ? `年末調整をしない人は、${year}年${w.earlierUntil.replace("-", "月").replace(/^0/, "")}日以前に出された申告書の線で読み、`
+              : "年末調整をしない人も、"}
             扶養親族の所得要件は{yen(w.earlierIncomeLimit)}以下、特定親族は見積額が{yen(w.specificRelativeLimit)}以下の人だけ書きます
-            （国税庁「法定調書の作成と提出の手引」 源泉徴収票の記載要領）。
+            （国税庁「法定調書の作成と提出の手引」 源泉徴収票の記載要領
+            {slipMaster?.provisional && `。令和${reiwa}年分の手引が出るまでは、令和${slipMaster.provisional.basedOn - 2018}年分の手引の書き方`}）。
           </p>
         ) : (
           <p style={note}>
             16歳未満の子（年少扶養親族）も入れてください（障害者控除・所得金額調整控除・生命保険料控除の特例の判定に使います）。
-            区分は{year}年12月31日の年齢と合計所得金額で決まります（令和{reiwa}年分の扶養親族の所得要件は{yen(master.spouse.spouseIncomeLimit)}以下）。
+            区分は{year}年12月31日の年齢と合計所得金額で決まります
+            {master && `（令和${reiwa}年分の扶養親族の所得要件は${yen(master.spouse.spouseIncomeLimit)}以下）`}。
           </p>
         )}
       </div>

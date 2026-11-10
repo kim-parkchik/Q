@@ -117,4 +117,9 @@ export interface WithholdingSlipMaster {
   youngBornOnOrAfter: string;
   /** 年齢23歳未満の扶養親族を有する場合の生命保険料控除の特例を受けたときに、摘要欄に書く文 */
   lifeInsuranceYoungNote: string;
+  /**
+   * 国税庁の手引がまだ出ていない年分の「仮の書き方」のときだけ（constants/nencho/index.ts の getProvisionalSlipMaster）。
+   * basedOn は元にした手引の年分、notes は源泉徴収票の画面に出す知らせ（印刷はしない）
+   */
+  provisional?: { basedOn: number; notes: string[] };
 }

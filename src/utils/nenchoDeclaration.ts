@@ -164,6 +164,14 @@ const specificRelativeLimit = (m: NenchoMaster) => m.specificRelative[m.specific
 export const classifyDependent = (
   d: DeclaredDependent, year: number, m: NenchoMaster,
   limits: { income: number; specificRelative: number } = { income: dependentIncomeLimit(m), specificRelative: specificRelativeLimit(m) },
+): DependentKind => classifyDependentByLimits(d, year, limits);
+
+/**
+ * 扶養親族の区分を、その年の12月31日の年齢と、所得の線で決める
+ * （年末調整の表がない年分の、年末調整をしない人の源泉徴収票でも使う。utils/withholdingSlip.ts の classifySourceDependent）
+ */
+export const classifyDependentByLimits = (
+  d: DeclaredDependent, year: number, limits: { income: number; specificRelative: number },
 ): DependentKind => {
   const age = ageAtYearEnd(d.birthday, year);
   if (age === null) return "none";
