@@ -14,6 +14,7 @@ import {
   jstParts,
   jstTime,
   looksLikeCardPayload,
+  NO_BREAK_LABEL,
   parseIso,
   PUNCH_LABELS,
   shortDateLabel,
@@ -187,7 +188,8 @@ export default function Kiosk(props: Props) {
     const at = Date.now();
     const id = await addRequest(db, { staffId: current.person.id, ...r, at, method: current.method, companyMark: mark });
     setRequestOpen(false);
-    say("ok", `${current.person.name}さん　${shortDateLabel(r.date)}の${PUNCH_LABELS[r.kind]} ${timeLabel(r.time)} の申し出を受け付けました（担当者が確かめます）`, {
+    const what = r.kind === "no_break" ? `「${NO_BREAK_LABEL}」` : `${PUNCH_LABELS[r.kind]} ${timeLabel(r.time)} `;
+    say("ok", `${current.person.name}さん　${shortDateLabel(r.date)}の${what}の申し出を受け付けました（担当者が確かめます）`, {
       target: "request",
       id,
       until: at + CANCEL_WINDOW_MS,

@@ -9,7 +9,7 @@
  *   注意に書いて、担当者が Q で直せるようにする（TimeQard の記録には、すべて残っている）。
  * ・取り消した打刻・申し出は、呼ぶ側で外してから渡す。
  */
-import { PUNCH_KINDS, PUNCH_LABELS, type PunchKind, type PunchMethod } from "./kinds";
+import { NO_BREAK_SHORT, PUNCH_KINDS, PUNCH_LABELS, REQUEST_KINDS, type PunchKind, type PunchMethod, type RequestKind } from "./kinds";
 import { DAY_MS, HOUR_MS, MINUTE_MS, jstDate, jstTime, timeLabel } from "./time";
 import { compareStaffId } from "./staffFile";
 
@@ -27,8 +27,8 @@ export interface PunchRequest {
   staffId: string;
   /** 申し出た日（「2026-11-07」） */
   date: string;
-  kind: PunchKind;
-  /** 申し出た時刻（「09:00」） */
+  kind: RequestKind;
+  /** 申し出た時刻（「09:00」。「休憩を取れなかった」（no_break）は ""） */
   time: string;
   reason: string;
   note: string;
@@ -43,6 +43,8 @@ export interface DayRow {
   times: Record<PunchKind, string>;
   /** 申し出た時刻（申し出がない種類は入れない） */
   requests: Partial<Record<PunchKind, string>>;
+  /** 「休憩を取れなかった」の申し出がある */
+  noBreakRequest: boolean;
   /** 申し出の理由（「退勤：押し間違えた（会議が長引いた）」。2つ以上は「／」で区切る） */
   requestReason: string;
   /** ID で押した（カードなしの）打刻の種類（行に入れた打刻のうち） */
@@ -152,7 +154,7 @@ const emptyTimes = (): Record<PunchKind, string> => ({
 });
 
 const emptyDraft = (staffId: string, date: string, fromShift: boolean): RowDraft => ({
-  row: { staffId, date, times: emptyTimes(), requests: {}, requestReason: "", cardless: [], notes: [] },
+  row: { staffId, date, times: emptyTimes(), requests: {}, noBreakRequest: false, requestReason: "", cardless: [], notes: [] },
   sources: {},
   fromShift,
 });
@@ -197,10 +199,10 @@ const draftFromShift = (staffId: string, shift: Shift, now: number): RowDraft =>
   return draft;
 };
 
-/** 申し出の理由の文（「退勤：押し間違えた（会議が長引いた）」） */
+/** 申し出の理由の文（「退勤：押し間違えた（会議が長引いた）」「休憩なし：休憩を取れなかった（来客が続いた）」） */
 export const requestReasonText = (r: Pick<PunchRequest, "kind" | "reason" | "note">) => {
   const note = r.note.trim();
-  return `${PUNCH_LABELS[r.kind]}：${r.reason}${note ? `（${note}）` : ""}`;
+  return `${r.kind === "no_break" ? NO_BREAK_SHORT : PUNCH_LABELS[r.kind]}：${r.reason}${note ? `（${note}）` : ""}`;
 };
 
 /**
@@ -290,8 +292,11 @@ export const buildDayRows = (args: {
       draft = emptyDraft(staffId, date, false);
       byDate.set(date, draft);
     }
-    const ordered = PUNCH_KINDS.flatMap((k) => list.filter((r) => r.kind === k));
-    for (const r of ordered) draft.row.requests[r.kind] = r.time;
+    const ordered = REQUEST_KINDS.flatMap((k) => list.filter((r) => r.kind === k));
+    for (const r of ordered) {
+      if (r.kind === "no_break") draft.row.noBreakRequest = true;
+      else draft.row.requests[r.kind] = r.time;
+    }
     draft.row.requestReason = ordered.map(requestReasonText).join("／");
   }
 

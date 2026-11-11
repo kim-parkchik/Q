@@ -8,7 +8,7 @@
  */
 import { PUNCH_KINDS, PUNCH_LABELS, punchKindOfLabel, type PunchKind } from "./kinds";
 
-/** CSV の形の名前（「形式」の列）。形を変えたら番号を上げる */
+/** CSV の形の名前（「形式」の列）。形を変えたら番号を上げる（Q は、知っている番号までの CSV だけを取り込む） */
 export const TIMEQARD_CSV_FORMAT_VERSION = 1;
 export const TIMEQARD_CSV_FORMAT = `TimeQard ${TIMEQARD_CSV_FORMAT_VERSION}`;
 
@@ -19,6 +19,7 @@ export const CSV_HEADERS = {
   staffId: "スタッフID",
   name: "名前",
   date: "日付",
+  noBreakRequest: "申出_休憩なし",
   requestReason: "申出_理由",
   cardless: "カードなし",
   notes: "注意",
@@ -33,6 +34,7 @@ export const TIMEQARD_CSV_HEADERS: string[] = [
   CSV_HEADERS.date,
   ...PUNCH_KINDS.map((k) => PUNCH_LABELS[k]),
   ...PUNCH_KINDS.map(requestHeader),
+  CSV_HEADERS.noBreakRequest,
   CSV_HEADERS.requestReason,
   CSV_HEADERS.cardless,
   CSV_HEADERS.notes,
@@ -43,6 +45,12 @@ export const TIMEQARD_CSV_HEADERS: string[] = [
 /** 注意が2つ以上あるときの区切り */
 export const NOTE_SEPARATOR = "／";
 
+/** 「申出_休憩なし」の列に書く印 */
+export const NO_BREAK_MARK = "○";
+
+/** 「申出_休憩なし」の列を読む（何か入っていれば申し出あり。列がない CSV は、申し出なし） */
+export const parseNoBreakRequest = (s: string | undefined) => (s ?? "").trim() !== "";
+
 /** CSV の1行（1人1日） */
 export interface TimeQardCsvRow {
   staffId: string;
@@ -52,6 +60,8 @@ export interface TimeQardCsvRow {
   times: Record<PunchKind, string>;
   /** 申し出た時刻（申し出がない種類は入れない） */
   requests: Partial<Record<PunchKind, string>>;
+  /** 「休憩を取れなかった」の申し出がある（「申出_休憩なし」の列に「○」） */
+  noBreakRequest: boolean;
   requestReason: string;
   /** ID で押した（カードなしの）打刻の種類 */
   cardless: PunchKind[];
@@ -72,6 +82,7 @@ export const writeTimeQardCsv = (rows: TimeQardCsvRow[]): string => {
       r.date,
       ...PUNCH_KINDS.map((k) => r.times[k] ?? ""),
       ...PUNCH_KINDS.map((k) => r.requests[k] ?? ""),
+      r.noBreakRequest ? NO_BREAK_MARK : "",
       r.requestReason,
       r.cardless.map((k) => PUNCH_LABELS[k]).join(" "),
       r.notes.join(NOTE_SEPARATOR),

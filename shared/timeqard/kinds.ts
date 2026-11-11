@@ -39,3 +39,20 @@ export type RequestReason = (typeof REQUEST_REASONS)[number];
 
 export const isRequestReason = (s: unknown): s is RequestReason =>
   typeof s === "string" && (REQUEST_REASONS as readonly string[]).includes(s);
+
+/**
+ * 申し出の種類：打刻の種類（時刻を申し出る）と、「休憩を取れなかった」（no_break。時刻はない）。
+ * Q は、「休憩を取れなかった」を担当者が選ぶと、その日の勤怠の「休憩なし」（決まった休憩を引かない）にする。
+ */
+export const REQUEST_KINDS = [...PUNCH_KINDS, "no_break"] as const;
+export type RequestKind = (typeof REQUEST_KINDS)[number];
+
+export const NO_BREAK_LABEL = "休憩を取れなかった";
+/** 申し出の理由の文・CSV の列で使う短い名前 */
+export const NO_BREAK_SHORT = "休憩なし";
+
+export const isRequestKind = (s: unknown): s is RequestKind =>
+  typeof s === "string" && (REQUEST_KINDS as readonly string[]).includes(s);
+
+/** 申し出の種類の名前（「出勤」「休憩を取れなかった」） */
+export const requestKindLabel = (kind: RequestKind) => (kind === "no_break" ? NO_BREAK_LABEL : PUNCH_LABELS[kind]);

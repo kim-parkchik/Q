@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { buildStaffFile, cardHash, cardPayload, jstMs, newCardNumber, parseCsvRecords, writeTimeQardCsv } from "../../shared/timeqard";
+import { buildStaffFile, cardHash, cardPayload, jstMs, newCardNumber, NO_BREAK_LABEL, parseCsvRecords, writeTimeQardCsv } from "../../shared/timeqard";
 import { readAttendanceImport } from "../../src/utils/attendanceImport";
 import {
   addPunch,
@@ -200,6 +200,23 @@ describe("CSV の書き出し → Q の取り込み", () => {
     expect(read.rows.length).toBe(3);
     expect(read.rows[2].requests).toEqual({ entry: "09:00" });
     expect(parseCsvRecords(csv).records[0].values["会社の印"]).toBe(MARK);
+  });
+
+  test("「休憩を取れなかった」の申し出（no_break。時刻は空）を申し出の表に残せ、Q では「休憩なし」の申し出として読める", async () => {
+    const { db } = await setup();
+    await addPunch(db, { staffId: "1001", kind: "entry", at: jstMs("2026-11-04", "09:00"), method: "card", companyMark: MARK });
+    await addPunch(db, { staffId: "1001", kind: "exit", at: jstMs("2026-11-04", "18:00"), method: "card", companyMark: MARK });
+    await addRequest(db, {
+      staffId: "1001", date: "2026-11-04", kind: "no_break", time: "", reason: NO_BREAK_LABEL, note: "来客が続いた",
+      at: jstMs("2026-11-04", "18:01"), method: "card", companyMark: MARK,
+    });
+    const rows = await exportRows(db, { companyMark: MARK, from: "2026-11-01", to: "2026-11-30", now: jstMs("2026-12-01", "12:00") });
+    expect(rows.map((r) => [r.date, r.noBreakRequest, r.requests, r.requestReason])).toEqual([
+      ["2026-11-04", true, {}, "休憩なし：休憩を取れなかった（来客が続いた）"],
+    ]);
+    const read = readAttendanceImport(writeTimeQardCsv(rows), { staff: [{ id: "1001", name: "山田 太郎" }], companyMark: MARK });
+    expect(read.error).toBeNull();
+    expect(read.rows[0].noBreakRequest).toBe(true);
   });
 });
 

@@ -20,12 +20,14 @@ import {
   newCompanyMark,
   normalizeDate,
   normalizeTime,
+  NO_BREAK_LABEL,
   parseCardPayload,
   parseCardlessKinds,
   parseCsv,
   parseCsvRecords,
   parseFormatVersion,
   parseIso,
+  parseNoBreakRequest,
   parseNotes,
   parseStaffFile,
   randomCode,
@@ -39,6 +41,7 @@ import {
   type Punch,
   type PunchKind,
   type PunchRequest,
+  type RequestKind,
   type TimeQardCsvRow,
 } from "./index";
 import { parseAttendanceCSV } from "../../src/utils/csvUtils";
@@ -154,6 +157,7 @@ describe("日付・時刻を決まった形に直す（Excel で保存し直し�
 const row = (over: Partial<TimeQardCsvRow> & Pick<TimeQardCsvRow, "staffId" | "name" | "date">): TimeQardCsvRow => ({
   times: { entry: "", exit: "", break_start: "", break_end: "", out: "", return: "" },
   requests: {},
+  noBreakRequest: false,
   requestReason: "",
   cardless: [],
   notes: [],
@@ -182,9 +186,9 @@ describe("CSV", () => {
       }),
     ]);
     expect(csv.split("\r\n")).toEqual([
-      "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_理由,カードなし,注意,会社の印,形式",
-      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00,13:00,,,,,,,,,,,,K7M3QP2X,TimeQard 1",
-      "1002,佐藤 花子,2026-11-04,,17:31,,,,,09:00,,,,,,出勤：押し忘れた,退勤,出勤がありません,K7M3QP2X,TimeQard 1",
+      "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_休憩なし,申出_理由,カードなし,注意,会社の印,形式",
+      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00,13:00,,,,,,,,,,,,,K7M3QP2X,TimeQard 1",
+      "1002,佐藤 花子,2026-11-04,,17:31,,,,,09:00,,,,,,,出勤：押し忘れた,退勤,出勤がありません,K7M3QP2X,TimeQard 1",
       "",
     ]);
   });
@@ -247,7 +251,19 @@ describe("CSV", () => {
     expect(parseCardlessKinds("退勤 出勤")).toEqual(["entry", "exit"]);
     expect(parseCardlessKinds("")).toEqual([]);
     expect(parseNotes("出勤がありません／退勤がありません")).toEqual(["出勤がありません", "退勤がありません"]);
-    expect(TIMEQARD_CSV_HEADERS.length).toBe(20);
+    expect(TIMEQARD_CSV_HEADERS.length).toBe(21);
+  });
+
+  test("「休憩を取れなかった」の申し出は、「申出_休憩なし」の列に○を書く。列がない CSV（手で作ったものなど）は、申し出なし", () => {
+    const csv = writeTimeQardCsv([
+      row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04", noBreakRequest: true, requestReason: "休憩なし：休憩を取れなかった（来客が続いた）" }),
+    ]);
+    const { records } = parseCsvRecords(csv);
+    expect(records[0].values["申出_休憩なし"]).toBe("○");
+    expect(records[0].values["形式"]).toBe("TimeQard 1");
+    expect(parseNoBreakRequest(records[0].values["申出_休憩なし"])).toBe(true);
+    expect(parseNoBreakRequest("")).toBe(false);
+    expect(parseNoBreakRequest(undefined)).toBe(false);
   });
 });
 
@@ -328,7 +344,7 @@ const punch = (staffId: string, date: string, time: string, kind: PunchKind, met
   at: jstMs(date, time),
   method,
 });
-const request = (staffId: string, date: string, kind: PunchKind, time: string, reason = "押し忘れた", note = "", requestedAt = jstMs(date, "23:00")): PunchRequest => ({
+const request = (staffId: string, date: string, kind: RequestKind, time: string, reason = "押し忘れた", note = "", requestedAt = jstMs(date, "23:00")): PunchRequest => ({
   id: nextId++,
   staffId,
   date,
@@ -534,7 +550,23 @@ describe("1日のまとめ方（付録 E）", () => {
     expect(times(rows[0])).toBe("");
     expect(rows[0].notes).toEqual([]);
     expect(rows[0].requests).toEqual({ entry: "09:00", exit: "19:00" });
+    expect(rows[0].noBreakRequest).toBe(false);
     expect(rows[0].requestReason).toBe("出勤：カードを忘れて押せなかった／退勤：押し間違えた（会議が長引いた）");
+  });
+
+  test("「休憩を取れなかった」の申し出（no_break。時刻なし）は、休憩始の申し出とは別に数え、理由の文の最後に書く", () => {
+    const rows = buildDayRows({
+      punches: [punch("1001", "2026-11-06", "09:00", "entry"), punch("1001", "2026-11-06", "18:00", "exit")],
+      requests: [
+        request("1001", "2026-11-06", "no_break", "", NO_BREAK_LABEL, "来客が続いた", jstMs("2026-11-06", "18:01")),
+        request("1001", "2026-11-06", "break_start", "12:30", "押し忘れた"),
+      ],
+      now: LATER,
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].noBreakRequest).toBe(true);
+    expect(rows[0].requests).toEqual({ break_start: "12:30" });
+    expect(rows[0].requestReason).toBe("休憩始：押し忘れた／休憩なし：休憩を取れなかった（来客が続いた）");
   });
 
   test("期間で選び、ID の数の順・日付の順に並べる", () => {

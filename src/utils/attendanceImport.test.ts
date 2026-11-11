@@ -220,3 +220,61 @@ describe("会社ファイルの勤怠と合わせる", () => {
     expect(importStatements(plan, new Set()).length).toBe(plan.toWrite.length);
   });
 });
+
+describe("「休憩を取れなかった」の申し出（「申出_休憩なし」の列）", () => {
+  const HEADER2 =
+    "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_休憩なし,申出_理由,カードなし,注意,会社の印,形式";
+  const tq2 = (...lines: string[]) => [HEADER2, ...lines].join("\r\n") + "\r\n";
+  const read = readAttendanceImport(
+    tq2(
+      `1001,山田 太郎,2026-11-04,09:00,18:00,,,,,,,,,,,○,休憩なし：休憩を取れなかった（来客が続いた）,,,${MARK},TimeQard 1`,
+      `1001,山田 太郎,2026-11-05,09:00,18:00,,,,,,,,,,,○,休憩なし：休憩を取れなかった,,,${MARK},TimeQard 1`,
+      `1002,佐藤 花子,2026-11-04,09:00,18:00,,,,,,,,,,,○,休憩なし：休憩を取れなかった,,,${MARK},TimeQard 1`
+    ),
+    { staff, companyMark: MARK }
+  );
+
+  test("「申出_休憩なし」に何か入っている日は、申し出ありとして読む。列がない CSV は、申し出なし", () => {
+    expect(read.error).toBeNull();
+    expect(read.rows.map((r) => r.noBreakRequest)).toEqual([true, true, true]);
+    const old = readAttendanceImport(tq(`1001,山田 太郎,2026-11-04,08:58,18:02,,,,,,,,,,,,,,${MARK},TimeQard 1`), { staff, companyMark: MARK });
+    expect(old.rows[0].noBreakRequest).toBe(false);
+  });
+
+  test("確定した日・もう「休憩なし」にしてある日には入れられない", () => {
+    const existing = new Map([
+      ["1001\u00002026-11-05", day({ breakNone: true })],
+      ["1002\u00002026-11-04", day({ finalized: true })],
+    ]);
+    const plan = planAttendanceImport(read, existing);
+    expect(plan.requests.map((r) => [r.staffId, r.date, r.kind, r.time, r.applicable, r.whyNot])).toEqual([
+      ["1001", "2026-11-04", "no_break", "", true, null],
+      ["1001", "2026-11-05", "no_break", "", false, "もう「休憩なし」になっています"],
+      ["1002", "2026-11-04", "no_break", "", false, "確定した日です"],
+    ]);
+    expect(plan.requests[0].reason).toBe("休憩を取れなかった（来客が続いた）");
+    expect(plan.requests[0].memoText).toBe("TimeQard の申し出：休憩を取れなかった（来客が続いた）");
+  });
+
+  test("選ぶと、その日を「休憩なし」にして備考に書き足す（確定していない日だけ）", () => {
+    const db = new Database(":memory:");
+    for (const s of DB_SCHEMAS) db.exec(s);
+    db.exec(`INSERT INTO staff (id, name, base_wage) VALUES ('1001', '山田 太郎', 1), ('1002', '佐藤 花子', 1)`);
+    db.exec(`INSERT INTO attendance (staff_id, work_date, memo, is_finalized) VALUES ('1002', '2026-11-04', '', 1)`);
+    const plan = planAttendanceImport(read, new Map([["1002\u00002026-11-04", day({ finalized: true })]]));
+    const statements = importStatements(plan, new Set(plan.requests.map((r) => r.key)));
+    db.transaction(() => {
+      for (const s of statements) db.prepare(s.sql).run(...((s.values ?? []) as any[]));
+    })();
+    expect(db.query("SELECT staff_id, work_date, break_none, memo FROM attendance ORDER BY staff_id, work_date").all()).toEqual([
+      { staff_id: "1001", work_date: "2026-11-04", break_none: 1, memo: "TimeQard の申し出：休憩を取れなかった（来客が続いた）" },
+      { staff_id: "1001", work_date: "2026-11-05", break_none: 1, memo: "TimeQard の申し出：休憩を取れなかった" },
+      { staff_id: "1002", work_date: "2026-11-04", break_none: 0, memo: "" },
+    ]);
+  });
+
+  test("選んでいなければ「休憩なし」にしない", () => {
+    const plan = planAttendanceImport(read, new Map());
+    expect(importStatements(plan, new Set()).length).toBe(plan.toWrite.length);
+  });
+});

@@ -16,7 +16,7 @@ import {
   jstTime,
   monthRange,
   parseIso,
-  PUNCH_LABELS,
+  requestKindLabel,
   safeFileNamePart,
   timeLabel,
   writeTimeQardCsv,
@@ -125,7 +125,7 @@ function ExportTab({ db, settings }: TabProps) {
       if (!saved) return;
       await recordExport(db, { companyMark: settings.companyMark, from: period.from, to: period.to, fileName: saved.name, rowCount: rows.length, at: Date.now() });
       const people = new Set(rows.map((r) => r.staffId)).size;
-      const requests = rows.reduce((a, r) => a + Object.keys(r.requests).length, 0);
+      const requests = rows.reduce((a, r) => a + Object.keys(r.requests).length + (r.noBreakRequest ? 1 : 0), 0);
       const notes = rows.filter((r) => r.notes.length > 0).length;
       const cardless = rows.filter((r) => r.cardless.length > 0).length;
       setResult({
@@ -189,7 +189,11 @@ function ListTab({ db, settings }: TabProps) {
             <tr key={`${e.type}-${e.id}`} style={{ color: e.cancelled ? "#90a4ae" : undefined }}>
               <td>{e.name}（{e.staffId}）</td>
               <td>{timeLabel(jstTime(e.at))}</td>
-              <td>{e.type === "request" ? <><span className="tag req">申し出</span> {PUNCH_LABELS[e.kind]} {timeLabel(e.requestTime ?? "")}</> : PUNCH_LABELS[e.kind]}</td>
+              <td>
+                {e.type === "request" ? (
+                  <><span className="tag req">申し出</span> {requestKindLabel(e.kind)}{e.requestTime ? ` ${timeLabel(e.requestTime)}` : ""}</>
+                ) : requestKindLabel(e.kind)}
+              </td>
               <td>{e.method === "id" ? <span className="tag id">ID</span> : "カード"}</td>
               <td>
                 {e.cancelled && <span className="tag cancel">取り消し</span>}

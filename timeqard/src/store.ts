@@ -10,6 +10,7 @@ import {
   addDays,
   buildDayRows,
   isPunchKind,
+  isRequestKind,
   jstDate,
   jstIso,
   jstMs,
@@ -19,6 +20,7 @@ import {
   type PunchKind,
   type PunchMethod,
   type PunchRequest,
+  type RequestKind,
   type StaffFile,
   type TimeQardCsvRow,
 } from "../../shared/timeqard";
@@ -53,8 +55,8 @@ export const SCHEMA: string[] = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     staff_id TEXT NOT NULL,
     work_date TEXT NOT NULL,         -- 申し出た日（「2026-11-07」）
-    kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break_start', 'break_end', 'out', 'return')),
-    time TEXT NOT NULL,              -- 申し出た時刻（「09:00」）
+    kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break_start', 'break_end', 'out', 'return', 'no_break')), -- no_break：休憩を取れなかった
+    time TEXT NOT NULL DEFAULT '',   -- 申し出た時刻（「09:00」。休憩を取れなかった（no_break）は空）
     reason TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     requested_at TEXT NOT NULL,
@@ -252,7 +254,7 @@ export const addPunch = async (db: KioskDb, p: { staffId: string; kind: PunchKin
 
 export const addRequest = async (
   db: KioskDb,
-  r: { staffId: string; date: string; kind: PunchKind; time: string; reason: string; note: string; at: number; method: PunchMethod; companyMark: string }
+  r: { staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod; companyMark: string }
 ) => {
   const res = await db.execute(
     `INSERT INTO requests (staff_id, work_date, kind, time, reason, note, requested_at, requested_ms, method, company_mark)
@@ -323,12 +325,12 @@ export const loadRequests = async (db: KioskDb, args: { companyMark: string; fro
     [args.companyMark, args.from, args.to]
   );
   return (rows ?? [])
-    .filter((r) => isPunchKind(r.kind))
+    .filter((r) => isRequestKind(r.kind))
     .map((r) => ({
       id: Number(r.id),
       staffId: String(r.staff_id),
       date: r.work_date,
-      kind: r.kind as PunchKind,
+      kind: r.kind as RequestKind,
       time: r.time,
       reason: r.reason,
       note: r.note ?? "",
@@ -396,7 +398,8 @@ export interface DayEvent {
   name: string;
   /** 押した（申し出た）日時のミリ秒 */
   at: number;
-  kind: PunchKind;
+  /** 打刻の種類（申し出は「休憩を取れなかった」もある） */
+  kind: RequestKind;
   method: PunchMethod;
   cancelled: boolean;
   /** 申し出：日・時刻・理由 */
@@ -438,7 +441,7 @@ export const loadDayEvents = async (db: KioskDb, companyMark: string, date: stri
       staffId: String(r.staff_id),
       name: names.get(String(r.staff_id)) ?? "",
       at: Number(r.requested_ms),
-      kind: (isPunchKind(r.kind) ? r.kind : "entry") as PunchKind,
+      kind: (isRequestKind(r.kind) ? r.kind : "entry") as RequestKind,
       method: (r.method === "id" ? "id" : "card") as PunchMethod,
       cancelled: Number(r.cancelled) === 1,
       requestDate: r.work_date,

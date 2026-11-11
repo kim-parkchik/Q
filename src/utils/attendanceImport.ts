@@ -9,25 +9,31 @@
  * ・日付・時刻の形を確かめる（「2026/11/7」「8:58」などは直して入れ、直せないものは、その行を入れずに知らせる）。
  * ・確定した日は上書きしない（いままでと同じ）。
  * ・カードなしで押した打刻・注意・申し出を一覧で出す。申し出は、選んだものだけを修正の欄（手入力の欄）に入れ、備考に書き足す。
+ *   「休憩を取れなかった」の申し出（「申出_休憩なし」の列）は、選ぶと、その日の「休憩なし」（決まった休憩を引かない。utils/fixedBreak.ts）にする。
  * ・書き込みは、1つのトランザクションでまとめてする（途中で止まって半分だけ入ることがないように）。
  */
 import {
   companyMarkLabel,
   CSV_HEADERS,
   isCompanyMark,
+  NO_BREAK_LABEL,
+  NO_BREAK_SHORT,
   normalizeDate,
   normalizeTime,
   parseCardlessKinds,
   parseCsvRecords,
   parseFormatVersion,
+  parseNoBreakRequest,
   parseNotes,
   PUNCH_KINDS,
   PUNCH_LABELS,
   requestHeader,
+  requestKindLabel,
   TIMEQARD_CSV_FORMAT_VERSION,
   timeLabel,
   toHalfWidth,
   type PunchKind,
+  type RequestKind,
 } from "../../shared/timeqard";
 import type { SqlStatement } from "./dbBatch";
 
@@ -54,6 +60,8 @@ export interface ImportRow {
   date: string;
   times: Record<PunchKind, string>;
   requests: Partial<Record<PunchKind, string>>;
+  /** 「休憩を取れなかった」の申し出がある */
+  noBreakRequest: boolean;
   requestReason: string;
   cardless: PunchKind[];
   notes: string[];
@@ -240,6 +248,7 @@ export const readAttendanceImport = (text: string, args: { staff: ImportStaff[];
       date,
       times,
       requests,
+      noBreakRequest: result.fromTimeQard ? parseNoBreakRequest(v[CSV_HEADERS.noBreakRequest]) : false,
       requestReason: result.fromTimeQard ? (v[CSV_HEADERS.requestReason] ?? "") : "",
       cardless: result.fromTimeQard ? parseCardlessKinds(v[CSV_HEADERS.cardless]) : [],
       notes: result.fromTimeQard ? parseNotes(v[CSV_HEADERS.notes]) : [],
@@ -271,17 +280,23 @@ export interface ExistingDay {
   /** 修正の欄（手入力）の値 */
   manual: Record<PunchKind, string>;
   memo: string;
+  /** その日は「休憩なし」にしてある */
+  breakNone?: boolean;
 }
 
 export const dayKey = (staffId: string, date: string) => `${staffId}\u0000${date}`;
 
-/** 申し出（修正の欄に入れられるか） */
+/** 申し出の種類の名前（「出勤」「休憩を取れなかった」。shared/timeqard の requestKindLabel） */
+export const importRequestLabel = requestKindLabel;
+
+/** 申し出（修正の欄・「休憩なし」に入れられるか） */
 export interface ImportRequest {
   key: string;
   staffId: string;
   name: string;
   date: string;
-  kind: PunchKind;
+  kind: RequestKind;
+  /** 申し出た時刻（「休憩を取れなかった」は ""） */
   time: string;
   reason: string;
   /** 修正の欄に入れられる（確定していない日で、その欄が空） */
@@ -303,8 +318,8 @@ export interface ImportPlan extends ReadImportResult {
 const isBlankTime = (s: string | null | undefined) => (s ?? "").trim().length < 5;
 
 /** 申出_理由の中から、その種類の理由を取り出す（「出勤：押し忘れた／退勤：押し間違えた」→ 退勤なら「押し間違えた」） */
-export const reasonForKind = (requestReason: string, kind: PunchKind) => {
-  const label = PUNCH_LABELS[kind];
+export const reasonForKind = (requestReason: string, kind: RequestKind) => {
+  const label = kind === "no_break" ? NO_BREAK_SHORT : PUNCH_LABELS[kind];
   const item = requestReason
     .split("／")
     .map((x) => x.trim())
@@ -342,6 +357,25 @@ export const planAttendanceImport = (read: ReadImportResult, existing: Map<strin
         memoText: `TimeQard の申し出：${PUNCH_LABELS[kind]} ${timeLabel(time)}${reason ? `（${reason}）` : ""}`,
       });
     }
+    // 「休憩を取れなかった」：選ぶと、その日の「休憩なし」にする（決まった休憩を引かない）
+    if (row.noBreakRequest) {
+      const reason = reasonForKind(row.requestReason, "no_break");
+      let whyNot: string | null = null;
+      if (day?.finalized) whyNot = "確定した日です";
+      else if (day?.breakNone) whyNot = "もう「休憩なし」になっています";
+      requests.push({
+        key: `${dayKey(row.staffId, row.date)}\u0000no_break`,
+        staffId: row.staffId,
+        name: row.name,
+        date: row.date,
+        kind: "no_break",
+        time: "",
+        reason,
+        applicable: whyNot === null,
+        whyNot,
+        memoText: `TimeQard の申し出：${reason || NO_BREAK_LABEL}`,
+      });
+    }
   }
   return { ...read, toWrite, finalized, requests };
 };
@@ -369,6 +403,16 @@ export const importStatements = (plan: ImportPlan, selectedRequestKeys: Set<stri
   }));
   for (const r of plan.requests) {
     if (!r.applicable || !selectedRequestKeys.has(r.key)) continue;
+    if (r.kind === "no_break") {
+      statements.push({
+        sql: `UPDATE attendance SET
+            break_none = 1,
+            memo = CASE WHEN memo IS NULL OR TRIM(memo) = '' THEN ? ELSE memo || '／' || ? END
+          WHERE staff_id = ? AND work_date = ? AND is_finalized = 0 AND COALESCE(break_none, 0) = 0`,
+        values: [r.memoText, r.memoText, r.staffId, r.date],
+      });
+      continue;
+    }
     const col = ATTENDANCE_COLUMNS[r.kind].manual;
     statements.push({
       sql: `UPDATE attendance SET

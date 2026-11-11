@@ -13,6 +13,7 @@ import {
   type PunchKind,
   type PunchMethod,
   type PunchRequest,
+  type RequestKind,
   type StaffFile,
   type TimeQardCsvRow,
 } from "../../shared/timeqard";
@@ -93,7 +94,7 @@ export const addPunch = async (_db: KioskDb, p: { staffId: string; kind: PunchKi
 
 export const addRequest = async (
   _db: KioskDb,
-  r: { staffId: string; date: string; kind: PunchKind; time: string; reason: string; note: string; at: number; method: PunchMethod; companyMark: string }
+  r: { staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod; companyMark: string }
 ) => {
   const id = nextId++;
   requests.push({ id, staffId: r.staffId, date: r.date, kind: r.kind, time: r.time, reason: r.reason, note: r.note.trim(), requestedAt: r.at, method: r.method, mark: r.companyMark });
