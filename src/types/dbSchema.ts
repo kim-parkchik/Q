@@ -123,6 +123,7 @@ export const DB_SCHEMAS = [
     commute_type TEXT DEFAULT 'none',
     commute_amount INTEGER DEFAULT 0,
     commute_setting TEXT,              -- 通勤の方法・片道の距離・定期代・有料道路・駐車場等（JSON。非課税限度額に使う。詳しくは utils/commuteAllowance.ts）
+    fixed_break_apply INTEGER DEFAULT 1, -- 給与規定グループの「決まった休憩」を使うか（1: 使う / 0: 使わない。utils/fixedBreak.ts）
     dependents INTEGER DEFAULT 0, 
     tax_column TEXT DEFAULT 'kou', -- 源泉所得税の欄（kou: 甲欄 / otsu: 乙欄 / hei: 丙欄）
     resident_tax INTEGER DEFAULT 0,    -- 住民税の月額（以前の入れ方。下の年度の額を入れていない月に使う）
@@ -176,6 +177,8 @@ export const DB_SCHEMAS = [
     night_rate REAL,
     is_error INTEGER DEFAULT 0,    -- 0:正常, 1:再計算・確認が必要
     error_message TEXT,            -- エラー内容（「起算日変更による再計算待ち」など）
+    break_none INTEGER DEFAULT 0,  -- その日は休憩を取らなかった（1 なら決まった休憩を引かない。utils/fixedBreak.ts）
+    auto_break TEXT,               -- 確定したときに引いた決まった休憩（「12:00〜13:00」「45分」。引かなければ空）
     UNIQUE(staff_id, work_date),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,
@@ -347,6 +350,7 @@ export const DB_SCHEMAS = [
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
     absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
+    fixed_break TEXT,                -- 決まった休憩（休憩の時刻が入っていない日に引く。JSON。空なら使わない。utils/fixedBreak.ts）
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,
 

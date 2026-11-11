@@ -8,10 +8,14 @@ import dayjs from "dayjs";
 import { S } from '../AttendanceManager.styles';
 import TimeInputPair from './TimeInputPair';
 import type { AttendanceViewModel } from './types';
+import { durationLabel } from '../../../utils/fixedBreak';
 
 interface Props {
   am: AttendanceViewModel;
 }
+
+/** 欠勤の日（出退勤・休憩を入れない） */
+const isAbsentRow = (rowData: any) => (rowData.workType || "normal") === "absent";
 
 export default function AttendanceTable({ am }: Props) {
   const {
@@ -24,6 +28,8 @@ export default function AttendanceTable({ am }: Props) {
     handleCellChange,
     finalizeAttendance,
     unfinalizeAttendance,
+    fixedBreakRule,
+    breakInfo,
   } = am;
 
   return (
@@ -77,6 +83,11 @@ export default function AttendanceTable({ am }: Props) {
 
           // --- 1. 状態判定（シンプルに！） ---
           const isFinalized = row.isFinalized;
+          // 決まった休憩・休憩を引かなかった理由・労働基準法34条の休憩に足りない分（useAttendanceManager の breakInfo）
+          const brk = breakInfo[dateStr] as (typeof breakInfo)[string] | undefined; // 出勤・退勤が入っていない日はない
+          const breakNone = !!rowData.breakNone;
+          // 「休憩なし」の印：決まった休憩を使う人の、出勤・退勤が入っている日（前に付けた印は、いつでも外せる）
+          const showBreakNone = ((!!fixedBreakRule && !!brk) || breakNone) && !isAbsentRow(rowData);
 
           // --- 2. 矛盾チェック（エラーメッセージ） ---
           let timeErrorMsg = "";
@@ -350,6 +361,31 @@ export default function AttendanceTable({ am }: Props) {
                       disabled={isFinalized || isClosed}
                     />
                   </div>
+                  {/* 休憩：決まった休憩・「休憩なし」・労働基準法34条の休憩に足りない日 */}
+                  {(brk?.autoBreak || brk?.notice || (brk?.shortage ?? 0) > 0 || showBreakNone) && (
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 12px", marginTop: "4px", fontSize: "11px" }}>
+                      {showBreakNone && (
+                        <label style={{ display: "flex", alignItems: "center", gap: "3px", color: "#475569", cursor: isFinalized || isClosed ? "default" : "pointer" }}
+                          title="その日は休憩を取らなかったとき（決まった休憩を引きません）">
+                          <input type="checkbox" checked={breakNone} disabled={isFinalized || isClosed}
+                            onChange={e => handleCellChange(dateStr, 'breakNone', e.target.checked)} />
+                          休憩なし
+                        </label>
+                      )}
+                      {brk?.autoBreak && (
+                        <span style={{ color: "#64748b" }}>
+                          決まった休憩（{brk.autoBreak}）を{isFinalized ? "引きました" : "引きます"}
+                        </span>
+                      )}
+                      {brk?.notice && <span style={{ color: "#b45309" }}>⚠ {brk.notice}</span>}
+                      {(brk?.shortage ?? 0) > 0 && (
+                        <span style={{ color: "#b91c1c" }}>
+                          ⚠ 休憩が足りません（労働時間{durationLabel(brk!.workMinutes)}には、休憩{brk!.workMinutes > 480 ? "1時間" : "45分"}以上。
+                          いまは{brk!.restMinutes > 0 ? durationLabel(brk!.restMinutes) : "なし"}。労働基準法34条）
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </td>
               </tr>
             </Fragment>

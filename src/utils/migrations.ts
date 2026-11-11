@@ -109,6 +109,16 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "prescribed_work_days", "INTEGER");
     },
   },
+  {
+    version: 9,
+    description: "給与規定グループに決まった休憩（初めは使わない）を、従業員に決まった休憩を使うか（初めは使う）を、勤怠にその日の「休憩なし」と確定したときに引いた決まった休憩を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "fixed_break", "TEXT");
+      await addColumnIfMissing(db, "staff", "fixed_break_apply", "INTEGER DEFAULT 1");
+      await addColumnIfMissing(db, "attendance", "break_none", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "attendance", "auto_break", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

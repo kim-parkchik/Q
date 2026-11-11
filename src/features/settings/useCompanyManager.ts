@@ -13,6 +13,7 @@ import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import type { TaxCalcMethod } from "../../utils/incomeTax";
 import { toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection } from "../../utils/calcSalary";
+import { parseFixedBreak, stringifyFixedBreak, type FixedBreakRule } from "../../utils/fixedBreak";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -59,6 +60,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgSocialInsCollection, setPgSocialInsCollection] = useState<SocialInsCollection>("current"); // 社会保険料の徴収（当月・翌月）
     const [pgProrationMethod, setPgProrationMethod] = useState<ProrationMethod>("none"); // 途中入社・退職の日割り
     const [pgAbsenceDeductionMethod, setPgAbsenceDeductionMethod] = useState<AbsenceDeductionMethod>("workdays"); // 月給制の人の欠勤控除
+    const [pgFixedBreak, setPgFixedBreak] = useState<FixedBreakRule | null>(null); // 決まった休憩（null は使わない。utils/fixedBreak.ts）
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
 
@@ -336,6 +338,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgSocialInsCollection(toSocialInsCollection(pg.social_ins_collection));
         setPgProrationMethod(toProrationMethod(pg.proration_method));
         setPgAbsenceDeductionMethod(toAbsenceDeductionMethod(pg.absence_deduction_method));
+        setPgFixedBreak(parseFixedBreak(pg.fixed_break));
     };
 
     // フォームのリセット（キャンセル時）
@@ -349,6 +352,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgSocialInsCollection("current");
         setPgProrationMethod("none");
         setPgAbsenceDeductionMethod("workdays");
+        setPgFixedBreak(null);
     };
 
     // 計算用のヘルパー
@@ -503,6 +507,11 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     // 保存処理（新規登録・更新兼用）
     const savePayrollGroup = async () => {
         if (!pgName) return dialog.warning("グループ名を入力してください");
+        // 決まった休憩：時刻は始めと終わりが違うこと、長さは1行以上（読み直して確かめる）
+        const fixedBreak = stringifyFixedBreak(pgFixedBreak);
+        if (pgFixedBreak && !parseFixedBreak(fixedBreak)) {
+            return dialog.warning("決まった休憩の時刻（始めと終わりが違うこと）か、長さ（休憩が1分以上）を確かめてください。");
+        }
 
         const isEdit = editingPgId !== null;
         const savedName = pgName;
@@ -510,14 +519,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=?, fixed_break=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, fixedBreak || null, editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method, fixed_break) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, fixedBreak || null]
                 );
             }
             resetPgForm();
@@ -828,6 +837,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgProrationMethod,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
+        pgFixedBreak,
+        setPgFixedBreak,
         setPgPaymentDay,
         editingPgId,
         setEditingPgId,

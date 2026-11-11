@@ -29,6 +29,7 @@ import {
     ABSENCE_DEDUCTION_METHOD_LABELS, PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection,
     type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection,
 } from '../../../utils/calcSalary';
+import { DEFAULT_LENGTH_RULES, describeFixedBreak, parseFixedBreak, type LengthRule } from '../../../utils/fixedBreak';
 
 interface Props {
     cm: CompanyManagerState;
@@ -53,6 +54,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgProrationMethod,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
+        pgFixedBreak,
+        setPgFixedBreak,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -93,6 +96,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                         / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
                                         / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
+                                        / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}
                                     </span>
                                 </div>
                             </div>
@@ -248,6 +252,62 @@ export default function PayrollGroupTab({ cm }: Props) {
                         どちらも1円未満は切り捨て、引く額はその月の基本給までにします。所定労働日数は会社カレンダー（従業員の出勤曜日）から数えます。
                         引くのは基本給の分だけです（手当の分も引く規程なら、その額を給与項目の控除で入れてください）。
                         欠勤控除をした月の算定・月変の支払基礎日数は、計算期間の所定労働日数から欠勤日数を引いた日数になります（完全月給制は暦日数）。
+                    </p>
+
+                    <label style={miniLabelStyle}>決まった休憩（休憩の時刻が入っていない日に引く）</label>
+                    <select
+                        value={pgFixedBreak?.mode ?? "none"}
+                        onChange={e => {
+                            const v = e.target.value;
+                            setPgFixedBreak(
+                                v === "time" ? { mode: "time", start: "12:00", end: "13:00" }
+                                : v === "length" ? { mode: "length", rules: DEFAULT_LENGTH_RULES.map(r => ({ ...r })) }
+                                : null
+                            );
+                        }}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="none">使わない（休憩の時刻を入れた日だけ引く）</option>
+                        <option value="time">時刻で決める（例：12:00〜13:00）</option>
+                        <option value="length">長さで決める（例：6時間を超えたら45分、8時間を超えたら60分）</option>
+                    </select>
+                    {pgFixedBreak?.mode === "time" && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                            <input type="time" value={pgFixedBreak.start} onChange={e => setPgFixedBreak({ ...pgFixedBreak, start: e.target.value })}
+                                style={{ ...inputStyle, width: "120px", marginBottom: 0 }} />
+                            <span>〜</span>
+                            <input type="time" value={pgFixedBreak.end} onChange={e => setPgFixedBreak({ ...pgFixedBreak, end: e.target.value })}
+                                style={{ ...inputStyle, width: "120px", marginBottom: 0 }} />
+                        </div>
+                    )}
+                    {pgFixedBreak?.mode === "length" && pgFixedBreak.rules.map((r, i) => {
+                        const setRule = (patch: Partial<LengthRule>) =>
+                            setPgFixedBreak({ mode: "length", rules: pgFixedBreak.rules.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+                        const num = (v: string, max: number) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
+                        const small = { ...inputStyle, width: "56px", marginBottom: 0, textAlign: "right" as const };
+                        return (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "6px", fontSize: "12px", flexWrap: "wrap" }}>
+                                <span>出勤から退勤まで（外出を除く）が</span>
+                                <input type="number" min={0} max={23} value={Math.floor(r.overMinutes / 60)} style={small}
+                                    onChange={e => setRule({ overMinutes: num(e.target.value, 23) * 60 + (r.overMinutes % 60) })} />
+                                <span>時間</span>
+                                <input type="number" min={0} max={59} value={r.overMinutes % 60} style={small}
+                                    onChange={e => setRule({ overMinutes: Math.floor(r.overMinutes / 60) * 60 + num(e.target.value, 59) })} />
+                                <span>分を超えたら、休憩</span>
+                                <input type="number" min={1} max={600} value={r.breakMinutes} style={small}
+                                    onChange={e => setRule({ breakMinutes: num(e.target.value, 600) })} />
+                                <span>分</span>
+                            </div>
+                        );
+                    })}
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        休憩を打刻しない会社や、打刻を忘れた日のために、休憩の時刻が入っていない日は、勤怠を確定するときにこの休憩を引きます。
+                        休憩の時刻を入れた日（手入力・打刻）は、その時刻を使います。休憩を取らなかった日は、勤怠の画面で「休憩なし」に印を付けます。
+                        時刻で決めると、出勤から退勤までの中にまるごと入る日だけ引きます（遅刻・早退などで途中にかかる日や、外出と重なる日は、引かずに知らせます）。
+                        長さで決めると、時刻がわからないので、深夜（22時〜5時）の時間はできるだけ減らしません（深夜の割増を少なく数えないため）。
+                        労働基準法34条では、労働時間が6時間を超えるときは45分以上、8時間を超えるときは1時間以上の休憩を、労働時間の途中に与えます。
+                        就業規則の休憩時間に合わせてください。従業員ごとに、この休憩を使わないようにもできます（従業員の画面）。
+                        確定済みの日の勤怠は変わりません（確定を解除して確定し直すと、新しい決まりで計算します）。
                     </p>
 
                     <div style={{ display: "flex", gap: "10px" }}>

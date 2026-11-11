@@ -6,6 +6,7 @@ import { XCircle, Car, TrainFront, Banknote } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { COMMUTE_METHOD_LABELS, describeCommuteLimit, type CommuteMethod, type CommuteSetting } from '../../../utils/commuteAllowance';
+import { describeFixedBreak, parseFixedBreak } from '../../../utils/fixedBreak';
 
 interface Props {
     cm: StaffManagerState;
@@ -31,7 +32,11 @@ export default function EmploymentSection({ cm }: Props) {
         payrollGroups,
         targetPayrollGroupId,
         setTargetPayrollGroupId,
+        targetFixedBreakApply,
+        setTargetFixedBreakApply,
     } = cm;
+    // 選んでいる給与規定グループの「決まった休憩」
+    const groupFixedBreak = parseFixedBreak(payrollGroups.find(pg => Number(pg.id) === Number(targetPayrollGroupId))?.fixed_break);
 
     return (
         <>
@@ -84,6 +89,13 @@ export default function EmploymentSection({ cm }: Props) {
                     </option>
                 ))}
                 </select>
+                {groupFixedBreak && (
+                    <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#475569", marginTop: "4px", cursor: "pointer" }}
+                        title="休憩の時刻が入っていない日に、勤怠を確定するときに引く休憩（給与規定グループで決める）">
+                        <input type="checkbox" checked={targetFixedBreakApply} onChange={e => setTargetFixedBreakApply(e.target.checked)} />
+                        決まった休憩（{describeFixedBreak(groupFixedBreak)}）を使う
+                    </label>
+                )}
             </div>
 
             </div>

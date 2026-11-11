@@ -110,6 +110,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetCommuteAmount, setTargetCommuteAmount] = useState(0);
     // 通勤の方法・片道の距離・定期代・有料道路・駐車場等（通勤手当の非課税限度額に使う。utils/commuteAllowance.ts）
     const [targetCommuteSetting, setTargetCommuteSetting] = useState<CommuteSetting>({ ...DEFAULT_COMMUTE_SETTING });
+    // 給与規定グループの「決まった休憩」を使うか（初めは使う。utils/fixedBreak.ts）
+    const [targetFixedBreakApply, setTargetFixedBreakApply] = useState(true);
     const [targetDependents, setTargetDependents] = useState(0);
     // 基本給・扶養人数の履歴（utils/staffHistory.ts）。上の入力欄は、いちばん新しい履歴の値と「何年何月分から」（From）
     // 〜Past は、それより前の履歴
@@ -327,6 +329,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetWageType("hourly"); setTargetWage(1200); setTargetIsOvertimeEligible(1);
         setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
         setTargetCommuteType("daily"); setTargetCommuteAmount(0); setTargetCommuteSetting({ ...DEFAULT_COMMUTE_SETTING });
+        setTargetFixedBreakApply(true);
         setTargetDependents(0); setTargetResidentTax(0); setTargetResidentTaxSchedule([]); setTargetResidentTaxMunicipality(""); setTargetFlatTaxReductionPersons(0);
         setTargetWageHistoryPast([]); setTargetWageFrom("");
         setTargetDependentsHistoryPast([]); setTargetDependentsFrom("");
@@ -364,6 +367,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteType(s.commute_type);
         setTargetCommuteAmount(s.commute_amount);
         setTargetCommuteSetting(parseCommuteSetting(s.commute_setting));
+        setTargetFixedBreakApply(Number(s.fixed_break_apply ?? 1) !== 0);
         setTargetWageType(latestWage.wageType);
         setTargetPatternId(s.calendar_pattern_id || 1);
         setTargetPayrollGroupId(s.payroll_group_id || 1);
@@ -445,6 +449,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             String(targetCommuteType) !== String(original.commute_type) ||
             Number(targetCommuteAmount) !== Number(original.commute_amount) ||
             stringifyCommuteSetting(targetCommuteSetting) !== stringifyCommuteSetting(parseCommuteSetting(original.commute_setting)) ||
+            targetFixedBreakApply !== (Number(original.fixed_break_apply ?? 1) !== 0) ||
             Number(targetBranchId) !== Number(original.branch_id || 1) ||
             Number(targetDependents) !== Number(original.dependents || 0) ||
             Number(targetFlatTaxReductionPersons) !== Number(original.flat_tax_reduction_persons || 0) ||
@@ -526,7 +531,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 stringifyDependentsHistory(targetDependentsHistory),
                 stringifyResidentTaxSchedule(targetResidentTaxSchedule),
                 targetResidentTaxMunicipality || null,
-                stringifyCommuteSetting(targetCommuteSetting)
+                stringifyCommuteSetting(targetCommuteSetting),
+                targetFixedBreakApply ? 1 : 0
             ];
 
             if (editingId) {
@@ -546,7 +552,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
                         flat_tax_reduction_persons=?, leave_periods=?, tax_column=?,
                         standard_remuneration_history=?, wage_history=?, dependents_history=?,
-                        resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?
+                        resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -567,7 +573,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         scheduled_in, is_flex, core_start, core_end,
                         flat_tax_reduction_persons, leave_periods, tax_column,
                         standard_remuneration_history, wage_history, dependents_history,
-                        resident_tax_schedule, resident_tax_municipality, commute_setting,
+                        resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -766,6 +772,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteAmount,
         targetCommuteSetting,
         setTargetCommuteSetting,
+        targetFixedBreakApply,
+        setTargetFixedBreakApply,
         targetDependents,
         setTargetDependents,
         targetWageHistoryPast, setTargetWageHistoryPast, targetWageFrom, setTargetWageFrom,
