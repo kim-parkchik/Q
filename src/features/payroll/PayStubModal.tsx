@@ -1,7 +1,7 @@
 import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';
-import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES } from '../../utils/calcSalary';
+import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES, TARDY_DEDUCTION_METHOD_LABELS } from '../../utils/calcSalary';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
@@ -153,6 +153,18 @@ export default function PayStubModal(props: Props) {
               {salary.absenceDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.absenceDeductionNote}</div>}
             </div>
           )}
+          {(salary.tardyDeductionDetail || salary.tardyDeductionNote) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              {salary.tardyDeductionDetail && (
+                <div>
+                  {salary.tardyDeduction > 0
+                    ? `遅刻・早退・中抜けの控除（給与規定グループの設定：${TARDY_DEDUCTION_METHOD_LABELS[salary.tardyDeductionMethod]}）：${salary.tardyDeductionDetail}（1円未満切り捨て）`
+                    : salary.tardyDeductionDetail}
+                </div>
+              )}
+              {salary.tardyDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.tardyDeductionNote}</div>}
+            </div>
+          )}
           {salary.socialInsCollection === "next" && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
               社会保険料（翌月徴収）：この給与から{insMonthLabel}を引きます。
@@ -286,6 +298,10 @@ export default function PayStubModal(props: Props) {
                   {/* 欠勤控除 */}
                   {salary.absenceDeduction > 0 && (
                     <tr><td style={{...S.tdS, color: "#c0392b"}}>欠勤控除({salary.absenceDays}日)</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.absenceDeduction.toLocaleString()}</td></tr>
+                  )}
+                  {/* 遅刻・早退・中抜けの控除 */}
+                  {salary.tardyDeduction > 0 && (
+                    <tr><td style={{...S.tdS, color: "#c0392b"}}>遅刻早退控除({fmtH(salary.tardyHours)})</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.tardyDeduction.toLocaleString()}</td></tr>
                   )}
 
                   {/* 残業手当の内訳分け */}

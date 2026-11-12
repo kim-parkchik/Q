@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
-import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type SalaryExtras } from '../../utils/calcSalary';
+import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from '../../utils/calcSalary';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
@@ -100,9 +100,12 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method, tardy_deduction_method FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
-        ) as { tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; absence_deduction_method?: string }[];
+        ) as {
+          tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string;
+          absence_deduction_method?: string; tardy_deduction_method?: string;
+        }[];
         if (cancelled) return;
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
         setExtras(p => ({
@@ -112,6 +115,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           collectRetirementMonth: Number(rows?.[0]?.is_next_month) !== 1,
           prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
           absenceDeductionMethod: toAbsenceDeductionMethod(rows?.[0]?.absence_deduction_method),
+          tardyDeductionMethod: toTardyDeductionMethod(rows?.[0]?.tardy_deduction_method),
         }));
         markLoad("group", "ok");
       } catch (e) {

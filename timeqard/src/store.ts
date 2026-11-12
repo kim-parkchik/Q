@@ -34,8 +34,11 @@ export interface KioskDb {
 
 /** TimeQard の記録のファイルの印（SQLite の application_id。"TQ01" の文字コード） */
 export const TIMEQARD_FILE_ID = 0x54513031;
-/** 記録のファイルの形の番号（2：ブラウザ版の表と列を足した。まだ作成中なので、前の形のファイルは読まずに作り直してもらう） */
-export const TIMEQARD_DB_VERSION = 2;
+/**
+ * 記録のファイルの形の番号（2：ブラウザ版の表と列を足した。3：外出をなくして休憩にまとめ、休憩の申し出（始めと終わり）を足した）。
+ * まだ作成中なので、前の形のファイルは読まずに作り直してもらう
+ */
+export const TIMEQARD_DB_VERSION = 3;
 
 const appendOnly = (table: string, label: string) => [
   `CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, '${label}は書き換えられません'); END;`,
@@ -46,7 +49,7 @@ export const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS punches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     staff_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break_start', 'break_end', 'out', 'return')),
+    kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break_start', 'break_end')), -- 休憩は何回でも（中抜けも休憩として押す）
     pressed_at TEXT NOT NULL,        -- 押した日時（日本時間。「2026-11-07T08:58:30+09:00」）
     pressed_ms INTEGER NOT NULL,     -- 押した日時（1970年からのミリ秒。並べる・期間で選ぶのに使う）
     method TEXT NOT NULL CHECK (method IN ('card', 'id', 'web')), -- web：ブラウザで押した
@@ -58,8 +61,9 @@ export const SCHEMA: string[] = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     staff_id TEXT NOT NULL,
     work_date TEXT NOT NULL,         -- 申し出た日（「2026-11-07」）
-    kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break_start', 'break_end', 'out', 'return', 'no_break')), -- no_break：休憩を取れなかった
-    time TEXT NOT NULL DEFAULT '',   -- 申し出た時刻（「09:00」。休憩を取れなかった（no_break）は空）
+    kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break', 'no_break')), -- break：休憩（始めと終わり）。no_break：休憩を取れなかった
+    time TEXT NOT NULL DEFAULT '',   -- 申し出た時刻（「09:00」。休憩は始め。休憩を取れなかった（no_break）は空）
+    end_time TEXT NOT NULL DEFAULT '', -- 休憩の終わり（休憩の申し出だけ）
     reason TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     requested_at TEXT NOT NULL,
@@ -167,8 +171,8 @@ export interface KioskSettings {
   companyMark: string | null;
   companyName: string;
   staffFileExportedAt: string | null;
+  /** 休憩のボタン（休憩始・休憩終）を出すか。休憩は何回でも押せる（中抜けも休憩として押す） */
   showBreak: boolean;
-  showOut: boolean;
   sound: boolean;
   fullscreen: boolean;
   /** カメラで QR コードを読むか（初めは読む） */
@@ -206,7 +210,6 @@ export const loadSettings = async (db: KioskDb): Promise<KioskSettings> => {
     companyName: m.get("company_name") ?? "",
     staffFileExportedAt: m.get("staff_file_exported_at") ?? null,
     showBreak: flag("show_break", true), // 初めは、休憩は出す
-    showOut: flag("show_out", false), // 初めは、外出は出さない
     sound: flag("sound", true),
     fullscreen: flag("fullscreen", false),
     camera: flag("camera", true),
@@ -300,14 +303,14 @@ export const addPunch = async (
 export const addRequest = async (
   db: KioskDb,
   r: {
-    staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod;
+    staffId: string; date: string; kind: RequestKind; time: string; endTime?: string; reason: string; note: string; at: number; method: PunchMethod;
     companyMark: string; clientIp?: string;
   }
 ) => {
   const res = await db.execute(
-    `INSERT INTO requests (staff_id, work_date, kind, time, reason, note, requested_at, requested_ms, method, client_ip, company_mark)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [r.staffId, r.date, r.kind, r.time, r.reason, r.note.trim(), jstIso(r.at), r.at, r.method, r.clientIp ?? "", r.companyMark]
+    `INSERT INTO requests (staff_id, work_date, kind, time, end_time, reason, note, requested_at, requested_ms, method, client_ip, company_mark)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [r.staffId, r.date, r.kind, r.time, r.kind === "break" ? r.endTime ?? "" : "", r.reason, r.note.trim(), jstIso(r.at), r.at, r.method, r.clientIp ?? "", r.companyMark]
   );
   return Number(res.lastInsertId);
 };
@@ -361,6 +364,7 @@ interface RequestRow {
   work_date: string;
   kind: string;
   time: string;
+  end_time: string;
   reason: string;
   note: string;
   requested_ms: number;
@@ -369,7 +373,7 @@ interface RequestRow {
 /** 申し出（取り消していないもの）。期間は申し出た日（その日を含む） */
 export const loadRequests = async (db: KioskDb, args: { companyMark: string; from: string; to: string }): Promise<PunchRequest[]> => {
   const rows = await db.select<RequestRow[]>(
-    `SELECT r.id, r.staff_id, r.work_date, r.kind, r.time, r.reason, r.note, r.requested_ms FROM requests r
+    `SELECT r.id, r.staff_id, r.work_date, r.kind, r.time, r.end_time, r.reason, r.note, r.requested_ms FROM requests r
      WHERE r.company_mark = ? AND r.work_date BETWEEN ? AND ?
        AND NOT EXISTS (SELECT 1 FROM cancellations c WHERE c.target = 'request' AND c.target_id = r.id)
      ORDER BY r.requested_ms, r.id`,
@@ -383,6 +387,7 @@ export const loadRequests = async (db: KioskDb, args: { companyMark: string; fro
       date: r.work_date,
       kind: r.kind as RequestKind,
       time: r.time,
+      endTime: r.end_time ?? "",
       reason: r.reason,
       note: r.note ?? "",
       requestedAt: Number(r.requested_ms),
@@ -449,15 +454,16 @@ export interface DayEvent {
   name: string;
   /** 押した（申し出た）日時のミリ秒 */
   at: number;
-  /** 打刻の種類（申し出は「休憩を取れなかった」もある） */
-  kind: RequestKind;
+  /** 打刻の種類（type が punch）か、申し出の種類（type が request） */
+  kind: PunchKind | RequestKind;
   method: PunchMethod;
   cancelled: boolean;
   /** ブラウザで押した（申し出た）ときの、つないできたパソコンのアドレス */
   clientIp: string;
-  /** 申し出：日・時刻・理由 */
+  /** 申し出：日・時刻（休憩は始めと終わり）・理由 */
   requestDate?: string;
   requestTime?: string;
+  requestEndTime?: string;
   reason?: string;
   note?: string;
 }
@@ -472,7 +478,7 @@ export const loadDayEvents = async (db: KioskDb, companyMark: string, date: stri
     [companyMark, jstMs(date), jstMs(addDays(date, 1))]
   );
   const requests = await db.select<(RequestRow & { method: string; cancelled: number; client_ip: string })[]>(
-    `SELECT r.id, r.staff_id, r.work_date, r.kind, r.time, r.reason, r.note, r.requested_ms, r.method, r.client_ip,
+    `SELECT r.id, r.staff_id, r.work_date, r.kind, r.time, r.end_time, r.reason, r.note, r.requested_ms, r.method, r.client_ip,
        EXISTS (SELECT 1 FROM cancellations c WHERE c.target = 'request' AND c.target_id = r.id) AS cancelled
      FROM requests r WHERE r.company_mark = ? AND r.work_date = ?`,
     [companyMark, date]
@@ -501,6 +507,7 @@ export const loadDayEvents = async (db: KioskDb, companyMark: string, date: stri
       clientIp: r.client_ip ?? "",
       requestDate: r.work_date,
       requestTime: r.time,
+      requestEndTime: r.end_time ?? "",
       reason: r.reason,
       note: r.note ?? "",
     })),

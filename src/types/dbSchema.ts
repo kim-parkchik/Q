@@ -46,6 +46,7 @@ export const DB_SCHEMAS = [
     default_emp_ins_type TEXT DEFAULT 'general', -- 会社全体の雇用保険区分
     week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
     is_small_business INTEGER DEFAULT 0, -- 中小企業（2023年3月までの月60時間超の割増は25%でよかった）
+    hourly_leave INTEGER DEFAULT 0,      -- 時間単位の有給を使う（労使協定を結んでいる。労働基準法39条4項。1年に5日分まで）
     annual_holidays INTEGER DEFAULT 120,
     holiday_csv_url TEXT DEFAULT '${HOLIDAY_CSV_URL_DEFAULT}',
     holiday_source TEXT DEFAULT 'url',
@@ -154,16 +155,10 @@ export const DB_SCHEMAS = [
     work_date TEXT NOT NULL,
     entry_time TEXT,
     exit_time TEXT,
-    break_start TEXT,
-    break_end TEXT,
-    out_time TEXT,
-    return_time TEXT,
+    breaks TEXT,                     -- 手入力した休憩の一覧（JSON。[{"start":"12:00","end":"13:00"},{"start":"15:00","end":"17:00","leave":true}]。NULL なら打刻を使う。utils/breaks.ts）
     csv_entry_time TEXT,
     csv_exit_time TEXT,
-    csv_break_start TEXT,
-    csv_break_end TEXT,
-    csv_out_time TEXT,
-    csv_return_time TEXT,
+    csv_breaks TEXT,                 -- 打刻（TimeQard・CSV）の休憩の一覧（JSON）
     work_type TEXT DEFAULT '',
     paid_leave_hours REAL DEFAULT 0,
     memo TEXT,
@@ -249,6 +244,7 @@ export const DB_SCHEMAS = [
     fixed_overtime_excess INTEGER DEFAULT 0,    -- 時間外労働の割増賃金が固定残業代を超えた差額（超過分として払った額）
     non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う）
     absence_deduction INTEGER,                  -- 欠勤控除の額（月給制。v8 より前に確定した給与は NULL）
+    tardy_deduction INTEGER,                    -- 遅刻・早退・中抜けの控除の額（月給制・日給制。v10 より前に確定した給与は NULL）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
 
     total_earnings INTEGER DEFAULT 0,
@@ -350,6 +346,7 @@ export const DB_SCHEMAS = [
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
     absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
+    tardy_deduction_method TEXT DEFAULT 'none',       -- 月給制・日給制の人の遅刻・早退・中抜けの控除 'none':しない / 'annual':1か月平均所定労働時間で割る / 'period':計算期間の所定労働時間で割る
     fixed_break TEXT,                -- 決まった休憩（休憩の時刻が入っていない日に引く。JSON。空なら使わない。utils/fixedBreak.ts）
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,

@@ -87,7 +87,7 @@ describe("従業員ファイルの読み込み", () => {
     const { db } = await setup();
     const s = await loadSettings(db);
     expect([s.companyMark, s.companyName, s.staffFileExportedAt]).toEqual([MARK, "○○株式会社", "2026-11-01T09:00:00+09:00"]);
-    expect([s.showBreak, s.showOut, s.sound]).toEqual([true, false, true]);
+    expect([s.showBreak, s.sound]).toEqual([true, true]);
   });
 
   test("読み込み直すと入れ替え、一覧から消えた人は押せなくして、名前を残す", async () => {
@@ -134,8 +134,8 @@ describe("人を見つける", () => {
   });
 
   test("出すボタンと、大きく出すボタン", () => {
-    expect(availableKinds({ showBreak: true, showOut: false })).toEqual(["entry", "exit", "break_start", "break_end"]);
-    expect(availableKinds({ showBreak: false, showOut: false })).toEqual(["entry", "exit"]);
+    expect(availableKinds({ showBreak: true })).toEqual(["entry", "exit", "break_start", "break_end"]);
+    expect(availableKinds({ showBreak: false })).toEqual(["entry", "exit"]);
     expect(suggestedKind("before", ["entry", "exit"])).toBe("entry");
     expect(suggestedKind("working", ["entry", "exit"])).toBe("exit");
     expect(suggestedKind("on_break", ["entry", "exit"])).toBe("exit"); // 休憩のボタンを出していないとき
@@ -223,9 +223,39 @@ describe("CSV の書き出し → Q の取り込み", () => {
 describe("設定", () => {
   test("ボタン・音などを変えられる", async () => {
     const { db } = await setup();
-    await setSetting(db, "show_out", "1");
+    await setSetting(db, "show_break", "0");
     await setSetting(db, "sound", "0");
     const s = await loadSettings(db);
-    expect([s.showOut, s.sound]).toEqual([true, false]);
+    expect([s.showBreak, s.sound]).toEqual([false, false]);
+  });
+});
+
+describe("休憩の申し出（始めと終わり）と、外出のない打刻", () => {
+  test("休憩の申し出は終わりの時刻も残し、読み直せる。1日の行・管理の一覧・CSV に出る", async () => {
+    const { db } = await setup();
+    const at = jstMs("2026-11-06", "19:00");
+    await addRequest(db, { staffId: "1001", date: "2026-11-06", kind: "break", time: "15:00", endTime: "17:00", reason: "押し忘れた", note: "病院", at, method: "card", companyMark: MARK });
+    // 休憩でない申し出の終わりの時刻は残さない
+    await addRequest(db, { staffId: "1001", date: "2026-11-06", kind: "exit", time: "18:00", endTime: "19:00", reason: "押し忘れた", note: "", at, method: "card", companyMark: MARK });
+    const events = await loadDayEvents(db, MARK, "2026-11-06");
+    expect(events.map((e) => [e.kind, e.requestTime, e.requestEndTime])).toEqual([["break", "15:00", "17:00"], ["exit", "18:00", ""]]);
+    const rows = await exportRows(db, { companyMark: MARK, from: "2026-11-06", to: "2026-11-06", now: at });
+    expect(rows[0].requestBreaks).toEqual([{ start: "15:00", end: "17:00" }]);
+    expect(rows[0].requests).toEqual({ exit: "18:00" });
+    expect(writeTimeQardCsv(rows)).toContain(",15:00-17:00,");
+  });
+  test("休憩は何回でも押せて、1日の行に全部入る。外出の打刻は残せない（休憩にまとめた）", async () => {
+    const { db } = await setup();
+    const p = (time: string, kind: "entry" | "exit" | "break_start" | "break_end") =>
+      addPunch(db, { staffId: "1001", kind, at: jstMs("2026-11-06", time), method: "card", companyMark: MARK });
+    await p("09:00", "entry");
+    await p("12:00", "break_start");
+    await p("13:00", "break_end");
+    await p("15:00", "break_start");
+    await p("15:30", "break_end");
+    await p("18:00", "exit");
+    const rows = await exportRows(db, { companyMark: MARK, from: "2026-11-06", to: "2026-11-06", now: jstMs("2026-11-07", "09:00") });
+    expect(rows[0].breaks).toEqual([{ start: "12:00", end: "13:00" }, { start: "15:00", end: "15:30" }]);
+    await expect(addPunch(db, { staffId: "1001", kind: "out" as any, at: jstMs("2026-11-06", "16:00"), method: "card", companyMark: MARK })).rejects.toThrow();
   });
 });

@@ -14,7 +14,6 @@ import {
   jstParts,
   jstTime,
   looksLikeCardPayload,
-  NO_BREAK_LABEL,
   parseIso,
   PUNCH_LABELS,
   shortDateLabel,
@@ -26,7 +25,7 @@ import {
   type PunchMethod,
 } from "../../shared/timeqard";
 import { addPunch, addRequest, cancelRecord, CANCEL_WINDOW_MS, clockProblem, loadPunches, type KioskDb, type KioskSettings, type KioskStaff } from "./store";
-import { availableKinds, findByCard, findById, punchBlockReason, suggestedKind } from "./kioskRules";
+import { availableKinds, findByCard, findById, punchBlockReason, requestWhatLabel, suggestedKind } from "./kioskRules";
 import { useScanner } from "./useScanner";
 import { useNow } from "./useNow";
 import IdDialog from "./IdDialog";
@@ -190,7 +189,7 @@ export default function Kiosk(props: Props) {
     const at = Date.now();
     const id = await addRequest(db, { staffId: current.person.id, ...r, at, method: current.method, companyMark: mark });
     setRequestOpen(false);
-    const what = r.kind === "no_break" ? `「${NO_BREAK_LABEL}」` : `${PUNCH_LABELS[r.kind]} ${timeLabel(r.time)} `;
+    const what = requestWhatLabel(r);
     say("ok", `${current.person.name}さん　${shortDateLabel(r.date)}の${what}の申し出を受け付けました（担当者が確かめます）`, {
       target: "request",
       id,
@@ -333,7 +332,6 @@ export default function Kiosk(props: Props) {
         <RequestDialog
           name={current.person.name}
           now={now}
-          kinds={kinds}
           onSubmit={submitRequest}
           onCancel={() => { lastAction.current = Date.now(); setRequestOpen(false); }}
         />

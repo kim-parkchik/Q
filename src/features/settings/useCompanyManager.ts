@@ -12,7 +12,10 @@ import { fetchAddressByZip } from "../../utils/addressUtils";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import type { TaxCalcMethod } from "../../utils/incomeTax";
-import { toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection } from "../../utils/calcSalary";
+import {
+    toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod,
+    type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection, type TardyDeductionMethod,
+} from "../../utils/calcSalary";
 import { parseFixedBreak, stringifyFixedBreak, type FixedBreakRule } from "../../utils/fixedBreak";
 
 interface UseCompanyManagerArgs {
@@ -46,6 +49,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [weekStartDay, setWeekStartDay] = useState(0);
     // 中小企業か（2023年3月までの月60時間超の割増率の猶予に使う）
     const [isSmallBusiness, setIsSmallBusiness] = useState(false);
+    // 時間単位の有給を使う（労使協定を結んでいる。労働基準法39条4項）
+    const [hourlyLeave, setHourlyLeave] = useState(false);
     const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
     const [originalWeekStartDay, setOriginalWeekStartDay] = useState(0);
     const [isSearchingComp, setIsSearchingComp] = useState(false);
@@ -60,6 +65,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgSocialInsCollection, setPgSocialInsCollection] = useState<SocialInsCollection>("current"); // 社会保険料の徴収（当月・翌月）
     const [pgProrationMethod, setPgProrationMethod] = useState<ProrationMethod>("none"); // 途中入社・退職の日割り
     const [pgAbsenceDeductionMethod, setPgAbsenceDeductionMethod] = useState<AbsenceDeductionMethod>("workdays"); // 月給制の人の欠勤控除
+    const [pgTardyDeductionMethod, setPgTardyDeductionMethod] = useState<TardyDeductionMethod>("none"); // 月給制・日給制の人の遅刻・早退・中抜けの控除
     const [pgFixedBreak, setPgFixedBreak] = useState<FixedBreakRule | null>(null); // 決まった休憩（null は使わない。utils/fixedBreak.ts）
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
@@ -209,6 +215,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setWeekStartDay(c.week_start_day ?? 0); // 👈 0（日曜）をデフォルトに
                 setOriginalWeekStartDay(c.week_start_day); // 👈 保存用に「元の値」を記憶
                 setIsSmallBusiness(Number(c.is_small_business) === 1);
+                setHourlyLeave(Number(c.hourly_leave) === 1);
                 setCompHealth(c.health_ins_num || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
@@ -231,6 +238,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                     compHealth: c.health_ins_num || "", compLabor: c.labor_ins_num || "",
                     weekStartDay: c.week_start_day ?? 0, headPref: head?.prefecture || "",
                     isSmallBusiness: Number(c.is_small_business) === 1 ? 1 : 0,
+                    hourlyLeave: Number(c.hourly_leave) === 1 ? 1 : 0,
                 });
                 setSavedRounding({
                     roundOvertime: c.round_overtime || "round",
@@ -291,13 +299,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                     name = ?, zip_code = ?, address = ?, phone = ?, corporate_number = ?, representative = ?,
                     health_ins_num = ?, labor_ins_num = ?,
                     round_overtime = ?, round_social_ins = ?, round_emp_ins = ?, week_start_day = ?,
-                    is_small_business = ?
+                    is_small_business = ?, hourly_leave = ?
                 WHERE id = 1`,
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
                     compHealth, compLabor, 
                     roundOvertime, roundSocialIns, roundEmpIns, weekStartDay,
-                    isSmallBusiness ? 1 : 0
+                    isSmallBusiness ? 1 : 0,
+                    hourlyLeave ? 1 : 0
                 ]
             );
             await db.execute(
@@ -338,6 +347,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgSocialInsCollection(toSocialInsCollection(pg.social_ins_collection));
         setPgProrationMethod(toProrationMethod(pg.proration_method));
         setPgAbsenceDeductionMethod(toAbsenceDeductionMethod(pg.absence_deduction_method));
+        setPgTardyDeductionMethod(toTardyDeductionMethod(pg.tardy_deduction_method));
         setPgFixedBreak(parseFixedBreak(pg.fixed_break));
     };
 
@@ -352,6 +362,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgSocialInsCollection("current");
         setPgProrationMethod("none");
         setPgAbsenceDeductionMethod("workdays");
+        setPgTardyDeductionMethod("none");
         setPgFixedBreak(null);
     };
 
@@ -519,14 +530,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=?, fixed_break=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, fixedBreak || null, editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method, fixed_break) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, fixedBreak || null]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method, tardy_deduction_method, fixed_break) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null]
                 );
             }
             resetPgForm();
@@ -770,6 +781,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         compName, compZip, compAddr, compPhone, compNum, compRep,
         compHealth, compLabor, weekStartDay, headPref,
         isSmallBusiness: isSmallBusiness ? 1 : 0,
+        hourlyLeave: hourlyLeave ? 1 : 0,
     };
     const isInfoDirty = savedInfo === null || Object.keys(currentInfo).some((k) => currentInfo[k] !== savedInfo[k]);
     const isRoundingDirty = savedRounding === null
@@ -816,6 +828,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setIsWeekStartEditable,
         isSmallBusiness,
         setIsSmallBusiness,
+        hourlyLeave,
+        setHourlyLeave,
         originalWeekStartDay,
         setOriginalWeekStartDay,
         isSearchingComp,
@@ -837,6 +851,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgProrationMethod,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
+        pgTardyDeductionMethod,
+        setPgTardyDeductionMethod,
         pgFixedBreak,
         setPgFixedBreak,
         setPgPaymentDay,

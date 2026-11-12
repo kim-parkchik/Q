@@ -79,6 +79,15 @@ export default function SummaryBoard({ am }: Props) {
           </div>
         )}
 
+        {calcResult && (calcResult as any).tardyDeduction > 0 && (
+          <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
+            <div style={{ fontSize: "12px", color: "#ff7675" }}>遅刻・早退・中抜け</div>
+            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#ff7675" }}>
+              -¥{(calcResult as any).tardyDeduction.toLocaleString()}
+            </div>
+          </div>
+        )}
+
         <div style={{ borderLeft: "1px solid #7f8c8d", paddingLeft: "20px", textAlign: "right", marginLeft: "auto" }}>
           <div style={{ fontSize: "12px", color: "#2ecc71" }}>
             <Banknote size={14} style={{ verticalAlign: "middle", marginRight: "4px" }} /> 
@@ -87,7 +96,7 @@ export default function SummaryBoard({ am }: Props) {
           <div style={{ fontSize: "28px", fontWeight: "bold", color: "#2ecc71" }}>
             ¥{(calcResult?.totalEarnings ?? 0).toLocaleString()}
           </div>
-          <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・手当・欠勤控除を反映済</div>
+          <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・手当・欠勤控除・遅刻早退控除を反映済</div>
         </div>
       </div>
     </>

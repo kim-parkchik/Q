@@ -265,6 +265,43 @@ export const summarizePaidLeave = (
   };
 };
 
+/** 時間単位の有給の、付与の年（年次有給休暇の付与日から1年）ごとの合計 */
+export interface HourlyLeaveYear {
+  /** 付与の年の初めの日（付与日）と終わりの日 */
+  from: string;
+  to: string;
+  /** その年に時間単位で取った有給（分） */
+  minutes: number;
+  /** 上限（分。5日 × 1日の時間数） */
+  limitMinutes: number;
+  over: boolean;
+}
+
+/**
+ * 時間単位の有給を、付与の年ごとに数える（労働基準法39条4項：時間単位で与えられるのは、1年に5日分まで。
+ * 前の年から繰り越した分も含めて5日まで）。付与の年は、年次有給休暇の付与日から1年（次の付与日がそれより早ければ、その前の日まで）。
+ * 付与を登録していない人は数えない（空の一覧）。
+ * @param maxDays 1年の上限の日数（constants の ANNUAL_PAID_LEAVE_MAX_DAYS）
+ */
+export const hourlyLeaveByGrantYear = (
+  grants: LeaveGrantRow[],
+  taken: Pick<LeaveTaken, "date" | "hours">[],
+  hoursPerDay: number,
+  maxDays: number,
+): HourlyLeaveYear[] => {
+  const starts = [...new Set(grants.filter(isAnnualLeaveGrant).map((g) => g.grant_date).filter((d) => dayjs(d).isValid()))].sort();
+  const limitMinutes = maxDays * hoursPerDay * 60;
+  return starts.map((from, i) => {
+    const yearEnd = dayjs(from).add(1, "year").subtract(1, "day").format("YYYY-MM-DD");
+    const next = starts[i + 1];
+    const to = next && next <= yearEnd ? dayjs(next).subtract(1, "day").format("YYYY-MM-DD") : yearEnd;
+    const minutes = taken
+      .filter((t) => t.date >= from && t.date <= to)
+      .reduce((sum, t) => sum + Math.round((Number(t.hours) || 0) * 60), 0);
+    return { from, to, minutes, limitMinutes, over: minutes > limitMinutes };
+  });
+};
+
 const formatTime = (minutes: number): string => {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;

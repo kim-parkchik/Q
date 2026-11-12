@@ -1,14 +1,19 @@
 /**
- * 日ごとの勤怠入力表（出退勤・休憩・外出・勤務区分・確定）
+ * 日ごとの勤怠入力表（出退勤・休憩・勤務区分・時間有給・確定）
  * （AttendanceManager.tsx から分割）
+ *
+ * 休憩は1日に何回でも入れられる（utils/breaks.ts）。表には1回目だけを出し、2回目からは「休憩の一覧」の画面で入れる
+ * （フォームの形を崩さないため）。私用の外出・中抜けも休憩として入れる。
  */
-import { Fragment } from "react";
-import { Check, CheckCircle, AlertCircle, Undo2 } from 'lucide-react';
+import { Fragment, useState } from "react";
+import { Check, CheckCircle, AlertCircle, Undo2, ListPlus } from 'lucide-react';
 import dayjs from "dayjs";
 import { S } from '../AttendanceManager.styles';
 import TimeInputPair from './TimeInputPair';
+import BreakListDialog from './BreakListDialog';
 import type { AttendanceViewModel } from './types';
 import { durationLabel } from '../../../utils/fixedBreak';
+import { effectiveBreaks, isCompleteSpan, spanLabel, type BreakSpan } from '../../../utils/breaks';
 
 interface Props {
   am: AttendanceViewModel;
@@ -16,6 +21,16 @@ interface Props {
 
 /** 欠勤の日（出退勤・休憩を入れない） */
 const isAbsentRow = (rowData: any) => (rowData.workType || "normal") === "absent";
+
+/** 休憩の長さ（分。始めと終わりがそろっているものだけ） */
+const spanMinutes = (b: BreakSpan) => {
+  if (!isCompleteSpan(b)) return 0;
+  const [sh, sm] = b.start.split(":").map(Number);
+  const [eh, em] = b.end.split(":").map(Number);
+  const s = sh * 60 + sm;
+  const e = eh * 60 + em;
+  return e < s ? e + 1440 - s : e - s;
+};
 
 export default function AttendanceTable({ am }: Props) {
   const {
@@ -30,9 +45,48 @@ export default function AttendanceTable({ am }: Props) {
     unfinalizeAttendance,
     fixedBreakRule,
     breakInfo,
+    hourlyLeaveEnabled,
   } = am;
+  // 休憩の一覧の画面を開いている日
+  const [breakDialogDate, setBreakDialogDate] = useState<string | null>(null);
+
+  /** 休憩の一覧を変える（時間有給の印を付けた中抜けがあれば、時間有給の時間を1時間単位で切り上げて足りるようにする） */
+  const changeBreaks = (dateStr: string, list: BreakSpan[] | null) => {
+    handleCellChange(dateStr, 'breaks', list);
+    const leave = (list ?? []).filter(b => b.leave).reduce((a, b) => a + spanMinutes(b), 0);
+    const need = Math.ceil(leave / 60);
+    const current = Number(monthlyWorkData[dateStr]?.paidHours) || 0;
+    if (need > current) handleCellChange(dateStr, 'paidHours', need);
+  };
+
+  /** 表の1回目の休憩を直す（手で直すと、その日は手入力の一覧を使う） */
+  const changeFirstBreak = (dateStr: string, field: "start" | "end", value: string) => {
+    const v = value === ":" ? "" : value;
+    const rowData = monthlyWorkData[dateStr] || {};
+    const manual: BreakSpan[] | null = rowData.breaks ?? null;
+    if (manual === null && v === "") return; // 打刻のままで、何も入れていない
+    const list = [...(manual ?? rowData.csvBreaks ?? [])];
+    const first = list[0] ?? { start: "", end: "" };
+    if ((first[field] ?? "") === v && manual !== null) return;
+    list[0] = { ...first, [field]: v };
+    changeBreaks(dateStr, list.filter((b, i) => i > 0 || b.start || b.end));
+  };
+
+  const dialogRow = breakDialogDate ? (monthlyWorkData[breakDialogDate] || {}) : null;
 
   return (
+    <>
+    {breakDialogDate && dialogRow && (
+      <BreakListDialog
+        dateLabel={dayjs(breakDialogDate).format("M月D日（ddd）")}
+        punched={dialogRow.csvBreaks ?? []}
+        manual={dialogRow.breaks ?? null}
+        hourlyLeave={hourlyLeaveEnabled}
+        disabled={dialogRow.is_finalized === 1 || isClosed || isAbsentRow(dialogRow)}
+        onChange={(list) => changeBreaks(breakDialogDate, list)}
+        onClose={() => setBreakDialogDate(null)}
+      />
+    )}
     <table style={{ 
       width: "100%", 
       borderCollapse: "collapse",
@@ -46,8 +100,7 @@ export default function AttendanceTable({ am }: Props) {
           <th style={{ ...S.th, paddingRight: "20px" }}>退勤</th>
           <th style={S.th}>休憩(始)</th>
           <th style={{ ...S.th, paddingRight: "20px" }}>休憩(終)</th>
-          <th style={S.th}>外出</th>
-          <th style={{ ...S.th, paddingRight: "2px" }}>戻り</th>
+          <th style={{ ...S.th, paddingRight: "2px" }}>休憩の一覧</th>
           {/* 🆕 独立した時間有給列 */}
           <th style={{ ...S.th, width: "60x", color: "#3498db" }}>時間有給</th>
           
@@ -67,12 +120,11 @@ export default function AttendanceTable({ am }: Props) {
           const row = {
             in: rowData.in || "",
             out: rowData.out || "",
-            bStart: rowData.bStart || "",
-            bEnd: rowData.bEnd || "",
-            outTime: rowData.outTime || "",
-            returnTime: rowData.returnTime || "",
             workType: rowData.workType || "normal",
             paidHours: rowData.paidHours || 0,
+            // 休憩：手入力の一覧（null なら打刻）と打刻の一覧。表には1回目を出す
+            manualBreaks: (rowData.breaks ?? null) as BreakSpan[] | null,
+            punchedBreaks: (rowData.csvBreaks ?? []) as BreakSpan[],
             memo: rowData.memo || "",
             isFinalized: rowData.is_finalized === 1,
             savedHours: Number(rowData.savedHours) || 0,
@@ -87,7 +139,10 @@ export default function AttendanceTable({ am }: Props) {
           const brk = breakInfo[dateStr] as (typeof breakInfo)[string] | undefined; // 出勤・退勤が入っていない日はない
           const breakNone = !!rowData.breakNone;
           // 「休憩なし」の印：決まった休憩を使う人の、出勤・退勤が入っている日（前に付けた印は、いつでも外せる）
-          const showBreakNone = ((!!fixedBreakRule && !!brk) || breakNone) && !isAbsentRow(rowData);
+          const showBreakNone = ((!!fixedBreakRule && !!brk && brk.workMinutes > 0) || breakNone) && !isAbsentRow(rowData);
+          // 時間有給にした中抜けより、時間有給の時間が少ない（1時間単位で切り上げた時間が要る）
+          const leaveNeedHours = Math.ceil((brk?.leaveMinutes ?? 0) / 60);
+          const leaveShort = leaveNeedHours > (Number(rowData.paidHours) || 0);
 
           // --- 2. 矛盾チェック（エラーメッセージ） ---
           let timeErrorMsg = "";
@@ -213,28 +268,29 @@ export default function AttendanceTable({ am }: Props) {
                 </td>
                 <td style={{ ...S.tdTight, color: "#94a3b8" }}>
                   <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(休始)</span>
-                  <span style={{ fontSize: "11px" }}>{rowData.csv_break_start || "--:--"}</span>
+                  <span style={{ fontSize: "11px" }}>{row.punchedBreaks[0]?.start || "--:--"}</span>
                 </td>
                 <td style={{ ...S.tdSpacer, color: "#94a3b8" }}>
                   <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(休終)</span>
-                  <span style={{ fontSize: "11px" }}>{rowData.csv_break_end || "--:--"}</span>
+                  <span style={{ fontSize: "11px" }}>{row.punchedBreaks[0]?.end || "--:--"}</span>
                 </td>
-                <td style={{ ...S.tdTight, color: "#94a3b8" }}>
-                  <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(外)</span>
-                  <span style={{ fontSize: "11px" }}>{rowData.csv_out_time || "--:--"}</span>
-                </td>
-                <td style={{ ...S.tdSpacer, color: "#94a3b8" }}>
-                  <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(戻)</span>
-                  <span style={{ fontSize: "11px" }}>{rowData.csv_return_time || "--:--"}</span>
+                <td style={{ ...S.tdSpacer, color: "#94a3b8", paddingRight: "2px" }}>
+                  <span style={{ fontSize: "9px", display: "block", color: "#bdc3c7" }}>打刻(ほか)</span>
+                  <span style={{ fontSize: "11px" }} title={row.punchedBreaks.slice(1).map(spanLabel).join("、")}>
+                    {row.punchedBreaks.length > 1 ? `${row.punchedBreaks.length - 1}回` : "--"}
+                  </span>
                 </td>
 
-                {/* --- 3. 時間有給列 --- */}
+                {/* --- 3. 時間有給列（会社の設定で時間単位の有給を使うときだけ入れられる） --- */}
                 <td rowSpan={3} style={{ 
                   borderLeft: "1px solid #eee", 
                   textAlign: "center", 
                   verticalAlign: "middle",
                   backgroundColor: (row.workType === "paid_full" || isAbsent) ? "#f9f9f9" : rowBgColor 
                 }}>
+                  {!hourlyLeaveEnabled && !(Number(row.paidHours) > 0) ? (
+                    <span style={{ fontSize: "10px", color: "#cbd5e1" }} title="時間単位の有給は、会社の設定で「使う」にしたときに入れられます">—</span>
+                  ) : (<>
                   <span style={{ 
                     fontSize: "10px", 
                     // ラベルも確定時は少し緑に寄せると統一感が出ます
@@ -266,7 +322,7 @@ export default function AttendanceTable({ am }: Props) {
                         opacity: 1, // ブラウザの無効化スタイルを上書き
                         WebkitTextFillColor: isFinalized ? "#27ae60" : undefined // iOS対策
                       }} 
-                      disabled={isFinalized || isClosed} 
+                      disabled={isFinalized || isClosed || !hourlyLeaveEnabled} 
                     />
                     <span style={{ 
                       fontSize: "10px", 
@@ -277,6 +333,10 @@ export default function AttendanceTable({ am }: Props) {
                       h
                     </span>
                   </div>
+                  {!hourlyLeaveEnabled && (
+                    <span style={{ fontSize: "9px", color: "#b45309", display: "block" }}>会社の設定で使わない</span>
+                  )}
+                  </>)}
                 </td>
 
                 {/* --- 4. 実働 / 確定エリア (rowSpan=3 で統合) --- */}
@@ -336,10 +396,32 @@ export default function AttendanceTable({ am }: Props) {
               }}>
                 <td style={S.tdTight}><TimeInputPair value={isAbsent ? ":" : row.in} onChange={val => handleCellChange(dateStr, 'in', val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
                 <td style={S.tdSpacer}><TimeInputPair value={isAbsent ? ":" : row.out} onChange={val => handleCellChange(dateStr, 'out', val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
-                <td style={S.tdTight}><TimeInputPair value={isAbsent ? ":" : row.bStart} onChange={val => handleCellChange(dateStr, 'bStart', val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
-                <td style={S.tdSpacer}><TimeInputPair value={isAbsent ? ":" : row.bEnd} onChange={val => handleCellChange(dateStr, 'bEnd', val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
-                <td style={S.tdTight}><TimeInputPair value={isAbsent ? ":" : row.outTime} onChange={val => handleCellChange(dateStr, 'outTime', val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
-                <td style={{ ...S.tdSpacer, paddingRight: "2px" }}><TimeInputPair value={isAbsent ? ":" : row.returnTime} onChange={val => handleCellChange(dateStr, 'returnTime', val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
+                <td style={S.tdTight}><TimeInputPair value={isAbsent ? ":" : (row.manualBreaks?.[0]?.start ?? "")} onChange={val => changeFirstBreak(dateStr, "start", val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
+                <td style={S.tdSpacer}><TimeInputPair value={isAbsent ? ":" : (row.manualBreaks?.[0]?.end ?? "")} onChange={val => changeFirstBreak(dateStr, "end", val)} disabled={isFinalized || isClosed || isAbsent} isFinalized={isFinalized} /></td>
+                <td style={{ ...S.tdSpacer, paddingRight: "2px" }}>
+                  {(() => {
+                    const list = effectiveBreaks(row.manualBreaks, row.punchedBreaks);
+                    const others = list.slice(1);
+                    const leave = list.filter(b => b.leave).reduce((a, b) => a + spanMinutes(b), 0);
+                    const otherRest = others.filter(b => !b.leave).reduce((a, b) => a + spanMinutes(b), 0);
+                    return (
+                      <button
+                        onClick={() => setBreakDialogDate(dateStr)}
+                        disabled={isAbsent}
+                        title={list.length > 0 ? list.map(b => `${spanLabel(b)}${b.leave ? "（時間有給）" : ""}`).join("、") : "休憩を足す・直す"}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 3, fontSize: "11px", padding: "3px 6px", borderRadius: 4,
+                          border: "1px solid #cbd5e1", background: "#fff", color: others.length > 0 || leave > 0 ? "#1d4ed8" : "#64748b",
+                          cursor: isAbsent ? "default" : "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        <ListPlus size={12} />
+                        {others.length > 0 ? `ほか${others.length}回${otherRest > 0 ? `（${durationLabel(otherRest)}）` : ""}` : (isFinalized || isClosed ? "一覧" : "足す")}
+                        {leave > 0 && <span style={{ color: "#2563eb" }}>・有給{durationLabel(leave)}</span>}
+                      </button>
+                    );
+                  })()}
+                </td>
               </tr>
 
               <tr style={{ 
@@ -347,7 +429,7 @@ export default function AttendanceTable({ am }: Props) {
                 borderBottom: "1px solid #eee",
                 borderLeft: borderLeftStyle
               }}>
-                <td colSpan={6} style={{ padding: "6px 12px", pointerEvents: "auto" }}>
+                <td colSpan={5} style={{ padding: "6px 12px", pointerEvents: "auto" }}>
                   <div style={S.memoContainer}>
                     <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: "bold", whiteSpace: "nowrap", flexShrink: 0 }}>
                       備考：
@@ -362,7 +444,7 @@ export default function AttendanceTable({ am }: Props) {
                     />
                   </div>
                   {/* 休憩：決まった休憩・「休憩なし」・労働基準法34条の休憩に足りない日 */}
-                  {(brk?.autoBreak || brk?.notice || (brk?.shortage ?? 0) > 0 || showBreakNone) && (
+                  {(brk?.autoBreak || brk?.notice || (brk?.shortage ?? 0) > 0 || showBreakNone || leaveShort) && (
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 12px", marginTop: "4px", fontSize: "11px" }}>
                       {showBreakNone && (
                         <label style={{ display: "flex", alignItems: "center", gap: "3px", color: "#475569", cursor: isFinalized || isClosed ? "default" : "pointer" }}
@@ -378,6 +460,11 @@ export default function AttendanceTable({ am }: Props) {
                         </span>
                       )}
                       {brk?.notice && <span style={{ color: "#b45309" }}>⚠ {brk.notice}</span>}
+                      {leaveShort && (
+                        <span style={{ color: "#b45309" }}>
+                          ⚠ 時間有給にした中抜け（{durationLabel(brk!.leaveMinutes)}）より、時間有給（{Number(rowData.paidHours) || 0}時間）が少ない（{leaveNeedHours}時間が要ります）
+                        </span>
+                      )}
                       {(brk?.shortage ?? 0) > 0 && (
                         <span style={{ color: "#b91c1c" }}>
                           ⚠ 休憩が足りません（労働時間{durationLabel(brk!.workMinutes)}には、休憩{brk!.workMinutes > 480 ? "1時間" : "45分"}以上。
@@ -393,5 +480,6 @@ export default function AttendanceTable({ am }: Props) {
         })}
       </tbody>
     </table>
+    </>
   );
 }

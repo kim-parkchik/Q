@@ -436,7 +436,7 @@ function RequestView(props: {
   now: number;
   busy: boolean;
   notice: ReactNode;
-  onSubmit: (input: { date: string; kind: RequestKind; time: string; reason: string; note: string }) => void;
+  onSubmit: (input: { date: string; kind: RequestKind; time: string; endTime: string; reason: string; note: string }) => void;
   onCancel: () => void;
 }) {
   const today = jstDate(props.now);
@@ -446,21 +446,46 @@ function RequestView(props: {
   const [kind, setKind] = useState<RequestKind | null>(null);
   const [hour, setHour] = useState(pad2(start.hour));
   const [minute, setMinute] = useState(pad2(start.minute));
+  const [endHour, setEndHour] = useState(pad2(start.hour));
+  const [endMinute, setEndMinute] = useState(pad2(start.minute));
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const noBreak = kind === "no_break";
+  const isBreak = kind === "break";
   const time = `${hour}:${minute}`;
-  const future = !noBreak && jstMs(date, time) > props.now;
+  const endTime = `${endHour}:${endMinute}`;
+  const sameTimes = isBreak && time === endTime;
+  // これからの時刻は申し出られない（休憩は終わりの時刻で見る。終わりが始めより前なら次の日の時刻）
+  const endDate = isBreak && endTime < time ? addDays(date, 1) : date;
+  const future = !noBreak && (isBreak ? jstMs(endDate, endTime) : jstMs(date, time)) > props.now;
   const needNote = !noBreak && reason === "そのほか" && note.trim() === "";
-  const ready = kind !== null && (noBreak || reason !== "") && !future && !needNote && !props.busy;
+  const ready = kind !== null && (noBreak || reason !== "") && !future && !sameTimes && !needNote && !props.busy;
   const submit = () => {
     if (!ready || kind === null) return;
-    props.onSubmit(noBreak ? { date, kind, time: "", reason: NO_BREAK_LABEL, note } : { date, kind, time, reason, note });
+    props.onSubmit(
+      noBreak ? { date, kind, time: "", endTime: "", reason: NO_BREAK_LABEL, note } : { date, kind, time, endTime: isBreak ? endTime : "", reason, note }
+    );
   };
+  const timeSelect = (id: string, h: string, m: string, onH: (v: string) => void, onM: (v: string) => void) => (
+    <>
+      <select id={id} value={h} onChange={(e) => onH(e.target.value)}>
+        {Array.from({ length: 24 }, (_, x) => pad2(x)).map((x) => <option key={x} value={x}>{Number(x)}時</option>)}
+      </select>{" "}
+      <select aria-label="分" value={m} onChange={(e) => onM(e.target.value)}>
+        {Array.from({ length: 60 }, (_, x) => pad2(x)).map((x) => <option key={x} value={x}>{x}分</option>)}
+      </select>
+    </>
+  );
+  const kinds: { kind: RequestKind; label: string }[] = [
+    { kind: "entry", label: PUNCH_LABELS.entry },
+    { kind: "exit", label: PUNCH_LABELS.exit },
+    { kind: "break", label: "休憩（中抜けも）" },
+    { kind: "no_break", label: NO_BREAK_LABEL },
+  ];
   return (
     <div className="w-card">
       <h1>押し忘れを申し出る</h1>
-      <p>押し忘れた・押し間違えた時刻や、休憩を取れなかった日を、担当者に伝えます。押した打刻は消えません。担当者が確かめてから直します。</p>
+      <p>押し忘れた・押し間違えた時刻や、休憩・中抜け、休憩を取れなかった日を、担当者に伝えます。押した打刻は消えません。担当者が確かめてから直します。</p>
       {props.notice}
       <div className="w-field">
         <label htmlFor="req-date">日</label>
@@ -476,26 +501,31 @@ function RequestView(props: {
       <div className="w-field">
         <label>種類</label>
         <div className="w-choice">
-          {props.home.kinds.map((k) => (
-            <button key={k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{PUNCH_LABELS[k]}</button>
+          {kinds.map((k) => (
+            <button key={k.kind} className={kind === k.kind ? "on" : ""} onClick={() => setKind(k.kind)}>{k.label}</button>
           ))}
-          <button className={noBreak ? "on" : ""} onClick={() => setKind("no_break")}>{NO_BREAK_LABEL}</button>
         </div>
       </div>
       {noBreak ? (
         <p className="w-muted">その日は休憩を取れなかったことを伝えます（時刻はいりません）。担当者が確かめて、休憩を引かずに計算します。</p>
       ) : (
         <>
-          <div className="w-field">
-            <label htmlFor="req-hour">時刻</label>
-            <select id="req-hour" value={hour} onChange={(e) => setHour(e.target.value)}>
-              {Array.from({ length: 24 }, (_, h) => pad2(h)).map((h) => <option key={h} value={h}>{Number(h)}時</option>)}
-            </select>{" "}
-            <select aria-label="分" value={minute} onChange={(e) => setMinute(e.target.value)}>
-              {Array.from({ length: 60 }, (_, m) => pad2(m)).map((m) => <option key={m} value={m}>{m}分</option>)}
-            </select>
-            {future && <div className="w-error">これからの時刻は申し出られません。</div>}
-          </div>
+          {isBreak ? (
+            <div className="w-field">
+              <label htmlFor="req-hour">休憩の始めと終わり</label>
+              {timeSelect("req-hour", hour, minute, setHour, setMinute)}
+              <span style={{ margin: "0 8px" }}>〜</span>
+              {timeSelect("req-end-hour", endHour, endMinute, setEndHour, setEndMinute)}
+              <div className="w-muted">私用で仕事を抜けた時間（中抜け）も、休憩として申し出ます。</div>
+              {sameTimes && <div className="w-error">始めと終わりが同じです。</div>}
+            </div>
+          ) : (
+            <div className="w-field">
+              <label htmlFor="req-hour">時刻</label>
+              {timeSelect("req-hour", hour, minute, setHour, setMinute)}
+            </div>
+          )}
+          {future && <div className="w-error">これからの時刻は申し出られません。</div>}
           <div className="w-field">
             <label>理由</label>
             <div className="w-choice">
@@ -508,7 +538,7 @@ function RequestView(props: {
       )}
       <div className="w-field">
         <label htmlFor="req-note">{noBreak ? "わけ（なくてもよい）" : `ひとこと${reason === "そのほか" ? "（書いてください）" : "（なくてもよい）"}`}</label>
-        <input id="req-note" value={note} maxLength={100} onChange={(e) => setNote(e.target.value)} placeholder={noBreak ? "たとえば：来客が続いて取れなかった" : "たとえば：会議が長引いて、押すのを忘れた"} />
+        <input id="req-note" value={note} maxLength={100} onChange={(e) => setNote(e.target.value)} placeholder={noBreak ? "たとえば：来客が続いて取れなかった" : isBreak ? "たとえば：病院へ行った" : "たとえば：会議が長引いて、押すのを忘れた"} />
       </div>
       <div className="w-actions">
         <button className="w-btn plain" onClick={props.onCancel}>やめる</button>
@@ -540,7 +570,7 @@ function RecordsView(props: { now: number; ask: <T>(action: string, body?: objec
     props.ask<WebRecords>("records", { month }).then(setData).catch((e) => setError(errorText(e)));
   }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const span = (a: string, b: string) => (a || b ? `${a ? timeLabel(a) : "?"}〜${b ? timeLabel(b) : "?"}` : "");
+  const span = (s: { start: string; end: string }) => `${s.start ? timeLabel(s.start) : "?"}〜${s.end ? timeLabel(s.end) : "?"}`;
   return (
     <div className="w-card">
       <h1>自分の記録</h1>
@@ -560,20 +590,20 @@ function RecordsView(props: { now: number; ask: <T>(action: string, body?: objec
           <div className="w-table-wrap">
             <table className="w-table">
               <thead>
-                <tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>外出</th><th>申し出</th><th>注意</th></tr>
+                <tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>申し出</th><th>注意</th></tr>
               </thead>
               <tbody>
-                {data.rows.length === 0 && <tr><td colSpan={7} className="w-muted">この月の打刻・申し出はありません。</td></tr>}
+                {data.rows.length === 0 && <tr><td colSpan={6} className="w-muted">この月の打刻・申し出はありません。</td></tr>}
                 {data.rows.map((r) => (
                   <tr key={r.date}>
                     <td className="w-nowrap">{jstDateLabel(jstMs(r.date, "12:00"))}</td>
                     <td>{timeLabel(r.times.entry)}</td>
                     <td>{timeLabel(r.times.exit)}</td>
-                    <td className="w-nowrap">{span(r.times.break_start, r.times.break_end)}</td>
-                    <td className="w-nowrap">{span(r.times.out, r.times.return)}</td>
+                    <td>{r.breaks.map(span).join("、")}</td>
                     <td>
                       {[
                         ...(Object.entries(r.requests) as [PunchKind, string][]).map(([k, t]) => `${PUNCH_LABELS[k]} ${timeLabel(t)}`),
+                        ...r.requestBreaks.map((s) => `休憩 ${span(s)}`),
                         ...(r.noBreakRequest ? [NO_BREAK_LABEL] : []),
                       ].join("・")}
                     </td>
@@ -595,7 +625,7 @@ function RecordsView(props: { now: number; ask: <T>(action: string, body?: objec
                         <td className="w-nowrap">{shortDateLabel(jstDate(r.requestedAt))} {timeLabel(jstTime(r.requestedAt))}</td>
                         <td className="w-nowrap">{shortDateLabel(r.date)}</td>
                         <td>{requestKindLabel(r.kind)}</td>
-                        <td>{r.time ? timeLabel(r.time) : ""}</td>
+                        <td>{r.kind === "break" ? span({ start: r.time, end: r.endTime }) : r.time ? timeLabel(r.time) : ""}</td>
                         <td>{r.reason}{r.note ? `（${r.note}）` : ""}</td>
                       </tr>
                     ))}

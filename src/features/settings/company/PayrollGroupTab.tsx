@@ -26,10 +26,14 @@ import {
 import type { CompanyManagerState } from '../useCompanyManager';
 import { TAX_CALC_METHOD_LABELS, type TaxCalcMethod } from '../../../utils/incomeTax';
 import {
-    ABSENCE_DEDUCTION_METHOD_LABELS, PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection,
-    type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection,
+    ABSENCE_DEDUCTION_METHOD_LABELS, PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, TARDY_DEDUCTION_METHOD_LABELS,
+    toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod,
+    type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection, type TardyDeductionMethod,
 } from '../../../utils/calcSalary';
-import { DEFAULT_LENGTH_RULES, describeFixedBreak, parseFixedBreak, type LengthRule } from '../../../utils/fixedBreak';
+import {
+    DEFAULT_LENGTH_RULES, LENGTH_COMBINE_LABELS, TIME_COMBINE_LABELS, describeCombine, describeFixedBreak, parseFixedBreak,
+    type LengthCombine, type LengthRule, type TimeCombine,
+} from '../../../utils/fixedBreak';
 
 interface Props {
     cm: CompanyManagerState;
@@ -54,6 +58,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgProrationMethod,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
+        pgTardyDeductionMethod,
+        setPgTardyDeductionMethod,
         pgFixedBreak,
         setPgFixedBreak,
         editingPgId,
@@ -96,7 +102,8 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                         / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
                                         / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
-                                        / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}
+                                        / 遅刻・早退・中抜け: {TARDY_DEDUCTION_METHOD_LABELS[toTardyDeductionMethod(pg.tardy_deduction_method)]}
+                                        / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}{parseFixedBreak(pg.fixed_break) ? `（${describeCombine(parseFixedBreak(pg.fixed_break))}）` : ""}
                                     </span>
                                 </div>
                             </div>
@@ -254,20 +261,38 @@ export default function PayrollGroupTab({ cm }: Props) {
                         欠勤控除をした月の算定・月変の支払基礎日数は、計算期間の所定労働日数から欠勤日数を引いた日数になります（完全月給制は暦日数）。
                     </p>
 
-                    <label style={miniLabelStyle}>決まった休憩（休憩の時刻が入っていない日に引く）</label>
+                    <label style={miniLabelStyle}>月給制・日給制の人の遅刻・早退・中抜けの控除</label>
+                    <select
+                        value={pgTardyDeductionMethod}
+                        onChange={e => setPgTardyDeductionMethod(e.target.value as TardyDeductionMethod)}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="none">{TARDY_DEDUCTION_METHOD_LABELS.none}（遅刻・早退・中抜けがあっても、月給・日給を満額払う）</option>
+                        <option value="annual">{TARDY_DEDUCTION_METHOD_LABELS.annual}（月給 × 足りない時間 ÷（1年間の所定労働日数 × 1日の所定労働時間 ÷ 12））</option>
+                        <option value="period">{TARDY_DEDUCTION_METHOD_LABELS.period}（月給 × 足りない時間 ÷（計算期間の所定労働日数 × 1日の所定労働時間））</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        出勤・半休の日に、働いた時間と時間有給を合わせても、その日の所定労働時間に足りない時間（遅刻・早退・中抜け）の分を引きます。
+                        引くかどうか・引き方は法律では決まっていないので、会社の賃金規程（就業規則）に合わせて選んでください
+                        （厚生労働省のモデル就業規則（第45条）は、遅刻・早退・私用外出の時間分を基本給から引き、1時間あたりを「基本給 ÷ 1か月平均所定労働時間数」で出す形です）。
+                        日給制の人は、どちらを選んでも「日給 ÷ 1日の所定労働時間」で1時間あたりを出します。1円未満は切り捨て、引く額はその月の基本給（欠勤控除のあと）までです。
+                        引くのは基本給の分だけです。働いた時間がちょうど所定労働時間に足りない日でも、時間有給にした時間は働いたものとして数えます。
+                    </p>
+
+                    <label style={miniLabelStyle}>決まった休憩（勤怠を確定するときに引く休憩）</label>
                     <select
                         value={pgFixedBreak?.mode ?? "none"}
                         onChange={e => {
                             const v = e.target.value;
                             setPgFixedBreak(
-                                v === "time" ? { mode: "time", start: "12:00", end: "13:00" }
-                                : v === "length" ? { mode: "length", rules: DEFAULT_LENGTH_RULES.map(r => ({ ...r })) }
+                                v === "time" ? { mode: "time", start: "12:00", end: "13:00", combine: "record" }
+                                : v === "length" ? { mode: "length", rules: DEFAULT_LENGTH_RULES.map(r => ({ ...r })), combine: "record" }
                                 : null
                             );
                         }}
                         style={{ ...inputStyle, marginBottom: "6px" }}
                     >
-                        <option value="none">使わない（休憩の時刻を入れた日だけ引く）</option>
+                        <option value="none">使わない（入れた休憩だけを引く）</option>
                         <option value="time">時刻で決める（例：12:00〜13:00）</option>
                         <option value="length">長さで決める（例：6時間を超えたら45分、8時間を超えたら60分）</option>
                     </select>
@@ -282,12 +307,12 @@ export default function PayrollGroupTab({ cm }: Props) {
                     )}
                     {pgFixedBreak?.mode === "length" && pgFixedBreak.rules.map((r, i) => {
                         const setRule = (patch: Partial<LengthRule>) =>
-                            setPgFixedBreak({ mode: "length", rules: pgFixedBreak.rules.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+                            setPgFixedBreak({ ...pgFixedBreak, rules: pgFixedBreak.rules.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
                         const num = (v: string, max: number) => Math.min(max, Math.max(0, Math.floor(Number(v) || 0)));
                         const small = { ...inputStyle, width: "56px", marginBottom: 0, textAlign: "right" as const };
                         return (
                             <div key={i} style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "6px", fontSize: "12px", flexWrap: "wrap" }}>
-                                <span>出勤から退勤まで（外出を除く）が</span>
+                                <span>出勤から退勤まで（時間有給にした中抜けを除く）が</span>
                                 <input type="number" min={0} max={23} value={Math.floor(r.overMinutes / 60)} style={small}
                                     onChange={e => setRule({ overMinutes: num(e.target.value, 23) * 60 + (r.overMinutes % 60) })} />
                                 <span>時間</span>
@@ -300,10 +325,31 @@ export default function PayrollGroupTab({ cm }: Props) {
                             </div>
                         );
                     })}
+                    {pgFixedBreak && (
+                        <>
+                            <label style={{ ...miniLabelStyle, marginTop: "4px" }}>打刻・手入力した休憩がある日の合わせ方</label>
+                            <select
+                                value={pgFixedBreak.combine}
+                                onChange={e => setPgFixedBreak(
+                                    pgFixedBreak.mode === "time"
+                                        ? { ...pgFixedBreak, combine: e.target.value as TimeCombine }
+                                        : { ...pgFixedBreak, combine: e.target.value as LengthCombine }
+                                )}
+                                style={{ ...inputStyle, marginBottom: "6px" }}
+                            >
+                                {pgFixedBreak.mode === "time"
+                                    ? (Object.keys(TIME_COMBINE_LABELS) as TimeCombine[]).map(k => <option key={k} value={k}>{TIME_COMBINE_LABELS[k]}</option>)
+                                    : (Object.keys(LENGTH_COMBINE_LABELS) as LengthCombine[]).map(k => <option key={k} value={k}>{LENGTH_COMBINE_LABELS[k]}</option>)}
+                            </select>
+                        </>
+                    )}
                     <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
-                        休憩を打刻しない会社や、打刻を忘れた日のために、休憩の時刻が入っていない日は、勤怠を確定するときにこの休憩を引きます。
-                        休憩の時刻を入れた日（手入力・打刻）は、その時刻を使います。休憩を取らなかった日は、勤怠の画面で「休憩なし」に印を付けます。
-                        時刻で決めると、出勤から退勤までの中にまるごと入る日だけ引きます（遅刻・早退などで途中にかかる日や、外出と重なる日は、引かずに知らせます）。
+                        休憩を打刻しない会社や、打刻を忘れた日のために、勤怠を確定するときにこの休憩を引きます。
+                        休憩は1日に何回でも入れられます（私用の外出・中抜けも休憩として入れます）。休憩を取らなかった日は、勤怠の画面で「休憩なし」に印を付けます。
+                        打刻・手入力した休憩がある日の合わせ方は、ジョブカンなどの勤怠ソフトと同じく選べます。「打刻を優先」は、その日に入れた休憩だけを引きます。
+                        「合わせて引く」（時刻で決めたとき）は、入れた休憩と決まった休憩の両方を引き、重なるところは1つにまとめます。
+                        「長いほう」「合算」（長さで決めたとき）は、入れた休憩と決まった休憩の長いほう、または両方を足した長さを引きます。
+                        時刻で決めると、出勤から退勤までの中にまるごと入る日だけ引きます（遅刻・早退などで途中にかかる日や、時間有給にした中抜けと重なる日は、引かずに知らせます）。
                         長さで決めると、時刻がわからないので、深夜（22時〜5時）の時間はできるだけ減らしません（深夜の割増を少なく数えないため）。
                         労働基準法34条では、労働時間が6時間を超えるときは45分以上、8時間を超えるときは1時間以上の休憩を、労働時間の途中に与えます。
                         就業規則の休憩時間に合わせてください。従業員ごとに、この休憩を使わないようにもできます（従業員の画面）。

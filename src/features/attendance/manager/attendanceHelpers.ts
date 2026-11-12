@@ -15,7 +15,8 @@ export const toMinutes = (t: string) => {
 
 // 入力があるかどうかの判定を共通化
 export const checkHasInput = (row: any) => {
-  const fields = [row.in, row.out, row.bStart, row.bEnd, row.outTime, row.returnTime];
-  // ":" 以外の文字が含まれているか、または有給・欠勤などのタイプが選択されているか
-  return fields.some(f => f && f !== ":" && f.trim() !== "") || row.workType !== "normal" || row.memo;
+  const fields = [row.in, row.out];
+  // ":" 以外の文字が含まれているか、休憩を手で入れたか、または有給・欠勤などのタイプが選択されているか
+  return fields.some(f => f && f !== ":" && f.trim() !== "") || (Array.isArray(row.breaks) && row.breaks.length > 0)
+    || row.workType !== "normal" || row.memo;
 };

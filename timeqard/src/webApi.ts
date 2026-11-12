@@ -38,9 +38,11 @@ import {
   type PunchMethod,
   type RequestKind,
   type TimeQardCsvRow,
+  type TimeRequestKind,
+  type TimeSpan,
   type WorkState,
 } from "../../shared/timeqard";
-import { availableKinds, findById, punchBlockReason, suggestedKind } from "./kioskRules";
+import { availableKinds, breakEndDate, findById, punchBlockReason, requestWhatLabel, suggestedKind } from "./kioskRules";
 import { cryptoRandomBytes, newInitialPassword, normalizePassword, passwordProblem } from "./passwordRules";
 import {
   ADMIN_LOGIN_ID,
@@ -154,15 +156,18 @@ export interface WebRecords {
   to: string;
   rows: {
     date: string;
-    times: Record<PunchKind, string>;
-    requests: Partial<Record<PunchKind, string>>;
+    times: Record<TimeRequestKind, string>;
+    /** 休憩（何回でも。一方しかない休憩も入る） */
+    breaks: TimeSpan[];
+    requests: Partial<Record<TimeRequestKind, string>>;
+    requestBreaks: TimeSpan[];
     noBreakRequest: boolean;
     requestReason: string;
     notes: string[];
     web: PunchKind[];
     cardless: PunchKind[];
   }[];
-  requests: { date: string; kind: RequestKind; time: string; reason: string; note: string; requestedAt: number }[];
+  requests: { date: string; kind: RequestKind; time: string; endTime: string; reason: string; note: string; requestedAt: number }[];
 }
 
 export interface WebAccountRow {
@@ -257,7 +262,7 @@ export const accountStateLabel = (a: WebAccount | null | undefined, now: number)
 export const summarizeExport = (rows: TimeQardCsvRow[]) => ({
   people: new Set(rows.map((r) => r.staffId)).size,
   days: rows.length,
-  requests: rows.reduce((a, r) => a + Object.keys(r.requests).length + (r.noBreakRequest ? 1 : 0), 0),
+  requests: rows.reduce((a, r) => a + Object.keys(r.requests).length + r.requestBreaks.length + (r.noBreakRequest ? 1 : 0), 0),
   notes: rows.filter((r) => r.notes.length > 0).length,
   cardless: rows.filter((r) => r.cardless.length > 0).length,
   web: rows.filter((r) => r.web.length > 0).length,
@@ -550,16 +555,26 @@ export const createWebApi = (deps: WebDeps) => {
     if (!isDateString(date) || date > today || date < addDays(today, -REQUEST_DAYS_BACK)) {
       throw new WebError(400, `申し出られるのは、今日から${REQUEST_DAYS_BACK}日前までの日です。`);
     }
-    if (!isRequestKind(kind) || (kind !== "no_break" && !availableKinds(ctx.settings).includes(kind))) throw new WebError(400, "この種類は申し出られません。");
+    // 休憩（中抜けも）と「休憩を取れなかった」は、休憩のボタンを出さない会社でも申し出られる
+    if (!isRequestKind(kind)) throw new WebError(400, "この種類は申し出られません。");
     const note = cleanText(str(body, "note", 200), 100);
-    if (kind === "no_break") return { date, kind: kind as RequestKind, time: "", reason: NO_BREAK_LABEL, note };
+    if (kind === "no_break") return { date, kind: kind as RequestKind, time: "", endTime: "", reason: NO_BREAK_LABEL, note };
     const time = str(body, "time", 5);
     if (!isTimeString(time)) throw new WebError(400, "時刻を選んでください。");
-    if (jstMs(date, time) > now) throw new WebError(400, "これからの時刻は申し出られません。");
+    let endTime = "";
+    if (kind === "break") {
+      endTime = str(body, "endTime", 5);
+      if (!isTimeString(endTime)) throw new WebError(400, "休憩の終わりの時刻を選んでください。");
+      if (endTime === time) throw new WebError(400, "休憩の始めと終わりが同じです。");
+      // 終わりが始めより前なら、次の日の時刻（夜勤の休憩）
+      if (jstMs(breakEndDate(date, time, endTime, addDays), endTime) > now) throw new WebError(400, "これからの時刻は申し出られません。");
+    } else if (jstMs(date, time) > now) {
+      throw new WebError(400, "これからの時刻は申し出られません。");
+    }
     const reason = body.reason;
     if (!isRequestReason(reason)) throw new WebError(400, "理由を選んでください。");
     if (reason === "そのほか" && !note) throw new WebError(400, "理由が「そのほか」のときは、ひとこと書いてください。");
-    return { date, kind: kind as RequestKind, time, reason: reason as string, note };
+    return { date, kind: kind as RequestKind, time, endTime, reason: reason as string, note };
   };
 
   const request = async (ctx: Ctx) => {
@@ -570,9 +585,8 @@ export const createWebApi = (deps: WebDeps) => {
       if (block) throw new WebError(403, block);
       const r = requestInput(ctx);
       const id = await addRequest(db, { staffId: person.id, ...r, at: ctx.now, method: "web", companyMark: ctx.mark, clientIp: ctx.ip });
-      const what = r.kind === "no_break" ? `「${NO_BREAK_LABEL}」` : `${PUNCH_LABELS[r.kind as PunchKind]} ${timeLabel(r.time)} `;
       return {
-        message: `${shortDateLabel(r.date)}の${what}の申し出を受け付けました（担当者が確かめます）`,
+        message: `${shortDateLabel(r.date)}の${requestWhatLabel(r)}の申し出を受け付けました（担当者が確かめます）`,
         ...newTicket(ctx, "request", id),
       };
     });
@@ -596,7 +610,9 @@ export const createWebApi = (deps: WebDeps) => {
       rows: rows.map((r) => ({
         date: r.date,
         times: r.times,
+        breaks: r.breaks,
         requests: r.requests,
+        requestBreaks: r.requestBreaks,
         noBreakRequest: r.noBreakRequest,
         requestReason: r.requestReason,
         notes: r.notes,
@@ -605,7 +621,7 @@ export const createWebApi = (deps: WebDeps) => {
       })),
       requests: requests
         .sort((a, b) => a.requestedAt - b.requestedAt)
-        .map((r) => ({ date: r.date, kind: r.kind, time: r.time, reason: r.reason, note: r.note, requestedAt: r.requestedAt })),
+        .map((r) => ({ date: r.date, kind: r.kind, time: r.time, endTime: r.endTime, reason: r.reason, note: r.note, requestedAt: r.requestedAt })),
     };
   };
 

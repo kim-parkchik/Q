@@ -235,8 +235,20 @@ describe("ブラウザ版の頼み", () => {
     const ask = (body: object) => t.call("request", { token, ...body });
     expect((await ask({ date: "2026-10-11", kind: "entry", time: "09:00", reason: "押し忘れた" })).body.error).toContain("31日前まで");
     expect((await ask({ date: "2026-11-12", kind: "exit", time: "18:00", reason: "押し忘れた" })).body.error).toContain("これからの時刻");
-    // 外出のボタンを出していない会社では、外出は申し出られない
+    // 外出はなくなった（中抜けは休憩として申し出る）。休憩の始めと終わりが同じ・これからの時刻は申し出られない
     expect((await ask({ date: "2026-11-11", kind: "out", time: "13:00", reason: "押し忘れた" })).body.error).toContain("この種類");
+    expect((await ask({ date: "2026-11-11", kind: "break", time: "13:00", endTime: "13:00", reason: "押し忘れた" })).body.error).toContain("同じ");
+    expect((await ask({ date: "2026-11-11", kind: "break", time: "13:00", reason: "押し忘れた" })).body.error).toContain("終わりの時刻");
+    expect((await ask({ date: "2026-11-12", kind: "break", time: "08:00", endTime: "09:00", reason: "押し忘れた" })).body.error).toContain("これからの時刻");
+    // 夜勤：きのう 23:30〜けさ 0:30 の休憩（終わりは今日の時刻）
+    const night = await ask({ date: "2026-11-11", kind: "break", time: "23:30", endTime: "00:30", reason: "押し忘れた" });
+    expect(night.body.message).toBe("11月11日の休憩 23:30〜0:30 の申し出を受け付けました（担当者が確かめます）");
+    expect((await t.call("cancel", { ticket: night.body.cancelTicket })).status).toBe(200);
+    // 休憩のボタンを出していない会社でも、休憩（中抜け）は申し出られる
+    await setSetting(t.db, "show_break", "0");
+    const away = await ask({ date: "2026-11-11", kind: "break", time: "15:00", endTime: "17:00", reason: "そのほか", note: "病院" });
+    expect(away.body.message).toBe("11月11日の休憩 15:00〜17:00 の申し出を受け付けました（担当者が確かめます）");
+    await setSetting(t.db, "show_break", "1");
     expect((await ask({ date: "2026-11-11", kind: "exit", time: "18:00" })).body.error).toContain("理由");
     expect((await ask({ date: "2026-11-11", kind: "exit", time: "18:00", reason: "そのほか" })).body.error).toContain("ひとこと");
 
@@ -253,14 +265,22 @@ describe("ブラウザ版の頼み", () => {
     await addRequest(t.db, { staffId: "1002", date: "2026-11-10", kind: "entry", time: "09:00", reason: "押し忘れた", note: "", at: t.clock.now, method: "card", companyMark: MARK });
     const nov = await t.call("records", { token, month: "2026-11" });
     expect(nov.status).toBe(200);
-    expect(nov.body.requests.map((r: any) => [r.date, r.kind, r.time, r.note])).toEqual([["2026-11-11", "exit", "18:00", "会議が長引いた"]]);
-    expect(nov.body.rows.map((r: any) => [r.date, r.requests, r.requestReason])).toEqual([
-      ["2026-11-11", { exit: "18:00" }, "退勤：押し忘れた（会議が長引いた）"],
+    expect(nov.body.requests.map((r: any) => [r.date, r.kind, r.time, r.endTime, r.note])).toEqual([
+      ["2026-11-11", "break", "15:00", "17:00", "病院"],
+      ["2026-11-11", "exit", "18:00", "", "会議が長引いた"],
+    ]);
+    expect(nov.body.rows.map((r: any) => [r.date, r.requests, r.requestBreaks, r.requestReason])).toEqual([
+      ["2026-11-11", { exit: "18:00" }, [{ start: "15:00", end: "17:00" }], "退勤：押し忘れた（会議が長引いた）／休憩（15:00〜17:00）：そのほか（病院）"],
     ]);
     expect((await t.call("records", { token, month: "2026-10" })).body.requests).toEqual([]);
     expect((await t.call("records", { token, month: "2026-12" })).status).toBe(400);
+    // 11月11日の申し出（退勤・取り消した夜勤の休憩・中抜けの休憩）は、どれもブラウザで、このパソコンから
     const events = await loadDayEvents(t.db, MARK, "2026-11-11");
-    expect(events.map((e) => [e.type, e.method, e.clientIp])).toEqual([["request", "web", PC]]);
+    expect(events.map((e) => [e.type, e.kind, e.method, e.clientIp, e.cancelled])).toEqual([
+      ["request", "break", "web", PC, true],
+      ["request", "break", "web", PC, false],
+      ["request", "exit", "web", PC, false],
+    ]);
   });
 
   test("入社日より前の人・入口のパソコンの時計がおかしいときは押せない", async () => {

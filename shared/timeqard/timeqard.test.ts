@@ -29,6 +29,8 @@ import {
   parseIso,
   parseNoBreakRequest,
   parseNotes,
+  parseSpanList,
+  formatSpanList,
   parseStaffFile,
   randomCode,
   serializeStaffFile,
@@ -44,7 +46,6 @@ import {
   type RequestKind,
   type TimeQardCsvRow,
 } from "./index";
-import { parseAttendanceCSV } from "../../src/utils/csvUtils";
 
 describe("日本時間", () => {
   test("パソコンの時計（UTC のミリ秒）から、日本時間の日付と時刻を作る", () => {
@@ -155,8 +156,10 @@ describe("日付・時刻を決まった形に直す（Excel で保存し直し�
 });
 
 const row = (over: Partial<TimeQardCsvRow> & Pick<TimeQardCsvRow, "staffId" | "name" | "date">): TimeQardCsvRow => ({
-  times: { entry: "", exit: "", break_start: "", break_end: "", out: "", return: "" },
+  times: { entry: "", exit: "" },
+  breaks: [],
   requests: {},
+  requestBreaks: [],
   noBreakRequest: false,
   requestReason: "",
   cardless: [],
@@ -173,50 +176,50 @@ describe("CSV", () => {
         staffId: "1001",
         name: "山田 太郎",
         date: "2026-11-04",
-        times: { entry: "08:58", exit: "18:02", break_start: "12:00", break_end: "13:00", out: "", return: "" },
+        times: { entry: "08:58", exit: "18:02" },
+        breaks: [{ start: "12:00", end: "13:00" }, { start: "15:00", end: "15:10" }],
       }),
       row({
         staffId: "1002",
         name: "佐藤 花子",
         date: "2026-11-04",
-        times: { entry: "", exit: "17:31", break_start: "", break_end: "", out: "", return: "" },
+        times: { entry: "", exit: "17:31" },
         requests: { entry: "09:00" },
-        requestReason: "出勤：押し忘れた",
+        requestBreaks: [{ start: "12:00", end: "13:00" }],
+        requestReason: "出勤：押し忘れた／休憩（12:00〜13:00）：押し忘れた",
         cardless: ["exit"],
         notes: ["出勤がありません"],
       }),
     ]);
     expect(csv.split("\r\n")).toEqual([
-      "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_休憩なし,申出_理由,カードなし,ブラウザ,注意,会社の印,形式",
-      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00,13:00,,,,,,,,,,,,,,K7M3QP2X,TimeQard 1",
-      "1002,佐藤 花子,2026-11-04,,17:31,,,,,09:00,,,,,,,出勤：押し忘れた,退勤,,出勤がありません,K7M3QP2X,TimeQard 1",
+      "スタッフID,名前,日付,出勤,退勤,休憩,申出_出勤,申出_退勤,申出_休憩,申出_休憩なし,申出_理由,カードなし,ブラウザ,注意,会社の印,形式",
+      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00-13:00 15:00-15:10,,,,,,,,,K7M3QP2X,TimeQard 1",
+      "1002,佐藤 花子,2026-11-04,,17:31,,09:00,,12:00-13:00,,出勤：押し忘れた／休憩（12:00〜13:00）：押し忘れた,退勤,,出勤がありません,K7M3QP2X,TimeQard 1",
       "",
     ]);
   });
 
-  test("文の中の改行・「,」・「\"」は空白にする（前の Q の読み方でも列がずれない）", () => {
+  test("文の中の改行・「,」・「\"」は空白にする（列がずれない）", () => {
     const csv = writeTimeQardCsv([
       row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04", requestReason: '退勤：そのほか（会議,"長引いた"\n）', notes: ["a", "b"] }),
     ]);
-    const old = parseAttendanceCSV(csv);
-    expect(old[0]["申出_理由"]).toBe("退勤：そのほか（会議 長引いた ）");
-    expect(old[0]["注意"]).toBe("a／b");
-    expect(old[0]["会社の印"]).toBe("K7M3QP2X");
+    const { records } = parseCsvRecords(csv);
+    expect(records[0].values["申出_理由"]).toBe("退勤：そのほか（会議 長引いた ）");
+    expect(records[0].values["注意"]).toBe("a／b");
+    expect(records[0].values["会社の印"]).toBe("K7M3QP2X");
   });
 
-  test("いまの Q の取り込み（parseAttendanceCSV）で、スタッフID・日付・打刻の列を読める", () => {
-    const csv = "\uFEFF" + writeTimeQardCsv([
-      row({
-        staffId: "1003",
-        name: "鈴木 一郎",
-        date: "2026-11-04",
-        times: { entry: "22:00", exit: "06:05", break_start: "02:00", break_end: "02:45", out: "", return: "" },
-      }),
-    ]);
-    const [r] = parseAttendanceCSV(csv);
-    expect([r["スタッフID"], r["日付"], r["出勤"], r["退勤"], r["休憩始"], r["休憩終"], r["外出"], r["戻り"]]).toEqual([
-      "1003", "2026-11-04", "22:00", "06:05", "02:00", "02:45", "", "",
-    ]);
+  test("休憩の一覧の書き方：始め・終わりを「-」でつなぎ、空白で区切る。一方しかない休憩も書く。全角・「〜」・「、」区切りも読む", () => {
+    const spans = [{ start: "12:00", end: "13:00" }, { start: "15:00", end: "" }, { start: "", end: "17:10" }];
+    expect(formatSpanList(spans)).toBe("12:00-13:00 15:00- -17:10");
+    expect(parseSpanList("12:00-13:00 15:00- -17:10")).toEqual({ spans, bad: [] });
+    expect(parseSpanList("１２：００〜１３：００、9:05~9:15")).toEqual({
+      spans: [{ start: "12:00", end: "13:00" }, { start: "09:05", end: "09:15" }],
+      bad: [],
+    });
+    expect(parseSpanList("12:00-13:00 昼 25:99-26:00 -")).toEqual({ spans: [{ start: "12:00", end: "13:00" }], bad: ["昼", "25:99-26:00", "-"] });
+    expect(parseSpanList("")).toEqual({ spans: [], bad: [] });
+    expect(formatSpanList([])).toBe("");
   });
 
   test("引用符でくくった値の中の「,」「\"\"」・改行も読む", () => {
@@ -249,10 +252,11 @@ describe("CSV", () => {
     expect(parseFormatVersion("TimeQard 12")).toBe(12);
     expect(parseFormatVersion("")).toBeNull();
     expect(parseFormatVersion("ほかのソフト")).toBeNull();
-    expect(parseCardlessKinds("退勤 出勤")).toEqual(["entry", "exit"]);
+    expect(parseCardlessKinds("退勤 出勤 休憩終")).toEqual(["entry", "exit", "break_end"]);
+    expect(parseCardlessKinds("外出")).toEqual([]);
     expect(parseCardlessKinds("")).toEqual([]);
     expect(parseNotes("出勤がありません／退勤がありません")).toEqual(["出勤がありません", "退勤がありません"]);
-    expect(TIMEQARD_CSV_HEADERS.length).toBe(22);
+    expect(TIMEQARD_CSV_HEADERS.length).toBe(16);
   });
 
   test("「休憩を取れなかった」の申し出は、「申出_休憩なし」の列に○を書く。列がない CSV（手で作ったものなど）は、申し出なし", () => {
@@ -345,19 +349,23 @@ const punch = (staffId: string, date: string, time: string, kind: PunchKind, met
   at: jstMs(date, time),
   method,
 });
-const request = (staffId: string, date: string, kind: RequestKind, time: string, reason = "押し忘れた", note = "", requestedAt = jstMs(date, "23:00")): PunchRequest => ({
+const request = (
+  staffId: string, date: string, kind: RequestKind, time: string, reason = "押し忘れた", note = "", requestedAt = jstMs(date, "23:00"), endTime = "",
+): PunchRequest => ({
   id: nextId++,
   staffId,
   date,
   kind,
   time,
+  endTime,
   reason,
   note,
   requestedAt,
 });
 const LATER = jstMs("2026-11-30", "00:00");
-const times = (r: { times: Record<PunchKind, string> }) =>
-  [r.times.entry, r.times.exit, r.times.break_start, r.times.break_end, r.times.out, r.times.return].join(" ").trim();
+/** 「出勤 退勤 休憩…」（休憩は「12:00-13:00」） */
+const times = (r: { times: { entry: string; exit: string }; breaks: { start: string; end: string }[] }) =>
+  [r.times.entry, r.times.exit, formatSpanList(r.breaks)].join(" ").trim();
 
 describe("1日のまとめ方（付録 E）", () => {
   test("ふつうの日：出勤・休憩・退勤が1行に入る", () => {
@@ -372,7 +380,8 @@ describe("1日のまとめ方（付録 E）", () => {
     });
     expect(rows.length).toBe(1);
     expect(rows[0].date).toBe("2026-11-04");
-    expect(rows[0].times).toEqual({ entry: "08:58", exit: "18:02", break_start: "12:00", break_end: "13:00", out: "", return: "" });
+    expect(rows[0].times).toEqual({ entry: "08:58", exit: "18:02" });
+    expect(rows[0].breaks).toEqual([{ start: "12:00", end: "13:00" }]);
     expect(rows[0].notes).toEqual([]);
     expect(rows[0].cardless).toEqual([]);
   });
@@ -389,7 +398,7 @@ describe("1日のまとめ方（付録 E）", () => {
     });
     expect(rows.length).toBe(1);
     expect(rows[0].date).toBe("2026-11-04");
-    expect(times(rows[0])).toBe("22:00 06:05 02:00 02:45");
+    expect(times(rows[0])).toBe("22:00 06:05 02:00-02:45");
   });
 
   test("出勤を押し忘れた日：退勤は押した日の行にして「出勤がありません」。申し出も同じ行に入る", () => {
@@ -485,7 +494,7 @@ describe("1日のまとめ方（付録 E）", () => {
     expect(rows[0].notes).toEqual(["1日に2回出勤しています（2回目 17:00〜21:00）。2回目は Q に入りません"]);
   });
 
-  test("休憩は最初の1組を入れ、2回目の休憩・休憩終のない休憩・押し直しを知らせる", () => {
+  test("休憩は何回でも、押した順に組にして入れる。休憩終のない休憩・押し直しを知らせる（中抜けも休憩として押す）", () => {
     const rows = buildDayRows({
       punches: [
         punch("1001", "2026-11-04", "09:00", "entry"),
@@ -494,16 +503,15 @@ describe("1日のまとめ方（付録 E）", () => {
         punch("1001", "2026-11-04", "13:00", "break_end"),
         punch("1001", "2026-11-04", "15:00", "break_start"),
         punch("1001", "2026-11-04", "15:10", "break_end"),
-        punch("1001", "2026-11-04", "16:00", "out"),
+        punch("1001", "2026-11-04", "16:00", "break_start"),
         punch("1001", "2026-11-04", "18:00", "exit"),
       ],
       now: LATER,
     });
-    expect(times(rows[0])).toBe("09:00 18:00 12:00 13:00 16:00");
+    expect(times(rows[0])).toBe("09:00 18:00 12:00-13:00 15:00-15:10 16:00-");
     expect(rows[0].notes).toEqual([
       "休憩始を2回押しています（12:00・12:01）。初めのほうを入れました",
-      "2回目の休憩（15:00〜15:10）は Q に入りません",
-      "戻りがありません（外出 16:00）",
+      "休憩終がありません（休憩始 16:00）",
     ]);
   });
 
@@ -517,11 +525,25 @@ describe("1日のまとめ方（付録 E）", () => {
       ],
       now: LATER,
     });
-    expect(rows[0].times).toEqual({ entry: "09:00", exit: "18:00", break_start: "", break_end: "13:00", out: "", return: "" });
+    expect(rows[0].times).toEqual({ entry: "09:00", exit: "18:00" });
+    expect(rows[0].breaks).toEqual([{ start: "", end: "13:00" }]);
     expect(rows[0].notes).toEqual([
       "休憩始がありません（休憩終 13:00）",
       "ほかに 休憩始 18:01 を押しています（その日の勤務と合わないので、Q には入りません）",
     ]);
+  });
+
+  test("出勤のない日の休憩も、組にして入れる", () => {
+    const rows = buildDayRows({
+      punches: [
+        punch("1001", "2026-11-04", "12:00", "break_start"),
+        punch("1001", "2026-11-04", "13:00", "break_end"),
+        punch("1001", "2026-11-04", "18:00", "exit"),
+      ],
+      now: LATER,
+    });
+    expect(times(rows[0])).toBe("18:00 12:00-13:00");
+    expect(rows[0].notes).toEqual(["出勤がありません"]);
   });
 
   test("カードなし：行に入れた打刻のうち、ID で押した種類", () => {
@@ -536,6 +558,19 @@ describe("1日のまとめ方（付録 E）", () => {
     });
     expect(rows[0].cardless).toEqual(["entry", "break_end"]);
     expect(rows[0].web).toEqual([]);
+    const later = buildDayRows({
+      punches: [
+        punch("1001", "2026-11-05", "09:00", "entry"),
+        punch("1001", "2026-11-05", "12:00", "break_start"),
+        punch("1001", "2026-11-05", "13:00", "break_end"),
+        punch("1001", "2026-11-05", "15:00", "break_start", "web"),
+        punch("1001", "2026-11-05", "15:10", "break_end", "web"),
+        punch("1001", "2026-11-05", "18:00", "exit"),
+      ],
+      now: LATER,
+    });
+    // 2回目の休憩をブラウザで押した
+    expect(later[0].web).toEqual(["break_start", "break_end"]);
   });
 
   test("ブラウザ：行に入れた打刻のうち、ブラウザで押した種類。CSV の「ブラウザ」の列に書き、読める", () => {
@@ -571,19 +606,24 @@ describe("1日のまとめ方（付録 E）", () => {
     expect(rows[0].requestReason).toBe("出勤：カードを忘れて押せなかった／退勤：押し間違えた（会議が長引いた）");
   });
 
-  test("「休憩を取れなかった」の申し出（no_break。時刻なし）は、休憩始の申し出とは別に数え、理由の文の最後に書く", () => {
+  test("休憩の申し出（始めと終わり）は、ちがう時刻ならどれも入れ、理由の文に時刻を書く。「休憩を取れなかった」は最後に書く", () => {
     const rows = buildDayRows({
       punches: [punch("1001", "2026-11-06", "09:00", "entry"), punch("1001", "2026-11-06", "18:00", "exit")],
       requests: [
         request("1001", "2026-11-06", "no_break", "", NO_BREAK_LABEL, "来客が続いた", jstMs("2026-11-06", "18:01")),
-        request("1001", "2026-11-06", "break_start", "12:30", "押し忘れた"),
+        request("1001", "2026-11-06", "break", "15:00", "押し忘れた", "病院", jstMs("2026-11-06", "18:02"), "17:00"),
+        request("1001", "2026-11-06", "break", "12:00", "押し忘れた", "", jstMs("2026-11-06", "18:03"), "13:00"),
+        request("1001", "2026-11-06", "break", "12:00", "押し間違えた", "", jstMs("2026-11-06", "18:04"), "13:00"),
       ],
       now: LATER,
     });
     expect(rows.length).toBe(1);
     expect(rows[0].noBreakRequest).toBe(true);
-    expect(rows[0].requests).toEqual({ break_start: "12:30" });
-    expect(rows[0].requestReason).toBe("休憩始：押し忘れた／休憩なし：休憩を取れなかった（来客が続いた）");
+    expect(rows[0].requests).toEqual({});
+    expect(rows[0].requestBreaks).toEqual([{ start: "12:00", end: "13:00" }, { start: "15:00", end: "17:00" }]);
+    expect(rows[0].requestReason).toBe(
+      "休憩（12:00〜13:00）：押し間違えた／休憩（15:00〜17:00）：押し忘れた（病院）／休憩なし：休憩を取れなかった（来客が続いた）"
+    );
   });
 
   test("期間で選び、ID の数の順・日付の順に並べる", () => {
@@ -619,9 +659,10 @@ describe("いまの状態（打刻の画面で、押すはずのボタンを大�
     expect(workStateOf(ps, at("12:30"))).toBe("on_break");
     ps.push(punch("1", "2026-11-04", "13:00", "break_end"));
     expect(workStateOf(ps, at("13:30"))).toBe("working");
-    ps.push(punch("1", "2026-11-04", "15:00", "out"));
-    expect(workStateOf(ps, at("15:30"))).toBe("out");
-    ps.push(punch("1", "2026-11-04", "16:00", "return"));
+    ps.push(punch("1", "2026-11-04", "15:00", "break_start"));
+    expect(workStateOf(ps, at("15:30"))).toBe("on_break");
+    ps.push(punch("1", "2026-11-04", "16:00", "break_end"));
+    expect(workStateOf(ps, at("16:30"))).toBe("working");
     ps.push(punch("1", "2026-11-04", "18:00", "exit"));
     expect(workStateOf(ps, at("18:30"))).toBe("done");
     expect(workStateOf(ps, jstMs("2026-11-05", "08:00"))).toBe("before");

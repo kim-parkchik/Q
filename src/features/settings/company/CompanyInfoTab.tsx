@@ -14,7 +14,8 @@ import {
     CalendarDays,
     Save,
     Rocket,
-    Loader2
+    Loader2,
+    Clock
 } from 'lucide-react';
 import * as Master from '../../../constants';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -64,6 +65,8 @@ export default function CompanyInfoTab({ cm }: Props) {
         setIsWeekStartEditable,
         isSmallBusiness,
         setIsSmallBusiness,
+        hourlyLeave,
+        setHourlyLeave,
         isSearchingComp,
         setIsZipFocus,
         handleFocus,
@@ -306,6 +309,32 @@ export default function CompanyInfoTab({ cm }: Props) {
                                     ))}
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+
+                    {/* 時間単位の有給（労使協定を結んだときだけ。労働基準法39条4項） */}
+                    <div style={{
+                        gridColumn: "1 / 3",
+                        padding: "15px",
+                        backgroundColor: "#f8fafc",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                        marginBottom: "-10px"
+                    }}>
+                        <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                            <input
+                                type="checkbox"
+                                checked={hourlyLeave}
+                                onChange={e => setHourlyLeave(e.target.checked)}
+                            />
+                            <Clock size={16} color="#3498db" />
+                            時間単位の有給を使う（労使協定を結んでいる）
+                        </label>
+                        <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.7, marginTop: "6px" }}>
+                            年次有給休暇を1時間単位で取れるのは、会社と従業員の代表とで労使協定を結んだときだけで、1年に5日分までです
+                            （労働基準法39条4項。前の年から繰り越した分も含めて数えます）。
+                            使うにすると、勤怠の画面で「時間有給」の時間を入れられ、休憩の一覧で中抜けに「時間有給」の印を付けられます。
+                            1年（付与日から1年）に5日分を超えると、勤怠の画面で知らせます。
                         </div>
                     </div>
 

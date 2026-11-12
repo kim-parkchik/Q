@@ -6,6 +6,7 @@ export * from "./time";
 export * from "./kinds";
 export * from "./codes";
 export * from "./normalize";
+export * from "./spans";
 export * from "./csv";
 export * from "./staffFile";
 export * from "./days";

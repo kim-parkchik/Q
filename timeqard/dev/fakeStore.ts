@@ -52,7 +52,6 @@ export const loadSettings = async (_db: KioskDb): Promise<KioskSettings> => {
     companyName: settings.get("company_name") ?? "",
     staffFileExportedAt: settings.get("staff_file_exported_at") ?? null,
     showBreak: flag("show_break", true),
-    showOut: flag("show_out", false),
     sound: flag("sound", true),
     fullscreen: flag("fullscreen", false),
     camera: flag("camera", true),
@@ -105,14 +104,14 @@ export const addPunch = async (
 export const addRequest = async (
   _db: KioskDb,
   r: {
-    staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod;
+    staffId: string; date: string; kind: RequestKind; time: string; endTime?: string; reason: string; note: string; at: number; method: PunchMethod;
     companyMark: string; clientIp?: string;
   }
 ) => {
   const id = nextId++;
   requests.push({
-    id, staffId: r.staffId, date: r.date, kind: r.kind, time: r.time, reason: r.reason, note: r.note.trim(), requestedAt: r.at, method: r.method,
-    clientIp: r.clientIp ?? "", mark: r.companyMark,
+    id, staffId: r.staffId, date: r.date, kind: r.kind, time: r.time, endTime: r.kind === "break" ? r.endTime ?? "" : "", reason: r.reason,
+    note: r.note.trim(), requestedAt: r.at, method: r.method, clientIp: r.clientIp ?? "", mark: r.companyMark,
   });
   return id;
 };
@@ -168,6 +167,7 @@ export const loadDayEvents = async (_db: KioskDb, mark: string, date: string): P
         clientIp: r.clientIp,
         requestDate: r.date,
         requestTime: r.time,
+        requestEndTime: r.endTime,
         reason: r.reason,
         note: r.note,
       })),

@@ -24,9 +24,9 @@ const header = (db: Database) => ({
 });
 
 describe("会社ファイルの形式（2026-11-03 の形を v1 とする）", () => {
-    test("v1 から始めて、今の最新は v9", () => {
+    test("v1 から始めて、今の最新は v10", () => {
         expect(BASE_DB_VERSION).toBe(1);
-        expect(LATEST_DB_VERSION).toBe(9);
+        expect(LATEST_DB_VERSION).toBe(10);
     });
     test("新しいファイル：表を作り、Q の印と最新の番号を付ける（更新は実行しない）", async () => {
         const db = new Database(":memory:");
@@ -80,7 +80,7 @@ describe("更新（マイグレーション）", () => {
     test("v2: 従業員に住民税の年度ごとの額の列を足す（初めは空。今までの月額はそのまま）", async () => {
         const db = v1File();
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(8);
+        expect(applied).toHaveLength(9);
         expect(applied[0]).toStartWith("v2:");
         expect(db.query("SELECT resident_tax AS t, resident_tax_schedule AS s FROM staff").get()).toEqual({ t: 7000, s: null });
         expect(header(db)).toEqual({ id: Q_FILE_ID, version: LATEST_DB_VERSION });
@@ -91,7 +91,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("ALTER TABLE staff ADD COLUMN resident_tax_schedule TEXT");
         db.exec("PRAGMA user_version = 2");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(7);
+        expect(applied).toHaveLength(8);
         expect(applied[0]).toStartWith("v3:");
         expect(db.query("SELECT resident_tax_municipality AS m FROM staff").get()).toEqual({ m: null });
     });
@@ -103,7 +103,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO users (login_id, display_name, password_hash, role) VALUES ('admin', '管理者', 'x', 'admin')");
         db.exec("PRAGMA user_version = 3");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(6);
+        expect(applied).toHaveLength(7);
         expect(applied[0]).toStartWith("v4:");
         expect(db.query("SELECT my_number_access AS a FROM users").get()).toEqual({ a: 0 });
         // マイナンバーの表は、開くときに作られる
@@ -117,7 +117,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO resident_tax_municipalities (code, designation_number) VALUES ('131016', 'AB-12345')");
         db.exec("PRAGMA user_version = 4");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(5);
+        expect(applied).toHaveLength(6);
         expect(applied[0]).toStartWith("v5:");
         expect(db.query("SELECT designation_number AS d, atena_number AS a, special_due AS s FROM resident_tax_municipalities").get())
             .toEqual({ d: "AB-12345", a: null, s: 0 });
@@ -130,7 +130,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO my_numbers (staff_id, person, number) VALUES ('S001', 'self', '123456789018')");
         db.exec("PRAGMA user_version = 5");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(4);
+        expect(applied).toHaveLength(5);
         expect(applied[0]).toStartWith("v6:");
         expect(db.query("SELECT number, number_hash AS h FROM my_numbers").get()).toEqual({ number: "123456789018", h: null });
         // 鍵の表は、開くときに作られる
@@ -144,7 +144,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("ALTER TABLE staff ADD COLUMN commute_amount INTEGER DEFAULT 20000");
         db.exec("PRAGMA user_version = 6");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(3);
+        expect(applied).toHaveLength(4);
         expect(applied[0]).toStartWith("v7:");
         expect(db.query("SELECT commute_type AS t, commute_amount AS a, commute_setting AS s FROM staff").get())
             .toEqual({ t: "monthly", a: 20000, s: null });
@@ -161,7 +161,7 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO salary_results (staff_id, target_year, target_month, total_earnings) VALUES ('S001', 2026, 10, 300000)");
         db.exec("PRAGMA user_version = 7");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(2);
+        expect(applied).toHaveLength(3);
         expect(applied[0]).toStartWith("v8:");
         expect(db.query("SELECT absence_deduction_method AS m FROM payroll_groups").get()).toEqual({ m: "workdays" });
         // 前に確定した給与は、欠勤控除の額・所定労働日数がわからない（NULL）
@@ -180,13 +180,45 @@ describe("更新（マイグレーション）", () => {
         db.exec("INSERT INTO attendance (staff_id, work_date, entry_time, exit_time, work_hours, is_finalized) VALUES ('S001', '2026-11-02', '09:00', '18:00', 9, 1)");
         db.exec("PRAGMA user_version = 8");
         const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
-        expect(applied).toHaveLength(1);
+        expect(applied).toHaveLength(2);
         expect(applied[0]).toStartWith("v9:");
         expect(db.query("SELECT fixed_break AS f FROM payroll_groups").get()).toEqual({ f: null });
         expect(db.query("SELECT fixed_break_apply AS a FROM staff").get()).toEqual({ a: 1 });
         // 前に確定した勤怠はそのまま（決まった休憩は引いていない）
         expect(db.query("SELECT work_hours AS h, break_none AS n, auto_break AS b FROM attendance").get()).toEqual({ h: 9, n: 0, b: null });
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: LATEST_DB_VERSION });
+    });
+    test("v10: 勤怠の休憩1組・外出1組を休憩の一覧に移し（手入力があれば手入力の一覧）、前の列を消す。時間有給を入れていた会社は時間単位の有給を使う", async () => {
+        const db = v1File();
+        db.exec("CREATE TABLE payroll_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, closing_day INTEGER NOT NULL, is_next_month INTEGER NOT NULL, payment_day INTEGER NOT NULL)");
+        db.exec("INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day) VALUES ('基本', 99, 0, 25)");
+        db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL)");
+        db.exec("INSERT INTO company (id, name) VALUES (1, '確かめ株式会社')");
+        db.exec(`CREATE TABLE attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id TEXT NOT NULL, work_date TEXT NOT NULL,
+            entry_time TEXT, exit_time TEXT, break_start TEXT, break_end TEXT, out_time TEXT, return_time TEXT,
+            csv_entry_time TEXT, csv_exit_time TEXT, csv_break_start TEXT, csv_break_end TEXT, csv_out_time TEXT, csv_return_time TEXT,
+            paid_leave_hours REAL DEFAULT 0, work_hours REAL DEFAULT 0, UNIQUE(staff_id, work_date))`);
+        const add = db.prepare(`INSERT INTO attendance (staff_id, work_date, break_start, break_end, out_time, return_time,
+            csv_break_start, csv_break_end, csv_out_time, csv_return_time, paid_leave_hours) VALUES ('S001', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        add.run("2026-11-02", "", "", "", "", "12:00", "13:00", "15:00", "15:10", 0); // 打刻だけ
+        add.run("2026-11-03", "12:30", "", ":", "", "12:00", "13:00", "", "", 0); // 休憩始だけ手で直した（休憩終は打刻）
+        add.run("2026-11-04", "", "", "16:00", "17:00", "", "", "", "", 2); // 手入力の外出（中抜け）。時間有給 2時間
+        add.run("2026-11-05", "", "", "", "", "", "", "", "", 0);
+        db.exec("PRAGMA user_version = 9");
+        const applied = await prepareCompanyFile(wrap(db), DB_SCHEMAS);
+        expect(applied.map((a) => a.slice(0, 4))).toEqual(["v10:"]);
+        const rows = db.query("SELECT work_date AS d, breaks AS m, csv_breaks AS c FROM attendance ORDER BY work_date").all();
+        expect(rows).toEqual([
+            { d: "2026-11-02", m: null, c: JSON.stringify([{ start: "12:00", end: "13:00" }, { start: "15:00", end: "15:10" }]) },
+            { d: "2026-11-03", m: JSON.stringify([{ start: "12:30", end: "13:00" }]), c: JSON.stringify([{ start: "12:00", end: "13:00" }]) },
+            { d: "2026-11-04", m: JSON.stringify([{ start: "16:00", end: "17:00" }]), c: null },
+            { d: "2026-11-05", m: null, c: null },
+        ]);
+        expect(columns(db, "attendance")).not.toContain("break_start");
+        expect(columns(db, "attendance")).not.toContain("csv_return_time");
+        expect(db.query("SELECT hourly_leave AS h FROM company").get()).toEqual({ h: 1 });
+        expect(db.query("SELECT tardy_deduction_method AS m FROM payroll_groups").get()).toEqual({ m: "none" });
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 10 });
     });
 });
 

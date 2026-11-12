@@ -10,6 +10,7 @@ import {
   defaultExpiryDate,
   formatLeaveMinutes,
   formatTakenAmount,
+  hourlyLeaveByGrantYear,
   isAnnualLeaveGrant,
   leaveHoursPerDay,
   loadPaidLeaveData,
@@ -243,6 +244,34 @@ describe("年次有給休暇の残り", () => {
     expect(s.grants.map((g) => g.grant.id)).toEqual([1]);
     expect(formatLeaveMinutes(s.remainingMinutes, 8)).toBe("9日");
     expect(summarizePaidLeave([grant(2, "2026-07-01", 3, "夏季休暇")], [], 8, "2026-11-07").hasGrants).toBe(false);
+  });
+});
+
+describe("時間単位の有給は1年に5日分まで（労働基準法39条4項）", () => {
+  const g = (id: number, grant_date: string): LeaveGrantRow => ({ id, name: "法定有給", grant_date, expiry_date: defaultExpiryDate(grant_date), days_granted: 10 });
+  test("付与の年（付与日から1年）ごとに数え、5日 × 1日の時間数を超えたら知らせる", () => {
+    const years = hourlyLeaveByGrantYear(
+      [g(1, "2025-10-01"), g(2, "2026-10-01")],
+      [
+        { date: "2025-12-01", hours: 20 },
+        { date: "2026-09-30", hours: 21 }, // 2025年の付与の年の最後の日
+        { date: "2026-10-01", hours: 3 }, // 次の付与の年
+      ],
+      8,
+      5,
+    );
+    expect(years).toEqual([
+      { from: "2025-10-01", to: "2026-09-30", minutes: 41 * 60, limitMinutes: 40 * 60, over: true },
+      { from: "2026-10-01", to: "2027-09-30", minutes: 3 * 60, limitMinutes: 40 * 60, over: false },
+    ]);
+  });
+  test("次の付与が1年より早いとき（入社して6か月の付与のあと、会社の基準日にそろえたとき）は、その前の日までを1年とする。付与がない人は数えない", () => {
+    const years = hourlyLeaveByGrantYear([g(1, "2026-04-01"), g(2, "2026-10-01")], [{ date: "2026-09-30", hours: 2 }], 7, 5);
+    expect(years.map((y) => [y.from, y.to, y.minutes, y.limitMinutes])).toEqual([
+      ["2026-04-01", "2026-09-30", 120, 35 * 60],
+      ["2026-10-01", "2027-09-30", 0, 35 * 60],
+    ]);
+    expect(hourlyLeaveByGrantYear([], [{ date: "2026-09-30", hours: 2 }], 8, 5)).toEqual([]);
   });
 });
 

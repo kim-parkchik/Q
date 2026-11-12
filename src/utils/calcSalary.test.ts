@@ -544,9 +544,70 @@ describe("欠勤控除（月給制。給与規定グループで、計算期間�
     });
 });
 
+describe("遅刻・早退・中抜けの控除（月給制・日給制。給与規定グループで選ぶ。初めは引かない。モデル就業規則第45条）", () => {
+    /** 6月8日に6時間30分（所定8時間に1時間30分足りない） */
+    const short = [day("08", 6.5)];
+    test("初めは引かない：足りない時間と、引かないことだけを出す", () => {
+        const r = calc(monthly, short, { periodWorkDays: 22, annualWorkDays: 245 });
+        expect([r.tardyDeductionMethod, r.tardyDeduction, r.tardyHours]).toEqual(["none", 0, 1.5]);
+        expect(r.tardyDeductionDetail).toBe("遅刻・早退・中抜け 1時間30分：引かない設定なので、月給をそのまま支給します");
+        expect(r.totalEarnings).toBe(300000);
+    });
+    test("1か月平均所定労働時間で割る：300,000 × 1.5時間 ÷（245日 × 8時間 ÷ 12）＝ 2,755円（1円未満切り捨て）", () => {
+        const r = calc(monthly, short, { tardyDeductionMethod: "annual", periodWorkDays: 22, annualWorkDays: 245 });
+        expect(r.tardyDeduction).toBe(2755);
+        expect(r.tardyDeductionDetail).toBe("月給 ¥300,000 × 遅刻・早退・中抜け 1時間30分 ÷ 1か月平均所定労働時間（245日 × 8時間 ÷ 12）");
+        expect(r.totalEarnings).toBe(300000 - 2755);
+    });
+    test("計算期間の所定労働時間で割る：300,000 × 1.5時間 ÷（22日 × 8時間）＝ 2,556円", () => {
+        const r = calc(monthly, short, { tardyDeductionMethod: "period", periodWorkDays: 22 });
+        expect(r.tardyDeduction).toBe(2556);
+        expect(r.tardyDeductionDetail).toBe("月給 ¥300,000 × 遅刻・早退・中抜け 1時間30分 ÷ 計算期間の所定労働時間（22日 × 8時間）");
+    });
+    test("時間有給にした時間は働いたものとして数える。半休の日は所定労働時間の半分に足りない時間。残業した日は引かない", () => {
+        const o = { tardyDeductionMethod: "annual" as const, annualWorkDays: 245 };
+        expect(calc(monthly, [day("08", 6, "normal", { paid_leave_hours: 2 })], o)).toMatchObject({ tardyDeduction: 0, tardyHours: 0, tardyDeductionDetail: null });
+        expect(calc(monthly, [day("09", 3, "paid_half")], o)).toMatchObject({ tardyDeduction: 1836, tardyHours: 1 });
+        expect(calc(monthly, [day("10", 9)], o)).toMatchObject({ tardyDeduction: 0, tardyHours: 0 });
+    });
+    test("働いた時間が0の出勤の日は引かずに知らせる（休んだ日なら「欠勤」にする）。時給制の人は引かない（働いた分だけ払う）", () => {
+        const r = calc(monthly, [day("08", 0)], { tardyDeductionMethod: "annual", annualWorkDays: 245 });
+        expect(r.tardyDeduction).toBe(0);
+        expect(r.tardyDeductionNote).toContain("働いた時間が0の日が1日");
+        expect(calc(hourly, short, { tardyDeductionMethod: "annual", annualWorkDays: 245 }).tardyDeduction).toBe(0);
+    });
+    test("日給制：日給 × 足りない時間 ÷ 1日の所定労働時間（12,000円・2時間足りない → 3,000円）", () => {
+        const daily = { ...hourly, wage_type: "daily", base_wage: 12000 };
+        const r = calc(daily, [day("08", 6), day("09", 8)], { tardyDeductionMethod: "period", periodWorkDays: 22 });
+        expect(r.tardyDeduction).toBe(3000);
+        expect(r.tardyDeductionDetail).toBe("日給 × 遅刻・早退・中抜け 2時間 ÷ 1日の所定労働時間 8時間（日ごとに計算して合計）");
+        expect(r.totalEarnings).toBe(12000 * 2 - 3000);
+        expect(calc(daily, [day("08", 6)]).tardyDeduction).toBe(0);
+    });
+    test("引く額は、その月の基本給（欠勤控除のあと）まで", () => {
+        const rows = ["08", "09", "10"].map((d) => day(d, 1));
+        const r = calc(monthly, [...rows, day("11", 0, "absent")], { tardyDeductionMethod: "period", periodWorkDays: 1 });
+        expect(r.absenceDeduction).toBe(300000);
+        expect(r.tardyDeduction).toBe(0);
+        expect(r.tardyDeductionDetail).toContain("→ 基本給の残り ¥0 まで");
+    });
+    test("確定した結果に、遅刻・早退・中抜けの控除の額を残す", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        expect(db.query("SELECT tardy_deduction_method AS m FROM payroll_groups").all()).toEqual([]);
+        db.exec("INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) VALUES (1, '全社', 99, 0, 25)");
+        expect(db.query("SELECT tardy_deduction_method AS m FROM payroll_groups").get()).toEqual({ m: "none" });
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const r = calc(monthly, short, { tardyDeductionMethod: "annual", annualWorkDays: 245 });
+        expect(await saveSalaryResult(asyncDb, "S001", 2026, 6, r, monthly)).toEqual({ success: true });
+        expect(db.query("SELECT tardy_deduction AS d, total_earnings AS t FROM salary_results").get()).toEqual({ d: 2755, t: 300000 - 2755 });
+    });
+});
+
 describe("給与明細の行を足すと、ちょうど支給合計になる（時間外・休日・深夜の手当ごとに、1か月の合計で端数を処理する。基発第150号）", () => {
     /** 給与明細の支給項目の行を足した額（固定残業代がある人は、時間外手当の代わりに固定残業代と超過分の行） */
-    const lineSum = (r: ReturnType<typeof calc>) => r.basePay - r.absenceDeduction + r.statutoryOvertimePay
+    const lineSum = (r: ReturnType<typeof calc>) => r.basePay - r.absenceDeduction - r.tardyDeduction + r.statutoryOvertimePay
         + (r.fixedOvertimeAllowance > 0 ? r.fixedOvertimeAllowance + r.fixedOvertimeExcess : r.standardOvertimePay + r.highOvertimePay)
         + r.holidayWorkPay + r.paidLeavePay + r.nightPay + r.commutePay + r.allowanceAmount + r.customEarnings;
 

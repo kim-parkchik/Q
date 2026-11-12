@@ -21,6 +21,7 @@ import {
   type ImportPlan,
 } from "../../utils/attendanceImport";
 import { executeBatch } from "../../utils/dbBatch";
+import { parseBreaksJson } from "../../utils/breaks";
 import { writeLog } from "../../utils/logUtils";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
@@ -63,21 +64,15 @@ export default function AttendanceImportButton({ db, staffList, onImported, user
     const existing = new Map<string, ExistingDay>();
     if (read.period) {
       const rows = (await db.select(
-        `SELECT staff_id, work_date, is_finalized, entry_time, exit_time, break_start, break_end, out_time, return_time, memo, break_none
+        `SELECT staff_id, work_date, is_finalized, entry_time, exit_time, breaks, memo, break_none
          FROM attendance WHERE work_date BETWEEN ? AND ?`,
         [read.period.from, read.period.to]
       )) as any[];
       for (const r of rows ?? []) {
         existing.set(dayKey(String(r.staff_id), r.work_date), {
           finalized: Number(r.is_finalized) === 1,
-          manual: {
-            entry: r.entry_time ?? "",
-            exit: r.exit_time ?? "",
-            break_start: r.break_start ?? "",
-            break_end: r.break_end ?? "",
-            out: r.out_time ?? "",
-            return: r.return_time ?? "",
-          },
+          manual: { entry: r.entry_time ?? "", exit: r.exit_time ?? "" },
+          manualBreaks: parseBreaksJson(r.breaks),
           memo: r.memo ?? "",
           breakNone: Number(r.break_none) === 1,
         });
@@ -248,6 +243,7 @@ export function PreviewDialog(props: {
             <Section title={`押し忘れの申し出（${plan.requests.length}件）`} color="#8e44ad">
               <div style={{ fontSize: 12, color: "#555", marginBottom: 6, lineHeight: 1.6 }}>
                 本人の申し出です。実際の時刻と合っているかを確かめてから、入れるものを選んでください。選んだものは、その日の修正の欄に入れ、備考に「TimeQard の申し出：…」と書き足します。
+                休憩（中抜けも）を選ぶと、その日の休憩の一覧に足します（同じ時刻・重なる休憩は、申し出たものに置き換えます）。
                 「休憩を取れなかった」を選ぶと、その日を「休憩なし」にします（給与規定グループの決まった休憩を引きません）。確定は、いつもどおり勤怠の画面でします。
                 <br />あとで確かめるときは、同じ CSV をもう一度取り込めば、ここに出ます。
               </div>
@@ -266,7 +262,7 @@ export function PreviewDialog(props: {
                       <td style={td}>{r.date}</td>
                       <td style={td}>{r.name}（{r.staffId}）</td>
                       <td style={td}>{importRequestLabel(r.kind)}</td>
-                      <td style={td}>{r.time ? timeLabel(r.time) : ""}</td>
+                      <td style={td}>{r.kind === "break" ? `${timeLabel(r.time)}〜${timeLabel(r.endTime)}` : r.time ? timeLabel(r.time) : ""}</td>
                       <td style={td}>{r.reason}</td>
                       <td style={td}>{r.whyNot ?? ""}</td>
                     </tr>

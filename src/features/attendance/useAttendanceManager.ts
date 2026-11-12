@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV } from "../../utils/csvUtils";
-import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, type SalaryExtras } from "../../utils/calcSalary";
+import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from "../../utils/calcSalary";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
@@ -9,24 +9,22 @@ import { useToast } from "../../components/Toast";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
-import { autoBreakMinutes, breakShortage, calcDayHours, describeFixedBreak, fixedBreakRuleFor, recordedRestMinutes, type DayTimes } from "../../utils/fixedBreak";
+import { breakShortage, calcDayHours, describeCombine, describeFixedBreak, fixedBreakRuleFor, leaveMinutesOf, recordedRestMinutes, type DayTimes } from "../../utils/fixedBreak";
+import { effectiveBreaks, parseBreaksJson, stringifyBreaks } from "../../utils/breaks";
 import { branchPrefectureOf } from "../../utils/branchPrefecture";
 import {
-  collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
+  collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, hourlyLeaveByGrantYear, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
   type AttendanceLeaveRow, type LeaveGrantRow, type ManualLeaveRecord,
 } from "../../utils/paidLeave";
 
 /** 手入力があればそれを使い、なければ打刻（CSV）を使う。TimeInputPair から ":" が来ている場合は空とみなす */
 const pick = (manual: string, csv: string) => (manual && manual !== ":") ? manual : (csv || "");
 
-/** その日の出勤・退勤・休憩・外出（手入力が先）と「休憩なし」 */
+/** その日の出勤・退勤・休憩の一覧（手入力が先）と「休憩なし」 */
 export const effectiveTimesOf = (row: any): DayTimes => ({
   entry: pick(row.in, row.csv_entry_time),
   exit: pick(row.out, row.csv_exit_time),
-  breakStart: pick(row.bStart, row.csv_break_start),
-  breakEnd: pick(row.bEnd, row.csv_break_end),
-  outTime: pick(row.outTime, row.csv_out_time),
-  returnTime: pick(row.returnTime, row.csv_return_time),
+  breaks: effectiveBreaks(row.breaks ?? null, row.csvBreaks ?? []),
   breakNone: !!row.breakNone,
 });
 
@@ -153,18 +151,28 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     const inPeriod = payrollPeriod
       ? summary.taken.filter(t => t.date >= payrollPeriod.startStr && t.date <= payrollPeriod.endStr)
       : [];
+    // 時間単位の有給は1年に5日分まで（労働基準法39条4項）。この画面でまだ確定していない日の時間有給も入れて数える
+    const unfinalized = Object.entries(monthlyWorkData)
+      .filter(([, row]) => Number(row.is_finalized) !== 1 && (Number(row.paidHours) || 0) > 0)
+      .map(([date, row]) => ({ date, hours: Number(row.paidHours) || 0 }));
+    const hourlyYears = hourlyLeaveByGrantYear(paidLeaveData.grants, [...taken, ...unfinalized], hours, Master.ANNUAL_PAID_LEAVE_MAX_DAYS);
+    const hourlyOver = hourlyYears
+      .filter(y => y.over && payrollPeriod && y.from <= payrollPeriod.endStr && y.to >= payrollPeriod.startStr)
+      .map(y => ({ from: y.from, to: y.to, taken: formatLeaveMinutes(y.minutes, hours), limit: formatLeaveMinutes(y.limitMinutes, hours), hours: y.minutes / 60, limitHours: y.limitMinutes / 60 }));
     return {
       hasGrants: summary.hasGrants,
       asOf,
       remainingText: formatLeaveMinutes(summary.remainingMinutes, hours),
       hoursAssumed: assumed,
       leaveInPeriod: inPeriod.length > 0,
-      hourlyLeaveInPeriod: inPeriod.some(t => t.hours > 0),
+      hourlyLeaveInPeriod: inPeriod.some(t => t.hours > 0) || unfinalized.some(t => t.date >= (payrollPeriod?.startStr ?? "") && t.date <= (payrollPeriod?.endStr ?? "")),
+      /** 時間単位の有給が1年に5日分を超えた付与の年 */
+      hourlyOver,
       shortages: inPeriod
         .filter(t => t.shortageMinutes > 0)
         .map(t => ({ date: t.date, amount: formatTakenAmount(t), shortage: formatLeaveMinutes(t.shortageMinutes, hours) })),
     };
-  }, [paidLeaveData, selectedStaffId, selectedStaff, payrollPeriod]);
+  }, [paidLeaveData, selectedStaffId, selectedStaff, payrollPeriod, monthlyWorkData]);
 
   // --- 決まった休憩（給与規定グループの決まり。従業員の「決まった休憩を使う」を外した人は null。utils/fixedBreak.ts） ---
   const fixedBreakRule = useMemo(
@@ -177,27 +185,42 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
    * 確定した日は、確定したときの実働と、そのとき引いた決まった休憩で見る
    */
   const breakInfo = useMemo(() => {
-    const info: Record<string, { autoBreak: string; notice: string; shortage: number; workMinutes: number; restMinutes: number }> = {};
+    const info: Record<string, {
+      autoBreak: string; notice: string; shortage: number; workMinutes: number; restMinutes: number;
+      /** 時間有給にした中抜けの長さ（分） */
+      leaveMinutes: number;
+    }> = {};
     for (const date of dateList) {
       const row = monthlyWorkData[date];
       if (!row) continue;
       const times = effectiveTimesOf(row);
       if (Number(row.is_finalized) === 1) {
         const work = Math.round((Number(row.savedHours) || 0) * 60);
-        const rest = recordedRestMinutes(times) + autoBreakMinutes(row.autoBreak);
-        info[date] = { autoBreak: row.autoBreak || "", notice: "", shortage: breakShortage(work, rest), workMinutes: work, restMinutes: rest };
+        const rest = recordedRestMinutes(times, row.autoBreak);
+        info[date] = {
+          autoBreak: row.autoBreak || "", notice: "", shortage: breakShortage(work, rest), workMinutes: work, restMinutes: rest,
+          leaveMinutes: leaveMinutesOf(times),
+        };
         continue;
       }
       const day = calcDayHours(times, fixedBreakRule);
-      if (Number.isNaN(day.total)) continue;
+      if (Number.isNaN(day.total)) {
+        info[date] = { autoBreak: "", notice: "", shortage: 0, workMinutes: 0, restMinutes: 0, leaveMinutes: leaveMinutesOf(times) };
+        continue;
+      }
       const work = Math.round(day.total * 60);
-      info[date] = { autoBreak: day.autoBreak, notice: day.notice, shortage: breakShortage(work, day.restMinutes), workMinutes: work, restMinutes: day.restMinutes };
+      info[date] = {
+        autoBreak: day.autoBreak, notice: day.notice, shortage: breakShortage(work, day.restMinutes), workMinutes: work,
+        restMinutes: day.restMinutes, leaveMinutes: day.leaveMinutes,
+      };
     }
     return info;
   }, [dateList, monthlyWorkData, fixedBreakRule]);
 
   /** 画面に出す、この人の決まった休憩（使わなければ null） */
   const fixedBreakText = fixedBreakRule ? describeFixedBreak(fixedBreakRule) : null;
+  /** 決まった休憩と、入れた休憩との合わせ方（使わなければ null） */
+  const fixedBreakCombineText = fixedBreakRule ? describeCombine(fixedBreakRule) : null;
 
   // --- 勤怠データの読み込み ---
   const loadMonthlyData = useCallback(async () => {
@@ -215,29 +238,24 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
       const loaded: Record<string, any> = {};
       dateList.forEach(d => {
-        loaded[d] = { 
-          in: "", out: "", bStart: "", bEnd: "", outTime: "", returnTime: "", 
+        loaded[d] = {
+          in: "", out: "",
+          // 休憩の一覧：breaks は手入力（null なら打刻を使う）、csvBreaks は打刻（utils/breaks.ts）
+          breaks: null, csvBreaks: [],
           is_finalized: 0, workType: "normal", paidHours: 0, memo: "",
           savedHours: 0, nightHours: 0, breakNone: false, autoBreak: "",
-          // --- ここに初期値をすべて追加 ---
-          csv_entry_time: "", 
+          csv_entry_time: "",
           csv_exit_time: "",
-          csv_break_start: "",
-          csv_break_end: "",
-          csv_out_time: "",
-          csv_return_time: ""
         };
       });
 
       if (Array.isArray(attendanceData)) {
         attendanceData.forEach(row => {
-          loaded[row.work_date] = { 
-            in: row.entry_time || "", 
-            out: row.exit_time || "", 
-            bStart: row.break_start || "", 
-            bEnd: row.break_end || "",
-            outTime: row.out_time || "",
-            returnTime: row.return_time || "",
+          loaded[row.work_date] = {
+            in: row.entry_time || "",
+            out: row.exit_time || "",
+            breaks: parseBreaksJson(row.breaks),
+            csvBreaks: parseBreaksJson(row.csv_breaks) ?? [],
             is_finalized: row.is_finalized || 0,
             finalized_at: row.finalized_at,
             savedHours: Number(row.work_hours) || 0,
@@ -247,13 +265,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
             memo: row.memo || "",
             breakNone: Number(row.break_none) === 1, // その日は休憩を取らなかった（決まった休憩を引かない）
             autoBreak: row.auto_break || "",          // 確定したときに引いた決まった休憩
-            // --- ここでDBから取得した値を反映させる ---
             csv_entry_time: row.csv_entry_time || "",
             csv_exit_time: row.csv_exit_time || "",
-            csv_break_start: row.csv_break_start || "",
-            csv_break_end: row.csv_break_end || "",
-            csv_out_time: row.csv_out_time || "",
-            csv_return_time: row.csv_return_time || ""
           };
         });
       }
@@ -291,7 +304,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     
     const row = monthlyWorkData[date];
 
-    // 手入力があればそれを使い、なければ打刻（CSV）を使う。休憩の時刻が入っていない日は、決まった休憩を引く（utils/fixedBreak.ts）
+    // 手入力があればそれを使い、なければ打刻（CSV）を使う。休憩の一覧と、決まった休憩を引く（utils/fixedBreak.ts）
     const day = calcDayHours(effectiveTimesOf(row), fixedBreakRule);
     const { total, night } = day;
     
@@ -303,20 +316,17 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       // 他の列（csv_...系）を破壊せずに、確定に必要な列だけを更新します
       await db.execute(
         `INSERT INTO attendance (
-          staff_id, work_date, entry_time, exit_time, 
-          break_start, break_end, out_time, return_time, 
+          staff_id, work_date, entry_time, exit_time,
+          breaks,
           work_hours, night_hours,
           actual_base_wage, overtime_rate, night_rate,
           work_type, paid_leave_hours, memo,
           is_finalized, finalized_at, break_none, auto_break
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(staff_id, work_date) DO UPDATE SET
           entry_time = excluded.entry_time,
           exit_time = excluded.exit_time,
-          break_start = excluded.break_start,
-          break_end = excluded.break_end,
-          out_time = excluded.out_time,
-          return_time = excluded.return_time,
+          breaks = excluded.breaks,
           work_hours = excluded.work_hours,
           night_hours = excluded.night_hours,
           actual_base_wage = excluded.actual_base_wage,
@@ -328,8 +338,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           break_none = excluded.break_none,
           auto_break = excluded.auto_break`,
         [
-          selectedStaffId, date, row.in||"", row.out||"", 
-          row.bStart||"", row.bEnd||"", row.outTime||"", row.returnTime||"", 
+          selectedStaffId, date, row.in||"", row.out||"",
+          stringifyBreaks(row.breaks ?? null),
           total, night,
           isMonthly ? 0 : selectedStaff.base_wage, 
           Master.OVERTIME_RATE, Master.NIGHT_SHIFT_RATE,
@@ -470,6 +480,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       deferredHighPremiumHours: 0,
       basePay: 0,         // 🆕 これを追加
       absenceDeduction: 0,
+      tardyDeduction: 0,
       commutePay: 0,
       totalEarnings: 0,
     };
@@ -516,6 +527,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         prorationMethod: toProrationMethod(currentGroup?.proration_method),
         // 月給制の人の欠勤控除（給与規定グループの設定。計算期間の所定労働日数か、1年間の月平均で割る）
         absenceDeductionMethod: toAbsenceDeductionMethod(currentGroup?.absence_deduction_method),
+        // 月給制・日給制の人の遅刻・早退・中抜けの控除（給与規定グループの設定。初めは引かない）
+        tardyDeductionMethod: toTardyDeductionMethod(currentGroup?.tardy_deduction_method),
         period: periodStart ? { start: periodStart, end: periodEnd } : null,
         periodWorkDays: workDays.period,
         employedWorkDays: workDays.employed,
@@ -593,18 +606,14 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     const monthStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-`;
     try {
       const data = await db.select(`
-        SELECT 
-          staff_id, work_date, 
-          csv_entry_time as entry_time, csv_exit_time as exit_time,
-          csv_break_start as break_start, csv_break_end as break_end,
-          csv_out_time as out_time, csv_return_time as return_time
-        FROM attendance 
+        SELECT staff_id, work_date, csv_entry_time, csv_exit_time, csv_breaks
+        FROM attendance
         WHERE work_date LIKE ?
         ORDER BY staff_id, work_date
       `, [`${monthStr}%`]) as any[];
 
       if (!data.length) return dialog.warning(`${targetYear}年${targetMonth}月の打刻ログはありません。`);
-      const csvContent = generateAttendanceCSV(data);
+      const csvContent = generateAttendanceCSV(data, "raw");
       const saved = await saveCsvFile(csvContent, `打刻ログ_${targetYear}年${targetMonth}月.csv`);
       if (!saved) return; // 保存先の選択がキャンセルされた
       toast.success(`「${saved.name}」を保存しました（${data.length}件）`);
@@ -639,7 +648,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       const statusLabel = data.every(row => Number(row.is_finalized) === 1) ? "" : "_【未確定あり】";
       const filename = `勤怠詳細_${targetYear}年${targetMonth}月支給分${statusLabel}.csv`;
 
-      const csvContent = generateAttendanceCSV(csvData); 
+      const csvContent = generateAttendanceCSV(csvData, "full");
       const saved = await saveCsvFile(csvContent, filename);
       if (!saved) return; // 保存先の選択がキャンセルされた
       toast.success(`「${saved.name}」を保存しました（${data.length}件）`);
@@ -709,7 +718,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     isClosed,
     monthlyWorkData, setMonthlyWorkData, dateList, payrollPeriod,
     paidLeave,
-    fixedBreakRule, fixedBreakText, breakInfo,
+    fixedBreakRule, fixedBreakText, fixedBreakCombineText, breakInfo,
+    // 時間単位の有給を使う会社か（会社の設定。労使協定を結んでいるとき）
+    hourlyLeaveEnabled: Number(companySettings?.hourly_leave) === 1,
     holidays,
     companyHolidays,
     activeFilters, setActiveFilters,

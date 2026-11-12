@@ -119,6 +119,54 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "attendance", "auto_break", "TEXT");
     },
   },
+  {
+    version: 10,
+    description:
+      "勤怠の休憩を一覧にする（休憩を1日に何回でも入れる。外出は休憩にまとめ、前の休憩・外出は一覧に移す）。" +
+      "会社に時間単位の有給を使うか（いままで時間有給を入れていれば使う）、給与規定グループに遅刻・早退・中抜けの控除のしかた（初めはしない）、確定した給与にその額を追加",
+    up: async (db) => {
+      await addColumnIfMissing(db, "attendance", "breaks", "TEXT");
+      await addColumnIfMissing(db, "attendance", "csv_breaks", "TEXT");
+      const cols = (await db.select<{ name: string }[]>("PRAGMA table_info(attendance)")).map((c) => c.name);
+      const old = ["break_start", "break_end", "out_time", "return_time", "csv_break_start", "csv_break_end", "csv_out_time", "csv_return_time"];
+      if (old.every((c) => cols.includes(c))) {
+        const isTime = (v: unknown) => typeof v === "string" && /^\d{1,2}:\d{2}$/.test(v.trim());
+        const time = (v: unknown) => (isTime(v) ? String(v).trim().padStart(5, "0") : "");
+        // 手入力があればそれを使い、なければ打刻を使う（いままでの勤怠の画面と同じ見方）
+        const pick = (manual: unknown, punched: unknown) => (isTime(manual) ? time(manual) : time(punched));
+        const pairs = (...ps: [string, string][]) => ps.filter(([s, e]) => s || e).map(([start, end]) => ({ start, end }));
+        const rows = await db.select<Record<string, unknown>[]>(`SELECT id, ${old.join(", ")} FROM attendance`);
+        for (const r of rows) {
+          const punched = pairs([time(r.csv_break_start), time(r.csv_break_end)], [time(r.csv_out_time), time(r.csv_return_time)]);
+          const edited = [r.break_start, r.break_end, r.out_time, r.return_time].some(isTime);
+          const manual = edited
+            ? pairs(
+              [pick(r.break_start, r.csv_break_start), pick(r.break_end, r.csv_break_end)],
+              [pick(r.out_time, r.csv_out_time), pick(r.return_time, r.csv_return_time)],
+            )
+            : null;
+          await db.execute("UPDATE attendance SET breaks = ?, csv_breaks = ? WHERE id = ?", [
+            manual ? JSON.stringify(manual) : null,
+            punched.length > 0 ? JSON.stringify(punched) : null,
+            r.id,
+          ]);
+        }
+        for (const c of old) {
+          try {
+            await db.execute(`ALTER TABLE attendance DROP COLUMN ${c}`);
+          } catch {
+            // 列を消せない古い SQLite では残す（使わない）
+          }
+        }
+      }
+      await addColumnIfMissing(db, "company", "hourly_leave", "INTEGER DEFAULT 0");
+      if (cols.includes("paid_leave_hours")) {
+        await db.execute("UPDATE company SET hourly_leave = 1 WHERE EXISTS (SELECT 1 FROM attendance WHERE paid_leave_hours > 0)");
+      }
+      await addColumnIfMissing(db, "payroll_groups", "tardy_deduction_method", "TEXT DEFAULT 'none'");
+      await addColumnIfMissing(db, "salary_results", "tardy_deduction", "INTEGER");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

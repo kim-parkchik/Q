@@ -17,9 +17,12 @@ import {
   jstTime,
   monthRange,
   parseIso,
+  PUNCH_LABELS,
   requestKindLabel,
   timeLabel,
   writeTimeQardCsv,
+  type PunchKind,
+  type RequestKind,
   type TimeQardCsvRow,
 } from "../../shared/timeqard";
 import { BACKUP_KEEP, backupNow } from "./backup";
@@ -204,8 +207,8 @@ function ListTab({ db, settings }: TabProps) {
               <td>{timeLabel(jstTime(e.at))}</td>
               <td>
                 {e.type === "request" ? (
-                  <><span className="tag req">申し出</span> {requestKindLabel(e.kind)}{e.requestTime ? ` ${timeLabel(e.requestTime)}` : ""}</>
-                ) : requestKindLabel(e.kind)}
+                  <><span className="tag req">申し出</span> {requestKindLabel(e.kind as RequestKind)}{e.kind === "break" ? ` ${timeLabel(e.requestTime ?? "")}〜${timeLabel(e.requestEndTime ?? "")}` : e.requestTime ? ` ${timeLabel(e.requestTime)}` : ""}</>
+                ) : PUNCH_LABELS[e.kind as PunchKind]}
               </td>
               <td>
                 {e.method === "id" ? <span className="tag id">ID</span> : e.method === "web" ? (
@@ -350,8 +353,7 @@ function SettingsTab({ db, settings, onChanged }: TabProps) {
     <>
       <div className="card">
         <h3>打刻の画面</h3>
-        <label className="check"><input type="checkbox" checked={settings.showBreak} onChange={(e) => flag("show_break", e.target.checked)} /> 休憩のボタン（休憩始・休憩終）を出す</label>
-        <label className="check"><input type="checkbox" checked={settings.showOut} onChange={(e) => flag("show_out", e.target.checked)} /> 外出のボタン（外出・戻り）を出す</label>
+        <label className="check"><input type="checkbox" checked={settings.showBreak} onChange={(e) => flag("show_break", e.target.checked)} /> 休憩のボタン（休憩始・休憩終）を出す（休憩は1日に何回でも押せます。私用の中抜けも休憩として押します）</label>
         <label className="check"><input type="checkbox" checked={settings.sound} onChange={(e) => flag("sound", e.target.checked)} /> 押したときに音を出す</label>
         <label className="check"><input type="checkbox" checked={settings.fullscreen} onChange={(e) => flag("fullscreen", e.target.checked)} /> 画面いっぱいに出す</label>
         <label className="check">

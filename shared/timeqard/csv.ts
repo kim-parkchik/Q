@@ -1,24 +1,31 @@
 /**
  * TimeQard の CSV（TimeQard → Q）と、CSV の読み方
  *
- * ・1人1日1行。Q のいまの取り込みの見出し（スタッフID・日付・出勤・退勤・休憩始・休憩終・外出・戻り）に、列を足す。
- *   Q は見出しの名前で列を探すので、列を足しても読める（くわしくは timeqard/DESIGN.md の 4.5・付録 A）。
- * ・名前・申し出の理由・注意などの文の中の、改行と「,」「"」は空白にする（前の Q の読み方でも崩れないように）。
+ * ・1人1日1行。出勤・退勤と、休憩の一覧（「12:00-13:00 15:00-15:10」。spans.ts）を書く（くわしくは timeqard/DESIGN.md の 4.5・付録 A）。
+ *   Q は見出しの名前で列を探す。
+ * ・名前・申し出の理由・注意などの文の中の、改行と「,」「"」は空白にする。
  * ・読み方（parseCsv）は、引用符（"）でくくった値の中の「,」「""」・改行も正しく読む。
  */
-import { PUNCH_KINDS, PUNCH_LABELS, punchKindOfLabel, type PunchKind } from "./kinds";
+import { BREAK_LABEL, PUNCH_KINDS, PUNCH_LABELS, punchKindOfLabel, TIME_REQUEST_KINDS, type PunchKind, type TimeRequestKind } from "./kinds";
+import { formatSpanList, type TimeSpan } from "./spans";
 
 /** CSV の形の名前（「形式」の列）。形を変えたら番号を上げる（Q は、知っている番号までの CSV だけを取り込む） */
 export const TIMEQARD_CSV_FORMAT_VERSION = 1;
 export const TIMEQARD_CSV_FORMAT = `TimeQard ${TIMEQARD_CSV_FORMAT_VERSION}`;
 
-/** 申し出の列の見出し（「申出_出勤」など） */
-export const requestHeader = (kind: PunchKind) => `申出_${PUNCH_LABELS[kind]}`;
+/** 申し出の列の見出し（「申出_出勤」「申出_退勤」） */
+export const requestHeader = (kind: TimeRequestKind) => `申出_${PUNCH_LABELS[kind]}`;
 
 export const CSV_HEADERS = {
   staffId: "スタッフID",
   name: "名前",
   date: "日付",
+  entry: PUNCH_LABELS.entry,
+  exit: PUNCH_LABELS.exit,
+  /** 休憩の一覧（「12:00-13:00 15:00-15:10」） */
+  breaks: BREAK_LABEL,
+  /** 申し出た休憩の一覧 */
+  requestBreaks: `申出_${BREAK_LABEL}`,
   noBreakRequest: "申出_休憩なし",
   requestReason: "申出_理由",
   cardless: "カードなし",
@@ -33,8 +40,11 @@ export const TIMEQARD_CSV_HEADERS: string[] = [
   CSV_HEADERS.staffId,
   CSV_HEADERS.name,
   CSV_HEADERS.date,
-  ...PUNCH_KINDS.map((k) => PUNCH_LABELS[k]),
-  ...PUNCH_KINDS.map(requestHeader),
+  CSV_HEADERS.entry,
+  CSV_HEADERS.exit,
+  CSV_HEADERS.breaks,
+  ...TIME_REQUEST_KINDS.map(requestHeader),
+  CSV_HEADERS.requestBreaks,
   CSV_HEADERS.noBreakRequest,
   CSV_HEADERS.requestReason,
   CSV_HEADERS.cardless,
@@ -58,10 +68,14 @@ export interface TimeQardCsvRow {
   staffId: string;
   name: string;
   date: string;
-  /** 打刻の時刻（「08:58」。なければ ""） */
-  times: Record<PunchKind, string>;
-  /** 申し出た時刻（申し出がない種類は入れない） */
-  requests: Partial<Record<PunchKind, string>>;
+  /** 出勤・退勤の時刻（「08:58」。なければ ""） */
+  times: Record<TimeRequestKind, string>;
+  /** 休憩（始めか終わりの一方しかない休憩も入れる） */
+  breaks: TimeSpan[];
+  /** 申し出た出勤・退勤の時刻（申し出がない種類は入れない） */
+  requests: Partial<Record<TimeRequestKind, string>>;
+  /** 申し出た休憩 */
+  requestBreaks: TimeSpan[];
   /** 「休憩を取れなかった」の申し出がある（「申出_休憩なし」の列に「○」） */
   noBreakRequest: boolean;
   requestReason: string;
@@ -84,8 +98,11 @@ export const writeTimeQardCsv = (rows: TimeQardCsvRow[]): string => {
       r.staffId,
       r.name,
       r.date,
-      ...PUNCH_KINDS.map((k) => r.times[k] ?? ""),
-      ...PUNCH_KINDS.map((k) => r.requests[k] ?? ""),
+      r.times.entry ?? "",
+      r.times.exit ?? "",
+      formatSpanList(r.breaks),
+      ...TIME_REQUEST_KINDS.map((k) => r.requests[k] ?? ""),
+      formatSpanList(r.requestBreaks),
       r.noBreakRequest ? NO_BREAK_MARK : "",
       r.requestReason,
       r.cardless.map((k) => PUNCH_LABELS[k]).join(" "),

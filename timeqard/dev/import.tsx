@@ -7,20 +7,29 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { PreviewDialog } from "../../src/features/attendance/AttendanceImportButton";
 import { planAttendanceImport, readAttendanceImport, type ExistingDay } from "../../src/utils/attendanceImport";
+import { writeTimeQardCsv, type TimeQardCsvRow } from "../../shared/timeqard";
 
 const MARK = "K7M3QP2X";
-const csv = [
-  "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_休憩なし,申出_理由,カードなし,ブラウザ,注意,会社の印,形式",
-  `1001,山田 太郎,2026/11/4,8:58,18:02,12:00,13:00,,,,,,,,,,,,,,${MARK},TimeQard 1`,
-  `1002,佐藤 花子,2026-11-04,,17:31,,,,,09:00,,,,,,,出勤：押し忘れた,退勤,,出勤がありません,${MARK},TimeQard 1`,
-  `1002,佐藤 花子,2026-11-05,08:50,17:00,,,,,,19:00,,,,,,退勤：押し間違えた（会議が長引いた）,,,,${MARK},TimeQard 1`,
-  `1003,鈴木 一郎,2026-11-04,22:00,06:05,02:00,02:45,,,,,,,,,,,,,2回目の休憩（04:00〜04:10）は Q に入りません,${MARK},TimeQard 1`,
-  `1004,確定 済子,2026-11-04,09:00,18:00,,,,,,,,,,,,,,,,${MARK},TimeQard 1`,
-  `9999,知らない 人,2026-11-04,09:00,18:00,,,,,,,,,,,,,,,,${MARK},TimeQard 1`,
-  `1001,山田 太郎,2026-11-05,9時,18:00,,,,,,,,,,,,,,,,${MARK},TimeQard 1`,
-  `1001,山田 太郎,2026-11-06,09:00,18:00,,,,,,,,,,,○,休憩なし：休憩を取れなかった（来客が続いた）,,,,${MARK},TimeQard 1`,
-  `1003,鈴木 一郎,2026-11-06,09:02,18:10,,,,,,,,,,,,,,出勤 退勤,,${MARK},TimeQard 1`,
-].join("\r\n");
+// 見本の CSV（shared/timeqard の書き方で作る。TimeQard が書き出すものと同じ形）
+const row = (o: Partial<TimeQardCsvRow> & Pick<TimeQardCsvRow, "staffId" | "name" | "date">): TimeQardCsvRow => ({
+  times: { entry: "", exit: "" }, breaks: [], requests: {}, requestBreaks: [], noBreakRequest: false, requestReason: "",
+  cardless: [], web: [], notes: [], companyMark: MARK, ...o,
+});
+const csv = writeTimeQardCsv([
+  row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04", times: { entry: "08:58", exit: "18:02" }, breaks: [{ start: "12:00", end: "13:00" }, { start: "15:00", end: "15:10" }] }),
+  row({ staffId: "1002", name: "佐藤 花子", date: "2026-11-04", times: { entry: "", exit: "17:31" }, requests: { entry: "09:00" }, requestReason: "出勤：押し忘れた", cardless: ["exit"], notes: ["出勤がありません"] }),
+  row({ staffId: "1002", name: "佐藤 花子", date: "2026-11-05", times: { entry: "08:50", exit: "17:00" }, requests: { exit: "19:00" }, requestReason: "退勤：押し間違えた（会議が長引いた）" }),
+  row({ staffId: "1003", name: "鈴木 一郎", date: "2026-11-04", times: { entry: "22:00", exit: "06:05" }, breaks: [{ start: "02:00", end: "02:45" }, { start: "04:00", end: "04:10" }] }),
+  row({ staffId: "1004", name: "確定 済子", date: "2026-11-04", times: { entry: "09:00", exit: "18:00" } }),
+  row({ staffId: "9999", name: "知らない 人", date: "2026-11-04", times: { entry: "09:00", exit: "18:00" } }),
+  row({
+    staffId: "1001", name: "山田 太郎", date: "2026-11-05", times: { entry: "09:00", exit: "18:00" }, breaks: [{ start: "12:00", end: "" }],
+    requestBreaks: [{ start: "12:00", end: "13:00" }, { start: "15:00", end: "17:00" }], requestReason: "休憩（12:00〜13:00）：押し忘れた／休憩（15:00〜17:00）：そのほか（病院）",
+    notes: ["休憩終がありません（休憩始 12:00）"],
+  }),
+  row({ staffId: "1001", name: "山田 太郎", date: "2026-11-06", times: { entry: "09:00", exit: "18:00" }, noBreakRequest: true, requestReason: "休憩なし：休憩を取れなかった（来客が続いた）" }),
+  row({ staffId: "1003", name: "鈴木 一郎", date: "2026-11-06", times: { entry: "09:02", exit: "18:10" }, web: ["entry", "exit"] }),
+]);
 
 const staff = [
   { id: "1001", name: "山田 太郎" },
@@ -28,10 +37,10 @@ const staff = [
   { id: "1003", name: "鈴木 一郎" },
   { id: "1004", name: "確定 済子" },
 ];
-const blank = { entry: "", exit: "", break_start: "", break_end: "", out: "", return: "" };
+const blank = { entry: "", exit: "" };
 const existing = new Map<string, ExistingDay>([
-  ["1004\u00002026-11-04", { finalized: true, manual: blank, memo: "" }],
-  ["1002\u00002026-11-05", { finalized: false, manual: { ...blank, exit: "19:30" }, memo: "" }],
+  ["1004\u00002026-11-04", { finalized: true, manual: blank, manualBreaks: null, memo: "" }],
+  ["1002\u00002026-11-05", { finalized: false, manual: { ...blank, exit: "19:30" }, manualBreaks: null, memo: "" }],
 ]);
 const plan = planAttendanceImport(readAttendanceImport(csv, { staff, companyMark: MARK }), existing);
 
