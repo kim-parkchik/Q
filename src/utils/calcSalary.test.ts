@@ -605,11 +605,101 @@ describe("遅刻・早退・中抜けの控除（月給制・日給制。給与�
     });
 });
 
+describe("特別休暇（夏季休暇などの会社独自の休暇。有給か無給かは種類ごと。確定したときの設定を leave_paid に残す）", () => {
+    const daily = { ...hourly, wage_type: "daily", base_wage: 12000 };
+    test("月給制の有給の休暇：引かない（月給をそのまま払う）", () => {
+        const r = calc(monthly, [day("08", 0, "special", { leave_paid: 1 }), day("09", 4, "special_half", { leave_paid: 1 })], { periodWorkDays: 22 });
+        expect(r).toMatchObject({ specialLeaveDays: 1.5, unpaidLeaveDays: 0, unpaidLeaveDeduction: 0, specialLeavePay: 0, totalEarnings: 300000 });
+        expect(r.unpaidLeaveDeductionDetail).toBeNull();
+    });
+    test("月給制の無給の休暇：欠勤控除と同じ計算で引く（300,000 × 1.5日 ÷ 22日 ＝ 20,454円）", () => {
+        const rows = [day("08", 0, "special", { leave_paid: 0 }), day("09", 4, "special_half", { leave_paid: 0 })];
+        const r = calc(monthly, rows, { periodWorkDays: 22 });
+        expect(r).toMatchObject({ unpaidLeaveDays: 1.5, unpaidLeaveDeduction: 20454, absenceDeduction: 0, absenceDays: 0, totalEarnings: 300000 - 20454 });
+        expect(r.unpaidLeaveDeductionDetail).toBe("月給 ¥300,000 × 無給の休暇 1.5日 ÷ 計算期間の所定労働日数 22日");
+        // 1年間の月平均で割る設定：300,000 × 1.5日 × 12 ÷ 245日 ＝ 22,040円
+        expect(calc(monthly, rows, { absenceDeductionMethod: "annual", annualWorkDays: 245 }).unpaidLeaveDeduction).toBe(22040);
+        // 欠勤控除をしない設定（完全月給制）なら、無給の休暇も引かない
+        const none = calc(monthly, rows, { absenceDeductionMethod: "none", periodWorkDays: 22 });
+        expect(none.unpaidLeaveDeduction).toBe(0);
+        expect(none.unpaidLeaveDeductionDetail).toBe("無給の休暇 1.5日：欠勤控除をしない設定（完全月給制）なので、月給をそのまま支給します");
+    });
+    test("欠勤と無給の休暇は分けて引く。無給の休暇は、欠勤控除のあとの基本給まで", () => {
+        const r = calc(monthly, [day("08", 0, "absent"), day("09", 0, "special", { leave_paid: 0 })], { periodWorkDays: 22 });
+        expect([r.absenceDeduction, r.unpaidLeaveDeduction, r.totalEarnings]).toEqual([13636, 13636, 300000 - 27272]);
+        const capped = calc(monthly, [day("08", 0, "absent"), day("09", 0, "special", { leave_paid: 0 })], { periodWorkDays: 1 });
+        expect([capped.absenceDeduction, capped.unpaidLeaveDeduction]).toEqual([300000, 0]);
+        expect(capped.unpaidLeaveDeductionDetail).toContain("→ 基本給の ¥0 まで");
+    });
+    test("半日の日は、所定労働時間の半分に足りない時間を遅刻・早退として数える", () => {
+        const r = calc(monthly, [day("09", 3, "special_half", { leave_paid: 1 })], { tardyDeductionMethod: "annual", annualWorkDays: 245 });
+        expect(r).toMatchObject({ tardyHours: 1, tardyDeduction: 1836 });
+    });
+    test("日給制：有給の休暇は日給の割合を払い、無給の休暇は払わない（半日の日は、働いた半日の日給を払う）", () => {
+        const r = calc(daily, [
+            day("08", 0, "special", { leave_paid: 1 }),
+            day("09", 4, "special_half", { leave_paid: 1 }),
+            day("10", 4, "special_half", { leave_paid: 0 }),
+            day("11", 0, "special", { leave_paid: 0 }),
+        ]);
+        expect(r).toMatchObject({ basePay: 12000, dailyWageDays: 1, specialLeavePay: 18000, specialLeaveHours: 12, specialLeaveDays: 1.5, unpaidLeaveDays: 1.5, unpaidLeaveDeduction: 0 });
+        expect(r.totalEarnings).toBe(30000);
+    });
+    test("時給制：有給の休暇は 時給 × 所定労働時間（半日は半分）を払う", () => {
+        const r = calc(hourly, [
+            day("08", 0, "special", { leave_paid: 1 }),
+            day("09", 4, "special_half", { leave_paid: 1 }),
+            day("10", 4, "special_half", { leave_paid: 0 }),
+        ]);
+        expect(r).toMatchObject({ basePay: 9600, specialLeavePay: 14400, specialLeaveHours: 12, totalEarnings: 24000 });
+    });
+    test("有給かがわからない日（leave_paid がない）は、払う額が少なくならないように有給として扱う", () => {
+        expect(calc(hourly, [day("08", 0, "special")]).specialLeavePay).toBe(9600);
+        expect(calc(monthly, [day("08", 0, "special")], { periodWorkDays: 22 }).unpaidLeaveDeduction).toBe(0);
+    });
+    test("時間単位（子の看護等休暇など）・月給制の無給の時間：遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く（300,000 × 3時間 ÷（245日 × 8時間 ÷ 12）＝ 5,510円）", () => {
+        const rows = [day("08", 5, "normal", { special_leave_hours: 3, leave_paid: 0 })];
+        const r = calc(monthly, rows, { tardyDeductionMethod: "annual", annualWorkDays: 245 });
+        expect(r).toMatchObject({ unpaidLeaveHours: 3, unpaidLeaveDeduction: 5510, tardyHours: 0, tardyDeduction: 0, totalEarnings: 300000 - 5510 });
+        expect(r.unpaidLeaveDeductionDetail).toBe("月給 ¥300,000 × 無給の休暇 3時間 ÷ 1か月平均所定労働時間（245日 × 8時間 ÷ 12）");
+        // 遅刻・早退・中抜けを引かない設定（初めの値）なら、無給の時間も引かない
+        const none = calc(monthly, rows, { annualWorkDays: 245 });
+        expect([none.unpaidLeaveDeduction, none.tardyDeduction, none.totalEarnings]).toEqual([0, 0, 300000]);
+        expect(none.unpaidLeaveDeductionDetail).toBe("無給の休暇 3時間：給与規定グループで遅刻・早退・中抜けを引かない設定なので、月給をそのまま支給します");
+        // 1日の無給の休暇と時間の無給の休暇は、合わせて「無給休暇控除」にする
+        const both = calc(monthly, [...rows, day("09", 0, "special", { leave_paid: 0 })], { tardyDeductionMethod: "annual", annualWorkDays: 245, absenceDeductionMethod: "annual" });
+        expect(both.unpaidLeaveDeduction).toBe(Math.floor(300000 * 12 / 245) + 5510);
+        expect(both.unpaidLeaveDeductionDetail).toContain("／");
+    });
+    test("時間単位・有給の時間：月給制は引かず、時給制は 時給 × 時間、日給制は 日給 × 時間 ÷ 所定労働時間 を払う", () => {
+        const paid = { special_leave_hours: 3, leave_paid: 1 };
+        expect(calc(monthly, [day("08", 5, "normal", paid)], { tardyDeductionMethod: "annual", annualWorkDays: 245 }))
+            .toMatchObject({ unpaidLeaveDeduction: 0, tardyDeduction: 0, totalEarnings: 300000 });
+        expect(calc(hourly, [day("08", 5, "normal", paid)])).toMatchObject({ basePay: 6000, specialLeavePay: 3600, specialLeaveHours: 3, totalEarnings: 9600 });
+        expect(calc(daily, [day("08", 5, "normal", paid)])).toMatchObject({ basePay: 7500, specialLeavePay: 4500, dailyWageDays: 0.625, totalEarnings: 12000 });
+        // 無給なら、日給は働いた時間の割合だけ
+        expect(calc(daily, [day("08", 5, "normal", { special_leave_hours: 3, leave_paid: 0 })])).toMatchObject({ basePay: 7500, specialLeavePay: 0, totalEarnings: 7500 });
+    });
+    test("時間単位の休暇の時間は、時間有給と同じく所定労働時間から引いて残業を数える（3時間休んで6時間働いたら、1時間は法定内残業）", () => {
+        const r = calc(monthly, [day("08", 6, "normal", { special_leave_hours: 3, leave_paid: 1 })]);
+        expect(r.totalStatutoryOvertimeHours).toBe(1);
+    });
+    test("確定した結果に、無給の休暇の控除の額を残す", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const r = calc(monthly, [day("08", 0, "special", { leave_paid: 0 })], { periodWorkDays: 22 });
+        expect(await saveSalaryResult(asyncDb, "S001", 2026, 6, r, monthly)).toEqual({ success: true });
+        expect(db.query("SELECT unpaid_leave_deduction AS d, total_earnings AS t FROM salary_results").get()).toEqual({ d: 13636, t: 300000 - 13636 });
+    });
+});
+
 describe("給与明細の行を足すと、ちょうど支給合計になる（時間外・休日・深夜の手当ごとに、1か月の合計で端数を処理する。基発第150号）", () => {
     /** 給与明細の支給項目の行を足した額（固定残業代がある人は、時間外手当の代わりに固定残業代と超過分の行） */
-    const lineSum = (r: ReturnType<typeof calc>) => r.basePay - r.absenceDeduction - r.tardyDeduction + r.statutoryOvertimePay
+    const lineSum = (r: ReturnType<typeof calc>) => r.basePay - r.absenceDeduction - r.unpaidLeaveDeduction - r.tardyDeduction + r.statutoryOvertimePay
         + (r.fixedOvertimeAllowance > 0 ? r.fixedOvertimeAllowance + r.fixedOvertimeExcess : r.standardOvertimePay + r.highOvertimePay)
-        + r.holidayWorkPay + r.paidLeavePay + r.nightPay + r.commutePay + r.allowanceAmount + r.customEarnings;
+        + r.holidayWorkPay + r.paidLeavePay + r.specialLeavePay + r.nightPay + r.commutePay + r.allowanceAmount + r.customEarnings;
 
     test("月給301,234円・9.3時間（深夜0.3時間）の日：時間外 2,781.28…円 → 2,781円、深夜 128.37…円 → 128円（いままでは2つを合わせて四捨五入し、合計が1円多かった）", () => {
         const r = calc({ ...monthly, base_wage: 301234 }, [day("08", 9.3, "normal", { night_hours: 0.3 })]);
@@ -625,6 +715,10 @@ describe("給与明細の行を足すと、ちょうど支給合計になる（�
             calc({ ...monthly, base_wage: 312345, fixed_overtime_hours: 5, fixed_overtime_allowance: 10000 }, weekdays({ work_hours: 11.6, night_hours: 1.3 })),
             calc({ ...hourly, base_wage: 1163 }, weekdays({ work_hours: 9.45, night_hours: 0.55 }), { customItems: [{ name: "職務手当", amount: 12345, type: "earning" }] }),
             calc({ ...monthly, wage_type: "daily", base_wage: 11111 }, [...weekdays({ work_hours: 8.9 }), day("14", 5.25, "statutory_holiday", nights)]),
+            // 特別休暇（有給・無給、1日・半日）がある月
+            calc({ ...monthly, wage_type: "daily", base_wage: 11111 }, [day("08", 0, "special", { leave_paid: 1 }), day("09", 4.2, "special_half", { leave_paid: 1 }), day("10", 3.9, "special_half", { leave_paid: 0 })]),
+            calc({ ...hourly, base_wage: 1163 }, [day("08", 0, "special", { leave_paid: 1 }), day("09", 4.35, "special_half", { leave_paid: 1 })]),
+            calc({ ...monthly, base_wage: 287654 }, [...weekdays({ work_hours: 9.1 }), day("15", 0, "special", { leave_paid: 0 })], { periodWorkDays: 22 }),
         ];
         for (const r of cases) expect(lineSum(r)).toBe(r.totalEarnings);
     });

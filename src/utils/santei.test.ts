@@ -100,6 +100,18 @@ describe("支払基礎日数", () => {
         ];
         expect(paymentBasisDays("hourly", period, rows, 22)).toBe(3);
     });
+    test("特別休暇：時給制は有給の休暇の日を数え、無給の休暇の日は数えない。月給制は無給の休暇（1日）で引いた日を欠勤と同じく引く", () => {
+        const rows = [
+            { work_date: "2026-04-06", work_type: "special", work_hours: 0, leave_paid: 1 },
+            { work_date: "2026-04-07", work_type: "special", work_hours: 0, leave_paid: 0 },
+            { work_date: "2026-04-08", work_type: "special_half", work_hours: 4, leave_paid: 0 },
+            { work_date: "2026-04-09", work_type: "special_half", work_hours: 0, leave_paid: 1 },
+        ];
+        expect(paymentBasisDays("hourly", period, rows, 22)).toBe(3);
+        // 月給制：無給の休暇（1日）の1日だけを引く（半日の日は残りの半日の給与を払っている）
+        expect(paymentBasisDays("monthly", period, rows, 22, true)).toBe(21);
+        expect(paymentBasisDays("monthly", period, rows, 22, false)).toBe(30);
+    });
 });
 
 describe("算定基礎届の対象", () => {

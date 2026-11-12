@@ -14,6 +14,7 @@ import BreakListDialog from './BreakListDialog';
 import type { AttendanceViewModel } from './types';
 import { durationLabel } from '../../../utils/fixedBreak';
 import { effectiveBreaks, isCompleteSpan, spanLabel, type BreakSpan } from '../../../utils/breaks';
+import { SPECIAL_LEAVE_FULL, SPECIAL_LEAVE_HALF, isSpecialLeaveWorkType, leaveOptionValue, specialLeaveLabel } from '../../../utils/specialLeave';
 
 interface Props {
   am: AttendanceViewModel;
@@ -41,23 +42,41 @@ export default function AttendanceTable({ am }: Props) {
     holidays,
     companyHolidays,
     handleCellChange,
+    handleWorkTypeChange,
+    handleHourlyLeaveTypeChange,
     finalizeAttendance,
     unfinalizeAttendance,
     fixedBreakRule,
     breakInfo,
     hourlyLeaveEnabled,
+    leaveTypes,
   } = am;
   // 休憩の一覧の画面を開いている日
   const [breakDialogDate, setBreakDialogDate] = useState<string | null>(null);
 
-  /** 休憩の一覧を変える（時間有給の印を付けた中抜けがあれば、時間有給の時間を1時間単位で切り上げて足りるようにする） */
+  /**
+   * 休憩の一覧を変える（時間有給の印を付けた中抜けがあれば、時間有給の時間を1時間単位で切り上げて足りるようにする。
+   * 時間単位の特別休暇の印を付けた中抜けがあれば、時間休の種類をその休暇にし、時間休の時間を同じく足りるようにする）
+   */
   const changeBreaks = (dateStr: string, list: BreakSpan[] | null) => {
     handleCellChange(dateStr, 'breaks', list);
-    const leave = (list ?? []).filter(b => b.leave).reduce((a, b) => a + spanMinutes(b), 0);
+    const items = list ?? [];
+    const row = monthlyWorkData[dateStr] || {};
+    const leave = items.filter(b => b.leave && !b.leaveTypeId).reduce((a, b) => a + spanMinutes(b), 0);
     const need = Math.ceil(leave / 60);
-    const current = Number(monthlyWorkData[dateStr]?.paidHours) || 0;
-    if (need > current) handleCellChange(dateStr, 'paidHours', need);
+    if (need > (Number(row.paidHours) || 0)) handleCellChange(dateStr, 'paidHours', need);
+    const special = items.filter(b => b.leaveTypeId);
+    if (special.length > 0) {
+      const typeId = special[0].leaveTypeId!;
+      if (Number(row.leaveTypeId) !== typeId) handleHourlyLeaveTypeChange(dateStr, typeId);
+      const needSpecial = Math.ceil(special.reduce((a, b) => a + spanMinutes(b), 0) / 60);
+      if (needSpecial > (Number(row.specialHours) || 0)) handleCellChange(dateStr, 'specialHours', needSpecial);
+    }
   };
+
+  /** 時間単位でも取れる特別休暇の種類（使う種類と、その日に入っている種類） */
+  const hourlyTypesFor = (currentId: number | null) =>
+    leaveTypes.filter(t => t.allowHourly && (t.active || t.id === currentId));
 
   /** 表の1回目の休憩を直す（手で直すと、その日は手入力の一覧を使う） */
   const changeFirstBreak = (dateStr: string, field: "start" | "end", value: string) => {
@@ -73,6 +92,10 @@ export default function AttendanceTable({ am }: Props) {
   };
 
   const dialogRow = breakDialogDate ? (monthlyWorkData[breakDialogDate] || {}) : null;
+  // 休憩の一覧で中抜けに付けられる特別休暇（その日が特別休暇（1日・半日）なら付けない）
+  const dialogLeaveTypes = dialogRow && !isSpecialLeaveWorkType(dialogRow.workType)
+    ? hourlyTypesFor(dialogRow.leaveTypeId ?? null).map(t => ({ id: t.id, name: t.name }))
+    : [];
 
   return (
     <>
@@ -82,6 +105,7 @@ export default function AttendanceTable({ am }: Props) {
         punched={dialogRow.csvBreaks ?? []}
         manual={dialogRow.breaks ?? null}
         hourlyLeave={hourlyLeaveEnabled}
+        leaveTypes={dialogLeaveTypes}
         disabled={dialogRow.is_finalized === 1 || isClosed || isAbsentRow(dialogRow)}
         onChange={(list) => changeBreaks(breakDialogDate, list)}
         onClose={() => setBreakDialogDate(null)}
@@ -101,8 +125,8 @@ export default function AttendanceTable({ am }: Props) {
           <th style={S.th}>休憩(始)</th>
           <th style={{ ...S.th, paddingRight: "20px" }}>休憩(終)</th>
           <th style={{ ...S.th, paddingRight: "2px" }}>休憩の一覧</th>
-          {/* 🆕 独立した時間有給列 */}
-          <th style={{ ...S.th, width: "60x", color: "#3498db" }}>時間有給</th>
+          {/* 時間単位の休暇（時間有給・時間単位の特別休暇） */}
+          <th style={{ ...S.th, width: "96px", color: "#3498db" }}>時間休</th>
           
           {/* 🆕 実働と操作を一つのエリアとして定義 */}
           <th style={{ ...S.th, width: "130px", borderLeft: "1px solid #eee" }}>実働 / 確定</th>
@@ -121,6 +145,10 @@ export default function AttendanceTable({ am }: Props) {
             in: rowData.in || "",
             out: rowData.out || "",
             workType: rowData.workType || "normal",
+            // 特別休暇の種類（区分が special・special_half の日と、時間休を入れた日）
+            leaveTypeId: rowData.leaveTypeId ?? null,
+            // 時間単位の特別休暇の時間（時間休）
+            specialHours: rowData.specialHours ?? 0,
             paidHours: rowData.paidHours || 0,
             // 休憩：手入力の一覧（null なら打刻）と打刻の一覧。表には1回目を出す
             manualBreaks: (rowData.breaks ?? null) as BreakSpan[] | null,
@@ -143,6 +171,9 @@ export default function AttendanceTable({ am }: Props) {
           // 時間有給にした中抜けより、時間有給の時間が少ない（1時間単位で切り上げた時間が要る）
           const leaveNeedHours = Math.ceil((brk?.leaveMinutes ?? 0) / 60);
           const leaveShort = leaveNeedHours > (Number(rowData.paidHours) || 0);
+          // 特別休暇にした中抜けより、時間休の時間が少ない
+          const specialNeedHours = Math.ceil((brk?.specialLeaveMinutes ?? 0) / 60);
+          const specialShort = specialNeedHours > (Number(rowData.specialHours) || 0);
 
           // --- 2. 矛盾チェック（エラーメッセージ） ---
           let timeErrorMsg = "";
@@ -157,6 +188,15 @@ export default function AttendanceTable({ am }: Props) {
 
           // --- 1. 状態判定 ---
           const isAbsent = row.workType === "absent"; // 欠勤かどうか
+          // 1日休む日（全休・特別休暇の1日）は、時間有給の欄を薄くする
+          const isDayOff = row.workType === "paid_full" || row.workType === SPECIAL_LEAVE_FULL;
+          // 区分のプルダウン：特別休暇は休暇の種類も入れた値。使わない種類でも、その日に入っていれば出す
+          const isSpecial = isSpecialLeaveWorkType(row.workType);
+          // 時間休（時間単位の特別休暇）：特別休暇（1日・半日）の日は出さない
+          const specialHourlyTypes = isSpecial ? [] : hourlyTypesFor(row.leaveTypeId === null ? null : Number(row.leaveTypeId));
+          const showSpecialHours = !isSpecial && !isAbsent && (specialHourlyTypes.length > 0 || Number(row.specialHours) > 0);
+          const selectValue = isSpecial && row.leaveTypeId !== null ? leaveOptionValue(row.workType, Number(row.leaveTypeId)) : row.workType;
+          const leaveOptions = leaveTypes.filter(t => t.active || (isSpecial && t.id === Number(row.leaveTypeId)));
 
           // --- 2. スタイル定義（動的に切り替え） ---
           const borderLeftStyle = isFinalized 
@@ -217,8 +257,9 @@ export default function AttendanceTable({ am }: Props) {
                     </div>
 
                     <select
-                      value={row.workType}
-                      onChange={e => handleCellChange(dateStr, 'workType', e.target.value)}
+                      value={selectValue}
+                      onChange={e => handleWorkTypeChange(dateStr, e.target.value)}
+                      title={isSpecial ? specialLeaveLabel(leaveTypes.find(t => t.id === Number(row.leaveTypeId)), row.workType) : undefined}
                       style={{ 
                         ...S.input, 
                         marginTop: "4px", 
@@ -251,6 +292,23 @@ export default function AttendanceTable({ am }: Props) {
                       <option value="statutory_holiday">法定休日出勤（35%増）</option>
                       <option value="paid_full">全休(有給)</option>
                       <option value="paid_half">半休(有給)</option>
+                      {/* 会社独自の休暇（特別休暇）。種類は会社設定の「休暇の種類」で作る（utils/specialLeave.ts） */}
+                      {leaveOptions.length > 0 && (
+                        <optgroup label="会社独自の休暇">
+                          {leaveOptions.map(t => (
+                            <Fragment key={t.id}>
+                              <option value={leaveOptionValue(SPECIAL_LEAVE_FULL, t.id)}>{t.name}{t.paid ? "" : "(無給)"}</option>
+                              {(t.allowHalf || (row.workType === SPECIAL_LEAVE_HALF && Number(row.leaveTypeId) === t.id)) && (
+                                <option value={leaveOptionValue(SPECIAL_LEAVE_HALF, t.id)}>{t.name}(半日){t.paid ? "" : "(無給)"}</option>
+                              )}
+                            </Fragment>
+                          ))}
+                        </optgroup>
+                      )}
+                      {/* 区分は特別休暇なのに種類がわからない日（消した種類など）：選び直してもらう */}
+                      {isSpecial && !leaveOptions.some(t => t.id === Number(row.leaveTypeId)) && (
+                        <option value={selectValue}>特別休暇（種類を選び直してください）</option>
+                      )}
                       {/* セレクトボックスの中も赤くしておくと親切 */}
                       <option value="absent" style={{ color: "#e74c3c" }}>欠勤</option>
                     </select>
@@ -286,10 +344,12 @@ export default function AttendanceTable({ am }: Props) {
                   borderLeft: "1px solid #eee", 
                   textAlign: "center", 
                   verticalAlign: "middle",
-                  backgroundColor: (row.workType === "paid_full" || isAbsent) ? "#f9f9f9" : rowBgColor 
+                  backgroundColor: (isDayOff || isAbsent) ? "#f9f9f9" : rowBgColor 
                 }}>
                   {!hourlyLeaveEnabled && !(Number(row.paidHours) > 0) ? (
-                    <span style={{ fontSize: "10px", color: "#cbd5e1" }} title="時間単位の有給は、会社の設定で「使う」にしたときに入れられます">—</span>
+                    !showSpecialHours && (
+                      <span style={{ fontSize: "10px", color: "#cbd5e1" }} title="時間単位の有給は、会社の設定で「使う」にしたときに入れられます">—</span>
+                    )
                   ) : (<>
                   <span style={{ 
                     fontSize: "10px", 
@@ -337,6 +397,38 @@ export default function AttendanceTable({ am }: Props) {
                     <span style={{ fontSize: "9px", color: "#b45309", display: "block" }}>会社の設定で使わない</span>
                   )}
                   </>)}
+                  {/* 時間単位の特別休暇（子の看護等休暇・介護休暇など）。特別休暇（1日・半日）の日は入れない */}
+                  {showSpecialHours && (
+                    <div style={{ marginTop: (hourlyLeaveEnabled || Number(row.paidHours) > 0) ? "8px" : 0, paddingTop: (hourlyLeaveEnabled || Number(row.paidHours) > 0) ? "6px" : 0,
+                      borderTop: (hourlyLeaveEnabled || Number(row.paidHours) > 0) ? "1px dashed #e2e8f0" : "none" }}>
+                      <select
+                        value={row.leaveTypeId ?? ""}
+                        onChange={e => handleHourlyLeaveTypeChange(dateStr, e.target.value === "" ? null : Number(e.target.value))}
+                        disabled={isFinalized || isClosed}
+                        title="時間単位で取った休暇の種類"
+                        style={{ width: "88px", fontSize: "10px", padding: "1px", color: isFinalized ? "#6b46c1" : "#333",
+                          border: isFinalized ? "1px solid transparent" : "1px solid #ddd", backgroundColor: "transparent" }}
+                      >
+                        <option value="">休暇（時間）</option>
+                        {specialHourlyTypes.map(t => <option key={t.id} value={t.id}>{t.name}{t.paid ? "" : "(無給)"}</option>)}
+                      </select>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", marginTop: "3px" }}>
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          value={row.specialHours}
+                          onChange={e => handleCellChange(dateStr, 'specialHours', e.target.value)}
+                          disabled={isFinalized || isClosed}
+                          style={{ width: "45px", fontSize: "13px", textAlign: "center", borderRadius: "4px",
+                            border: isFinalized ? "1px solid transparent" : "1px solid #ddd",
+                            backgroundColor: (isFinalized || isClosed) ? "transparent" : "#fff",
+                            color: isFinalized ? "#6b46c1" : "#333", fontWeight: isFinalized ? "bold" : "normal", opacity: 1 }}
+                        />
+                        <span style={{ fontSize: "10px", color: isFinalized ? "#6b46c1" : "#7f8c8d", marginLeft: "2px" }}>h</span>
+                      </div>
+                    </div>
+                  )}
                 </td>
 
                 {/* --- 4. 実働 / 確定エリア (rowSpan=3 で統合) --- */}
@@ -368,6 +460,11 @@ export default function AttendanceTable({ am }: Props) {
                         (内 有給 {row.paidHours}h)
                       </div>
                     )}
+                    {isFinalized && Number(row.specialHours) > 0 && !isSpecial && (
+                      <div style={{ fontSize: "9px", color: "#6b46c1" }}>
+                        (ほかに 休暇 {row.specialHours}h)
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "center" }}>
@@ -390,7 +487,7 @@ export default function AttendanceTable({ am }: Props) {
               </tr>
 
               <tr style={{ 
-                backgroundColor: (row.workType === "paid_full" || isAbsent ? "#f9f9f9" : rowBgColor),
+                backgroundColor: (isDayOff || isAbsent ? "#f9f9f9" : rowBgColor),
                 borderLeft: borderLeftStyle,
                 opacity: 1, 
               }}>
@@ -402,22 +499,26 @@ export default function AttendanceTable({ am }: Props) {
                   {(() => {
                     const list = effectiveBreaks(row.manualBreaks, row.punchedBreaks);
                     const others = list.slice(1);
-                    const leave = list.filter(b => b.leave).reduce((a, b) => a + spanMinutes(b), 0);
-                    const otherRest = others.filter(b => !b.leave).reduce((a, b) => a + spanMinutes(b), 0);
+                    const leave = list.filter(b => b.leave && !b.leaveTypeId).reduce((a, b) => a + spanMinutes(b), 0);
+                    const specialLeave = list.filter(b => b.leaveTypeId).reduce((a, b) => a + spanMinutes(b), 0);
+                    const otherRest = others.filter(b => !b.leave && !b.leaveTypeId).reduce((a, b) => a + spanMinutes(b), 0);
                     return (
                       <button
                         onClick={() => setBreakDialogDate(dateStr)}
                         disabled={isAbsent}
-                        title={list.length > 0 ? list.map(b => `${spanLabel(b)}${b.leave ? "（時間有給）" : ""}`).join("、") : "休憩を足す・直す"}
+                        title={list.length > 0
+                          ? list.map(b => `${spanLabel(b)}${b.leaveTypeId ? `（${leaveTypes.find(t => t.id === b.leaveTypeId)?.name ?? "特別休暇"}）` : b.leave ? "（時間有給）" : ""}`).join("、")
+                          : "休憩を足す・直す"}
                         style={{
                           display: "inline-flex", alignItems: "center", gap: 3, fontSize: "11px", padding: "3px 6px", borderRadius: 4,
-                          border: "1px solid #cbd5e1", background: "#fff", color: others.length > 0 || leave > 0 ? "#1d4ed8" : "#64748b",
+                          border: "1px solid #cbd5e1", background: "#fff", color: others.length > 0 || leave > 0 || specialLeave > 0 ? "#1d4ed8" : "#64748b",
                           cursor: isAbsent ? "default" : "pointer", whiteSpace: "nowrap",
                         }}
                       >
                         <ListPlus size={12} />
                         {others.length > 0 ? `ほか${others.length}回${otherRest > 0 ? `（${durationLabel(otherRest)}）` : ""}` : (isFinalized || isClosed ? "一覧" : "足す")}
                         {leave > 0 && <span style={{ color: "#2563eb" }}>・有給{durationLabel(leave)}</span>}
+                        {specialLeave > 0 && <span style={{ color: "#6b46c1" }}>・休暇{durationLabel(specialLeave)}</span>}
                       </button>
                     );
                   })()}
@@ -444,7 +545,7 @@ export default function AttendanceTable({ am }: Props) {
                     />
                   </div>
                   {/* 休憩：決まった休憩・「休憩なし」・労働基準法34条の休憩に足りない日 */}
-                  {(brk?.autoBreak || brk?.notice || (brk?.shortage ?? 0) > 0 || showBreakNone || leaveShort) && (
+                  {(brk?.autoBreak || brk?.notice || (brk?.shortage ?? 0) > 0 || showBreakNone || leaveShort || specialShort) && (
                     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 12px", marginTop: "4px", fontSize: "11px" }}>
                       {showBreakNone && (
                         <label style={{ display: "flex", alignItems: "center", gap: "3px", color: "#475569", cursor: isFinalized || isClosed ? "default" : "pointer" }}
@@ -463,6 +564,11 @@ export default function AttendanceTable({ am }: Props) {
                       {leaveShort && (
                         <span style={{ color: "#b45309" }}>
                           ⚠ 時間有給にした中抜け（{durationLabel(brk!.leaveMinutes)}）より、時間有給（{Number(rowData.paidHours) || 0}時間）が少ない（{leaveNeedHours}時間が要ります）
+                        </span>
+                      )}
+                      {specialShort && (
+                        <span style={{ color: "#b45309" }}>
+                          ⚠ 休暇にした中抜け（{durationLabel(brk!.specialLeaveMinutes)}）より、時間休（{Number(rowData.specialHours) || 0}時間）が少ない（{specialNeedHours}時間が要ります）
                         </span>
                       )}
                       {(brk?.shortage ?? 0) > 0 && (

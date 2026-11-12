@@ -3,7 +3,8 @@
  *
  * ■ 休憩の一覧（utils/breaks.ts）：1日に何回でも。私用の外出・中抜けも休憩として入れる。
  *   出勤から退勤までの中の分だけを引き、重なる休憩は1つにまとめて引く（2回引かない）。深夜（22時〜5時）の分も、時刻どおりに引く。
- *   時間有給にした中抜け（leave）も働いた時間には入れないが、労働基準法34条の休憩には数えない。
+ *   時間有給にした中抜け（leave）・時間単位の特別休暇にした中抜け（leaveTypeId）も働いた時間には入れないが、
+ *   労働基準法34条の休憩には数えない。
  * ■ 決まった休憩（給与規定グループごと。payroll_groups.fixed_break。JSON）
  *   ・時刻で決める（例：12:00〜13:00）：出勤から退勤までが、決まった休憩の時刻をまるごと含む日だけ引く。
  *     途中で出勤・退勤した日（遅刻・早退など）や、時間有給にした中抜けと重なる日は、休憩を取ったかわからないので引かずに知らせる
@@ -22,7 +23,7 @@
  *   休憩がこれより短い日を、勤怠の画面で知らせる（breakShortage）
  */
 import { NIGHT_END_HOUR, NIGHT_START_HOUR } from "../constants/labor";
-import { spanLabel, type BreakSpan } from "./breaks";
+import { isLeaveSpan, spanLabel, type BreakSpan } from "./breaks";
 
 /** 長さで決めるときの1行：出勤から退勤まで（時間有給にした中抜けを除く）が overMinutes 分を超えたら、breakMinutes 分の休憩 */
 export interface LengthRule {
@@ -150,6 +151,8 @@ export interface DayHours {
   restMinutes: number;
   /** 時間有給にした中抜けの長さ（分） */
   leaveMinutes: number;
+  /** 時間単位の特別休暇（子の看護等休暇など）にした中抜けの長さ（分） */
+  specialLeaveMinutes: number;
   /** 決まった休憩を引いたときの書き方（「12:00〜13:00」「45分」。勤怠に残す）。引かなければ "" */
   autoBreak: string;
   /** 休憩を引かなかった理由など（画面に出す）。なければ "" */
@@ -217,10 +220,11 @@ const shiftOf = (t: Pick<DayTimes, "entry" | "exit">) => {
   return { entry, exit };
 };
 
-/** 休憩の一覧を、出勤から退勤までの中に置く（休憩・時間有給にした中抜けに分け、知らせることを集める） */
+/** 休憩の一覧を、出勤から退勤までの中に置く（休憩・時間有給にした中抜け・特別休暇にした中抜けに分け、知らせることを集める） */
 const placeBreaks = (breaks: BreakSpan[], entry: number, exit: number) => {
   const rest: Iv[] = [];
   const leave: Iv[] = [];
+  const special: Iv[] = [];
   const notices: string[] = [];
   let incomplete = false;
   for (const b of breaks ?? []) {
@@ -239,9 +243,9 @@ const placeBreaks = (breaks: BreakSpan[], entry: number, exit: number) => {
       continue;
     }
     if (placed.clipped) notices.push(`休憩（${spanLabel(b)}）の一部が出勤から退勤までの外にあるので、中の分だけ引いています。`);
-    (b.leave ? leave : rest).push(placed.iv);
+    (b.leaveTypeId ? special : b.leave ? leave : rest).push(placed.iv);
   }
-  return { rest, leave, notices, incomplete };
+  return { rest, leave, special, notices, incomplete };
 };
 
 /**
@@ -250,9 +254,11 @@ const placeBreaks = (breaks: BreakSpan[], entry: number, exit: number) => {
  */
 export const calcDayHours = (t: DayTimes, rule: FixedBreakRule | null): DayHours => {
   const shift = shiftOf(t);
-  if (!shift) return { total: NaN, night: NaN, breakMinutes: 0, restMinutes: 0, leaveMinutes: 0, autoBreak: "", notice: "" };
+  if (!shift) return { total: NaN, night: NaN, breakMinutes: 0, restMinutes: 0, leaveMinutes: 0, specialLeaveMinutes: 0, autoBreak: "", notice: "" };
   const { entry, exit } = shift;
-  const { rest, leave, notices, incomplete } = placeBreaks(t.breaks, entry, exit);
+  const { rest, leave: annualLeave, special, notices, incomplete } = placeBreaks(t.breaks, entry, exit);
+  // 休暇にした中抜け（時間有給・特別休暇）は、決まった休憩との重なり・出勤から退勤までの長さでは同じに扱う
+  const leave = [...annualLeave, ...special];
 
   // 決まった休憩：時刻で決めたときは区間（fixedIv）、長さで決めたときは時刻のない分（loose）
   let fixedIv: Iv | null = null;
@@ -272,13 +278,13 @@ export const calcDayHours = (t: DayTimes, rule: FixedBreakRule | null): DayHours
         notices.push(`決まった休憩（${label}）の途中で出勤・退勤しているので、決まった休憩を引いていません。休憩を取ったなら、その日の休憩を入れてください。`);
       }
     } else if (leave.some((iv) => overlaps(iv.s, iv.e, inside[0], inside[1]))) {
-      notices.push(`時間有給にした中抜けと決まった休憩（${label}）が重なっているので、決まった休憩を引いていません。休憩を取ったなら、その日の休憩を入れてください。`);
+      notices.push(`休暇にした中抜けと決まった休憩（${label}）が重なっているので、決まった休憩を引いていません。休憩を取ったなら、その日の休憩を入れてください。`);
     } else {
       fixedIv = { s: inside[0], e: inside[1] };
       autoBreak = label;
     }
   } else if (useFixed && rule.mode === "length") {
-    const span = exit - entry - lengthOf(leave); // 出勤から退勤まで（時間有給にした中抜けを除く）
+    const span = exit - entry - lengthOf(leave); // 出勤から退勤まで（休暇にした中抜けを除く）
     const fixedMinutes = Math.max(0, ...rule.rules.filter((r) => span > r.overMinutes).map((r) => r.breakMinutes));
     loose = rule.combine === "max" ? Math.max(0, fixedMinutes - lengthOf(rest)) : fixedMinutes;
     if (loose > 0) autoBreak = `${loose}分`;
@@ -289,14 +295,16 @@ export const calcDayHours = (t: DayTimes, rule: FixedBreakRule | null): DayHours
   const work = Math.max(0, exit - entry - awayMinutes - loose);
   // 時刻のない決まった休憩（長さで決めたとき）は、深夜でない時間から先に休憩とみなす（深夜の割増を少なく数えない）
   const night = Math.max(0, Math.min(nightIn(entry, exit) - away.reduce((a, i) => a + nightIn(i.s, i.e), 0), work));
-  const leaveMinutes = lengthOf(leave);
-  const restMinutes = awayMinutes - leaveMinutes + loose;
+  const leaveMinutes = lengthOf(annualLeave);
+  const specialLeaveMinutes = lengthOf(special);
+  const restMinutes = Math.max(0, awayMinutes - lengthOf(leave)) + loose;
   return {
     total: hoursOf(work),
     night: hoursOf(night),
     breakMinutes: restMinutes,
     restMinutes,
     leaveMinutes,
+    specialLeaveMinutes,
     autoBreak,
     notice: notices.join(" "),
   };
@@ -306,9 +314,18 @@ export const calcDayHours = (t: DayTimes, rule: FixedBreakRule | null): DayHours
 export const leaveMinutesOf = (t: DayTimes): number => {
   const shift = shiftOf(t);
   if (!shift) {
-    return (t.breaks ?? []).filter((b) => b.leave && hasTime(b.start) && hasTime(b.end)).reduce((a, b) => a + spanMinutes(b.start, b.end), 0);
+    return (t.breaks ?? []).filter((b) => b.leave && !b.leaveTypeId && hasTime(b.start) && hasTime(b.end)).reduce((a, b) => a + spanMinutes(b.start, b.end), 0);
   }
   return lengthOf(placeBreaks(t.breaks, shift.entry, shift.exit).leave);
+};
+
+/** その日の時間単位の特別休暇にした中抜けの長さ（分。leaveMinutesOf と同じ数え方） */
+export const specialLeaveMinutesOf = (t: DayTimes): number => {
+  const shift = shiftOf(t);
+  if (!shift) {
+    return (t.breaks ?? []).filter((b) => !!b.leaveTypeId && hasTime(b.start) && hasTime(b.end)).reduce((a, b) => a + spanMinutes(b.start, b.end), 0);
+  }
+  return lengthOf(placeBreaks(t.breaks, shift.entry, shift.exit).special);
 };
 
 /** 確定した勤怠に残した決まった休憩（「12:00〜13:00」「45分」）の長さ（分） */
@@ -328,7 +345,7 @@ export const recordedRestMinutes = (t: DayTimes, autoBreak: unknown = ""): numbe
   const shift = shiftOf(t);
   const text = typeof autoBreak === "string" ? autoBreak : "";
   if (!shift) {
-    return (t.breaks ?? []).filter((b) => !b.leave && hasTime(b.start) && hasTime(b.end)).reduce((a, b) => a + spanMinutes(b.start, b.end), 0)
+    return (t.breaks ?? []).filter((b) => !isLeaveSpan(b) && hasTime(b.start) && hasTime(b.end)).reduce((a, b) => a + spanMinutes(b.start, b.end), 0)
       + autoBreakMinutes(text);
   }
   const { rest } = placeBreaks(t.breaks, shift.entry, shift.exit);

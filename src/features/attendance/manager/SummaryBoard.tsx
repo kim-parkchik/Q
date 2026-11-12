@@ -79,6 +79,14 @@ export default function SummaryBoard({ am }: Props) {
           </div>
         )}
 
+        {calcResult && (calcResult as any).unpaidLeaveDeduction > 0 && (
+          <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
+            <div style={{ fontSize: "12px", color: "#ff7675" }}>無給の休暇</div>
+            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#ff7675" }}>
+              -¥{(calcResult as any).unpaidLeaveDeduction.toLocaleString()}
+            </div>
+          </div>
+        )}
         {calcResult && (calcResult as any).tardyDeduction > 0 && (
           <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
             <div style={{ fontSize: "12px", color: "#ff7675" }}>遅刻・早退・中抜け</div>

@@ -153,6 +153,18 @@ export default function PayStubModal(props: Props) {
               {salary.absenceDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.absenceDeductionNote}</div>}
             </div>
           )}
+          {(salary.unpaidLeaveDeductionDetail || salary.unpaidLeaveDeductionNote) && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              {salary.unpaidLeaveDeductionDetail && (
+                <div>
+                  {salary.unpaidLeaveDeduction > 0
+                    ? `無給の休暇の控除（欠勤控除と同じ計算。給与規定グループの設定：${ABSENCE_DEDUCTION_METHOD_LABELS[salary.absenceDeductionMethod]}）：${salary.unpaidLeaveDeductionDetail}（1円未満切り捨て）`
+                    : salary.unpaidLeaveDeductionDetail}
+                </div>
+              )}
+              {salary.unpaidLeaveDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.unpaidLeaveDeductionNote}</div>}
+            </div>
+          )}
           {(salary.tardyDeductionDetail || salary.tardyDeductionNote) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
               {salary.tardyDeductionDetail && (
@@ -299,6 +311,10 @@ export default function PayStubModal(props: Props) {
                   {salary.absenceDeduction > 0 && (
                     <tr><td style={{...S.tdS, color: "#c0392b"}}>欠勤控除({salary.absenceDays}日)</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.absenceDeduction.toLocaleString()}</td></tr>
                   )}
+                  {/* 無給の特別休暇の控除（月給制。欠勤控除と同じ計算） */}
+                  {salary.unpaidLeaveDeduction > 0 && (
+                    <tr><td style={{...S.tdS, color: "#c0392b"}}>無給休暇控除({salary.unpaidLeaveDays}日)</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.unpaidLeaveDeduction.toLocaleString()}</td></tr>
+                  )}
                   {/* 遅刻・早退・中抜けの控除 */}
                   {salary.tardyDeduction > 0 && (
                     <tr><td style={{...S.tdS, color: "#c0392b"}}>遅刻早退控除({fmtH(salary.tardyHours)})</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.tardyDeduction.toLocaleString()}</td></tr>
@@ -331,6 +347,10 @@ export default function PayStubModal(props: Props) {
                   )}
                   {salary.paidLeavePay > 0 && (
                     <tr><td style={S.tdS}>有給休暇手当({fmtH(salary.paidLeaveHours)})</td><td style={S.rtdS}>¥{salary.paidLeavePay.toLocaleString()}</td></tr>
+                  )}
+                  {/* 有給の特別休暇の賃金（時給制・日給制） */}
+                  {salary.specialLeavePay > 0 && (
+                    <tr><td style={S.tdS}>特別休暇手当({fmtH(salary.specialLeaveHours)})</td><td style={S.rtdS}>¥{salary.specialLeavePay.toLocaleString()}</td></tr>
                   )}
 
                   <tr><td style={S.tdS}>深夜手当</td><td style={S.rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>

@@ -18,6 +18,7 @@ const openCompanyFile = () => {
     db.exec("INSERT INTO social_insurance_groups (id, name) VALUES (1, '協会けんぽ')");
     db.exec("INSERT INTO bonus_settings (id, name, target_year, target_month) VALUES (1, '夏季賞与', 2026, 7)");
     db.exec("INSERT INTO bonus_item_master (id, name, type) VALUES (1, '基本賞与', 'earning')");
+    db.exec("INSERT INTO leave_types (id, name) VALUES (1, '夏季休暇')");
     return db;
 };
 
@@ -32,6 +33,7 @@ const ADD_RECORD: Record<string, string> = {
     bonus_results: "INSERT INTO bonus_results (bonus_setting_id, staff_id) VALUES (1, ?)",
     paid_leave_grants: "INSERT INTO paid_leave_grants (staff_id, grant_date, expiry_date, days_granted) VALUES (?, '2026-04-01', '2028-03-31', 10)",
     paid_leave_usage: "INSERT INTO paid_leave_usage (staff_id, usage_date, days_used) VALUES (?, '2026-06-01', 1)",
+    special_leave_grants: "INSERT INTO special_leave_grants (staff_id, leave_type_id, grant_date, expiry_date, days_granted) VALUES (?, 1, '2026-07-01', '2026-09-30', 3)",
 };
 
 describe("記録がある従業員は削除できない（記録が一緒に消えないように）", () => {

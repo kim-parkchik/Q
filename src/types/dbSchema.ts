@@ -13,6 +13,7 @@ export const STAFF_RECORD_TABLES = [
   { table: "bonus_results", label: "賞与の確定結果" },
   { table: "paid_leave_grants", label: "有給の付与" },
   { table: "paid_leave_usage", label: "有給の取得" },
+  { table: "special_leave_grants", label: "特別休暇の付与" },
 ] as const;
 
 export const DB_SCHEMAS = [
@@ -159,7 +160,10 @@ export const DB_SCHEMAS = [
     csv_entry_time TEXT,
     csv_exit_time TEXT,
     csv_breaks TEXT,                 -- 打刻（TimeQard・CSV）の休憩の一覧（JSON）
-    work_type TEXT DEFAULT '',
+    work_type TEXT DEFAULT '',       -- 勤務区分（normal・holiday・paid_full・paid_half・special（特別休暇）・special_half（特別休暇の半日）・absent など）
+    leave_type_id INTEGER,           -- 特別休暇の種類（leave_types.id。区分が special・special_half の日だけ）
+    leave_paid INTEGER,              -- 特別休暇が有給か（確定したときの休暇の種類の設定。1: 有給 / 0: 無給。utils/specialLeave.ts）
+    special_leave_hours REAL DEFAULT 0, -- 時間単位の特別休暇の時間（時間休。休暇の種類は leave_type_id。区分が special・special_half の日は使わない）
     paid_leave_hours REAL DEFAULT 0,
     memo TEXT,
     is_finalized INTEGER DEFAULT 0,  -- 0: 未確定, 1: 確定済み
@@ -182,7 +186,7 @@ export const DB_SCHEMAS = [
   `CREATE TABLE IF NOT EXISTS paid_leave_grants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     staff_id TEXT NOT NULL,
-    name TEXT DEFAULT '法定有給',
+    name TEXT DEFAULT '法定有給',  -- 年次有給休暇の付与だけを入れる（夏季休暇などの特別休暇は special_leave_grants）
     grant_date TEXT NOT NULL,
     expiry_date TEXT NOT NULL,
     days_granted REAL NOT NULL,
@@ -199,6 +203,34 @@ export const DB_SCHEMAS = [
     days_used REAL NOT NULL,
     description TEXT,
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
+  // 9-2. 会社独自の休暇（特別休暇）の種類（夏季休暇・慶弔休暇など。くわしくは utils/specialLeave.ts）
+  `CREATE TABLE IF NOT EXISTS leave_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    is_paid INTEGER DEFAULT 1,        -- 1: 有給（休んでも給与を引かない・払う） / 0: 無給
+    track_balance INTEGER DEFAULT 1,  -- 1: 残りを数える（付与から引く） / 0: 数えない（慶弔休暇など、そのつど取る休暇）
+    allow_half INTEGER DEFAULT 0,     -- 1: 半日でも取れる
+    allow_hourly INTEGER DEFAULT 0,   -- 1: 時間単位でも取れる（子の看護等休暇・介護休暇は、1時間単位でも取れるようにしなければならない）
+    grant_rule TEXT,                  -- 発生（JSON。{"month":7,"day":1,"days":3}：毎年7月1日に3日。NULL は決まりなし（人ごとに付与））
+    expiry_rule TEXT,                 -- 消滅（JSON。{"mode":"months","months":3}：付与日から3か月 / {"mode":"date","month":9,"day":30}：9月30日まで）
+    is_active INTEGER DEFAULT 1,      -- 0: 使わない（勤怠で選べない。前の記録はそのまま）
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (DATETIME('now', 'localtime'))
+  );`,
+
+  // 9-3. 特別休暇の付与（人ごと。0日の付与は「この回は付与しない」の印）
+  `CREATE TABLE IF NOT EXISTS special_leave_grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id TEXT NOT NULL,
+    leave_type_id INTEGER NOT NULL,
+    grant_date TEXT NOT NULL,
+    expiry_date TEXT NOT NULL,
+    days_granted REAL NOT NULL,
+    created_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+    FOREIGN KEY(leave_type_id) REFERENCES leave_types(id)
   );`,
 
   // 10. 給与項目辞書
@@ -245,6 +277,7 @@ export const DB_SCHEMAS = [
     non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う）
     absence_deduction INTEGER,                  -- 欠勤控除の額（月給制。v8 より前に確定した給与は NULL）
     tardy_deduction INTEGER,                    -- 遅刻・早退・中抜けの控除の額（月給制・日給制。v10 より前に確定した給与は NULL）
+    unpaid_leave_deduction INTEGER,             -- 無給の特別休暇の控除の額（月給制。欠勤控除と同じ計算。v11 より前に確定した給与は NULL）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
 
     total_earnings INTEGER DEFAULT 0,
@@ -482,11 +515,12 @@ export const DB_SCHEMAS = [
   );`,
 
   // 記録がある従業員の削除を止める（画面の確認をすり抜けても、記録が一緒に消えないようにする）
-  // ※ IF NOT EXISTS のため、中身を変えるときは別の名前で作り直すこと
-  `CREATE TRIGGER IF NOT EXISTS keep_staff_with_records
+  // ※ IF NOT EXISTS のため、中身を変えるときは別の名前で作り直すこと（前の名前の TRIGGER は、マイグレーションで消す）
+  //    v11 で特別休暇の付与（special_leave_grants）を足したので、keep_staff_with_records から _v2 にした
+  `CREATE TRIGGER IF NOT EXISTS keep_staff_with_records_v2
     BEFORE DELETE ON staff
     WHEN ${STAFF_RECORD_TABLES.map(({ table }) => `EXISTS (SELECT 1 FROM ${table} WHERE staff_id = OLD.id)`).join("\n      OR ")}
   BEGIN
-    SELECT RAISE(ABORT, '勤怠・給与・賞与・有給の記録がある従業員は削除できません。退職にしてください。');
+    SELECT RAISE(ABORT, '勤怠・給与・賞与・有給・休暇の記録がある従業員は削除できません。退職にしてください。');
   END;`
 ];

@@ -80,7 +80,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         // 前の年の4月（1月の変動の年間平均で、前の9か月を見るため）から、次の年の2月（11・12月の変動の3か月目まで）に支払った給与
         const salaries = await db.select<SalaryRecord[]>(
           `SELECT staff_id, target_year, target_month, total_earnings, applied_base_wage, fixed_overtime_allowance, non_fixed_earnings,
-                  absence_deduction, prescribed_work_days
+                  absence_deduction, unpaid_leave_deduction, prescribed_work_days
            FROM salary_results WHERE (target_year * 12 + target_month) BETWEEN ? AND ?`,
           [(year - 1) * 12 + 4, (year + 1) * 12 + 2]
         );
@@ -90,7 +90,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         const to = periods.map((p) => p.endStr).sort().reverse()[0];
         const attendance = from && to
           ? await db.select<AttendanceRecord[]>(
-              "SELECT staff_id, work_date, work_type, work_hours FROM attendance WHERE is_finalized = 1 AND work_date BETWEEN ? AND ?",
+              "SELECT staff_id, work_date, work_type, work_hours, leave_paid FROM attendance WHERE is_finalized = 1 AND work_date BETWEEN ? AND ?",
               [from, to]
             )
           : [];

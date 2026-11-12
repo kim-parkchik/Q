@@ -5,7 +5,8 @@ import {
     FileText,
     MapPin,
     Calculator,
-    ShieldCheck
+    ShieldCheck,
+    CalendarHeart
 } from 'lucide-react';
 import { useCompanyManager } from "./useCompanyManager";
 import { subTabStyle } from './CompanyManager.styles';
@@ -15,6 +16,7 @@ import PayrollGroupTab from "./company/PayrollGroupTab";
 import SocialInsuranceTab from "./company/SocialInsuranceTab";
 import BranchTab from "./company/BranchTab";
 import RoundingTab from "./company/RoundingTab";
+import LeaveTypeTab from "./company/LeaveTypeTab";
 
 interface Props {
     db: Database;
@@ -52,6 +54,11 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     <ShieldCheck size={16} /> 社会保険規定
                                 </div>
                             </button>
+                            <button onClick={() => setActiveSubTab("leave")} style={subTabStyle(activeSubTab === "leave")}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                    <CalendarHeart size={16} /> 休暇の種類
+                                </div>
+                            </button>
                             <button onClick={() => setActiveSubTab("branches")} style={subTabStyle(activeSubTab === "branches")}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                     <MapPin size={16} /> 支店リスト
@@ -69,6 +76,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
 
                     {activeSubTab === "payroll" && <PayrollGroupTab cm={cm} />}
                     {activeSubTab === "social" && <SocialInsuranceTab cm={cm} />}
+                    {activeSubTab === "leave" && <LeaveTypeTab db={db} />}
 
                     {activeSubTab === "branches" && <BranchTab cm={cm} />}
 

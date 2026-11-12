@@ -10,9 +10,10 @@
  *   ・特定適用事業所の短時間労働者：11日以上の月で平均する
  *   ・使える月がなければ、従前の標準報酬月額のまま
  *   ・途中入社で、日割りのため1か月分の給与が支払われていない月は、日数に関係なく除く（修正平均）
- * ■ 支払基礎日数：時給制・日給制は出勤日数（有給休暇の日も含む）、月給制は給与の計算期間の暦日数
- *   （月給制で欠勤した日の分を引いた月は、所定労働日数から欠勤日数を引いた日数。所定労働日数は、給与を確定したときに
- *    会社カレンダーから数えて残した計算期間の日数。欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
+ * ■ 支払基礎日数：時給制・日給制は出勤日数（有給休暇の日・有給の特別休暇の日も含む）、月給制は給与の計算期間の暦日数
+ *   （月給制で欠勤した日の分を引いた月は、所定労働日数から欠勤日数を引いた日数。無給の特別休暇（1日）で引いた日も欠勤と同じく引く。
+ *    所定労働日数は、給与を確定したときに会社カレンダーから数えて残した計算期間の日数。
+ *    欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
  * ■ 決まった標準報酬月額は、9月分から翌年8月分まで使う
  * 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20121017.html （定時決定）
  *       https://www.nenkin.go.jp/service/kounen/info/jireishokai/henreisantei.html （途中入社の月・短時間就労者・短時間労働者）
@@ -28,6 +29,7 @@ import { checkSocialInsEnrolled, prescribedWorkDays } from './calcSalary';
 import { getPeriodForPayMonth, type PayrollGroupForPeriod } from './payrollPeriod';
 import { getStandardRemuneration, remunerationHistoryOf } from './standardRemuneration';
 import { staffAsOf } from './staffHistory';
+import { isSpecialLeaveWorkType, SPECIAL_LEAVE_FULL, specialLeaveOfRow } from './specialLeave';
 
 /** general: 一般 / part: 短時間就労者（パートなど） / short: 特定適用事業所の短時間労働者 */
 export type SanteiWorkerKind = 'general' | 'part' | 'short';
@@ -109,22 +111,24 @@ export const decideTeiji = (
 
 /**
  * 支払基礎日数
- * ・時給制・日給制：出勤日数（働いた時間がある日と、有給休暇の日）
- * ・月給制：給与の計算期間の暦日数。欠勤控除をした月は、所定労働日数 − 欠勤日数
+ * ・時給制・日給制：出勤日数（働いた時間がある日と、有給休暇の日・有給の特別休暇の日）
+ * ・月給制：給与の計算期間の暦日数。欠勤控除をした月は、所定労働日数 − 欠勤日数（無給の特別休暇（1日）の日も引く。
+ *   半日の日は、残りの半日の給与を払っているので引かない）
  *   （欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
  * @param rows             給与の計算期間の確定済み勤怠
  * @param prescribedDays   計算期間の所定労働日数（確定した給与に残した、会社カレンダーから数えた日数）
- * @param absenceDeducted  欠勤控除をしたか（確定した給与に欠勤控除の額を残していないときは undefined。欠勤があれば、したとみなす）
+ * @param absenceDeducted  欠勤控除（無給の特別休暇の控除を含む）をしたか（確定した給与に額を残していないときは undefined。
+ *                         欠勤があれば、したとみなす）
  */
 export const paymentBasisDays = (
   wageType: string,
   period: { startStr: string; endStr: string },
-  rows: { work_date: string; work_type?: string; work_hours?: number | string }[],
+  rows: { work_date: string; work_type?: string; work_hours?: number | string; leave_paid?: number | string | null }[],
   prescribedDays: number,
   absenceDeducted?: boolean,
 ): number => {
   if (wageType === 'monthly') {
-    const absent = rows.filter((r) => r.work_type === 'absent').length;
+    const absent = rows.filter((r) => r.work_type === 'absent' || (r.work_type === SPECIAL_LEAVE_FULL && !specialLeaveOfRow(r).paid)).length;
     if (absent > 0 && absenceDeducted !== false) return Math.max(0, prescribedDays - absent);
     const start = new Date(`${period.startStr}T00:00:00`);
     const end = new Date(`${period.endStr}T00:00:00`);
@@ -132,7 +136,8 @@ export const paymentBasisDays = (
   }
   const days = new Set(
     rows
-      .filter((r) => (Number(r.work_hours) || 0) > 0 || r.work_type === 'paid_full' || r.work_type === 'paid_half')
+      .filter((r) => (Number(r.work_hours) || 0) > 0 || r.work_type === 'paid_full' || r.work_type === 'paid_half'
+        || (isSpecialLeaveWorkType(r.work_type) && specialLeaveOfRow(r).paid))
       .map((r) => r.work_date),
   );
   return days.size;
@@ -187,6 +192,8 @@ export interface SalaryRecord {
   non_fixed_earnings?: number | null;
   /** 確定したときの欠勤控除の額（会社ファイルの形式 v8 より前に確定した給与は null） */
   absence_deduction?: number | null;
+  /** 確定したときの無給の特別休暇の控除の額（会社ファイルの形式 v11 より前に確定した給与は null） */
+  unpaid_leave_deduction?: number | null;
   /** 確定したときの計算期間の所定労働日数（会社カレンダーから数えたもの。わからないときは null） */
   prescribed_work_days?: number | null;
 }
@@ -197,6 +204,8 @@ export interface AttendanceRecord {
   work_date: string;
   work_type?: string;
   work_hours?: number | string;
+  /** 特別休暇が有給か（確定したときの設定。utils/specialLeave.ts） */
+  leave_paid?: number | null;
 }
 
 /**
@@ -226,9 +235,8 @@ export const monthFigures = (
   const prescribedDays = salary.prescribed_work_days === null || salary.prescribed_work_days === undefined
     ? prescribedWorkDays(staff, year, month)
     : Number(salary.prescribed_work_days);
-  const absenceDeducted = salary.absence_deduction === null || salary.absence_deduction === undefined
-    ? undefined
-    : Number(salary.absence_deduction) > 0;
+  const known = [salary.absence_deduction, salary.unpaid_leave_deduction].filter((v) => v !== null && v !== undefined);
+  const absenceDeducted = known.length === 0 ? undefined : known.some((v) => Number(v) > 0);
   return {
     figures: {
       month,

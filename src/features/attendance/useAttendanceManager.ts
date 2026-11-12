@@ -9,13 +9,17 @@ import { useToast } from "../../components/Toast";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
-import { breakShortage, calcDayHours, describeCombine, describeFixedBreak, fixedBreakRuleFor, leaveMinutesOf, recordedRestMinutes, type DayTimes } from "../../utils/fixedBreak";
+import { breakShortage, calcDayHours, describeCombine, describeFixedBreak, fixedBreakRuleFor, leaveMinutesOf, recordedRestMinutes, specialLeaveMinutesOf, type DayTimes } from "../../utils/fixedBreak";
 import { effectiveBreaks, parseBreaksJson, stringifyBreaks } from "../../utils/breaks";
 import { branchPrefectureOf } from "../../utils/branchPrefecture";
 import {
   collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, hourlyLeaveByGrantYear, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
   type AttendanceLeaveRow, type LeaveGrantRow, type ManualLeaveRecord,
 } from "../../utils/paidLeave";
+import {
+  isSpecialLeaveWorkType, loadLeaveTypes, loadSpecialLeaveData, maxHourlyLeave, parseLeaveOption,
+  summarizeSpecialLeave, type LeaveType, type SpecialLeaveDay, type SpecialLeaveGrantRow,
+} from "../../utils/specialLeave";
 
 /** 手入力があればそれを使い、なければ打刻（CSV）を使う。TimeInputPair から ":" が来ている場合は空とみなす */
 const pick = (manual: string, csv: string) => (manual && manual !== ":") ? manual : (csv || "");
@@ -47,6 +51,11 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     staffId: string; grants: LeaveGrantRow[]; attendance: AttendanceLeaveRow[]; manual: ManualLeaveRecord[];
   } | null>(null);
   const paidLeaveSeq = useRef(0);
+  // 会社独自の休暇（特別休暇）の種類と、その人の付与・確定した勤怠の特別休暇の日（utils/specialLeave.ts）
+  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+  const [specialLeaveData, setSpecialLeaveData] = useState<{
+    staffId: string; grants: SpecialLeaveGrantRow[]; days: SpecialLeaveDay[];
+  } | null>(null);
   const [holidays, setHolidays] = useState<Record<string, string>>({});
   const [companyHolidays, setCompanyHolidays] = useState<Record<string, number>>({});
   const [activeFilters, setActiveFilters] = useState<string[]>(["active"]);
@@ -133,9 +142,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       return;
     }
     try {
-      const loaded = await loadPaidLeaveData(db, selectedStaffId);
+      const [loaded, special, types] = await Promise.all([
+        loadPaidLeaveData(db, selectedStaffId), loadSpecialLeaveData(db, selectedStaffId), loadLeaveTypes(db),
+      ]);
       if (seq !== paidLeaveSeq.current) return; // 読み込み中にほかの人を選んだ
       setPaidLeaveData({ staffId: selectedStaffId, ...loaded });
+      setSpecialLeaveData({ staffId: selectedStaffId, ...special });
+      setLeaveTypes(types);
     } catch (e) {
       console.error("Paid leave check error:", e);
     }
@@ -174,6 +187,51 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     };
   }, [paidLeaveData, selectedStaffId, selectedStaff, payrollPeriod, monthlyWorkData]);
 
+  // --- 特別休暇の残り（有給休暇管理の画面と同じ数え方。utils/specialLeave.ts）---
+  // この画面の計算期間の日は、まだ確定していない日も入れて数える（確定する前に、残りが足りないことに気づけるように）
+  const specialLeave = useMemo(() => {
+    if (!specialLeaveData || specialLeaveData.staffId !== selectedStaffId || !payrollPeriod) return null;
+    const shown = new Set(Object.keys(monthlyWorkData));
+    const isLeaveRow = (row: any) => isSpecialLeaveWorkType(row.workType) || (Number(row.specialHours) || 0) > 0;
+    const days: SpecialLeaveDay[] = [
+      ...specialLeaveData.days.filter(d => !shown.has(d.work_date)),
+      ...Object.entries(monthlyWorkData)
+        .filter(([, row]) => isLeaveRow(row))
+        .map(([date, row]) => ({ work_date: date, work_type: row.workType, leave_type_id: row.leaveTypeId, special_leave_hours: row.specialHours })),
+    ];
+    // 時間単位の休暇の1日分は、1日の所定労働時間（1時間に満たない端数は切り上げ。年次有給休暇の時間単位と同じ）
+    const { hours } = leaveHoursPerDay(selectedStaff?.scheduled_work_hours);
+    const asOf = payrollPeriod.endStr;
+    const inPeriod = (date: string) => date >= payrollPeriod.startStr && date <= payrollPeriod.endStr;
+    const summaries = leaveTypes
+      .map(t => summarizeSpecialLeave(t, specialLeaveData.grants, days, asOf, hours))
+      .filter(s => s.taken.some(t => inPeriod(t.date)) || (s.type.active && s.type.trackBalance && s.hasGrants));
+    return {
+      asOf,
+      types: summaries.map(s => {
+        const takenMinutes = s.taken.filter(t => inPeriod(t.date)).reduce((sum, t) => sum + t.minutes, 0);
+        return {
+          id: s.type.id,
+          name: s.type.name,
+          paid: s.type.paid,
+          trackBalance: s.type.trackBalance,
+          hasGrants: s.hasGrants,
+          remainingText: formatLeaveMinutes(s.remainingMinutes, hours),
+          /** この期間に取った日数・時間（「1日と3時間」。なければ ""） */
+          takenInPeriod: takenMinutes > 0 ? formatLeaveMinutes(takenMinutes, hours) : "",
+          /** この期間に、残りが足りない日 */
+          shortages: s.shortages
+            .filter(t => inPeriod(t.date))
+            .map(t => ({ date: t.date, shortage: formatLeaveMinutes(t.shortageMinutes, hours) })),
+        };
+      }),
+      /** 特別休暇・時間休なのに、休暇の種類がわからない日（種類を選んでいない・消した種類） */
+      unknownDates: Object.entries(monthlyWorkData)
+        .filter(([, row]) => isLeaveRow(row) && !leaveTypes.some(t => t.id === Number(row.leaveTypeId)))
+        .map(([date]) => date),
+    };
+  }, [specialLeaveData, selectedStaffId, selectedStaff, payrollPeriod, monthlyWorkData, leaveTypes]);
+
   // --- 決まった休憩（給与規定グループの決まり。従業員の「決まった休憩を使う」を外した人は null。utils/fixedBreak.ts） ---
   const fixedBreakRule = useMemo(
     () => fixedBreakRuleFor(currentGroup?.fixed_break, selectedStaff?.fixed_break_apply),
@@ -189,6 +247,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       autoBreak: string; notice: string; shortage: number; workMinutes: number; restMinutes: number;
       /** 時間有給にした中抜けの長さ（分） */
       leaveMinutes: number;
+      /** 時間単位の特別休暇にした中抜けの長さ（分） */
+      specialLeaveMinutes: number;
     }> = {};
     for (const date of dateList) {
       const row = monthlyWorkData[date];
@@ -199,19 +259,22 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         const rest = recordedRestMinutes(times, row.autoBreak);
         info[date] = {
           autoBreak: row.autoBreak || "", notice: "", shortage: breakShortage(work, rest), workMinutes: work, restMinutes: rest,
-          leaveMinutes: leaveMinutesOf(times),
+          leaveMinutes: leaveMinutesOf(times), specialLeaveMinutes: specialLeaveMinutesOf(times),
         };
         continue;
       }
       const day = calcDayHours(times, fixedBreakRule);
       if (Number.isNaN(day.total)) {
-        info[date] = { autoBreak: "", notice: "", shortage: 0, workMinutes: 0, restMinutes: 0, leaveMinutes: leaveMinutesOf(times) };
+        info[date] = {
+          autoBreak: "", notice: "", shortage: 0, workMinutes: 0, restMinutes: 0,
+          leaveMinutes: leaveMinutesOf(times), specialLeaveMinutes: specialLeaveMinutesOf(times),
+        };
         continue;
       }
       const work = Math.round(day.total * 60);
       info[date] = {
         autoBreak: day.autoBreak, notice: day.notice, shortage: breakShortage(work, day.restMinutes), workMinutes: work,
-        restMinutes: day.restMinutes, leaveMinutes: day.leaveMinutes,
+        restMinutes: day.restMinutes, leaveMinutes: day.leaveMinutes, specialLeaveMinutes: day.specialLeaveMinutes,
       };
     }
     return info;
@@ -242,7 +305,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           in: "", out: "",
           // 休憩の一覧：breaks は手入力（null なら打刻を使う）、csvBreaks は打刻（utils/breaks.ts）
           breaks: null, csvBreaks: [],
-          is_finalized: 0, workType: "normal", paidHours: 0, memo: "",
+          is_finalized: 0, workType: "normal", leaveTypeId: null, leavePaid: null, specialHours: 0, paidHours: 0, memo: "",
           savedHours: 0, nightHours: 0, breakNone: false, autoBreak: "",
           csv_entry_time: "",
           csv_exit_time: "",
@@ -261,6 +324,10 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
             savedHours: Number(row.work_hours) || 0,
             nightHours: Number(row.night_hours) || 0,
             workType: row.work_type || "normal", 
+            // 特別休暇の種類と、確定したときの有給か（utils/specialLeave.ts）
+            leaveTypeId: row.leave_type_id ?? null,
+            leavePaid: row.leave_paid ?? null,
+            specialHours: Number(row.special_leave_hours) || 0, // 時間単位の特別休暇の時間（時間休）
             paidHours: row.paid_leave_hours || 0, 
             memo: row.memo || "",
             breakNone: Number(row.break_none) === 1, // その日は休憩を取らなかった（決まった休憩を引かない）
@@ -281,6 +348,35 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   }, [db, selectedStaffId, payrollPeriod, dateList]);
 
   // --- 操作系 ---
+  /** 勤怠の区分を変える（プルダウンの値。特別休暇は「special:3」のように休暇の種類も入っている） */
+  const handleWorkTypeChange = (date: string, value: string) => {
+    const { workType, leaveTypeId } = parseLeaveOption(value);
+    setMonthlyWorkData(prev => {
+      const row = prev[date];
+      const special = isSpecialLeaveWorkType(workType);
+      // 特別休暇（1日・半日）の日は時間休を入れない。特別休暇でない区分に戻したら、時間休の種類は残す
+      const keepHours = !special && (Number(row.specialHours) || 0) > 0;
+      return {
+        ...prev,
+        [date]: {
+          ...row, workType,
+          leaveTypeId: special ? leaveTypeId : keepHours && !isSpecialLeaveWorkType(row.workType) ? row.leaveTypeId : null,
+          specialHours: special ? 0 : row.specialHours,
+          isSaved: false,
+        },
+      };
+    });
+  };
+
+  /** 時間休（時間単位の特別休暇）の種類を変える。特別休暇（1日・半日）の日は変えない */
+  const handleHourlyLeaveTypeChange = (date: string, leaveTypeId: number | null) => {
+    setMonthlyWorkData(prev => {
+      const row = prev[date];
+      if (isSpecialLeaveWorkType(row.workType)) return prev;
+      return { ...prev, [date]: { ...row, leaveTypeId, isSaved: false } };
+    });
+  };
+
   const handleCellChange = (date: string, field: string, value: any) => {
     if (monthlyWorkData[date][field] === value) return;
     setMonthlyWorkData(prev => ({
@@ -304,6 +400,25 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     
     const row = monthlyWorkData[date];
 
+    // 特別休暇は、休暇の種類と、いまの設定で有給か無給かを残す（あとで設定を変えても、確定した日は変わらない）
+    // 時間休（時間単位の特別休暇）も同じ。1日に入れられる特別休暇は1種類
+    const isSpecial = isSpecialLeaveWorkType(row.workType);
+    const specialHours = isSpecial ? 0 : Math.max(0, Number(row.specialHours) || 0);
+    if (specialHours > 0) {
+      const max = maxHourlyLeave(selectedStaff.scheduled_work_hours);
+      if (!Number.isInteger(specialHours) || specialHours > max) {
+        if (!quiet) dialog.warning(`${date} の時間休は、1時間単位で、1日の所定労働時間に満たない時間（${max}時間まで）にしてください。1日休むときは、区分で休暇を選んでください。`);
+        return false;
+      }
+    }
+    const leaveType = isSpecial || specialHours > 0 ? leaveTypes.find(t => t.id === Number(row.leaveTypeId)) : undefined;
+    if ((isSpecial || specialHours > 0) && !leaveType) {
+      if (!quiet) dialog.warning(`${date} の休暇の種類がわかりません。${isSpecial ? "区分" : "時間休"}で休暇を選び直してください。`);
+      return false;
+    }
+    const leaveTypeId = leaveType ? leaveType.id : null;
+    const leavePaid = leaveType ? (leaveType.paid ? 1 : 0) : null;
+
     // 手入力があればそれを使い、なければ打刻（CSV）を使う。休憩の一覧と、決まった休憩を引く（utils/fixedBreak.ts）
     const day = calcDayHours(effectiveTimesOf(row), fixedBreakRule);
     const { total, night } = day;
@@ -320,9 +435,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           breaks,
           work_hours, night_hours,
           actual_base_wage, overtime_rate, night_rate,
-          work_type, paid_leave_hours, memo,
+          work_type, leave_type_id, leave_paid, special_leave_hours, paid_leave_hours, memo,
           is_finalized, finalized_at, break_none, auto_break
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(staff_id, work_date) DO UPDATE SET
           entry_time = excluded.entry_time,
           exit_time = excluded.exit_time,
@@ -331,6 +446,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           night_hours = excluded.night_hours,
           actual_base_wage = excluded.actual_base_wage,
           work_type = excluded.work_type,
+          leave_type_id = excluded.leave_type_id,
+          leave_paid = excluded.leave_paid,
+          special_leave_hours = excluded.special_leave_hours,
           paid_leave_hours = excluded.paid_leave_hours,
           memo = excluded.memo,
           is_finalized = excluded.is_finalized,
@@ -343,7 +461,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           total, night,
           isMonthly ? 0 : selectedStaff.base_wage, 
           Master.OVERTIME_RATE, Master.NIGHT_SHIFT_RATE,
-          row.workType, Number(row.paidHours)||0, row.memo||"",
+          row.workType, leaveTypeId, leavePaid, specialHours, Number(row.paidHours)||0, row.memo||"",
           1, now, row.breakNone ? 1 : 0, day.autoBreak || null
         ]
       );
@@ -351,7 +469,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       // UI側の状態を更新
       setMonthlyWorkData(prev => ({ 
         ...prev, 
-        [date]: { ...prev[date], is_finalized: 1, savedHours: total, nightHours: night, finalized_at: now, autoBreak: day.autoBreak } 
+        [date]: { ...prev[date], is_finalized: 1, savedHours: total, nightHours: night, finalized_at: now, autoBreak: day.autoBreak, leaveTypeId, leavePaid, specialHours } 
       }));
       await checkRemainingPaidLeave();
       return true;
@@ -370,14 +488,14 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     try {
       // DBの is_finalized を 0 に戻す
       await db.execute(
-        "UPDATE attendance SET is_finalized = 0, auto_break = NULL WHERE staff_id = ? AND work_date = ?",
+        "UPDATE attendance SET is_finalized = 0, auto_break = NULL, leave_paid = NULL WHERE staff_id = ? AND work_date = ?",
         [selectedStaffId, date]
       );
 
       // UI側の状態を更新（編集可能にする）
       setMonthlyWorkData(prev => ({
         ...prev,
-        [date]: { ...prev[date], is_finalized: 0, autoBreak: "" }
+        [date]: { ...prev[date], is_finalized: 0, autoBreak: "", leavePaid: null }
       }));
       await checkRemainingPaidLeave();
     } catch (e) {
@@ -500,6 +618,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
             ? Number(selectedStaff.base_wage || 0)
             : 0,
         work_type: row.workType || "normal",
+        leave_paid: row.leavePaid ?? null,
+        special_leave_hours: Number(row.specialHours) || 0,
         is_late: Number(row.is_late) || 0,
         is_early: Number(row.is_early) || 0,
         paid_leave_hours: Number(row.paidHours) || 0,
@@ -630,9 +750,10 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     try {
       const data = await db.select(`
-        SELECT a.*, s.name as staff_name 
+        SELECT a.*, s.name as staff_name, lt.name AS leave_name
         FROM attendance a
         JOIN staff s ON a.staff_id = s.id
+        LEFT JOIN leave_types lt ON lt.id = a.leave_type_id
         WHERE a.work_date BETWEEN ? AND ?
         ORDER BY a.staff_id, a.work_date
       `, [startStr, endStr]) as any[];
@@ -718,6 +839,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     isClosed,
     monthlyWorkData, setMonthlyWorkData, dateList, payrollPeriod,
     paidLeave,
+    // 会社独自の休暇（特別休暇）の種類と、この人の残り
+    leaveTypes,
+    specialLeave,
     fixedBreakRule, fixedBreakText, fixedBreakCombineText, breakInfo,
     // 時間単位の有給を使う会社か（会社の設定。労使協定を結んでいるとき）
     hourlyLeaveEnabled: Number(companySettings?.hourly_leave) === 1,
@@ -729,6 +853,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     calcResult,
 
     handleCellChange,
+    handleWorkTypeChange,
+    handleHourlyLeaveTypeChange,
     finalizeAttendance,
     saveAllMonthlyData,
     handleExportRawCSV,

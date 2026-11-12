@@ -12,7 +12,8 @@
  *   （労働基準法施行規則24条の4第1号：時間単位で与える有給休暇1日の時間数は、1日の所定労働時間数を下回らない）
  * ・残りが足りない日は、引けた分だけ引き、足りない分を shortageMinutes に入れる
  * ・最初の付与より前の日の有給は、Q で有給を管理する前の分として引かない（beforeFirstGrant）
- * ・夏季休暇など、年次有給休暇ではない付与（名前が「法定有給」でないもの）は数えない。勤怠に区分がないので、残りを数えられない
+ * ・夏季休暇などの会社独自の休暇（特別休暇）は、ここでは数えない（付与は special_leave_grants、数え方は utils/specialLeave.ts。
+ *   引き方は同じ allocateLeave を使う）。年次有給休暇ではない名前の付与が paid_leave_grants にあっても数えない
  *
  * 時間は分（整数）で数える。1日 ＝ 1日の時間数 × 60 分。
  */
@@ -125,14 +126,20 @@ export const leaveHoursPerDay = (scheduledWorkHours: unknown): { hours: number; 
   return { hours: Math.min(24, Math.ceil(minutes / 60)), assumed: false };
 };
 
-/** 付与日から2年の有効期限（2年後の応当日の前日。応当日がない2月29日の付与は、2年後の2月の末日） */
-export const defaultExpiryDate = (grantDate: string): string => {
+/**
+ * 付与日から◯か月の有効期限（応当日の前日。応当日がない日の付与は、その月の末日。民法143条の数え方）
+ * 例：7月1日から3か月 → 9月30日、1月31日から1か月 → 2月の末日
+ */
+export const expiryAfterMonths = (grantDate: string, months: number): string => {
   const d = dayjs(grantDate);
-  if (!d.isValid()) return "";
-  const monthStart = dayjs(new Date(d.year() + 2, d.month(), 1));
+  if (!d.isValid() || !Number.isInteger(months) || months <= 0) return "";
+  const monthStart = dayjs(new Date(d.year(), d.month() + months, 1));
   if (d.date() > monthStart.daysInMonth()) return monthStart.endOf("month").format("YYYY-MM-DD");
   return monthStart.date(d.date()).subtract(1, "day").format("YYYY-MM-DD");
 };
+
+/** 付与日から2年の有効期限（2年後の応当日の前日。応当日がない2月29日の付与は、2年後の2月の末日） */
+export const defaultExpiryDate = (grantDate: string): string => expiryAfterMonths(grantDate, 24);
 
 const WORK_TYPE_LABELS: Record<string, string> = {
   normal: "出勤（平日）",
@@ -141,6 +148,8 @@ const WORK_TYPE_LABELS: Record<string, string> = {
   statutory_holiday: "法定休日出勤",
   paid_full: "全休(有給)",
   paid_half: "半休(有給)",
+  special: "特別休暇",
+  special_half: "特別休暇（半日）",
   absent: "欠勤",
 };
 
@@ -203,15 +212,39 @@ export const summarizePaidLeave = (
 ): PaidLeaveSummary => {
   const dayMinutes = hoursPerDay * 60;
   const annual = grants.filter(isAnnualLeaveGrant);
+  const result = allocateLeave(annual, taken, dayMinutes, asOf, true);
+  return {
+    hoursPerDay,
+    dayMinutes,
+    asOf,
+    ...result,
+    hasGrants: annual.length > 0,
+  };
+};
+
+/**
+ * 付与から、取った日を引く（期限の早い付与（ふつうは古い付与）から）。年次有給休暇と特別休暇（utils/specialLeave.ts）で同じ数え方にする
+ * @param grants 付与（渡したものをすべて数える）
+ * @param dayMinutes 1日を何分として数えるか
+ * @param skipBeforeFirstGrant 最初の付与より前の日（付与が1つもなければ、すべての日）を引かない。
+ *   年次有給休暇は、Q で有給を管理する前の分として扱う（true）。特別休暇は、付与の前に取った日を「残りが足りない」にする（false）
+ */
+export const allocateLeave = (
+  grants: LeaveGrantRow[],
+  taken: LeaveTaken[],
+  dayMinutes: number,
+  asOf: string,
+  skipBeforeFirstGrant: boolean,
+): { grants: GrantStatus[]; taken: TakenStatus[]; remainingMinutes: number; firstGrantDate: string | null } => {
   const toMinutes = (days: number) => Math.round((Number(days) || 0) * dayMinutes);
 
   // 期限の早い付与（ふつうは古い付与）から引く
-  const order = [...annual].sort((a, b) =>
+  const order = [...grants].sort((a, b) =>
     a.expiry_date.localeCompare(b.expiry_date) || a.grant_date.localeCompare(b.grant_date) || a.id - b.id);
   const left = new Map(order.map((g) => [g.id, toMinutes(g.days_granted)]));
   const used = new Map<number, number>();
   const later = new Map<number, number>();
-  const firstGrantDate = annual.reduce<string | null>(
+  const firstGrantDate = grants.reduce<string | null>(
     (min, g) => (min === null || g.grant_date < min ? g.grant_date : min), null);
 
   const statuses = [...taken]
@@ -219,7 +252,7 @@ export const summarizePaidLeave = (
     .map((t): TakenStatus => {
       const minutes = Math.round(t.days * dayMinutes + t.hours * 60);
       const afterAsOf = t.date > asOf;
-      const beforeFirstGrant = firstGrantDate === null || t.date < firstGrantDate;
+      const beforeFirstGrant = skipBeforeFirstGrant && (firstGrantDate === null || t.date < firstGrantDate);
       const allocations: { grantId: number; minutes: number }[] = [];
       let need = beforeFirstGrant ? 0 : minutes;
       for (const g of order) {
@@ -237,7 +270,7 @@ export const summarizePaidLeave = (
       return { ...t, minutes, allocations, shortageMinutes: need, beforeFirstGrant, afterAsOf };
     });
 
-  const grantStatuses = annual.map((grant): GrantStatus => {
+  const grantStatuses = grants.map((grant): GrantStatus => {
     const grantedMinutes = toMinutes(grant.days_granted);
     const usedMinutes = used.get(grant.id) ?? 0;
     const laterMinutes = later.get(grant.id) ?? 0;
@@ -254,13 +287,9 @@ export const summarizePaidLeave = (
   });
 
   return {
-    hoursPerDay,
-    dayMinutes,
-    asOf,
     grants: grantStatuses,
     taken: statuses,
     remainingMinutes: grantStatuses.reduce((sum, g) => sum + g.remainingMinutes, 0),
-    hasGrants: annual.length > 0,
     firstGrantDate,
   };
 };

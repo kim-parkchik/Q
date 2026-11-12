@@ -1,5 +1,8 @@
 /**
- * 有給休暇の画面（年次有給休暇の付与・残り・取った日）
+ * 有給休暇の画面（年次有給休暇の付与・残り・取った日と、会社独自の休暇（特別休暇）の付与・残り）
+ *
+ * 特別休暇（夏季休暇など）は、休暇の種類（会社設定）ごとに付与と残りを出し、発生の日が来た付与を知らせる
+ * （SpecialLeavePanel.tsx。数え方は utils/specialLeave.ts）。
  *
  * 有給を取った日は、勤怠の画面で「全休(有給)」「半休(有給)」「時間有給」を入れて確定する（給与の計算と同じ記録）。
  * この画面では付与を登録し、確定した勤怠から数えた残り・取った日・期限で消えた日数を見る（数え方は utils/paidLeave.ts）。
@@ -28,6 +31,18 @@ import {
   type LeaveGrantRow,
   type ManualLeaveRecord,
 } from "../../utils/paidLeave";
+import {
+  dueGrants,
+  formatLeaveDays,
+  loadLeaveTypes,
+  loadSpecialLeaveData,
+  type DueGrant,
+  type GrantRecord,
+  type LeaveType,
+  type SpecialLeaveDay,
+  type SpecialLeaveGrantRow,
+} from "../../utils/specialLeave";
+import { DueGrantBanner, SpecialLeaveSection } from "./SpecialLeavePanel";
 
 interface Props {
   db: Database;
@@ -39,6 +54,9 @@ interface LeaveData {
   grants: LeaveGrantRow[];
   attendance: AttendanceLeaveRow[];
   manual: ManualLeaveRecord[];
+  /** 特別休暇の付与と、確定した勤怠の特別休暇の日 */
+  specialGrants: SpecialLeaveGrantRow[];
+  specialDays: SpecialLeaveDay[];
 }
 
 /** 1日の所定労働時間（7.5 → 7時間30分） */
@@ -97,14 +115,33 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
     if (!staffId) return;
     const seq = ++loadSeq.current;
     try {
-      const loaded = await loadPaidLeaveData(db, staffId);
+      const [loaded, special] = await Promise.all([loadPaidLeaveData(db, staffId), loadSpecialLeaveData(db, staffId)]);
       if (seq !== loadSeq.current) return; // 読み込み中にほかの人を選んだ
-      setData({ staffId, ...loaded });
+      setData({ staffId, ...loaded, specialGrants: special.grants, specialDays: special.days });
     } catch (e) {
       console.error(e);
       dialog.error(`有給の記録を読み込めませんでした。\n${e}`);
     }
   }, [db, dialog]);
+
+  // 会社独自の休暇（特別休暇）の種類と、全員の付与（発生の日が来た付与の知らせに使う）
+  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
+  const [allSpecialGrants, setAllSpecialGrants] = useState<GrantRecord[]>([]);
+  const [specialBusy, setSpecialBusy] = useState(false);
+  const loadCompanyLeave = useCallback(async () => {
+    try {
+      const [types, grants] = await Promise.all([
+        loadLeaveTypes(db),
+        db.select<GrantRecord[]>("SELECT staff_id, leave_type_id, grant_date FROM special_leave_grants"),
+      ]);
+      setLeaveTypes(types);
+      setAllSpecialGrants(grants ?? []);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`休暇の種類を読み込めませんでした。\n${e}`);
+    }
+  }, [db, dialog]);
+  useEffect(() => { loadCompanyLeave(); }, [loadCompanyLeave]);
 
   useEffect(() => {
     if (selectedStaffId) loadAllData(selectedStaffId);
@@ -119,11 +156,9 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
   const view = useMemo(() => {
     if (!data || data.staffId !== selectedStaffId) return null;
     const annualGrants = data.grants.filter(isAnnualLeaveGrant);
-    const otherGrants = data.grants.filter(g => !isAnnualLeaveGrant(g));
     const { taken, manualChecks } = collectLeaveTaken(data.attendance, data.manual);
     const summary = summarizePaidLeave(annualGrants, taken, H, today);
     return {
-      otherGrants,
       summary,
       uncountedManual: manualChecks.filter(c => !c.counted),
       shortages: summary.taken.filter(t => t.shortageMinutes > 0),
@@ -166,7 +201,7 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
 
   // --- 付与の取り消し ---
   const handleDeleteGrant = async (g: LeaveGrantRow, usedMinutes: number) => {
-    const label = isAnnualLeaveGrant(g) ? "年次有給休暇" : `「${g.name}」`;
+    const label = "年次有給休暇";
     const usedNote = usedMinutes > 0
       ? `\nこの付与から引いていた有給（${formatLeaveMinutes(usedMinutes, H)}）は、ほかの付与から引き直します。足りなければ「残りが足りません」と出ます。`
       : "";
@@ -185,21 +220,78 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
     }
   };
 
-  // --- 別の名前で登録した付与を、年次有給休暇にする ---
-  const handleMakeAnnual = async (g: LeaveGrantRow) => {
-    const ok = await ask(
-      `「${g.name}」（${g.grant_date}付与・${g.days_granted}日）を、年次有給休暇の付与にしますか？\n` +
-      "年次有給休暇を別の名前で登録していたときだけ、こうしてください。",
-      { title: "年次有給休暇にする", kind: "info", okLabel: "年次有給休暇にする", cancelLabel: "やめる" });
-    if (!ok) return;
+  // --- 特別休暇：発生の日が来た付与（チェックした人に付与する。days が 0 なら、この回は付与しない） ---
+  const dues = useMemo(() => dueGrants(leaveTypes, staffList, allSpecialGrants, today), [leaveTypes, staffList, allSpecialGrants, today]);
+  const handleDueGrant = async (due: DueGrant, staffIds: string[], days: number): Promise<boolean> => {
+    if (specialBusy || staffIds.length === 0) return false;
+    const names = due.staff.filter(s => staffIds.includes(String(s.id))).map(s => s.name);
+    const what = days > 0
+      ? `${due.grantDate} の${due.type.name}（${formatLeaveDays(days)}・有効期限 ${due.expiryDate}）を、${names.length}人に付与しますか？`
+      : `${due.grantDate} の${due.type.name}を、${names.length}人には付与しないことにしますか？（0日の付与として残します）`;
+    const ok = await ask(`${what}\n${names.join("、")}`, {
+      title: days > 0 ? "特別休暇の付与" : "この回は付与しない", kind: "info", okLabel: days > 0 ? "付与する" : "付与しない", cancelLabel: "やめる",
+    });
+    if (!ok) return false;
+    setSpecialBusy(true);
     try {
-      await db.execute("UPDATE paid_leave_grants SET name = ? WHERE id = ? AND staff_id = ?", [ANNUAL_LEAVE_GRANT_NAME, g.id, selectedStaffId]);
-      await writeLog(db, "INFO", "attendance", `${staffLabel}の付与「${g.name}」（付与日 ${g.grant_date}・${g.days_granted}日）を年次有給休暇にしました`);
-      toast.success("年次有給休暇にしました");
-      await loadAllData(selectedStaffId);
+      for (const id of staffIds) {
+        await db.execute(
+          "INSERT INTO special_leave_grants (staff_id, leave_type_id, grant_date, expiry_date, days_granted) VALUES (?, ?, ?, ?, ?)",
+          [id, due.type.id, due.grantDate, due.expiryDate, days],
+        );
+      }
+      await writeLog(db, "INFO", "attendance", days > 0
+        ? `${due.type.name} ${days}日（付与日 ${due.grantDate}・有効期限 ${due.expiryDate}）を${staffIds.length}人に付与しました（${staffIds.join("・")}）`
+        : `${due.type.name}（付与日 ${due.grantDate}）を${staffIds.length}人には付与しないことにしました（${staffIds.join("・")}）`);
+      toast.success(days > 0 ? `${due.type.name}を${staffIds.length}人に付与しました` : `${staffIds.length}人には付与しないことにしました`);
+      await loadCompanyLeave();
+      if (selectedStaffId) await loadAllData(selectedStaffId);
+      return true;
     } catch (e) {
       console.error(e);
-      dialog.error(`変えられませんでした。\n${e}`);
+      dialog.error(`付与を登録できませんでした（途中まで登録したときは、知らせに残りの人が出ます）。\n${e}`);
+      await loadCompanyLeave();
+      return false;
+    } finally {
+      setSpecialBusy(false);
+    }
+  };
+
+  // --- 特別休暇：人ごとの付与の登録・取り消し ---
+  const handleAddSpecialGrant = async (input: { type: LeaveType; grantDate: string; expiryDate: string; days: number }) => {
+    if (!selectedStaffId || specialBusy) return;
+    setSpecialBusy(true);
+    try {
+      await db.execute(
+        "INSERT INTO special_leave_grants (staff_id, leave_type_id, grant_date, expiry_date, days_granted) VALUES (?, ?, ?, ?, ?)",
+        [selectedStaffId, input.type.id, input.grantDate, input.expiryDate, input.days],
+      );
+      await writeLog(db, "INFO", "attendance", `${staffLabel}に、${input.type.name} ${input.days}日（付与日 ${input.grantDate}・有効期限 ${input.expiryDate}）を登録しました`);
+      toast.success(`${input.type.name} ${formatLeaveDays(input.days)}を登録しました`);
+      await Promise.all([loadAllData(selectedStaffId), loadCompanyLeave()]);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`付与を登録できませんでした。\n${e}`);
+    } finally {
+      setSpecialBusy(false);
+    }
+  };
+  const handleDeleteSpecialGrant = async (type: LeaveType, g: SpecialLeaveGrantRow, usedText: string) => {
+    const usedNote = usedText
+      ? `\nこの付与から引いていた${usedText}は、ほかの付与から引き直します。足りなければ「残りが足りません」と出ます。`
+      : "";
+    const ok = await ask(`${g.grant_date}に付与した${type.name} ${g.days_granted}日を取り消しますか？${usedNote}`, {
+      title: "付与の取り消し", kind: "warning", okLabel: "取り消す", cancelLabel: "やめる",
+    });
+    if (!ok) return;
+    try {
+      await db.execute("DELETE FROM special_leave_grants WHERE id = ? AND staff_id = ?", [g.id, selectedStaffId]);
+      await writeLog(db, "INFO", "attendance", `${staffLabel}の${type.name}の付与（付与日 ${g.grant_date}・${g.days_granted}日）を取り消しました`);
+      toast.success("付与を取り消しました");
+      await Promise.all([loadAllData(selectedStaffId), loadCompanyLeave()]);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`付与を取り消せませんでした。\n${e}`);
     }
   };
 
@@ -389,6 +481,8 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
           </div>
         </div>
       </section>
+
+      <DueGrantBanner dues={dues} busy={specialBusy} onGrant={handleDueGrant} />
 
       {!selectedStaffId ? (
         <div style={{ textAlign: "center", padding: "100px", color: "#94a3b8", backgroundColor: "white", borderRadius: "10px", border: "1px dashed #cbd5e1" }}>
@@ -609,41 +703,18 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
               </>
             )}
 
-            {view.otherGrants.length > 0 && (
-              <>
-                <h3 style={{ ...sectionTitleStyle("#cbd5e1"), marginTop: "30px" }}>年次有給休暇ではない付与（夏季休暇など）</h3>
-                <p style={hintStyle}>
-                  夏季休暇などの会社独自の休暇は、勤怠に区分がないので、Q ではまだ残りを数えられません。有給の残りにも足していません。
-                  年次有給休暇を別の名前で登録していたときは、「年次有給休暇にする」を押してください。
-                </p>
-                <table style={tableStyle}>
-                  <thead>
-                    <tr style={{ backgroundColor: "#f8fafc" }}>
-                      <th style={thStyle}>名前</th>
-                      <th style={thStyle}>付与日</th>
-                      <th style={thStyle}>有効期限</th>
-                      <th style={thStyle}>日数</th>
-                      <th style={thStyle}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.otherGrants.map(g => (
-                      <tr key={g.id}>
-                        <td style={tdStyle}>{g.name}</td>
-                        <td style={tdStyle}>{g.grant_date}</td>
-                        <td style={tdStyle}>{g.expiry_date}</td>
-                        <td style={tdStyle}>{g.days_granted}日</td>
-                        <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
-                          <button style={{ ...smallBtnStyle("#3182ce"), marginRight: "6px" }} onClick={() => handleMakeAnnual(g)}>年次有給休暇にする</button>
-                          <button style={smallBtnStyle("#e53e3e")} onClick={() => handleDeleteGrant(g, 0)}>取り消す</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
           </div>
+
+          <SpecialLeaveSection
+            types={leaveTypes}
+            grants={data?.specialGrants ?? []}
+            days={data?.specialDays ?? []}
+            today={today}
+            hoursPerDay={H}
+            busy={specialBusy}
+            onAddGrant={handleAddSpecialGrant}
+            onDeleteGrant={handleDeleteSpecialGrant}
+          />
         </>
       )}
     </div>

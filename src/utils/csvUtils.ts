@@ -2,7 +2,8 @@
  * 勤怠の CSV の書き出し
  *
  * ・raw（打刻ログ）：スタッフID・日付・出勤・退勤・休憩（打刻の値）。勤怠の「CSV 取り込み」でそのまま取り込める形。
- * ・full（詳細）：打刻と修正（手入力）の両方と、勤務区分・時間有給・備考・確定したか。
+ * ・full（詳細）：打刻と修正（手入力）の両方と、勤務区分・特別休暇の種類・時間有給・備考・確定したか。
+ *   特別休暇の種類は、勤怠の leave_type_id から読んだ名前（leave_name。呼び出し側が leave_types とつないで渡す）。無給の休暇は「（無給）」を付ける。
  * ・休憩は一覧で書く（「12:00-13:00 15:00-15:10」。shared/timeqard/spans.ts。TimeQard の CSV と同じ書き方）。
  *   時間有給にした中抜けは、「時間有給の中抜け」の列に分けて書く。
  */
@@ -14,7 +15,7 @@ const FULL_HEADER = [
   "スタッフID", "名前", "日付",
   "打刻_出勤", "打刻_退勤", "打刻_休憩",
   "修正_出勤", "修正_退勤", "修正_休憩", "時間有給の中抜け",
-  "区分", "有給h", "備考", "確定",
+  "区分", "休暇の種類", "有給h", "備考", "確定",
 ];
 
 /** 文の中の改行・「,」を空白にする（CSV の列がずれないように） */
@@ -45,6 +46,7 @@ export const generateAttendanceCSV = (data: any[], mode: "raw" | "full"): string
       manual ? formatBreakList(manual) : "",
       manual ? formatLeaveList(manual) : "",
       row.work_type || "normal",
+      row.leave_name ? `${row.leave_name}${Number(row.leave_paid) === 0 && row.leave_paid !== null ? "（無給）" : ""}` : "",
       row.paid_leave_hours || 0,
       row.memo || "",
       Number(row.is_finalized) === 1 ? "1" : "0",

@@ -1,6 +1,7 @@
 /**
  * 勤怠の画面に出す、有給の残り（「有給休暇管理」の画面と同じ数え方。確定した勤怠で数える）
- * この期間に残りが足りない有給の日があれば知らせる
+ * この期間に残りが足りない有給の日があれば知らせる。
+ * 会社独自の休暇（特別休暇）の残り・足りない日も出す（この期間の日は、まだ確定していない日も入れて数える）
  */
 import dayjs from "dayjs";
 import type { AttendanceViewModel } from './types';
@@ -11,12 +12,14 @@ interface Props {
 
 export default function PaidLeaveNotice({ am }: Props) {
   const { paidLeave } = am;
-  if (!paidLeave) return null;
+  const special = <SpecialLeaveNotice am={am} />;
+  if (!paidLeave) return special;
   // 有給をほかで管理している会社（付与を登録していない人）は、この期間に有給がなければ何も出さない
-  if (!paidLeave.hasGrants && !paidLeave.leaveInPeriod) return null;
+  if (!paidLeave.hasGrants && !paidLeave.leaveInPeriod) return special;
 
   return (
     <div style={{ marginBottom: 10 }}>
+      {special}
       <div style={{ fontSize: 12, color: "#475569", padding: "6px 12px", borderRadius: 6, backgroundColor: "#f1f5f9" }}>
         {paidLeave.hasGrants ? (
           <>
@@ -51,6 +54,44 @@ export default function PaidLeaveNotice({ am }: Props) {
       {paidLeave.hoursAssumed && paidLeave.hourlyLeaveInPeriod && (
         <div style={{ marginTop: 6, fontSize: 12, color: "#92400e", padding: "6px 12px", borderRadius: 6, backgroundColor: "#fef3c7" }}>
           この人の1日の所定労働時間が入っていないので、時間単位の有給は8時間を1日として数えています。従業員の画面で、1日の所定労働時間を入れてください。
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 会社独自の休暇（特別休暇）の残りと、この期間に残りが足りない日 */
+function SpecialLeaveNotice({ am }: Props) {
+  const { specialLeave } = am;
+  if (!specialLeave) return null;
+  const shown = specialLeave.types.filter(t => t.takenInPeriod !== "" || (t.trackBalance && t.hasGrants));
+  const shortages = specialLeave.types.filter(t => t.trackBalance && t.shortages.length > 0);
+  if (shown.length === 0 && specialLeave.unknownDates.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 6 }}>
+      {shown.length > 0 && (
+        <div style={{ fontSize: 12, color: "#475569", padding: "6px 12px", borderRadius: 6, backgroundColor: "#fff7ed" }}>
+          会社独自の休暇：
+          {shown.map(t => (
+            <span key={t.id} style={{ marginRight: 14 }}>
+              {t.name}{t.paid ? "" : "（無給）"}
+              {t.trackBalance && <> の残り <b style={{ fontSize: 14, color: "#1e293b" }}>{t.hasGrants ? t.remainingText : "付与なし"}</b></>}
+              {t.takenInPeriod !== "" && `（この期間に ${t.takenInPeriod}）`}
+            </span>
+          ))}
+          （{dayjs(specialLeave.asOf).format("M月D日")}時点。この期間のまだ確定していない日も入れています。くわしくは「有給休暇管理」の画面で見られます）
+        </div>
+      )}
+      {shortages.length > 0 && (
+        <div style={{ marginTop: 6, fontSize: 13, color: "#9b1c1c", padding: "8px 12px", borderRadius: 6, backgroundColor: "#fde8e8" }}>
+          ⚠ この期間に、残りが足りない休暇があります：
+          {shortages.map(t => `${t.name}：${t.shortages.map(s => `${s.date}（${s.shortage}）`).join("・")}`).join("、")}。
+          「有給休暇管理」の画面で付与を登録するか、勤怠を直してください。
+        </div>
+      )}
+      {specialLeave.unknownDates.length > 0 && (
+        <div style={{ marginTop: 6, fontSize: 13, color: "#9b1c1c", padding: "8px 12px", borderRadius: 6, backgroundColor: "#fde8e8" }}>
+          ⚠ 休暇の種類がわからない日があります：{specialLeave.unknownDates.join("、")}。区分で休暇を選び直してください（確定できません）。
         </div>
       )}
     </div>

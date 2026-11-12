@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     DEFAULT_LENGTH_RULES, autoBreakMinutes, breakShortage, calcDayHours, describeCombine, describeFixedBreak, fixedBreakRuleFor,
-    leaveMinutesOf, parseFixedBreak, recordedRestMinutes, stringifyFixedBreak, type DayTimes, type FixedBreakRule,
+    leaveMinutesOf, parseFixedBreak, recordedRestMinutes, specialLeaveMinutesOf, stringifyFixedBreak, type DayTimes, type FixedBreakRule,
 } from "./fixedBreak";
 import { effectiveBreaks, parseBreaksJson, stringifyBreaks, type BreakSpan } from "./breaks";
 
@@ -142,9 +142,22 @@ describe("時刻で決める（12:00〜13:00）", () => {
     test("時間有給にした中抜けと重なる日は、決まった休憩を引かずに知らせる。重ならなければ両方を引く", () => {
         const over = calcDayHours(day("09:00", "18:00", [b("11:30", "12:30", true)]), lunch);
         expect([over.total, over.autoBreak, over.leaveMinutes]).toEqual([8, "", 60]);
-        expect(over.notice).toContain("時間有給にした中抜けと決まった休憩");
+        expect(over.notice).toContain("休暇にした中抜けと決まった休憩");
         const apart = calcDayHours(day("09:00", "18:00", [b("15:00", "17:00", true)]), lunch);
         expect([apart.total, apart.breakMinutes, apart.restMinutes, apart.leaveMinutes]).toEqual([6, 60, 60, 120]);
+    });
+    test("時間単位の特別休暇（子の看護等休暇など）にした中抜けも、働いた時間にも休憩（34条）にも入れない。時間有給とは分けて数える", () => {
+        const special: BreakSpan = { start: "15:00", end: "17:00", leaveTypeId: 3 };
+        const r = calcDayHours(day("09:00", "18:00", [b("12:00", "13:00"), special, b("10:00", "10:30", true)]), lunch);
+        expect([r.total, r.breakMinutes, r.restMinutes, r.leaveMinutes, r.specialLeaveMinutes]).toEqual([5.5, 60, 60, 30, 120]);
+        expect(specialLeaveMinutesOf(day("09:00", "18:00", [special]))).toBe(120);
+        expect(leaveMinutesOf(day("09:00", "18:00", [special]))).toBe(0);
+        // 出勤・退勤がない日は、入れた長さ
+        expect(specialLeaveMinutesOf(day("", "", [special]))).toBe(120);
+        // 34条の確かめに使う休憩には入れない
+        expect(recordedRestMinutes(day("", "", [b("12:00", "13:00"), special]))).toBe(60);
+        // 保存して読み直しても、休暇の種類が残る
+        expect(parseBreaksJson(stringifyBreaks([special, b("12:00", "13:00", true)]))).toEqual([special, { start: "12:00", end: "13:00", leave: true }]);
     });
     test("夜勤：22:00〜翌7:00 で決まった休憩が 2:00〜3:00 なら、次の日の2時。深夜（22時〜5時）の7時間から1時間引く", () => {
         const r = calcDayHours(day("22:00", "07:00"), { mode: "time", start: "02:00", end: "03:00", combine: "record" });

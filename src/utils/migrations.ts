@@ -167,6 +167,55 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "tardy_deduction", "INTEGER");
     },
   },
+  {
+    version: 11,
+    description:
+      "会社独自の休暇（特別休暇）：勤怠に休暇の種類と有給かの列、確定した給与に無給の休暇の控除の列を足す。" +
+      "有給の付与のうち年次有給休暇ではない名前の付与（夏季休暇など）は、その名前の休暇の種類（有給・残りを数える）の付与に移す",
+    up: async (db) => {
+      // 従業員の削除を止める TRIGGER は、特別休暇の付与も見る新しいもの（keep_staff_with_records_v2。開くときに作る）に替える
+      await db.execute("DROP TRIGGER IF EXISTS keep_staff_with_records");
+      await addColumnIfMissing(db, "attendance", "leave_type_id", "INTEGER");
+      await addColumnIfMissing(db, "attendance", "leave_paid", "INTEGER");
+      await addColumnIfMissing(db, "salary_results", "unpaid_leave_deduction", "INTEGER");
+      // 前は、夏季休暇などの付与を、有給の付与（paid_leave_grants）に別の名前で入れられた（残りは数えていなかった）
+      const others = await db.select<{ id: number; staff_id: string; name: string; grant_date: string; expiry_date: string; days_granted: number }[]>(
+        `SELECT id, staff_id, TRIM(name) AS name, grant_date, expiry_date, days_granted FROM paid_leave_grants
+         WHERE TRIM(COALESCE(name, '')) NOT IN ('', '法定有給') ORDER BY id`,
+      );
+      const typeIds = new Map<string, number>();
+      const findType = async (name: string) =>
+        (await db.select<{ id: number }[]>("SELECT id FROM leave_types WHERE name = ? ORDER BY id DESC LIMIT 1", [name]))?.[0]?.id;
+      for (const g of others ?? []) {
+        let typeId = typeIds.get(g.name);
+        if (typeId === undefined) {
+          let found = await findType(g.name);
+          if (found === undefined) {
+            await db.execute(
+              "INSERT INTO leave_types (name, is_paid, track_balance, allow_half, expiry_rule, sort_order) VALUES (?, 1, 1, 0, ?, ?)",
+              [g.name, JSON.stringify({ mode: "months", months: 12 }), typeIds.size],
+            );
+            found = await findType(g.name);
+          }
+          typeId = Number(found);
+          typeIds.set(g.name, typeId);
+        }
+        await db.execute(
+          "INSERT INTO special_leave_grants (staff_id, leave_type_id, grant_date, expiry_date, days_granted) VALUES (?, ?, ?, ?, ?)",
+          [g.staff_id, typeId, g.grant_date, g.expiry_date, g.days_granted],
+        );
+        await db.execute("DELETE FROM paid_leave_grants WHERE id = ?", [g.id]);
+      }
+    },
+  },
+  {
+    version: 12,
+    description: "特別休暇を時間単位でも取れるようにする（休暇の種類に時間単位でも取れるか、勤怠に時間単位の特別休暇の時間の列を足す）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "leave_types", "allow_hourly", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "attendance", "special_leave_hours", "REAL DEFAULT 0");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

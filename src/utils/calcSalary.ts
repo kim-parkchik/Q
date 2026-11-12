@@ -74,6 +74,17 @@
  *  - 1円未満は切り捨て、引く額は、その月に払う基本給（欠勤控除を引いたあと）まで。働いた時間が0の出勤の日は引かない（欠勤なら「欠勤」にする）
  *  出典：厚生労働省「モデル就業規則（令和7年12月版）」第45条（欠勤、遅刻、早退・私用外出の時間分を基本給から控除。
  *        1時間あたりは、月給は 基本給 ÷ 1か月平均所定労働時間数、日給は 基本給 ÷ 1日の所定労働時間数）
+ *
+ * 特別休暇（夏季休暇などの会社独自の休暇。勤怠の区分 special・special_half。utils/specialLeave.ts）:
+ *  - 有給か無給かは、休暇の種類ごとに会社が決める（確定したときの設定を勤怠に残した leave_paid で見る）
+ *  - 有給の休暇：月給制は引かない。日給制・時給制は、年次有給休暇と同じく所定労働時間を働いた場合の通常の賃金を払う
+ *    （日給制は 日給 × 休んだ時間 ÷ 1日の所定労働時間、時給制は 時給 × 休んだ時間。1日は所定労働時間、半日はその半分）
+ *  - 無給の休暇：月給制は、欠勤控除と同じ計算（給与規定グループの欠勤控除のしかた）で引き、明細では欠勤とは分けて出す。
+ *    日給制・時給制は払わない（半日の日は、残りの半日に働いた分の日給・時給を払う）
+ *  - 半日の日は、半休と同じく、所定労働時間の半分を働く日として残業・遅刻早退を数える
+ *  - 時間単位の休暇（子の看護等休暇・介護休暇など。attendance.special_leave_hours）：時間有給と同じく、所定労働時間から引いて残業・遅刻早退を数える。
+ *    有給なら日給制・時給制はその時間の通常の賃金を払い、無給なら月給制は、遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く
+ *    （給与規定グループで遅刻・早退・中抜けを「引かない」にしている会社は引かない。明細では「無給休暇控除」に入れる）
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -88,6 +99,7 @@ import { calcDailyHeiTaxByTable, calcWithholdingTax, toTaxColumn, type TaxCalcMe
 import { checkLeaveExemptMonth, exemptLeavePeriodsOf } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
+import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './specialLeave';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -207,6 +219,22 @@ export interface SalaryResult {
   appliedDependents: number;
   nightPay: number;
   paidLeavePay: number;           // 有給休暇の賃金（時給制・日給制）
+  /** 有給の特別休暇の日数（勤怠の「特別休暇」のうち、有給の種類の日。半日は0.5日） */
+  specialLeaveDays: number;
+  /** 有給の特別休暇の時間（時給制・日給制で賃金を払う時間） */
+  specialLeaveHours: number;
+  /** 有給の特別休暇の賃金（時給制・日給制。所定労働時間を働いた場合の通常の賃金） */
+  specialLeavePay: number;
+  /** 無給の特別休暇の日数（半日は0.5日） */
+  unpaidLeaveDays: number;
+  /** 無給の時間単位の特別休暇の時間 */
+  unpaidLeaveHours: number;
+  /** 無給の特別休暇の控除（月給制。1日・半日は欠勤控除と同じ計算、時間単位は遅刻・早退・中抜けの控除と同じ計算で引く） */
+  unpaidLeaveDeduction: number;
+  /** 無給の特別休暇の控除の計算式（明細に出す。なければ null） */
+  unpaidLeaveDeductionDetail: string | null;
+  /** 無給の特別休暇の控除の注意（なければ null） */
+  unpaidLeaveDeductionNote: string | null;
   commutePay: number;
   allowanceAmount: number;
   customEarnings: number;
@@ -292,7 +320,7 @@ export interface SalaryResult {
  */
 const scheduledHoursOf = (type: string, scheduledHours: number, paidLeaveHours: number): number => {
   const base = type === 'normal' ? scheduledHours
-             : type === 'paid_half' ? scheduledHours / 2
+             : type === 'paid_half' || type === SPECIAL_LEAVE_HALF ? scheduledHours / 2
              : 0;
   return Math.max(0, base - paidLeaveHours);
 };
@@ -607,11 +635,11 @@ export const saveSalaryResult = async (
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
-      absence_deduction, prescribed_work_days, tardy_deduction,
+      absence_deduction, prescribed_work_days, tardy_deduction, unpaid_leave_deduction,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -629,6 +657,7 @@ export const saveSalaryResult = async (
       absence_deduction = excluded.absence_deduction,
       prescribed_work_days = excluded.prescribed_work_days,
       tardy_deduction = excluded.tardy_deduction,
+      unpaid_leave_deduction = excluded.unpaid_leave_deduction,
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
       health_insurance = excluded.health_insurance,
@@ -653,7 +682,7 @@ export const saveSalaryResult = async (
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
     result.fixedOvertimeAllowance, result.fixedOvertimeExcess, result.nonFixedEarnings,
     // 欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う。utils/santei.ts）
-    result.absenceDeduction, result.periodWorkDays, result.tardyDeduction,
+    result.absenceDeduction, result.periodWorkDays, result.tardyDeduction, result.unpaidLeaveDeduction,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
@@ -826,12 +855,14 @@ export const absenceDeductionOf = (
   periodWorkDays: number | null | undefined,
   annualWorkDays: number | null | undefined,
   fallbackDays: number,
+  /** 計算式に書く、休んだ日の名前（無給の特別休暇は「無給の休暇」） */
+  label = '欠勤',
 ): AbsenceDeduction => {
   if (absentDays <= 0 || monthlyWage <= 0) return { amount: 0, detail: null, note: null };
   if (method === 'none') {
-    return { amount: 0, detail: `欠勤 ${absentDays}日：欠勤控除をしない設定（完全月給制）なので、月給をそのまま支給します`, note: null };
+    return { amount: 0, detail: `${label} ${absentDays}日：欠勤控除をしない設定（完全月給制）なので、月給をそのまま支給します`, note: null };
   }
-  const wage = `月給 ¥${monthlyWage.toLocaleString()} × 欠勤 ${absentDays}日`;
+  const wage = `月給 ¥${monthlyWage.toLocaleString()} × ${label} ${absentDays}日`;
   // 割り算を最後にして、端数の誤差が出ないようにする
   const byFallback = (reason: string) => ({
     raw: Math.floor((monthlyWage * absentDays) / fallbackDays),
@@ -884,13 +915,22 @@ export const TARDY_DEDUCTION_METHOD_LABELS: Record<TardyDeductionMethod, string>
 export const toTardyDeductionMethod = (value: unknown): TardyDeductionMethod =>
   (value === 'annual' || value === 'period' ? value : 'none');
 
-/** その日の所定労働時間に足りない時間（分）。出勤・半休の日で、働いた時間がある日だけ（時間有給の時間は働いたものとして数える） */
-export const tardyMinutesOf = (row: { work_type?: string | null; work_hours?: unknown; paid_leave_hours?: unknown }, scheduledHours: number): number => {
+/**
+ * その日の所定労働時間に足りない時間（分）。出勤・半休（有給・特別休暇の半日）の日で、働いた時間がある日だけ
+ * （時間有給の時間は働いたものとして数える）
+ */
+export const tardyMinutesOf = (
+  row: { work_type?: string | null; work_hours?: unknown; paid_leave_hours?: unknown; special_leave_hours?: unknown },
+  scheduledHours: number,
+): number => {
   const type = row.work_type || 'normal';
   const worked = Number(row.work_hours) || 0;
-  if ((type !== 'normal' && type !== 'paid_half') || worked <= 0) return 0;
-  const scheduled = type === 'paid_half' ? scheduledHours / 2 : scheduledHours;
-  return Math.max(0, Math.round((scheduled - worked - (Number(row.paid_leave_hours) || 0)) * 60));
+  const half = type === 'paid_half' || type === SPECIAL_LEAVE_HALF;
+  if ((type !== 'normal' && !half) || worked <= 0) return 0;
+  const scheduled = half ? scheduledHours / 2 : scheduledHours;
+  // 時間有給と時間単位の特別休暇の時間は、遅刻・早退にしない（無給の特別休暇の時間は、無給の休暇の控除で引く）
+  const leave = (Number(row.paid_leave_hours) || 0) + specialLeaveHoursOf(row);
+  return Math.max(0, Math.round((scheduled - worked - leave) * 60));
 };
 
 /** 「2時間30分」 */
@@ -923,10 +963,20 @@ export const tardyDeductionOf = (
   periodWorkDays: number | null | undefined,
   annualWorkDays: number | null | undefined,
   fallbackDays: number,
+  /** 計算式に書く名前（無給の特別休暇の時間は「無給の休暇」） */
+  label = '遅刻・早退・中抜け',
 ): TardyDeduction => {
   if (minutes <= 0 || monthlyWage <= 0) return { amount: 0, detail: null, note: null };
-  const late = `遅刻・早退・中抜け ${hoursMinutesLabel(minutes)}`;
-  if (method === 'none') return { amount: 0, detail: `${late}：引かない設定なので、月給をそのまま支給します`, note: null };
+  const late = `${label} ${hoursMinutesLabel(minutes)}`;
+  if (method === 'none') {
+    return {
+      amount: 0,
+      detail: label === '遅刻・早退・中抜け'
+        ? `${late}：引かない設定なので、月給をそのまま支給します`
+        : `${late}：給与規定グループで遅刻・早退・中抜けを引かない設定なので、月給をそのまま支給します`,
+      note: null,
+    };
+  }
   const dayMinutes = Math.round(scheduledHours * 60);
   const wage = `月給 ¥${monthlyWage.toLocaleString()} × ${late}`;
   let raw: number;
@@ -940,10 +990,11 @@ export const tardyDeductionOf = (
     raw = Math.floor((monthlyWage * minutes) / (periodWorkDays * dayMinutes));
     detail = `${wage} ÷ 計算期間の所定労働時間（${periodWorkDays}日 × ${scheduledHours}時間）`;
   } else {
-    if (fallbackDays <= 0) return { amount: 0, detail: null, note: '所定労働日がわからないため、遅刻・早退・中抜けの控除をしていません（従業員画面の出勤曜日・会社カレンダーを確かめてください）。' };
+    if (fallbackDays <= 0) return { amount: 0, detail: null, note: `所定労働日がわからないため、${label}の控除をしていません（従業員画面の出勤曜日・会社カレンダーを確かめてください）。` };
     raw = Math.floor((monthlyWage * minutes) / (fallbackDays * dayMinutes));
     detail = `${wage} ÷（この月の土日を除いた日数 ${fallbackDays}日 × ${scheduledHours}時間）`;
     note = `${method === 'annual' ? '1年間の所定労働日数がわからないため' : '会社カレンダーを読み込めていないため'}、この月の土日を除いた日数で割っています（従業員画面の出勤曜日・会社カレンダーを確かめてください）。`;
+    if (label !== '遅刻・早退・中抜け') note = `${label}：${note}`;
   }
   const limit = Math.max(0, Math.floor(cap));
   return raw > limit
@@ -1132,10 +1183,24 @@ export const calculateSalary = (
   let tardyDeduction = 0;
   let tardyDeductionDetail: string | null = null;
   let tardyDeductionNote: string | null = null;
+  // 特別休暇（会社独自の休暇）：有給の日は賃金を払い（時給制・日給制）、無給の日は月給から引く（utils/specialLeave.ts）
+  const specialLeaveDays = attendanceData.reduce((sum, row) => { const s = specialLeaveOfRow(row); return s.paid ? sum + s.days : sum; }, 0);
+  const unpaidLeaveDays = attendanceData.reduce((sum, row) => { const s = specialLeaveOfRow(row); return s.paid ? sum : sum + s.days; }, 0);
+  // 無給の時間単位の特別休暇（分）。月給制は、遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く
+  const unpaidLeaveMinutes = attendanceData.reduce((sum, row) => {
+    const s = specialLeaveOfRow(row);
+    return s.paid ? sum : sum + Math.round(s.hours * 60);
+  }, 0);
+  let specialLeavePay = 0;      // 有給の特別休暇の賃金（時給制・日給制）
+  let specialLeaveHours = 0;
+  let unpaidLeaveDeduction = 0; // 無給の特別休暇の控除（月給制）
+  let unpaidLeaveDeductionDetail: string | null = null;
+  let unpaidLeaveDeductionNote: string | null = null;
   const tardyMinutes = attendanceData.reduce((sum, row) => sum + tardyMinutesOf(row, scheduledHours), 0);
   let dailyTardyRaw = 0; // 日給制：日ごとの 日給 × 足りない時間 ÷ 1日の所定労働時間 の合計
   // 出勤の日なのに働いた時間が0の日（欠勤なら「欠勤」にする）
-  const zeroWorkDays = attendanceData.filter(row => (row.work_type || 'normal') === 'normal' && !((Number(row.work_hours) || 0) > 0) && !((Number(row.paid_leave_hours) || 0) > 0)).length;
+  const zeroWorkDays = attendanceData.filter(row => (row.work_type || 'normal') === 'normal' && !((Number(row.work_hours) || 0) > 0)
+    && !((Number(row.paid_leave_hours) || 0) > 0) && !(specialLeaveHoursOf(row) > 0)).length;
   let totalOvertimeHours = 0;       // 法定外残業（割増対象）の累計
   let totalStatutoryOvertimeHours = 0; // 法定内残業の累計
   let standardPremiumHours = 0; // ★追加
@@ -1147,7 +1212,7 @@ export const calculateSalary = (
   let dailyWageDays = 0;        // 日給制で日給を払った日数
   // 日ごとの支給額（丙欄で、働いた日ごとの給与を出すのに使う）。overtime は残業代の対象外の人には払わない分
   const dayPays: Record<string, { pay: number; overtime: number }> = {};
-  const payTotal = () => basePay + paidLeavePay + nightPay;
+  const payTotal = () => basePay + paidLeavePay + specialLeavePay + nightPay;
   const overtimeTotal = () => statutoryOvertimePay + standardOvertimePay + highOvertimePay + holidayWorkPay;
   const addDayPay = (date: string, pay: number, overtime: number) => {
     const d = (dayPays[date] ??= { pay: 0, overtime: 0 });
@@ -1240,9 +1305,23 @@ export const calculateSalary = (
       absenceDeductionDetail = absence.detail;
       absenceDeductionNote = absence.note;
 
+      // 無給の特別休暇：欠勤控除と同じ計算で引く（引く額は、欠勤控除を引いたあとの基本給まで）
+      const unpaid = absenceDeductionOf(
+        absenceDeductionMethod, monthlyWage, unpaidLeaveDays, basePay - absenceDeduction,
+        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '無給の休暇',
+      );
+      // 無給の時間単位の特別休暇：遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く（引く額は、そこまでに引いたあとの基本給まで）
+      const unpaidHours = tardyDeductionOf(
+        tardyDeductionMethod, monthlyWage, unpaidLeaveMinutes, basePay - absenceDeduction - unpaid.amount, scheduledHours,
+        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '無給の休暇',
+      );
+      unpaidLeaveDeduction = unpaid.amount + unpaidHours.amount;
+      unpaidLeaveDeductionDetail = [unpaid.detail, unpaidHours.detail].filter(Boolean).join('／') || null;
+      unpaidLeaveDeductionNote = [unpaid.note, unpaidHours.note].filter(Boolean).join(' ') || null;
+
       // 遅刻・早退・中抜けの控除：給与規定グループの設定で、1か月平均所定労働時間か、計算期間の所定労働時間で割る（tardyDeductionOf）
       const tardy = tardyDeductionOf(
-        tardyDeductionMethod, monthlyWage, tardyMinutes, basePay - absenceDeduction, scheduledHours,
+        tardyDeductionMethod, monthlyWage, tardyMinutes, basePay - absenceDeduction - unpaidLeaveDeduction, scheduledHours,
         extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth),
       );
       tardyDeduction = tardy.amount;
@@ -1269,8 +1348,15 @@ export const calculateSalary = (
         const leaveHours = Math.min(scheduledHours, paidLeaveHoursOf(type, scheduledHours, Number(row.paid_leave_hours) || 0));
         paidLeaveHours += leaveHours;
         paidLeavePay += dayWage * leaveHours / scheduledHours;
-        if (h > 0 && (type === 'normal' || type === 'paid_half')) {
-          const workShare = (scheduledHours - leaveHours) / scheduledHours;
+        // 特別休暇：休んだ時間（1日・半日）の割合を、有給なら特別休暇の賃金として払い、無給なら払わない
+        const special = specialLeaveOfRow(row);
+        const specialHours = Math.max(0, Math.min(scheduledHours - leaveHours, special.days * scheduledHours + special.hours));
+        if (special.paid && specialHours > 0) {
+          specialLeaveHours += specialHours;
+          specialLeavePay += dayWage * specialHours / scheduledHours;
+        }
+        if (h > 0 && (type === 'normal' || type === 'paid_half' || type === SPECIAL_LEAVE_HALF)) {
+          const workShare = Math.max(0, scheduledHours - leaveHours - specialHours) / scheduledHours;
           basePay += dayWage * workShare;
           dailyWageDays += workShare;
           // 遅刻・早退・中抜け：日給 × 足りない時間 ÷ 1日の所定労働時間（モデル就業規則第45条：日給は 基本給 ÷ 1日の所定労働時間数）
@@ -1298,7 +1384,7 @@ export const calculateSalary = (
 
         // 2. 法定内残業（1.0倍）の計算
         // 所定労働時間の外の時間（月給・日給に入っていない時間）のうち、法定外残業でない時間
-        const currentScheduled = scheduledHoursOf(type, scheduledHours, Number(row.paid_leave_hours) || 0);
+        const currentScheduled = scheduledHoursOf(type, scheduledHours, (Number(row.paid_leave_hours) || 0) + specialLeaveHoursOf(row));
         const { beyond, statutory: effectiveStatutoryOvertime } = splitBySchedule(h, currentScheduled, legalOvertimeToday);
 
         totalStatutoryOvertimeHours += effectiveStatutoryOvertime;
@@ -1355,6 +1441,14 @@ export const calculateSalary = (
       paidLeaveHours += leaveHours;
       paidLeavePay += wage * leaveHours;
 
+      // 有給の特別休暇の賃金（年次有給休暇と同じく、所定労働時間を働いた場合の通常の賃金。無給なら払わない）
+      const special = specialLeaveOfRow(row);
+      if (special.paid && (special.days > 0 || special.hours > 0)) {
+        const specialHours = special.days * scheduledHours + special.hours;
+        specialLeaveHours += specialHours;
+        specialLeavePay += wage * specialHours;
+      }
+
       nightPay += (wage + allowancePerHour) * Master.NIGHT_SHIFT_RATE * n;
 
       if (type === 'statutory_holiday') {
@@ -1376,7 +1470,7 @@ export const calculateSalary = (
         // ★ 1. 「今日（その行）の時間」を25%と50%（月60時間超）に分ける
         const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
         // 所定労働時間の中の時間は、手当の通常の分（1.0倍）を月額の手当で払っているので、手当の分も割増分だけを足す（月給制・日給制と同じ）
-        const currentScheduled = scheduledHoursOf(type, scheduledHours, Number(row.paid_leave_hours) || 0);
+        const currentScheduled = scheduledHoursOf(type, scheduledHours, (Number(row.paid_leave_hours) || 0) + specialLeaveHoursOf(row));
         const { beyond } = splitBySchedule(h, currentScheduled, legalOvertimeToday);
         const within = withinScheduleSplit(legalOvertimeToday, beyond, split.high);
 
@@ -1462,10 +1556,12 @@ export const calculateSalary = (
 
   const totalEarnings = Math.floor(basePay || 0)
                     - (absenceDeduction || 0)
+                    - (unpaidLeaveDeduction || 0)
                     - (tardyDeduction || 0)
                     + statutoryLine
                     + roundedPremiums
                     + Math.floor(paidLeavePay || 0)
+                    + Math.floor(specialLeavePay || 0)
                     + (commutePay || 0)
                     + (allowanceAmount || 0)
                     + (customEarnings || 0);
@@ -1581,6 +1677,14 @@ export const calculateSalary = (
     appliedDependents: isHei ? 0 : Number(extras.dependents) || 0,
     nightPay: nightLine,
     paidLeavePay: Math.floor(paidLeavePay),
+    specialLeaveDays,
+    specialLeaveHours,
+    specialLeavePay: Math.floor(specialLeavePay),
+    unpaidLeaveDays,
+    unpaidLeaveHours: Math.round((unpaidLeaveMinutes / 60) * 1000) / 1000,
+    unpaidLeaveDeduction,
+    unpaidLeaveDeductionDetail,
+    unpaidLeaveDeductionNote,
     commutePay,
     allowanceAmount,
     customEarnings,

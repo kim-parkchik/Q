@@ -290,12 +290,15 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   // 行数計算ロジック
   const earningItemsCount = 1
     + (salary.absenceDeduction > 0 ? 1 : 0)
+    + (salary.unpaidLeaveDeduction > 0 ? 1 : 0)
+    + (salary.tardyDeduction > 0 ? 1 : 0)
     + (salary.statutoryOvertimePay > 0 ? 1 : 0)
     + (salary.fixedOvertimeAllowance > 0
       ? 1 + (salary.fixedOvertimeExcess > 0 ? 1 : 0)
       : (salary.standardOvertimePay > 0 ? 1 : 0) + (salary.highOvertimePay > 0 ? 1 : 0))
     + (salary.holidayWorkPay > 0 ? 1 : 0)
     + (salary.paidLeavePay > 0 ? 1 : 0)
+    + (salary.specialLeavePay > 0 ? 1 : 0)
     + 1 + 1 + 1 + customEarningItems.length;
   const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + customDeductionItems.length;
   const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
