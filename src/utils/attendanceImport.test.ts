@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { writeTimeQardCsv } from "../../shared/timeqard";
 import { DB_SCHEMAS } from "../types/dbSchema";
 import {
   decodeCsvBytes,
@@ -77,6 +78,31 @@ describe("TimeQard の CSV：会社の印と形式を確かめる", () => {
     expect(r.rows[0].notes).toEqual(["出勤がありません"]);
     expect(r.rows[0].requests).toEqual({ entry: "09:00" });
     expect(r.rows[0].requestReason).toBe("出勤：押し忘れた");
+    expect(r.rows[0].web).toEqual([]);
+  });
+
+  test("ブラウザの列（ブラウザで押した打刻の種類）を読む", () => {
+    const csv = writeTimeQardCsv([
+      {
+        staffId: "1001",
+        name: "山田 太郎",
+        date: "2026-11-04",
+        times: { entry: "08:58", exit: "18:02", break_start: "", break_end: "", out: "", return: "" },
+        requests: {},
+        noBreakRequest: false,
+        requestReason: "",
+        cardless: ["exit"],
+        web: ["entry"],
+        notes: [],
+        companyMark: MARK,
+      },
+    ]);
+    const r = readAttendanceImport(csv, { staff, companyMark: MARK });
+    expect(r.error).toBeNull();
+    expect(r.rows[0].web).toEqual(["entry"]);
+    expect(r.rows[0].cardless).toEqual(["exit"]);
+    // TimeQard の CSV でなければ、ブラウザの列は読まない
+    expect(readAttendanceImport("スタッフID,日付,出勤,ブラウザ\n1001,2026-11-04,09:00,出勤\n", { staff, companyMark: null }).rows[0].web).toEqual([]);
   });
 });
 

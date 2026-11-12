@@ -63,7 +63,10 @@ export interface ImportRow {
   /** 「休憩を取れなかった」の申し出がある */
   noBreakRequest: boolean;
   requestReason: string;
+  /** ID で押した（カードなしの）打刻の種類 */
   cardless: PunchKind[];
+  /** ブラウザで押した打刻の種類（各自のパソコンで、スタッフID とパスワードでログインして押した） */
+  web: PunchKind[];
   notes: string[];
 }
 
@@ -251,6 +254,7 @@ export const readAttendanceImport = (text: string, args: { staff: ImportStaff[];
       noBreakRequest: result.fromTimeQard ? parseNoBreakRequest(v[CSV_HEADERS.noBreakRequest]) : false,
       requestReason: result.fromTimeQard ? (v[CSV_HEADERS.requestReason] ?? "") : "",
       cardless: result.fromTimeQard ? parseCardlessKinds(v[CSV_HEADERS.cardless]) : [],
+      web: result.fromTimeQard ? parseCardlessKinds(v[CSV_HEADERS.web]) : [],
       notes: result.fromTimeQard ? parseNotes(v[CSV_HEADERS.notes]) : [],
     };
     const key = `${staffId}\u0000${date}`;

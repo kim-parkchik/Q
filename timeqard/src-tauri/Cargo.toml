@@ -24,6 +24,17 @@ serde_json = "1"
 argon2 = "0.5"
 password-hash = "0.5"
 rand_core = { version = "0.6", features = ["std"] }
+# ブラウザ版（各自のパソコンから押す。DESIGN.md の 10）：同じネットワークの中だけの https のサーバーと、会社専用の証明書。
+# 2026-11-12 にユーザーの許しを得て足した（rcgen・pem・yasna・httpdate は crates.io から新しく、rustls などは Mac にあったもの）
+tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time", "io-util"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+# 証明書の指紋（SHA-256・SHA-1）。rustls が使う ring をそのまま使う
+ring = "0.17"
 
 # Linux：画面の部品（WebKitGTK）でカメラを使えるようにする（初めは切ってある）。Tauri（wry）が使っているものと同じ版
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -103,7 +103,16 @@ button:disabled { cursor: default; opacity: 0.45; }
 .tag.id { background: #fff3e0; color: var(--out); }
 .tag.cancel { background: #eceff1; color: #546e7a; }
 .tag.req { background: #f3e5f5; color: var(--break); }
+.tag.web { background: #e0f2f1; color: #00695c; }
 .muted { color: var(--sub); }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+.small { font-size: 12px; }
+.admin .btn.small { padding: 5px 10px; font-size: 13px; }
+.admin .urls { margin: 4px 0 10px; padding-left: 20px; }
+.admin .urls li { font-size: 22px; font-weight: bold; color: var(--navy); font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; user-select: text; -webkit-user-select: text; }
+.admin .small-list { padding-left: 20px; margin: 8px 0; }
+.admin .small-list li { font-size: 13px; color: var(--sub); line-height: 1.6; }
+
 
 .setup { max-width: 760px; margin: 0 auto; padding: 30px 24px; overflow: auto; height: 100%; }
 .setup h1 { font-size: 28px; margin: 0 0 6px; color: var(--navy); }

@@ -160,6 +160,7 @@ const row = (over: Partial<TimeQardCsvRow> & Pick<TimeQardCsvRow, "staffId" | "n
   noBreakRequest: false,
   requestReason: "",
   cardless: [],
+  web: [],
   notes: [],
   companyMark: "K7M3QP2X",
   ...over,
@@ -186,9 +187,9 @@ describe("CSV", () => {
       }),
     ]);
     expect(csv.split("\r\n")).toEqual([
-      "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_休憩なし,申出_理由,カードなし,注意,会社の印,形式",
-      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00,13:00,,,,,,,,,,,,,K7M3QP2X,TimeQard 1",
-      "1002,佐藤 花子,2026-11-04,,17:31,,,,,09:00,,,,,,,出勤：押し忘れた,退勤,出勤がありません,K7M3QP2X,TimeQard 1",
+      "スタッフID,名前,日付,出勤,退勤,休憩始,休憩終,外出,戻り,申出_出勤,申出_退勤,申出_休憩始,申出_休憩終,申出_外出,申出_戻り,申出_休憩なし,申出_理由,カードなし,ブラウザ,注意,会社の印,形式",
+      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00,13:00,,,,,,,,,,,,,,K7M3QP2X,TimeQard 1",
+      "1002,佐藤 花子,2026-11-04,,17:31,,,,,09:00,,,,,,,出勤：押し忘れた,退勤,,出勤がありません,K7M3QP2X,TimeQard 1",
       "",
     ]);
   });
@@ -251,7 +252,7 @@ describe("CSV", () => {
     expect(parseCardlessKinds("退勤 出勤")).toEqual(["entry", "exit"]);
     expect(parseCardlessKinds("")).toEqual([]);
     expect(parseNotes("出勤がありません／退勤がありません")).toEqual(["出勤がありません", "退勤がありません"]);
-    expect(TIMEQARD_CSV_HEADERS.length).toBe(21);
+    expect(TIMEQARD_CSV_HEADERS.length).toBe(22);
   });
 
   test("「休憩を取れなかった」の申し出は、「申出_休憩なし」の列に○を書く。列がない CSV（手で作ったものなど）は、申し出なし", () => {
@@ -337,7 +338,7 @@ describe("従業員ファイル", () => {
 
 // --- 1日のまとめ方 ---
 let nextId = 1;
-const punch = (staffId: string, date: string, time: string, kind: PunchKind, method: "card" | "id" = "card"): Punch => ({
+const punch = (staffId: string, date: string, time: string, kind: PunchKind, method: "card" | "id" | "web" = "card"): Punch => ({
   id: nextId++,
   staffId,
   kind,
@@ -534,6 +535,22 @@ describe("1日のまとめ方（付録 E）", () => {
       now: LATER,
     });
     expect(rows[0].cardless).toEqual(["entry", "break_end"]);
+    expect(rows[0].web).toEqual([]);
+  });
+
+  test("ブラウザ：行に入れた打刻のうち、ブラウザで押した種類。CSV の「ブラウザ」の列に書き、読める", () => {
+    const rows = buildDayRows({
+      punches: [
+        punch("1001", "2026-11-04", "09:00", "entry", "web"),
+        punch("1001", "2026-11-04", "18:00", "exit", "id"),
+      ],
+      now: LATER,
+    });
+    expect([rows[0].web, rows[0].cardless]).toEqual([["entry"], ["exit"]]);
+    const csv = writeTimeQardCsv([{ ...rows[0], name: "山田 太郎", companyMark: "K7M3QP2X" }]);
+    const { records } = parseCsvRecords(csv);
+    expect(records[0].values["ブラウザ"]).toBe("出勤");
+    expect(parseCardlessKinds(records[0].values["ブラウザ"])).toEqual(["entry"]);
   });
 
   test("申し出：同じ日・同じ種類なら後の申し出を使い、打刻のない日も行を作る", () => {

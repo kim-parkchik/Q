@@ -49,6 +49,8 @@ export interface DayRow {
   requestReason: string;
   /** ID で押した（カードなしの）打刻の種類（行に入れた打刻のうち） */
   cardless: PunchKind[];
+  /** ブラウザで押した打刻の種類（行に入れた打刻のうち） */
+  web: PunchKind[];
   notes: string[];
 }
 
@@ -154,7 +156,7 @@ const emptyTimes = (): Record<PunchKind, string> => ({
 });
 
 const emptyDraft = (staffId: string, date: string, fromShift: boolean): RowDraft => ({
-  row: { staffId, date, times: emptyTimes(), requests: {}, noBreakRequest: false, requestReason: "", cardless: [], notes: [] },
+  row: { staffId, date, times: emptyTimes(), requests: {}, noBreakRequest: false, requestReason: "", cardless: [], web: [], notes: [] },
   sources: {},
   fromShift,
 });
@@ -310,6 +312,7 @@ export const buildDayRows = (args: {
         row.times[k] = p ? jstTime(p.at) : "";
       }
       row.cardless = PUNCH_KINDS.filter((k) => sources[k]?.method === "id");
+      row.web = PUNCH_KINDS.filter((k) => sources[k]?.method === "web");
       rows.push(row);
     }
   }

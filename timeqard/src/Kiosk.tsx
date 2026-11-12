@@ -40,6 +40,8 @@ interface Props {
   settings: KioskSettings;
   staff: KioskStaff[];
   lastPunch: number | null;
+  /** ブラウザ版を始められなかったわけ（空なら、なし） */
+  webProblem: string;
   onChanged: () => Promise<void> | void;
   onAdmin: () => void;
 }
@@ -229,6 +231,11 @@ export default function Kiosk(props: Props) {
         )}
         {tzWrong && !problem && (
           <div className="notice warn">パソコンのタイムゾーンが日本（東京）になっていません。上の時刻が合っているか確かめてください。</div>
+        )}
+        {props.webProblem && (
+          <div className="notice warn" style={{ fontSize: 15 }}>
+            ブラウザ版を始められなかったので、各自のパソコンからは押せません。担当者は、管理の画面の「ブラウザ版」を確かめてください。
+          </div>
         )}
         {banner && (
           <div className={`notice ${banner.tone}`}>

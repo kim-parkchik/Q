@@ -5,6 +5,9 @@
 //! - パソコンを点けたら TimeQard を開く設定（Windows・Mac・Linux）
 //! - 毎日の控えの古いものを消す（TimeQard が作った名前の控えだけ）
 //! - Linux：画面の部品（WebKitGTK）で、カメラ（打刻カードの QR コードを読む）を使えるようにする
+//! - ブラウザ版：同じネットワークの中だけの https のサーバーと、会社専用の証明書（web.rs）
+
+mod web;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -19,8 +22,7 @@ struct ExitGate(AtomicBool);
 /// 閉じるボタンが押されたことを、画面に知らせる名前
 const CLOSE_REQUESTED: &str = "timeqard://close-requested";
 
-#[tauri::command]
-fn hash_password(password: String) -> Result<String, String> {
+fn hash_sync(password: &str) -> Result<String, String> {
     let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
         .hash_password(password.as_bytes(), &salt)
@@ -28,12 +30,23 @@ fn hash_password(password: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn verify_password(password: String, hash: String) -> bool {
-    match PasswordHash::new(&hash) {
+fn verify_sync(password: &str, hash: &str) -> bool {
+    match PasswordHash::new(hash) {
         Ok(parsed) => Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok(),
         Err(_) => false,
     }
+}
+
+/// パスワードの確かめ用の値を作る（Argon2 は重いので、画面の動き（メインのスレッド）を止めないよう、別のスレッドで計算する。
+/// ブラウザ版のログインが続いても、入口の打刻の画面が固まらないように）
+#[tauri::command]
+async fn hash_password(password: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || hash_sync(&password)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn verify_password(password: String, hash: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || verify_sync(&password, &hash)).await.unwrap_or(false)
 }
 
 /// TimeQard を閉じる（画面で管理のパスワードを確かめてから呼ぶ）
@@ -292,7 +305,9 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(ExitGate(AtomicBool::new(false)));
+        .manage(ExitGate(AtomicBool::new(false)))
+        .manage(web::WebServer::default())
+        .manage(web::WebBridge::default());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(kiosk_menu);
     builder
@@ -316,7 +331,12 @@ pub fn run() {
             data_dir,
             prune_backups,
             get_autostart,
-            set_autostart
+            set_autostart,
+            web::web_start,
+            web::web_stop,
+            web::web_status,
+            web::web_respond,
+            web::web_ca_der
         ])
         .build(tauri::generate_context!())
         .expect("TimeQard を起動できませんでした")
@@ -337,10 +357,10 @@ mod tests {
 
     #[test]
     fn パスワードを確かめられる() {
-        let hash = hash_password("kanri1234".into()).unwrap();
-        assert!(verify_password("kanri1234".into(), hash.clone()));
-        assert!(!verify_password("kanri12345".into(), hash));
-        assert!(!verify_password("x".into(), "壊れた値".into()));
+        let hash = hash_sync("kanri1234").unwrap();
+        assert!(verify_sync("kanri1234", &hash));
+        assert!(!verify_sync("kanri12345", &hash));
+        assert!(!verify_sync("x", "壊れた値"));
     }
 
     #[test]

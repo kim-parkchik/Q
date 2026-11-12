@@ -72,3 +72,41 @@ export const saveCsv = async (content: string, defaultName: string) => {
 
 export const confirm = (text: string, title: string, okLabel = "はい", cancelLabel = "いいえ") =>
   ask(text, { title, kind: "warning", okLabel, cancelLabel });
+
+// --- ブラウザ版（src-tauri/src/web.rs） ---
+
+export interface WebStatus {
+  running: boolean;
+  port: number;
+  /** 各自のパソコンのブラウザで開くアドレス */
+  urls: string[];
+  /** 会社専用の証明書の名前と指紋 */
+  caName: string;
+  sha256: string;
+  sha1: string;
+}
+
+export interface WebRequestEvent {
+  id: number;
+  action: string;
+  body: string;
+  ip: string;
+}
+
+/** ブラウザ版のサーバーを始める（会社名と今日の日付は、会社専用の証明書を初めて作るときの名前に使う） */
+export const webStart = (port: number, company: string, today: string) => invoke<WebStatus>("web_start", { port, company, today });
+export const webStop = () => invoke<void>("web_stop");
+export const webStatus = () => invoke<WebStatus>("web_status");
+/** ブラウザからの頼みに答える */
+export const webRespond = (id: number, status: number, body: string) => invoke<void>("web_respond", { id, status, body });
+/** ブラウザからの頼み（サーバーが、この画面に渡してくる） */
+export const onWebRequest = (handler: (e: WebRequestEvent) => void) => listen<WebRequestEvent>("timeqard://web-request", (ev) => handler(ev.payload));
+
+/** 会社専用の証明書を、ファイルに保存する（USB メモリなどで、各自のパソコンに運ぶ） */
+export const saveCaCertificate = async () => {
+  const der = await invoke<number[]>("web_ca_der");
+  const path = await save({ title: "会社専用の証明書の保存先（USB メモリなど）", defaultPath: "TimeQard-CA.cer", filters: [{ name: "証明書", extensions: ["cer"] }] });
+  if (!path) return null;
+  await writeFile(path, new Uint8Array(der));
+  return { path, name: path.split(/[\\/]/).pop() ?? path };
+};

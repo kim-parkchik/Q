@@ -4,6 +4,7 @@
  * ・打刻の一覧（見るだけ。直すのは Q）
  * ・CSV の書き出し（Q に取り込む）
  * ・従業員ファイルの読み込み直し
+ * ・ブラウザ版（使うか・ポート・会社専用の証明書・従業員のパスワード・ログインの記録。WebAdmin.tsx）
  * ・設定（ボタン・音・画面いっぱい・パソコンを点けたら開く・控え・パスワード）
  * 5分のあいだ何もしなければ、打刻の画面に戻る。
  */
@@ -17,7 +18,6 @@ import {
   monthRange,
   parseIso,
   requestKindLabel,
-  safeFileNamePart,
   timeLabel,
   writeTimeQardCsv,
   type TimeQardCsvRow,
@@ -27,8 +27,10 @@ import { NewPasswordFields } from "./PasswordDialog";
 import { confirm, dataDir, getAutostart, hashPassword, pickFolder, pickTextFile, quitApp, saveCsv, setAutostart, setFullscreen } from "./platform";
 import { applyStaffFile, exportRows, loadDayEvents, loadStaff, recordExport, setSetting, type DayEvent, type KioskDb, type KioskSettings, type KioskStaff } from "./store";
 import { checkStaffFile } from "./staffFileLoad";
+import WebAdmin from "./WebAdmin";
+import { csvFileName, exportSummaryText, summarizeExport, type WebApi } from "./webApi";
 
-type Tab = "list" | "export" | "staff" | "settings";
+type Tab = "list" | "export" | "staff" | "web" | "settings";
 const IDLE_MS = 5 * 60 * 1000;
 
 const when = (iso: string | null) => {
@@ -36,7 +38,15 @@ const when = (iso: string | null) => {
   return ms === null ? "—" : `${jstDate(ms)} ${jstTime(ms)}`;
 };
 
-export default function Admin(props: { db: KioskDb; settings: KioskSettings; onChanged: () => Promise<void>; onExit: () => void }) {
+export default function Admin(props: {
+  db: KioskDb;
+  settings: KioskSettings;
+  onChanged: () => Promise<void>;
+  onExit: () => void;
+  webApi: WebApi;
+  webProblem: string;
+  onWebProblem: (text: string) => void;
+}) {
   const [tab, setTab] = useState<Tab>("export");
   const lastAction = useRef(Date.now());
   const onExit = useRef(props.onExit);
@@ -60,6 +70,7 @@ export default function Admin(props: { db: KioskDb; settings: KioskSettings; onC
     ["export", "CSV の書き出し"],
     ["list", "打刻の一覧"],
     ["staff", "従業員ファイル"],
+    ["web", "ブラウザ版"],
     ["settings", "設定"],
   ];
 
@@ -85,6 +96,9 @@ export default function Admin(props: { db: KioskDb; settings: KioskSettings; onC
         {tab === "export" && <ExportTab {...props} />}
         {tab === "list" && <ListTab {...props} />}
         {tab === "staff" && <StaffTab {...props} />}
+        {tab === "web" && (
+          <WebAdmin db={props.db} settings={props.settings} onChanged={props.onChanged} api={props.webApi} webProblem={props.webProblem} onWebProblem={props.onWebProblem} />
+        )}
         {tab === "settings" && <SettingsTab {...props} />}
       </div>
     </div>
@@ -120,18 +134,14 @@ function ExportTab({ db, settings }: TabProps) {
         setResult({ tone: "ng", text: `${period.from}〜${period.to} の打刻・申し出はありません。` });
         return;
       }
-      const fileName = `${safeFileNamePart(settings.companyName)}_打刻_${period.from}〜${period.to}.csv`;
+      const fileName = csvFileName(settings.companyName, period.from, period.to);
       const saved = await saveCsv(writeTimeQardCsv(rows), fileName);
       if (!saved) return;
       await recordExport(db, { companyMark: settings.companyMark, from: period.from, to: period.to, fileName: saved.name, rowCount: rows.length, at: Date.now() });
-      const people = new Set(rows.map((r) => r.staffId)).size;
-      const requests = rows.reduce((a, r) => a + Object.keys(r.requests).length + (r.noBreakRequest ? 1 : 0), 0);
-      const notes = rows.filter((r) => r.notes.length > 0).length;
-      const cardless = rows.filter((r) => r.cardless.length > 0).length;
       setResult({
         tone: "ok",
         text:
-          `「${saved.name}」を保存しました（${people}人・${rows.length}日分。申し出 ${requests}件・注意のある日 ${notes}日・ID で押した日 ${cardless}日）。\n` +
+          `「${saved.name}」を保存しました（${exportSummaryText(summarizeExport(rows))}）。\n` +
           `USB メモリなどで Q のパソコンに運び、Q の「TimeQard（打刻）」の画面か、勤怠の「CSV 取り込み」で取り込んでください。`,
       });
     } catch (e) {
@@ -175,7 +185,10 @@ function ListTab({ db, settings }: TabProps) {
   return (
     <div className="card">
       <h3>打刻の一覧（見るだけ）</h3>
-      <p>その日に押した打刻と、その日の分の申し出です。取り消した打刻も残っています。直すのは、Q に取り込んでから、Q の勤怠の画面でします。</p>
+      <p>
+        その日に押した打刻と、その日の分の申し出です。取り消した打刻も残っています。直すのは、Q に取り込んでから、Q の勤怠の画面でします。
+        ブラウザで押した打刻には、つないできたパソコンのアドレスを出します。
+      </p>
       <div className="field">
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
@@ -194,7 +207,11 @@ function ListTab({ db, settings }: TabProps) {
                   <><span className="tag req">申し出</span> {requestKindLabel(e.kind)}{e.requestTime ? ` ${timeLabel(e.requestTime)}` : ""}</>
                 ) : requestKindLabel(e.kind)}
               </td>
-              <td>{e.method === "id" ? <span className="tag id">ID</span> : "カード"}</td>
+              <td>
+                {e.method === "id" ? <span className="tag id">ID</span> : e.method === "web" ? (
+                  <><span className="tag web">ブラウザ</span> <span className="mono small">{e.clientIp}</span></>
+                ) : "カード"}
+              </td>
               <td>
                 {e.cancelled && <span className="tag cancel">取り消し</span>}
                 {e.type === "request" && ` ${e.reason}${e.note ? `（${e.note}）` : ""}`}

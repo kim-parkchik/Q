@@ -1,8 +1,8 @@
 /**
  * 確かめ用の画面（dev/preview.html）で、記録のファイル（src/store.ts）の代わりに使うもの（開発用。配るものには入らない）
  *
- * 記録をブラウザの中（配列）に持つ。打刻・申し出・取り消しの決まり（1分の取り消し・1日のまとめ方・会社の印ごとの従業員）は、
- * src/store.ts と同じにする（本物の SQLite の動きは、src/store.test.ts で確かめている）。
+ * 記録をブラウザの中（配列）に持つ。打刻・申し出・取り消しの決まり（1分の取り消し・1日のまとめ方・会社の印ごとの従業員）と、
+ * ブラウザ版のパスワード・ログインの記録は、src/store.ts と同じにする（本物の SQLite の動きは、src/store.test.ts・src/webApi.test.ts で確かめている）。
  */
 import {
   addDays,
@@ -17,22 +17,25 @@ import {
   type StaffFile,
   type TimeQardCsvRow,
 } from "../../shared/timeqard";
-import type { DayEvent, KioskDb, KioskSettings, KioskStaff } from "../src/store";
-export { CANCEL_WINDOW_MS, CLOCK_TOLERANCE_MS, clockProblem } from "../src/store";
-export type { DayEvent, KioskDb, KioskSettings, KioskStaff } from "../src/store";
+import { DEFAULT_WEB_PORT } from "../src/store";
+import type { DayEvent, KioskDb, KioskSettings, KioskStaff, WebAccount, WebLogin } from "../src/store";
+export { ADMIN_LOGIN_ID, CANCEL_WINDOW_MS, CLOCK_TOLERANCE_MS, clockProblem, DEFAULT_WEB_PORT, methodOf } from "../src/store";
+export type { DayEvent, KioskDb, KioskSettings, KioskStaff, WebAccount, WebLogin } from "../src/store";
 
-interface PunchRec { id: number; staffId: string; kind: PunchKind; at: number; method: PunchMethod; mark: string }
-interface RequestRec extends PunchRequest { method: PunchMethod; mark: string }
+interface PunchRec { id: number; staffId: string; kind: PunchKind; at: number; method: PunchMethod; clientIp: string; mark: string }
+interface RequestRec extends PunchRequest { method: PunchMethod; clientIp: string; mark: string }
 
 const settings = new Map<string, string>();
 const staff: (KioskStaff & { mark: string })[] = [];
 const punches: PunchRec[] = [];
 const requests: RequestRec[] = [];
 const cancelled = new Set<string>();
+const webAccounts: (WebAccount & { mark: string })[] = [];
+const webLogins: (WebLogin & { mark: string })[] = [];
 let nextId = 1;
 
 // 開発者の道具の Console から中身を見られるように
-Object.assign(((window as any).__timeqardPreview ??= {}), { settings, staff, punches, requests, cancelled });
+Object.assign(((window as any).__timeqardPreview ??= {}), { settings, staff, punches, requests, cancelled, webAccounts, webLogins });
 
 export const prepareDb = async (_db: KioskDb) => {};
 
@@ -54,6 +57,8 @@ export const loadSettings = async (_db: KioskDb): Promise<KioskSettings> => {
     fullscreen: flag("fullscreen", false),
     camera: flag("camera", true),
     cameraDevice: settings.get("camera_device") ?? "",
+    webEnabled: flag("web_enabled", false),
+    webPort: Number(settings.get("web_port")) || DEFAULT_WEB_PORT,
     backupDir: settings.get("backup_dir") ?? "",
     lastBackupDate: settings.get("last_backup_date") ?? "",
     lastBackupError: settings.get("last_backup_error") ?? "",
@@ -78,6 +83,8 @@ export const applyStaffFile = async (_db: KioskDb, file: StaffFile, _loadedAt: s
       s.inFile = false;
       s.cardHashes = [];
       removed++;
+      const i = webAccounts.findIndex((a) => a.mark === file.companyMark && a.staffId === s.id);
+      if (i >= 0) webAccounts.splice(i, 1);
     }
   }
   settings.set("company_mark", file.companyMark);
@@ -86,18 +93,27 @@ export const applyStaffFile = async (_db: KioskDb, file: StaffFile, _loadedAt: s
   return { added: file.staff.filter((s) => !before.includes(s.id)).length, removed, total: file.staff.length };
 };
 
-export const addPunch = async (_db: KioskDb, p: { staffId: string; kind: PunchKind; at: number; method: PunchMethod; companyMark: string }) => {
+export const addPunch = async (
+  _db: KioskDb,
+  p: { staffId: string; kind: PunchKind; at: number; method: PunchMethod; companyMark: string; clientIp?: string }
+) => {
   const id = nextId++;
-  punches.push({ id, staffId: p.staffId, kind: p.kind, at: p.at, method: p.method, mark: p.companyMark });
+  punches.push({ id, staffId: p.staffId, kind: p.kind, at: p.at, method: p.method, clientIp: p.clientIp ?? "", mark: p.companyMark });
   return id;
 };
 
 export const addRequest = async (
   _db: KioskDb,
-  r: { staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod; companyMark: string }
+  r: {
+    staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod;
+    companyMark: string; clientIp?: string;
+  }
 ) => {
   const id = nextId++;
-  requests.push({ id, staffId: r.staffId, date: r.date, kind: r.kind, time: r.time, reason: r.reason, note: r.note.trim(), requestedAt: r.at, method: r.method, mark: r.companyMark });
+  requests.push({
+    id, staffId: r.staffId, date: r.date, kind: r.kind, time: r.time, reason: r.reason, note: r.note.trim(), requestedAt: r.at, method: r.method,
+    clientIp: r.clientIp ?? "", mark: r.companyMark,
+  });
   return id;
 };
 
@@ -134,7 +150,10 @@ export const loadDayEvents = async (_db: KioskDb, mark: string, date: string): P
   const events: DayEvent[] = [
     ...punches
       .filter((p) => p.mark === mark && jstDate(p.at) === date)
-      .map((p) => ({ type: "punch" as const, id: p.id, staffId: p.staffId, name: names.get(p.staffId) ?? "", at: p.at, kind: p.kind, method: p.method, cancelled: cancelled.has(`punch:${p.id}`) })),
+      .map((p) => ({
+        type: "punch" as const, id: p.id, staffId: p.staffId, name: names.get(p.staffId) ?? "", at: p.at, kind: p.kind, method: p.method,
+        cancelled: cancelled.has(`punch:${p.id}`), clientIp: p.clientIp,
+      })),
     ...requests
       .filter((r) => r.mark === mark && r.date === date)
       .map((r) => ({
@@ -146,6 +165,7 @@ export const loadDayEvents = async (_db: KioskDb, mark: string, date: string): P
         kind: r.kind,
         method: r.method,
         cancelled: cancelled.has(`request:${r.id}`),
+        clientIp: r.clientIp,
         requestDate: r.date,
         requestTime: r.time,
         reason: r.reason,
@@ -154,3 +174,48 @@ export const loadDayEvents = async (_db: KioskDb, mark: string, date: string): P
   ];
   return events.sort((a, b) => a.staffId.localeCompare(b.staffId, "ja", { numeric: true }) || a.at - b.at);
 };
+
+// --- ブラウザ版：従業員のパスワードとログインの記録 ---
+
+const copyAccount = ({ mark: _m, ...a }: WebAccount & { mark: string }): WebAccount => ({ ...a });
+
+export const loadWebAccounts = async (_db: KioskDb, mark: string) => webAccounts.filter((a) => a.mark === mark).map(copyAccount);
+
+export const loadWebAccount = async (_db: KioskDb, mark: string, staffId: string) => {
+  const a = webAccounts.find((x) => x.mark === mark && x.staffId === staffId);
+  return a ? copyAccount(a) : null;
+};
+
+export const saveWebPassword = async (
+  _db: KioskDb,
+  a: { companyMark: string; staffId: string; passwordHash: string; initial: boolean; initialExpiresMs: number | null; at: number }
+) => {
+  const rec = {
+    mark: a.companyMark, staffId: a.staffId, passwordHash: a.passwordHash, initial: a.initial, initialExpiresMs: a.initialExpiresMs,
+    failedCount: 0, lockedUntilMs: null, updatedAt: jstIso(a.at),
+  };
+  const existing = webAccounts.find((x) => x.mark === a.companyMark && x.staffId === a.staffId);
+  if (existing) Object.assign(existing, rec);
+  else webAccounts.push(rec);
+};
+
+export const saveWebFailures = async (_db: KioskDb, mark: string, staffId: string, failedCount: number, lockedUntilMs: number | null) => {
+  const a = webAccounts.find((x) => x.mark === mark && x.staffId === staffId);
+  if (a) Object.assign(a, { failedCount, lockedUntilMs });
+};
+
+export const deleteWebAccount = async (_db: KioskDb, mark: string, staffId: string) => {
+  const i = webAccounts.findIndex((x) => x.mark === mark && x.staffId === staffId);
+  if (i >= 0) webAccounts.splice(i, 1);
+};
+
+export const logWebLogin = async (_db: KioskDb, e: { companyMark: string; staffId: string; result: string; clientIp: string; at: number }) => {
+  webLogins.push({ id: nextId++, mark: e.companyMark, staffId: e.staffId, result: e.result, clientIp: e.clientIp, at: e.at });
+};
+
+export const loadWebLogins = async (_db: KioskDb, mark: string, limit: number) =>
+  webLogins
+    .filter((l) => l.mark === mark)
+    .sort((a, b) => b.at - a.at || b.id - a.id)
+    .slice(0, limit)
+    .map(({ mark: _m, ...l }) => l);

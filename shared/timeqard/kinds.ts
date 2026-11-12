@@ -24,8 +24,8 @@ export const isPunchKind = (s: unknown): s is PunchKind =>
 export const punchKindOfLabel = (label: string): PunchKind | null =>
   PUNCH_KINDS.find((k) => PUNCH_LABELS[k] === label.trim()) ?? null;
 
-/** どうやって押したか（カードをかざした・ID を入れた） */
-export type PunchMethod = "card" | "id";
+/** どうやって押したか（カードをかざした・ID を入れた・ブラウザで押した（各自のパソコン。ID とパスワードでログインして）） */
+export type PunchMethod = "card" | "id" | "web";
 
 /** 押し忘れの申し出の理由（このほかに、ひとこと書ける） */
 export const REQUEST_REASONS = [

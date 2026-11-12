@@ -22,6 +22,7 @@ export const CSV_HEADERS = {
   noBreakRequest: "申出_休憩なし",
   requestReason: "申出_理由",
   cardless: "カードなし",
+  web: "ブラウザ",
   notes: "注意",
   companyMark: "会社の印",
   format: "形式",
@@ -37,6 +38,7 @@ export const TIMEQARD_CSV_HEADERS: string[] = [
   CSV_HEADERS.noBreakRequest,
   CSV_HEADERS.requestReason,
   CSV_HEADERS.cardless,
+  CSV_HEADERS.web,
   CSV_HEADERS.notes,
   CSV_HEADERS.companyMark,
   CSV_HEADERS.format,
@@ -65,6 +67,8 @@ export interface TimeQardCsvRow {
   requestReason: string;
   /** ID で押した（カードなしの）打刻の種類 */
   cardless: PunchKind[];
+  /** ブラウザで押した打刻の種類 */
+  web: PunchKind[];
   notes: string[];
   companyMark: string;
 }
@@ -85,6 +89,7 @@ export const writeTimeQardCsv = (rows: TimeQardCsvRow[]): string => {
       r.noBreakRequest ? NO_BREAK_MARK : "",
       r.requestReason,
       r.cardless.map((k) => PUNCH_LABELS[k]).join(" "),
+      r.web.map((k) => PUNCH_LABELS[k]).join(" "),
       r.notes.join(NOTE_SEPARATOR),
       r.companyMark,
       TIMEQARD_CSV_FORMAT,
@@ -176,7 +181,7 @@ export const parseFormatVersion = (s: string | undefined): number | null => {
   return m ? Number(m[1]) : null;
 };
 
-/** 「カードなし」の列を読む（「出勤 退勤」→ entry・exit。知らない言葉は飛ばす） */
+/** 「カードなし」「ブラウザ」の列を読む（「出勤 退勤」→ entry・exit。知らない言葉は飛ばす） */
 export const parseCardlessKinds = (s: string | undefined): PunchKind[] => {
   const kinds = (s ?? "")
     .normalize("NFKC")

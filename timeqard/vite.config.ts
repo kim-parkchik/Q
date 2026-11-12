@@ -20,5 +20,9 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     target: ["es2020", "safari15", "chrome105"], // macOS 10.15 に入る最後の Safari（15）・Ubuntu 22.04 の WebKitGTK・Windows の WebView2 で動くように
+    rollupOptions: {
+      // index.html：入口のパソコンの画面。web.html：各自のパソコンのブラウザで開く画面（ブラウザ版。TimeQard のサーバーが出す）
+      input: { main: `${here}index.html`, web: `${here}web.html` },
+    },
   },
 });

@@ -189,6 +189,7 @@ export function PreviewDialog(props: {
   const unknownRows = plan.unknownIds.reduce((a, x) => a + x.rows, 0);
   const applicable = plan.requests.filter((r) => r.applicable);
   const cardless = plan.toWrite.filter((r) => r.cardless.length > 0);
+  const web = plan.toWrite.filter((r) => r.web.length > 0);
   const notes = plan.toWrite.filter((r) => r.notes.length > 0);
   const toggle = (key: string) => {
     const next = new Set(selected);
@@ -288,6 +289,24 @@ export function PreviewDialog(props: {
                 </tbody>
               </table>
               <More total={cardless.length} />
+            </Section>
+          )}
+
+          {web.length > 0 && (
+            <Section title={`ブラウザで押した打刻（${web.length}日分）`} color="#00695c">
+              <div style={{ fontSize: 12, color: "#555", marginBottom: 6 }}>
+                各自のパソコンのブラウザで、スタッフID とパスワードでログインして押した打刻です（時刻は、入口のパソコンの時計で記録しています）。
+                どのパソコンから押したかは、TimeQard の管理の画面の「打刻の一覧」で見られます。
+              </div>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead><tr><th style={th}>日</th><th style={th}>名前</th><th style={th}>ブラウザで押した種類</th></tr></thead>
+                <tbody>
+                  {web.slice(0, MAX_LIST).map((r) => (
+                    <tr key={dayKey(r.staffId, r.date)}><td style={td}>{r.date}</td><td style={td}>{r.name}（{r.staffId}）</td><td style={td}>{r.web.map((k) => PUNCH_LABELS[k]).join("・")}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+              <More total={web.length} />
             </Section>
           )}
 

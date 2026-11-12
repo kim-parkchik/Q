@@ -1,0 +1,15 @@
+/* はじめのパスワードを渡す紙（印刷するときは、この紙だけを出す） */
+.print-slip h2 { font-size: 20px; margin: 0 0 10px; }
+.print-slip .slip-table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.print-slip .slip-table td { border: 1px solid #d9dee5; padding: 6px 10px; vertical-align: top; }
+.print-slip .slip-table td:first-child { white-space: nowrap; background: #f5f7fa; width: 9em; }
+.print-slip .slip-password { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 26px; font-weight: bold; letter-spacing: 0.12em; user-select: text; -webkit-user-select: text; }
+.print-slip .slip-steps { font-size: 14px; line-height: 1.7; padding-left: 22px; }
+.print-slip .slip-note { font-size: 13px; color: #5b6675; line-height: 1.6; }
+@media print {
+  html, body, #root { height: auto; overflow: visible; background: #fff; }
+  body * { visibility: hidden; }
+  .print-slip, .print-slip * { visibility: visible; }
+  .print-slip { position: absolute; left: 0; top: 0; width: 100%; padding: 10mm; }
+  .modal-back { background: none; }
+}

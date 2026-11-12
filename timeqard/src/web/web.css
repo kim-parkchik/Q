@@ -1,0 +1,112 @@
+/* ブラウザ版の画面（各自のパソコンのブラウザ。入口のパソコンの画面と同じ色にそろえる） */
+:root {
+  --navy: #0b2a55;
+  --blue: #0055a4;
+  --ink: #1b2430;
+  --sub: #5b6675;
+  --line: #d9dee5;
+  --bg: #f3f5f8;
+  --ok: #1e7d32;
+  --ng: #c62828;
+  --warn: #b26a00;
+  --entry: #1565c0;
+  --exit: #c62828;
+  --break: #6a1b9a;
+  --out: #e65100;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.45; }
+
+.w-page { min-height: 100vh; display: flex; flex-direction: column; }
+.w-header { background: var(--navy); color: #fff; display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+.w-company { font-size: 18px; font-weight: bold; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-who { font-size: 15px; }
+.w-header-btn { background: transparent; color: #fff; border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 6px; padding: 6px 12px; font-size: 14px; }
+.w-main { width: min(860px, 100%); margin: 0 auto; padding: 16px; }
+
+.w-card { background: #fff; border-radius: 14px; padding: 18px 20px; margin: 12px 0; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); }
+.w-narrow { max-width: 520px; margin-left: auto; margin-right: auto; }
+.w-card h1 { font-size: 22px; margin: 0 0 10px; color: var(--navy); }
+.w-card h2 { font-size: 18px; margin: 18px 0 8px; }
+.w-card p, .w-card li { line-height: 1.7; }
+.w-center { text-align: center; }
+.w-muted { color: var(--sub); font-size: 14px; }
+.w-small { font-size: 13px; }
+.w-nowrap { white-space: nowrap; }
+.w-mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 13px; word-break: break-all; }
+.w-attention { color: var(--warn); }
+
+.w-notice { border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 16px; line-height: 1.6; }
+.w-notice.ok { background: #e8f5e9; color: var(--ok); border: 2px solid #a5d6a7; }
+.w-notice.ng { background: #ffebee; color: var(--ng); border: 2px solid #ef9a9a; }
+.w-notice.warn { background: #fff8e1; color: var(--warn); border: 2px solid #ffe082; }
+.w-error { color: var(--ng); font-weight: bold; margin: 6px 0; }
+
+.w-field { margin: 14px 0; }
+.w-field > label { display: block; font-weight: bold; margin-bottom: 6px; }
+.w-field input:not([type="date"]):not([type="checkbox"]) { width: 100%; }
+.w-field input, .w-field select { font-size: 18px; padding: 9px 10px; border: 2px solid var(--line); border-radius: 8px; background: #fff; }
+.w-field input:focus, .w-field select:focus { outline: none; border-color: var(--blue); }
+
+.w-btn { display: inline-block; border: none; border-radius: 10px; background: var(--blue); color: #fff; font-size: 17px; font-weight: bold; padding: 11px 20px; text-decoration: none; text-align: center; }
+.w-btn.plain { background: #fff; color: var(--ink); border: 2px solid var(--line); font-weight: normal; }
+.w-btn.wide { width: 100%; margin-top: 6px; }
+.w-btn.small { font-size: 14px; padding: 6px 12px; border-radius: 8px; }
+.w-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.w-links { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.w-link { background: transparent; border: none; color: var(--blue); text-decoration: underline; padding: 4px 0; text-align: left; font-size: 15px; }
+.w-rules { color: var(--sub); font-size: 14px; padding-left: 20px; }
+
+.w-clock { text-align: center; margin-top: 4px; }
+.w-date { font-size: 20px; color: var(--sub); }
+.w-time { font-size: 48px; font-weight: bold; color: var(--navy); font-variant-numeric: tabular-nums; }
+.w-time small { font-size: 24px; color: var(--sub); }
+
+.w-name { font-size: 28px; font-weight: bold; }
+.w-state { display: inline-block; font-size: 16px; font-weight: bold; border-radius: 20px; padding: 3px 14px; background: #e3f2fd; color: var(--entry); margin-left: 10px; vertical-align: middle; }
+.w-today { color: var(--sub); margin: 8px 0; }
+.w-big { border: none; border-radius: 14px; color: #fff; font-size: 28px; font-weight: bold; padding: 20px 36px; min-width: 220px; }
+.w-mid { border: none; border-radius: 12px; color: #fff; font-size: 20px; font-weight: bold; padding: 12px 22px; min-width: 130px; }
+.k-entry { background: var(--entry); }
+.k-exit { background: var(--exit); }
+.k-break_start, .k-break_end { background: var(--break); }
+.k-out, .k-return { background: var(--out); }
+
+.w-done { font-size: 24px; font-weight: bold; padding: 16px; border-radius: 12px; margin-bottom: 10px; }
+.w-done.ok { background: #e8f5e9; color: var(--ok); }
+.w-done.warn { background: #fff8e1; color: var(--warn); }
+.w-cancel { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.w-notice.w-cancel { justify-content: space-between; }
+
+.w-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+.w-choice button { font-size: 16px; padding: 8px 14px; border-radius: 10px; border: 2px solid var(--line); background: #fff; }
+.w-choice button.on { border-color: var(--blue); background: #e3f2fd; color: var(--blue); font-weight: bold; }
+
+.w-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.w-tabs button { border: none; background: transparent; padding: 10px 14px; font-size: 16px; border-bottom: 3px solid transparent; }
+.w-tabs button.on { border-bottom-color: var(--blue); color: var(--blue); font-weight: bold; }
+
+.w-table-wrap { overflow-x: auto; }
+.w-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.w-table.w-auto { width: auto; }
+.w-table th { text-align: left; background: #f5f7fa; border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap; }
+.w-table td { border-bottom: 1px solid #eee; padding: 6px 8px; vertical-align: top; }
+
+.w-details { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin: 8px 0; }
+.w-details summary { font-weight: bold; cursor: pointer; padding: 4px 0; }
+.w-details ol { padding-left: 22px; }
+
+@media (max-width: 520px) {
+  .w-main { padding: 10px; }
+  .w-card { padding: 14px; }
+  .w-time { font-size: 38px; }
+  .w-big { width: 100%; }
+}

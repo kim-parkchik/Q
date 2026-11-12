@@ -1,16 +1,18 @@
 /**
- * TimeQard の画面の切り替え（最初の設定・打刻の画面・管理の画面）と、閉じるとき・毎日の控え
+ * TimeQard の画面の切り替え（最初の設定・打刻の画面・管理の画面）と、閉じるとき・毎日の控え・ブラウザ版のサーバー
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { jstIso, type StaffFile } from "../../shared/timeqard";
 import Admin from "./Admin";
 import Kiosk from "./Kiosk";
 import PasswordDialog, { NewPasswordFields } from "./PasswordDialog";
 import Setup from "./Setup";
 import { backupIfDue } from "./backup";
-import { hashPassword, onCloseRequested, openKioskDb, pickTextFile, quitApp, setFullscreen } from "./platform";
+import { hashPassword, onCloseRequested, onWebRequest, openKioskDb, pickTextFile, quitApp, setFullscreen, verifyPassword, webRespond } from "./platform";
 import { applyStaffFile, lastPunchMs, loadSettings, loadStaff, prepareDb, setSetting, type KioskDb, type KioskSettings, type KioskStaff } from "./store";
 import { checkStaffFileForReset } from "./staffFileLoad";
+import { createWebApi } from "./webApi";
+import { startWebServer } from "./WebAdmin";
 
 type Ask = null | "admin" | "close";
 
@@ -25,6 +27,8 @@ export default function App() {
   const [reset, setReset] = useState<{ file: StaffFile; after: Ask } | null>(null);
   const [resetError, setResetError] = useState("");
   const [newPassword, setNewPassword] = useState<string | null>(null);
+  /** ブラウザ版を始められなかったわけ（ポートを使えないなど） */
+  const [webProblem, setWebProblem] = useState("");
   const settingsRef = useRef<KioskSettings | null>(null);
   settingsRef.current = settings;
 
@@ -45,11 +49,34 @@ export default function App() {
         const s = await loadSettings(d);
         if (s.fullscreen) await setFullscreen(true);
         await reload(d);
+        if (s.webEnabled && s.companyMark && s.adminPasswordHash) {
+          startWebServer(s).catch((e) => setWebProblem(String(e)));
+        }
       } catch (e) {
         setFatal(String(e));
       }
     })();
   }, [reload]);
+
+  // ブラウザ版：サーバー（Rust）から渡された頼みに答える（ログインの印などは、この中にだけ持つ）
+  const webApi = useMemo(
+    () => (db ? createWebApi({ db, hash: hashPassword, verify: verifyPassword, onChanged: () => reload(db) }) : null),
+    [db, reload]
+  );
+  useEffect(() => {
+    if (!webApi) return;
+    const unlisten = onWebRequest(async (req) => {
+      const answer = await webApi.handle(req.action, req.body, req.ip);
+      try {
+        await webRespond(req.id, answer.status, JSON.stringify(answer.body));
+      } catch (e) {
+        console.warn("ブラウザに答えを返せませんでした", e);
+      }
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, [webApi]);
 
   // 閉じるボタン（Alt+F4・⌘Q も）：管理のパスワードを聞いてから閉じる（パスワードを決める前なら、そのまま閉じる）
   useEffect(() => {
@@ -124,10 +151,26 @@ export default function App() {
 
   return (
     <>
-      {mode === "admin" ? (
-        <Admin db={db} settings={settings} onChanged={() => reload(db)} onExit={() => setMode("kiosk")} />
+      {mode === "admin" && webApi ? (
+        <Admin
+          db={db}
+          settings={settings}
+          onChanged={() => reload(db)}
+          onExit={() => setMode("kiosk")}
+          webApi={webApi}
+          webProblem={webProblem}
+          onWebProblem={setWebProblem}
+        />
       ) : (
-        <Kiosk db={db} settings={settings} staff={staff} lastPunch={lastPunch} onChanged={() => reload(db)} onAdmin={() => setAsk("admin")} />
+        <Kiosk
+          db={db}
+          settings={settings}
+          staff={staff}
+          lastPunch={lastPunch}
+          webProblem={settings.webEnabled ? webProblem : ""}
+          onChanged={() => reload(db)}
+          onAdmin={() => setAsk("admin")}
+        />
       )}
 
       {ask && (

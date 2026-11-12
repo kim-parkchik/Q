@@ -38,6 +38,15 @@ preview.otherCompanyCard = cardPayload("ABCD2345", CARDS["1001"]);
 console.info("[確かめ用] カード", preview.cards, "ほかの会社のカード", preview.otherCompanyCard);
 
 let autostart = false;
+let webRunning = false;
+const webStatusOf = (port: number) => ({
+  running: true,
+  port,
+  urls: [`https://192.168.0.10:${port}/`],
+  caName: "TimeQard 会社専用の証明書（2026-11-12）",
+  sha256: "12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0",
+  sha1: "12:34:56:78:9A:BC:DE:F0:12:34:56:78:9A:BC:DE:F0:12:34:56:78",
+});
 
 mockWindows("main");
 mockIPC(
@@ -83,6 +92,19 @@ mockIPC(
         return null;
       case "plugin:window|set_fullscreen":
         return null;
+      // ブラウザ版（確かめ用の画面では、サーバーは動かさない。ブラウザの画面は dev/web-preview.html で確かめる）
+      case "web_start":
+        webRunning = true;
+        return webStatusOf(args.port);
+      case "web_stop":
+        webRunning = false;
+        return null;
+      case "web_status":
+        return webRunning ? webStatusOf(8443) : { running: false, port: 0, urls: [], caName: "", sha256: "", sha1: "" };
+      case "web_respond":
+        return null;
+      case "web_ca_der":
+        return [0x30, 0x82, 0x01, 0x00];
       default:
         console.warn("[確かめ用] 知らない呼び出し", cmd, args);
         return null;

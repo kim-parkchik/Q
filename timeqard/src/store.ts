@@ -3,7 +3,8 @@
  *
  * ・打刻・申し出・取り消しは、足すだけにする（表のトリガーで、書き換えと削除を止める）。
  * ・取り消しは、元の打刻（申し出）を消さずに「取り消した」という記録を足す。
- * ・従業員は、会社の印ごとに持つ。従業員ファイルを読み込み直すと入れ替えるが、一覧から消えた人も、CSV に名前を出すために残す。
+ * ・従業員は、会社の印ごとに持つ。従業員ファイルを読み込み直すと入れ替えるが、一覧から消えた人も、CSV に名前を出すために残す
+ *   （ブラウザ版のパスワードは消す）。
  * ・1日の行（出勤・退勤…）は、記録から毎回計算し、表には残さない（shared/timeqard/days.ts）。
  */
 import {
@@ -33,7 +34,8 @@ export interface KioskDb {
 
 /** TimeQard の記録のファイルの印（SQLite の application_id。"TQ01" の文字コード） */
 export const TIMEQARD_FILE_ID = 0x54513031;
-export const TIMEQARD_DB_VERSION = 1;
+/** 記録のファイルの形の番号（2：ブラウザ版の表と列を足した。まだ作成中なので、前の形のファイルは読まずに作り直してもらう） */
+export const TIMEQARD_DB_VERSION = 2;
 
 const appendOnly = (table: string, label: string) => [
   `CREATE TRIGGER IF NOT EXISTS ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, '${label}は書き換えられません'); END;`,
@@ -47,7 +49,8 @@ export const SCHEMA: string[] = [
     kind TEXT NOT NULL CHECK (kind IN ('entry', 'exit', 'break_start', 'break_end', 'out', 'return')),
     pressed_at TEXT NOT NULL,        -- 押した日時（日本時間。「2026-11-07T08:58:30+09:00」）
     pressed_ms INTEGER NOT NULL,     -- 押した日時（1970年からのミリ秒。並べる・期間で選ぶのに使う）
-    method TEXT NOT NULL CHECK (method IN ('card', 'id')),
+    method TEXT NOT NULL CHECK (method IN ('card', 'id', 'web')), -- web：ブラウザで押した
+    client_ip TEXT NOT NULL DEFAULT '', -- ブラウザで押したときの、つないできたパソコンのアドレス
     company_mark TEXT NOT NULL       -- 押したときの会社の印
   );`,
   `CREATE INDEX IF NOT EXISTS punches_by_time ON punches(company_mark, pressed_ms);`,
@@ -61,7 +64,8 @@ export const SCHEMA: string[] = [
     note TEXT NOT NULL DEFAULT '',
     requested_at TEXT NOT NULL,
     requested_ms INTEGER NOT NULL,
-    method TEXT NOT NULL CHECK (method IN ('card', 'id')),
+    method TEXT NOT NULL CHECK (method IN ('card', 'id', 'web')),
+    client_ip TEXT NOT NULL DEFAULT '', -- ブラウザで申し出たときの、つないできたパソコンのアドレス
     company_mark TEXT NOT NULL
   );`,
   `CREATE TABLE IF NOT EXISTS cancellations (
@@ -74,6 +78,29 @@ export const SCHEMA: string[] = [
   ...appendOnly("punches", "打刻"),
   ...appendOnly("requests", "申し出"),
   ...appendOnly("cancellations", "取り消しの記録"),
+  // ブラウザ版（DESIGN.md の 10）：従業員のパスワード（確かめ用の値だけ。はじめのパスワードは、管理者が人ごとに作って渡す）
+  `CREATE TABLE IF NOT EXISTS web_accounts (
+    company_mark TEXT NOT NULL,
+    staff_id TEXT NOT NULL,
+    password_hash TEXT NOT NULL,          -- Argon2 の確かめ用の値
+    initial INTEGER NOT NULL DEFAULT 1,   -- 1：管理者が渡したはじめのパスワード（本人がまだ変えていない）
+    initial_expires_ms INTEGER,           -- はじめのパスワードの期限
+    failed_count INTEGER NOT NULL DEFAULT 0, -- 続けてまちがえた回数
+    locked_until_ms INTEGER,              -- この時刻まで使えない（5回まちがえたとき）
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (company_mark, staff_id)
+  );`,
+  // ログインの記録（足すだけ）。管理者は staff_id を「(管理者)」にする。はじめのパスワードを作った・消したことも残す
+  `CREATE TABLE IF NOT EXISTS web_logins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_mark TEXT NOT NULL,
+    staff_id TEXT NOT NULL,
+    result TEXT NOT NULL,                 -- ok / wrong / locked / expired / no_account / ip_blocked / changed / issued / cleared（src/webApi.ts）
+    client_ip TEXT NOT NULL,
+    at TEXT NOT NULL,
+    at_ms INTEGER NOT NULL
+  );`,
+  ...appendOnly("web_logins", "ログインの記録"),
   `CREATE TABLE IF NOT EXISTS staff (
     company_mark TEXT NOT NULL,
     id TEXT NOT NULL,
@@ -96,6 +123,7 @@ export const SCHEMA: string[] = [
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );`,
+  `CREATE INDEX IF NOT EXISTS web_logins_by_time ON web_logins(company_mark, at_ms);`,
   `CREATE TABLE IF NOT EXISTS exports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_mark TEXT NOT NULL,
@@ -121,6 +149,9 @@ export const prepareDb = async (db: KioskDb) => {
     if (fileId !== TIMEQARD_FILE_ID) throw new Error("TimeQard の記録のファイルではありません。");
     const version = await readPragma(db, "user_version");
     if (version > TIMEQARD_DB_VERSION) throw new Error("新しい TimeQard で使っていた記録です。TimeQard を新しくしてください。");
+    if (version < TIMEQARD_DB_VERSION) {
+      throw new Error("前の形の TimeQard の記録です（まだ作成中のため、前の形は読めません）。記録のファイルを別の場所に移して、作り直してください。");
+    }
   }
   for (const s of SCHEMA) await db.execute(s);
   if (isNew) {
@@ -144,10 +175,17 @@ export interface KioskSettings {
   camera: boolean;
   /** 使うカメラ（空なら、いつものカメラ） */
   cameraDevice: string;
+  /** ブラウザ版（各自のパソコンのブラウザから押す）を使うか（初めは使わない） */
+  webEnabled: boolean;
+  /** ブラウザ版のポートの番号（初めは 8443） */
+  webPort: number;
   backupDir: string;
   lastBackupDate: string;
   lastBackupError: string;
 }
+
+/** ブラウザ版のポートの初めの番号 */
+export const DEFAULT_WEB_PORT = 8443;
 
 export const getSetting = async (db: KioskDb, key: string) => {
   const rows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = ?", [key]);
@@ -173,6 +211,8 @@ export const loadSettings = async (db: KioskDb): Promise<KioskSettings> => {
     fullscreen: flag("fullscreen", false),
     camera: flag("camera", true),
     cameraDevice: m.get("camera_device") ?? "",
+    webEnabled: flag("web_enabled", false),
+    webPort: Number(m.get("web_port")) || DEFAULT_WEB_PORT,
     backupDir: m.get("backup_dir") ?? "",
     lastBackupDate: m.get("last_backup_date") ?? "",
     lastBackupError: m.get("last_backup_error") ?? "",
@@ -206,7 +246,8 @@ export const loadStaff = async (db: KioskDb, companyMark: string): Promise<Kiosk
 };
 
 /**
- * 従業員ファイルの中身を入れる（その会社の印の従業員を入れ替える。一覧から消えた人は、押せないようにして名前を残す）。
+ * 従業員ファイルの中身を入れる（その会社の印の従業員を入れ替える。一覧から消えた人は、押せないようにして名前を残し、
+ * ブラウザ版のパスワードを消す）。
  * 会社の印・会社名・書き出した日時を、いまの設定にする。
  */
 export const applyStaffFile = async (db: KioskDb, file: StaffFile, loadedAt: string) => {
@@ -223,6 +264,7 @@ export const applyStaffFile = async (db: KioskDb, file: StaffFile, loadedAt: str
   const removed = before.filter((s) => s.inFile && !ids.has(s.id));
   for (const s of removed) {
     await db.execute("UPDATE staff SET in_file = 0, card_hashes = '[]' WHERE company_mark = ? AND id = ?", [file.companyMark, s.id]);
+    await db.execute("DELETE FROM web_accounts WHERE company_mark = ? AND staff_id = ?", [file.companyMark, s.id]);
   }
   await setSetting(db, "company_mark", file.companyMark);
   await setSetting(db, "company_name", file.companyName);
@@ -244,22 +286,28 @@ export const applyStaffFile = async (db: KioskDb, file: StaffFile, loadedAt: str
 /** 取り消しができる長さ（押してから1分） */
 export const CANCEL_WINDOW_MS = 60 * 1000;
 
-export const addPunch = async (db: KioskDb, p: { staffId: string; kind: PunchKind; at: number; method: PunchMethod; companyMark: string }) => {
+export const addPunch = async (
+  db: KioskDb,
+  p: { staffId: string; kind: PunchKind; at: number; method: PunchMethod; companyMark: string; clientIp?: string }
+) => {
   const r = await db.execute(
-    "INSERT INTO punches (staff_id, kind, pressed_at, pressed_ms, method, company_mark) VALUES (?, ?, ?, ?, ?, ?)",
-    [p.staffId, p.kind, jstIso(p.at), p.at, p.method, p.companyMark]
+    "INSERT INTO punches (staff_id, kind, pressed_at, pressed_ms, method, client_ip, company_mark) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [p.staffId, p.kind, jstIso(p.at), p.at, p.method, p.clientIp ?? "", p.companyMark]
   );
   return Number(r.lastInsertId);
 };
 
 export const addRequest = async (
   db: KioskDb,
-  r: { staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod; companyMark: string }
+  r: {
+    staffId: string; date: string; kind: RequestKind; time: string; reason: string; note: string; at: number; method: PunchMethod;
+    companyMark: string; clientIp?: string;
+  }
 ) => {
   const res = await db.execute(
-    `INSERT INTO requests (staff_id, work_date, kind, time, reason, note, requested_at, requested_ms, method, company_mark)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [r.staffId, r.date, r.kind, r.time, r.reason, r.note.trim(), jstIso(r.at), r.at, r.method, r.companyMark]
+    `INSERT INTO requests (staff_id, work_date, kind, time, reason, note, requested_at, requested_ms, method, client_ip, company_mark)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [r.staffId, r.date, r.kind, r.time, r.reason, r.note.trim(), jstIso(r.at), r.at, r.method, r.clientIp ?? "", r.companyMark]
   );
   return Number(res.lastInsertId);
 };
@@ -275,6 +323,9 @@ export const cancelRecord = async (db: KioskDb, target: "punch" | "request", id:
   await db.execute("INSERT OR IGNORE INTO cancellations (target, target_id, cancelled_at) VALUES (?, ?, ?)", [target, id, jstIso(now)]);
 };
 
+/** 記録の「どうやって」を読む */
+export const methodOf = (s: unknown): PunchMethod => (s === "id" ? "id" : s === "web" ? "web" : "card");
+
 interface PunchRow {
   id: number;
   staff_id: string;
@@ -289,7 +340,7 @@ const toPunch = (r: PunchRow): Punch => ({
   staffId: String(r.staff_id),
   kind: isPunchKind(r.kind) ? r.kind : "entry",
   at: Number(r.pressed_ms),
-  method: r.method === "id" ? "id" : "card",
+  method: methodOf(r.method),
 });
 
 /** 打刻（取り消していないもの）。期間は押した日時のミリ秒（from 以上・to 未満） */
@@ -402,6 +453,8 @@ export interface DayEvent {
   kind: RequestKind;
   method: PunchMethod;
   cancelled: boolean;
+  /** ブラウザで押した（申し出た）ときの、つないできたパソコンのアドレス */
+  clientIp: string;
   /** 申し出：日・時刻・理由 */
   requestDate?: string;
   requestTime?: string;
@@ -412,14 +465,14 @@ export interface DayEvent {
 /** その日（日本時間）に押した打刻と、その日の分の申し出（取り消したものも、印を付けて出す） */
 export const loadDayEvents = async (db: KioskDb, companyMark: string, date: string): Promise<DayEvent[]> => {
   const names = new Map((await loadStaff(db, companyMark)).map((s) => [s.id, s.name]));
-  const punches = await db.select<(PunchRow & { cancelled: number })[]>(
-    `SELECT p.id, p.staff_id, p.kind, p.pressed_ms, p.method,
+  const punches = await db.select<(PunchRow & { cancelled: number; client_ip: string })[]>(
+    `SELECT p.id, p.staff_id, p.kind, p.pressed_ms, p.method, p.client_ip,
        EXISTS (SELECT 1 FROM cancellations c WHERE c.target = 'punch' AND c.target_id = p.id) AS cancelled
      FROM punches p WHERE p.company_mark = ? AND p.pressed_ms >= ? AND p.pressed_ms < ?`,
     [companyMark, jstMs(date), jstMs(addDays(date, 1))]
   );
-  const requests = await db.select<(RequestRow & { method: string; cancelled: number })[]>(
-    `SELECT r.id, r.staff_id, r.work_date, r.kind, r.time, r.reason, r.note, r.requested_ms, r.method,
+  const requests = await db.select<(RequestRow & { method: string; cancelled: number; client_ip: string })[]>(
+    `SELECT r.id, r.staff_id, r.work_date, r.kind, r.time, r.reason, r.note, r.requested_ms, r.method, r.client_ip,
        EXISTS (SELECT 1 FROM cancellations c WHERE c.target = 'request' AND c.target_id = r.id) AS cancelled
      FROM requests r WHERE r.company_mark = ? AND r.work_date = ?`,
     [companyMark, date]
@@ -432,8 +485,9 @@ export const loadDayEvents = async (db: KioskDb, companyMark: string, date: stri
       name: names.get(String(r.staff_id)) ?? "",
       at: Number(r.pressed_ms),
       kind: (isPunchKind(r.kind) ? r.kind : "entry") as PunchKind,
-      method: (r.method === "id" ? "id" : "card") as PunchMethod,
+      method: methodOf(r.method),
       cancelled: Number(r.cancelled) === 1,
+      clientIp: r.client_ip ?? "",
     })),
     ...(requests ?? []).map((r) => ({
       type: "request" as const,
@@ -442,8 +496,9 @@ export const loadDayEvents = async (db: KioskDb, companyMark: string, date: stri
       name: names.get(String(r.staff_id)) ?? "",
       at: Number(r.requested_ms),
       kind: (isRequestKind(r.kind) ? r.kind : "entry") as RequestKind,
-      method: (r.method === "id" ? "id" : "card") as PunchMethod,
+      method: methodOf(r.method),
       cancelled: Number(r.cancelled) === 1,
+      clientIp: r.client_ip ?? "",
       requestDate: r.work_date,
       requestTime: r.time,
       reason: r.reason,
@@ -451,4 +506,113 @@ export const loadDayEvents = async (db: KioskDb, companyMark: string, date: stri
     })),
   ];
   return events.sort((a, b) => a.staffId.localeCompare(b.staffId, "ja", { numeric: true }) || a.at - b.at || a.id - b.id);
+};
+
+// --- ブラウザ版：従業員のパスワードとログインの記録（DESIGN.md の 10） ---
+
+export interface WebAccount {
+  staffId: string;
+  passwordHash: string;
+  /** 管理者が渡したはじめのパスワード（本人がまだ変えていない） */
+  initial: boolean;
+  initialExpiresMs: number | null;
+  failedCount: number;
+  lockedUntilMs: number | null;
+  updatedAt: string;
+}
+
+interface WebAccountRow {
+  staff_id: string;
+  password_hash: string;
+  initial: number;
+  initial_expires_ms: number | null;
+  failed_count: number;
+  locked_until_ms: number | null;
+  updated_at: string;
+}
+
+const toAccount = (r: WebAccountRow): WebAccount => ({
+  staffId: String(r.staff_id),
+  passwordHash: r.password_hash,
+  initial: Number(r.initial) === 1,
+  initialExpiresMs: r.initial_expires_ms === null || r.initial_expires_ms === undefined ? null : Number(r.initial_expires_ms),
+  failedCount: Number(r.failed_count) || 0,
+  lockedUntilMs: r.locked_until_ms === null || r.locked_until_ms === undefined ? null : Number(r.locked_until_ms),
+  updatedAt: r.updated_at,
+});
+
+export const loadWebAccounts = async (db: KioskDb, companyMark: string): Promise<WebAccount[]> => {
+  const rows = await db.select<WebAccountRow[]>(
+    "SELECT staff_id, password_hash, initial, initial_expires_ms, failed_count, locked_until_ms, updated_at FROM web_accounts WHERE company_mark = ?",
+    [companyMark]
+  );
+  return (rows ?? []).map(toAccount);
+};
+
+export const loadWebAccount = async (db: KioskDb, companyMark: string, staffId: string): Promise<WebAccount | null> => {
+  const rows = await db.select<WebAccountRow[]>(
+    "SELECT staff_id, password_hash, initial, initial_expires_ms, failed_count, locked_until_ms, updated_at FROM web_accounts WHERE company_mark = ? AND staff_id = ?",
+    [companyMark, staffId]
+  );
+  return rows?.[0] ? toAccount(rows[0]) : null;
+};
+
+/** パスワードを決める（はじめのパスワードなら期限を付ける。まちがえた回数は 0 に戻す） */
+export const saveWebPassword = async (
+  db: KioskDb,
+  a: { companyMark: string; staffId: string; passwordHash: string; initial: boolean; initialExpiresMs: number | null; at: number }
+) => {
+  await db.execute(
+    `INSERT INTO web_accounts (company_mark, staff_id, password_hash, initial, initial_expires_ms, failed_count, locked_until_ms, updated_at)
+     VALUES (?, ?, ?, ?, ?, 0, NULL, ?)
+     ON CONFLICT(company_mark, staff_id) DO UPDATE SET password_hash = excluded.password_hash, initial = excluded.initial,
+       initial_expires_ms = excluded.initial_expires_ms, failed_count = 0, locked_until_ms = NULL, updated_at = excluded.updated_at`,
+    [a.companyMark, a.staffId, a.passwordHash, a.initial ? 1 : 0, a.initialExpiresMs, jstIso(a.at)]
+  );
+};
+
+/** まちがえた回数・使えない期限を残す */
+export const saveWebFailures = async (db: KioskDb, companyMark: string, staffId: string, failedCount: number, lockedUntilMs: number | null) => {
+  await db.execute("UPDATE web_accounts SET failed_count = ?, locked_until_ms = ? WHERE company_mark = ? AND staff_id = ?", [
+    failedCount,
+    lockedUntilMs,
+    companyMark,
+    staffId,
+  ]);
+};
+
+/** パスワードを消す（ブラウザで押せなくなる。管理者がはじめのパスワードを作り直すまで） */
+export const deleteWebAccount = async (db: KioskDb, companyMark: string, staffId: string) => {
+  await db.execute("DELETE FROM web_accounts WHERE company_mark = ? AND staff_id = ?", [companyMark, staffId]);
+};
+
+/** ログインの記録（管理者は「(管理者)」） */
+export const ADMIN_LOGIN_ID = "(管理者)";
+
+export const logWebLogin = async (db: KioskDb, e: { companyMark: string; staffId: string; result: string; clientIp: string; at: number }) => {
+  await db.execute("INSERT INTO web_logins (company_mark, staff_id, result, client_ip, at, at_ms) VALUES (?, ?, ?, ?, ?, ?)", [
+    e.companyMark,
+    e.staffId,
+    e.result,
+    e.clientIp,
+    jstIso(e.at),
+    e.at,
+  ]);
+};
+
+export interface WebLogin {
+  id: number;
+  staffId: string;
+  result: string;
+  clientIp: string;
+  at: number;
+}
+
+/** ログインの記録（新しいものから） */
+export const loadWebLogins = async (db: KioskDb, companyMark: string, limit: number): Promise<WebLogin[]> => {
+  const rows = await db.select<{ id: number; staff_id: string; result: string; client_ip: string; at_ms: number }[]>(
+    "SELECT id, staff_id, result, client_ip, at_ms FROM web_logins WHERE company_mark = ? ORDER BY at_ms DESC, id DESC LIMIT ?",
+    [companyMark, limit]
+  );
+  return (rows ?? []).map((r) => ({ id: Number(r.id), staffId: String(r.staff_id), result: r.result, clientIp: r.client_ip, at: Number(r.at_ms) }));
 };
