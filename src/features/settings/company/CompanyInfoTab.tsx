@@ -67,6 +67,8 @@ export default function CompanyInfoTab({ cm }: Props) {
         setIsSmallBusiness,
         hourlyLeave,
         setHourlyLeave,
+        halfDayLeave,
+        setHalfDayLeave,
         isSearchingComp,
         setIsZipFocus,
         handleFocus,
@@ -335,6 +337,21 @@ export default function CompanyInfoTab({ cm }: Props) {
                             （労働基準法39条4項。前の年から繰り越した分も含めて数えます）。
                             使うにすると、勤怠の画面で「時間有給」の時間を入れられ、休憩の一覧で中抜けに「時間有給」の印を付けられます。
                             1年（付与日から1年）に5日分を超えると、勤怠の画面で知らせます。
+                        </div>
+                        {/* 半日単位の有給（法律の決まりではなく、本人が半日で取りたいと言い、会社が同意したときに取れるもの） */}
+                        <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", marginTop: "14px" }}>
+                            <input
+                                type="checkbox"
+                                checked={halfDayLeave}
+                                onChange={e => setHalfDayLeave(e.target.checked)}
+                            />
+                            <Clock size={16} color="#3498db" />
+                            半日単位の有給（半休）を使う
+                        </label>
+                        <div style={{ fontSize: "12px", color: "#64748b", lineHeight: 1.7, marginTop: "6px" }}>
+                            年次有給休暇は1日単位が原則です。半日単位は、本人が半日で取りたいと言い、会社が同意したときに取れるものです
+                            （厚生労働省。時間単位と違い、労使協定も日数の上限もいりません。年5日の取得義務には、半休1回を0.5日として数えます）。
+                            使うにすると、勤怠の区分で「半休(有給)」を選べます。半日は、1日の所定労働時間の半分として計算します。
                         </div>
                     </div>
 

@@ -48,6 +48,7 @@ export const DB_SCHEMAS = [
     week_start_day INTEGER DEFAULT 0,  -- 週の開始曜日 (0=日曜, 1=月曜, ..., 6=土曜)
     is_small_business INTEGER DEFAULT 0, -- 中小企業（2023年3月までの月60時間超の割増は25%でよかった）
     hourly_leave INTEGER DEFAULT 0,      -- 時間単位の有給を使う（労使協定を結んでいる。労働基準法39条4項。1年に5日分まで）
+    half_day_leave INTEGER DEFAULT 1,    -- 半日単位の有給（半休）を使う（法律の決まりではなく、会社が認めるとき。初めは使う）
     annual_holidays INTEGER DEFAULT 120,
     holiday_csv_url TEXT DEFAULT '${HOLIDAY_CSV_URL_DEFAULT}',
     holiday_source TEXT DEFAULT 'url',

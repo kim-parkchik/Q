@@ -216,6 +216,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "attendance", "special_leave_hours", "REAL DEFAULT 0");
     },
   },
+  {
+    version: 13,
+    description: "会社に、半日単位の有給（半休）を使うかの列を足す（初めは使う。いままでどおり半休を入れられる）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "company", "half_day_leave", "INTEGER DEFAULT 1");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

@@ -845,6 +845,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     fixedBreakRule, fixedBreakText, fixedBreakCombineText, breakInfo,
     // 時間単位の有給を使う会社か（会社の設定。労使協定を結んでいるとき）
     hourlyLeaveEnabled: Number(companySettings?.hourly_leave) === 1,
+    // 半日単位の有給（半休）を使う会社か（会社の設定。初めは使う）と、この期間に半休の日があるか
+    halfDayLeaveEnabled: Number(companySettings?.half_day_leave ?? 1) !== 0,
+    halfDayInPeriod: Object.values(monthlyWorkData).some((row: any) => row?.workType === "paid_half"),
     holidays,
     companyHolidays,
     activeFilters, setActiveFilters,

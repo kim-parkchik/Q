@@ -128,11 +128,14 @@ function Page() {
   const [, setTick] = useState(0);
   const refresh = () => { setTick((t) => t + 1); notify(); };
   const [rows, setRows] = useState<Record<string, any>>(() => Object.fromEntries(DATES.map((d) => [d, blankRow()])));
+  // 会社の設定「半日単位の有給（半休）を使う」（初めは使う）
+  const [halfDay, setHalfDay] = useState(true);
 
   // 勤怠の画面の代わり（useAttendanceManager と同じ動き）
   const am: any = {
     isLoading: false, isClosed: false, monthlyWorkData: rows, dateList: DATES, holidays: {}, companyHolidays: {},
     fixedBreakRule: null, breakInfo: {}, hourlyLeaveEnabled: false, leaveTypes: types, paidLeave: null,
+    halfDayLeaveEnabled: halfDay, halfDayInPeriod: DATES.some((d) => rows[d].workType === "paid_half"),
     handleCellChange: (date: string, field: string, value: any) => setRows((p) => ({ ...p, [date]: { ...p[date], [field]: value } })),
     handleWorkTypeChange: (date: string, value: string) => {
       const { workType, leaveTypeId } = parseLeaveOption(value);
@@ -217,6 +220,9 @@ function Page() {
 
       <section>
         <h2 id="attendance">3. 勤怠の画面（山田 太郎さん・11月9日〜13日）</h2>
+        <label style={{ display: "block", marginBottom: 8, fontSize: 13 }}>
+          <input id="half-day" type="checkbox" checked={halfDay} onChange={(e) => setHalfDay(e.target.checked)} /> 会社の設定：半日単位の有給（半休）を使う
+        </label>
         <PaidLeaveNotice am={am} />
         <div style={{ background: "white", borderRadius: 8, padding: 10 }}>
           <AttendanceTable am={am} />

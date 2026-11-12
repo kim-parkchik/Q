@@ -51,6 +51,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [isSmallBusiness, setIsSmallBusiness] = useState(false);
     // 時間単位の有給を使う（労使協定を結んでいる。労働基準法39条4項）
     const [hourlyLeave, setHourlyLeave] = useState(false);
+    // 半日単位の有給（半休）を使う（法律の決まりではなく、会社が認めるとき。初めは使う）
+    const [halfDayLeave, setHalfDayLeave] = useState(true);
     const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
     const [originalWeekStartDay, setOriginalWeekStartDay] = useState(0);
     const [isSearchingComp, setIsSearchingComp] = useState(false);
@@ -216,6 +218,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setOriginalWeekStartDay(c.week_start_day); // 👈 保存用に「元の値」を記憶
                 setIsSmallBusiness(Number(c.is_small_business) === 1);
                 setHourlyLeave(Number(c.hourly_leave) === 1);
+                setHalfDayLeave(Number(c.half_day_leave ?? 1) !== 0);
                 setCompHealth(c.health_ins_num || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
@@ -239,6 +242,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                     weekStartDay: c.week_start_day ?? 0, headPref: head?.prefecture || "",
                     isSmallBusiness: Number(c.is_small_business) === 1 ? 1 : 0,
                     hourlyLeave: Number(c.hourly_leave) === 1 ? 1 : 0,
+                    halfDayLeave: Number(c.half_day_leave ?? 1) !== 0 ? 1 : 0,
                 });
                 setSavedRounding({
                     roundOvertime: c.round_overtime || "round",
@@ -299,14 +303,15 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                     name = ?, zip_code = ?, address = ?, phone = ?, corporate_number = ?, representative = ?,
                     health_ins_num = ?, labor_ins_num = ?,
                     round_overtime = ?, round_social_ins = ?, round_emp_ins = ?, week_start_day = ?,
-                    is_small_business = ?, hourly_leave = ?
+                    is_small_business = ?, hourly_leave = ?, half_day_leave = ?
                 WHERE id = 1`,
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
                     compHealth, compLabor, 
                     roundOvertime, roundSocialIns, roundEmpIns, weekStartDay,
                     isSmallBusiness ? 1 : 0,
-                    hourlyLeave ? 1 : 0
+                    hourlyLeave ? 1 : 0,
+                    halfDayLeave ? 1 : 0
                 ]
             );
             await db.execute(
@@ -782,6 +787,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         compHealth, compLabor, weekStartDay, headPref,
         isSmallBusiness: isSmallBusiness ? 1 : 0,
         hourlyLeave: hourlyLeave ? 1 : 0,
+        halfDayLeave: halfDayLeave ? 1 : 0,
     };
     const isInfoDirty = savedInfo === null || Object.keys(currentInfo).some((k) => currentInfo[k] !== savedInfo[k]);
     const isRoundingDirty = savedRounding === null
@@ -830,6 +836,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setIsSmallBusiness,
         hourlyLeave,
         setHourlyLeave,
+        halfDayLeave,
+        setHalfDayLeave,
         originalWeekStartDay,
         setOriginalWeekStartDay,
         isSearchingComp,

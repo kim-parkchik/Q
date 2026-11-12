@@ -12,7 +12,16 @@ interface Props {
 
 export default function PaidLeaveNotice({ am }: Props) {
   const { paidLeave } = am;
-  const special = <SpecialLeaveNotice am={am} />;
+  const special = (
+    <>
+      <SpecialLeaveNotice am={am} />
+      {!am.halfDayLeaveEnabled && am.halfDayInPeriod && (
+        <div style={{ marginBottom: 6, fontSize: 12, color: "#92400e", padding: "6px 12px", borderRadius: 6, backgroundColor: "#fef3c7" }}>
+          この期間に半休(有給)の日がありますが、会社の設定では半日単位の有給を使わないことになっています（会社設定の「基本情報」で変えられます）。
+        </div>
+      )}
+    </>
+  );
   if (!paidLeave) return special;
   // 有給をほかで管理している会社（付与を登録していない人）は、この期間に有給がなければ何も出さない
   if (!paidLeave.hasGrants && !paidLeave.leaveInPeriod) return special;

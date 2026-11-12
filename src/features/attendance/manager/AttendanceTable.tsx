@@ -49,6 +49,7 @@ export default function AttendanceTable({ am }: Props) {
     fixedBreakRule,
     breakInfo,
     hourlyLeaveEnabled,
+    halfDayLeaveEnabled,
     leaveTypes,
   } = am;
   // 休憩の一覧の画面を開いている日
@@ -291,7 +292,8 @@ export default function AttendanceTable({ am }: Props) {
                       <option value="holiday_work">所定休日出勤</option>
                       <option value="statutory_holiday">法定休日出勤（35%増）</option>
                       <option value="paid_full">全休(有給)</option>
-                      <option value="paid_half">半休(有給)</option>
+                      {/* 半休は、会社の設定で半日単位の有給を使うときだけ選べる（前に入れた日は、そのまま出す） */}
+                      {(halfDayLeaveEnabled || row.workType === "paid_half") && <option value="paid_half">半休(有給)</option>}
                       {/* 会社独自の休暇（特別休暇）。種類は会社設定の「休暇の種類」で作る（utils/specialLeave.ts） */}
                       {leaveOptions.length > 0 && (
                         <optgroup label="会社独自の休暇">
