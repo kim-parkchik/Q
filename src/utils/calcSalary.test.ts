@@ -87,6 +87,78 @@ describe("社会保険の加入・未加入", () => {
     });
 });
 
+describe("健康保険組合・国民健康保険組合の人（会社設定の「社会保険規定」。utils/healthInsurer.ts）", () => {
+    const unionInsurer = {
+        id: 2, name: "確かめ健康保険組合", type: "union" as const,
+        rates: [
+            { from: "2025-04", health: 4.4, care: 0.8, childSupport: 0 },
+            { from: "2026-04", health: 4.5, care: 0.8, childSupport: 0.115 },
+        ],
+    };
+    const kokuhoInsurer = { id: 3, name: "確かめ建設国保", type: "kokuho" as const, rates: [] };
+    const older = { ...monthly, birthday: "1980-06-15", social_insurance_group_id: 2 }; // 46歳（介護保険の対象）
+
+    test("健康保険組合：組合の本人負担の料率で計算し、都道府県は使わない。厚生年金は全国で同じ料率", () => {
+        const r = calc(older, [], { healthInsurer: unionInsurer, prefecture: "" });
+        // 300,000 × 4.5% = 13,500、300,000 × (4.5% + 0.8%) − 13,500 = 2,400、300,000 × 0.115% = 345
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport]).toEqual([13500, 2400, 345]);
+        expect(r.welfarePension).toBe(27450);
+        expect([r.prefectureUnknown, r.insurerRateMissing]).toEqual([false, false]);
+        expect(r.insurer).toEqual({ type: "union", name: "確かめ健康保険組合" });
+        expect(r.unionRate?.from).toBe("2026-04");
+        // 協会けんぽの人は、いままでどおり（規定を渡さない・協会けんぽの規定）
+        expect(calc(older, []).insurer).toEqual({ type: "kyokai", name: "" });
+    });
+    test("翌月徴収では、前の月の分の料率で計算する（2026年4月に払う給与は3月分の料率。支援金は4月分から）", () => {
+        const next = calculateSalary(older, [], extras({ healthInsurer: unionInsurer, socialInsCollection: "next" }), 2026, 4, company);
+        expect([next.healthInsurance, next.childSupport, next.unionRate?.from]).toEqual([13200, 0, "2025-04"]);
+        const current = calculateSalary(older, [], extras({ healthInsurer: unionInsurer }), 2026, 4, company);
+        expect([current.healthInsurance, current.childSupport]).toEqual([13500, 345]);
+    });
+    test("健康保険組合の、その月の分の料率がなければ、健康保険料・介護保険料を計算せず知らせる（確定できない）", () => {
+        const later = { ...unionInsurer, rates: [{ from: "2026-07", health: 4.5, care: 0.8, childSupport: 0.115 }] };
+        const r = calc(older, [], { healthInsurer: later });
+        expect(r.insurerRateMissing).toBe(true);
+        expect(r.prefectureUnknown).toBe(false);
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport]).toEqual([0, 0, 0]);
+        expect(r.welfarePension).toBe(27450);
+    });
+    test("国保組合：健康保険料・介護保険料・支援金はかけず、従業員ごとの月額を引く。厚生年金はかかり、所得税の計算でも社会保険料として引く", () => {
+        const staff = { ...older, social_insurance_group_id: 3, kokuho_premium: 23000 };
+        const r = calc(staff, [], { healthInsurer: kokuhoInsurer });
+        expect([r.healthInsurance, r.nursingInsurance, r.childSupport]).toEqual([0, 0, 0]);
+        expect(r.kokuhoPremium).toBe(23000);
+        expect(r.welfarePension).toBe(27450);
+        const social = r.welfarePension + r.empInsurance + 23000;
+        expect(r.incomeTax).toBe(calcWithholdingTax(r.taxableAmount - social, 0, 2026, "table"));
+        expect(r.totalDeductions).toBe(social + r.incomeTax);
+        expect(r.netPay).toBe(r.totalEarnings - r.totalDeductions);
+        expect(r.insurer).toEqual({ type: "kokuho", name: "確かめ建設国保" });
+    });
+    test("国保組合で厚生年金に入らない人（標準報酬月額 0）からも、国保組合の保険料は引く。入社前の月は引かない", () => {
+        const staff = { ...hourly, social_insurance_group_id: 3, kokuho_premium: 18000 };
+        const r = calc(staff, weekdays(), { healthInsurer: kokuhoInsurer });
+        expect([r.kokuhoPremium, r.welfarePension, r.healthInsurance]).toEqual([18000, 0, 0]);
+        expect(calc({ ...staff, join_date: "2026-07-01" }, weekdays(), { healthInsurer: kokuhoInsurer }).kokuhoPremium).toBe(0);
+        // 国保組合ではない規定の人は、月額が残っていても引かない
+        expect(calc({ ...staff, social_insurance_group_id: 1 }, weekdays()).kokuhoPremium).toBe(0);
+    });
+    test("確定した給与に、国保組合の保険料を残し、社会保険料の合計に入れる", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
+        db.exec("INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) VALUES (1, '全社', 99, 0, 25)");
+        db.exec("INSERT INTO social_insurance_groups (id, name, type) VALUES (1, '協会けんぽ', 'kyokai'), (3, '確かめ建設国保', 'kokuho')");
+        db.exec("INSERT INTO staff (id, name, base_wage, social_insurance_group_id, kokuho_premium) VALUES ('S001', '山田', 300000, 3, 23000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const staff = { ...older, social_insurance_group_id: 3, kokuho_premium: 23000 };
+        const r = calc(staff, [], { healthInsurer: kokuhoInsurer });
+        expect(await saveSalaryResult(asyncDb, "S001", 2026, 6, r, staff)).toEqual({ success: true });
+        expect(db.query("SELECT kokuho_premium AS k, health_insurance AS h, social_ins_total AS t FROM salary_results").get())
+            .toEqual({ k: 23000, h: 0, t: r.welfarePension + r.empInsurance + 23000 });
+    });
+});
+
 describe("社会保険料（本人負担分）の端数処理（協会けんぽの保険料額表：給与から引くときは50銭以下切り捨て・50銭超切り上げ。特約があればそれによる）", () => {
     // 子ども・子育て支援金：標準報酬月額 58,000円 × 0.23% ÷ 2 ＝ 66.7円
     const small = { ...monthly, standard_remuneration: 58000, social_insurance_group_id: 1 };

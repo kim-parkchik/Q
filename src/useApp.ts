@@ -6,7 +6,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState } from "react";
 import { DB_SCHEMAS } from "./types/dbSchema";
-import * as Master from './constants';
 import { APP_DIR_NAME, BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, HOLIDAY_CSV_URL_DEFAULT } from "./constants/appConfig";
 import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
@@ -139,10 +138,9 @@ export const useApp = () => {
       }
       const sGroups = await sqlite.select<any[]>("SELECT * FROM social_insurance_groups WHERE id = 1");
       if (sGroups.length === 0) {
+        // 協会けんぽ（料率は都道府県ごとに Q が持っている。健康保険組合・国保組合は会社設定の「社会保険規定」で足す）
         await sqlite.execute(
-          `INSERT INTO social_insurance_groups (id, name, type, is_fixed, pension_rate, is_active) 
-          VALUES (1, '全国健康保険協会（協会けんぽ）', 'kyokai', 0, ?, 1)`,
-          [Master.INSURANCE_2026.PENSION_RATE[1]] // インデックス1（18.30）を直接渡す
+          `INSERT INTO social_insurance_groups (id, name, type, is_active) VALUES (1, '全国健康保険協会（協会けんぽ）', 'kyokai', 1)`
         );
       }
       // 🆕 賞与項目マスターの初期投入

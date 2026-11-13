@@ -74,25 +74,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
 
-    // --- 社会保険（健保規定）グループ用ステート ---
-    const [socialGroups, setSocialGroups] = useState<any[]>([]);
-    const [sgName, setSgName] = useState("");
-    const [sgType, setSgType] = useState("union"); // kyokai, union, kokuho
-    const [sgHealthRate, setSgHealthRate] = useState(10.0); // 健康保険料率
-    const [sgCareRate, setSgCareRate] = useState(1.6);     // 介護保険料率
-    const [sgPensionRate, setSgPensionRate] = useState(18.3); // 厚生年金料率
-    const [sgIsFixed, setSgIsFixed] = useState(0);         // 0:率計算, 1:定額(国保など)
-    const [sgFixedAmount, setSgFixedAmount] = useState(0);  // 定額時の金額
-    const [editingSgId, setEditingSgId] = useState<number | null>(null);
-    const [deletingSgId, setDeletingSgId] = useState<number | null>(null);
-    const [previewPref, setPreviewPref] = useState("京都");
-    const [showInactive, setShowInactive] = useState(false);
-    // --- 社会保険規定（会社負担分）のState ---
-    const [sgCompHealthRate, setSgCompHealthRate] = useState(0);
-    const [sgCompCareRate, setSgCompCareRate] = useState(0);
-    const [sgCompPensionRate, setSgCompPensionRate] = useState(Master.INSURANCE_2026.PENSION_RATE[0]); // デフォルトは折半率
-    const [sgChildAllowanceRate, setSgChildAllowanceRate] = useState(Master.INSURANCE_2026.CHILD_ALLOWANCE_RATE);
-    const [sgCompFixedAmount, setSgCompFixedAmount] = useState(0); // 定額時の会社負担用
 
     // --- 支店管理用ステート ---
     const [branches, setBranches] = useState<any[]>([]);
@@ -254,8 +235,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             }
             const resPG = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
             setPayrollGroups(resPG);
-            const resSG = await db.select<any[]>("SELECT * FROM social_insurance_groups ORDER BY id ASC");
-            setSocialGroups(resSG);
         } catch (e) { console.error("Load Error:", e); }
     };
 
@@ -373,155 +352,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTardyDeductionMethod("none");
         setPgFixedBreak(null);
         setPgFlexRule(DEFAULT_FLEX_RULE);
-    };
-
-    // 計算用のヘルパー
-    const getRates = (pref: string) => {
-        // 1. 都道府県別の料率を取得（見つからない場合は京都をフォールバックに）
-        const rateData = Master.INSURANCE_2026.KENPO_RATES[pref] || Master.INSURANCE_2026.KENPO_RATES["京都"];
-        
-        // rateData[1] が「総料率」です
-        const healthTotal = rateData[1]; 
-        
-        // 2. 介護保険料率（総額）を取得
-        const careTotal = Master.INSURANCE_2026.KENPO_CARE_RATE[1]; 
-        
-        // 3. 厚生年金料率（総額）を取得
-        const pensionTotal = Master.INSURANCE_2026.PENSION_RATE[1];
-
-        return {
-            healthTotal: healthTotal.toFixed(2),
-            careTotal: careTotal.toFixed(2),
-            pensionTotal: pensionTotal.toFixed(2)
-        };
-    };
-    const rates = getRates(previewPref);
-
-    const saveSocialGroup = async () => {
-        if (!sgName.trim()) return dialog.warning("規定名を入力してください");
-
-        // パラメータを配列にまとめる（順番が命です！）
-        const params = [
-            sgName,               // name
-            sgType,               // type
-            sgIsFixed,            // is_fixed
-            sgHealthRate,         // health_rate
-            sgCareRate,           // care_rate
-            sgPensionRate,        // pension_rate
-            sgFixedAmount,        // fixed_amount
-            sgCompHealthRate,     // comp_health_rate
-            sgCompCareRate,       // comp_care_rate
-            sgCompPensionRate,    // comp_pension_rate
-            sgChildAllowanceRate, // child_allowance_rate
-            sgCompFixedAmount,    // comp_fixed_amount (新設)
-            1                     // is_active (新規時は常に1)
-        ];
-
-        const isEdit = editingSgId !== null;
-        try {
-            if (editingSgId !== null) {
-                // --- UPDATE (編集) ---
-                // 最後の ? は WHERE id=? 用の editingSgId
-                await db.execute(
-                    `UPDATE social_insurance_groups SET 
-                        name=?, type=?, is_fixed=?, 
-                        health_rate=?, care_rate=?, pension_rate=?, fixed_amount=?,
-                        comp_health_rate=?, comp_care_rate=?, comp_pension_rate=?, 
-                        child_allowance_rate=?, comp_fixed_amount=?, is_active=?
-                    WHERE id=?`,
-                    [...params, editingSgId]
-                );
-            } else {
-                // --- INSERT (新規追加) ---
-                await db.execute(
-                    `INSERT INTO social_insurance_groups (
-                        name, type, is_fixed, 
-                        health_rate, care_rate, pension_rate, fixed_amount,
-                        comp_health_rate, comp_care_rate, comp_pension_rate, 
-                        child_allowance_rate, comp_fixed_amount, is_active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    params
-                );
-            }
-
-            toast.success(isEdit ? `「${sgName}」を更新しました` : `「${sgName}」を追加しました`);
-            resetSgForm();
-            loadData();
-        } catch (e) {
-            console.error(e);
-            dialog.error("社会保険規定の保存に失敗しました。");
-        }
-    };
-
-    const resetSgForm = () => {
-        setEditingSgId(null);
-        setSgName("");
-        setSgType("union"); // 🆕 ここ！デフォルトの種別（追加画面の初期値）に戻す
-        setSgIsFixed(0);
-        setSgHealthRate(0);
-        setSgCareRate(0);
-        setSgPensionRate(18.3); // 厚生年金は18.3%を初期値にしても良いですね
-        setSgFixedAmount(0);
-        setSgCompHealthRate(0);
-        setSgCompCareRate(0);
-        setSgCompPensionRate(Master.INSURANCE_2026.PENSION_RATE[0]);
-        setSgChildAllowanceRate(Master.INSURANCE_2026.CHILD_ALLOWANCE_RATE);
-        setSgCompFixedAmount(0);
-        
-        setEditingSgId(null);
-    };
-
-    const startEditSg = (sg: any) => {
-        setEditingSgId(sg.id); setSgName(sg.name); setSgType(sg.type);
-        setSgHealthRate(sg.health_rate); setSgCareRate(sg.care_rate);
-        setSgPensionRate(sg.pension_rate); setSgIsFixed(sg.is_fixed);
-        setSgFixedAmount(sg.fixed_amount);
-        setSgCompHealthRate(sg.comp_health_rate || 0);
-        setSgCompCareRate(sg.comp_care_rate || 0);
-        setSgCompPensionRate(sg.comp_pension_rate || Master.INSURANCE_2026.PENSION_RATE[0]);
-        setSgChildAllowanceRate(sg.child_allowance_rate || Master.INSURANCE_2026.CHILD_ALLOWANCE_RATE);
-        setSgCompFixedAmount(sg.comp_fixed_amount || 0);
-    };
-
-    const getPlaceholder = () => {
-        if (sgType === "union") return "例: ○○健康保険組合";
-        if (sgType === "kokuho") return "例: ○○建設国民健康保険組合";
-        return "規定名を入力してください";
-    };
-
-    const toggleSocialGroupStatus = async (id: number, currentName: string, currentActiveStatus: number) => {
-        if (!db) return;
-
-        // 現在 1(有効) なら 0(廃止) へ、 現在 0(廃止) なら 1(有効) へ
-        const nextStatus = currentActiveStatus === 1 ? 0 : 1;
-
-        if (nextStatus === 0) {
-            // 廃止しようとしている場合：使用中チェック
-            const usage = await db.select<any[]>("SELECT id FROM staff WHERE social_insurance_group_id = ?", [id]);
-            if (usage.length > 0) {
-                dialog.warning(`「${currentName}」は現在使用中の従業員がいるため、廃止できません。`);
-                return;
-            }
-            const ok = await ask(
-                `「${currentName}」を廃止しますか？\n(新規登録時の選択肢に表示されなくなります)`,
-                { title: '確認', kind: 'warning' }
-            );
-            if (!ok) return;
-        }
-
-        try {
-            await db.execute(
-                "UPDATE social_insurance_groups SET is_active = ? WHERE id = ?",
-                [nextStatus, id]
-            );
-            // refreshSocialGroups ではなく、既存の loadData を呼ぶ
-            await loadData(); 
-            
-            toast.success(nextStatus === 1 ? `「${currentName}」を復元しました` : `「${currentName}」を廃止しました`);
-        } catch (e) {
-            console.error("Status Toggle Error:", e);
-            dialog.error("状態の更新に失敗しました。");
-        }
     };
 
     // 保存処理（新規登録・更新兼用）
@@ -799,10 +629,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         || roundSocialIns !== savedRounding.roundSocialIns
         || roundEmpIns !== savedRounding.roundEmpIns;
 
-    // データを有効・無効で分ける
-    const activeGroups = socialGroups.filter(sg => sg.is_active === 1);
-    const inactiveGroups = socialGroups.filter(sg => sg.is_active === 0);
-
     return {
         isInfoDirty,
         isRoundingDirty,
@@ -874,40 +700,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setEditingPgId,
         deletingPgId,
         setDeletingPgId,
-        socialGroups,
-        setSocialGroups,
-        sgName,
-        setSgName,
-        sgType,
-        setSgType,
-        sgHealthRate,
-        setSgHealthRate,
-        sgCareRate,
-        setSgCareRate,
-        sgPensionRate,
-        setSgPensionRate,
-        sgIsFixed,
-        setSgIsFixed,
-        sgFixedAmount,
-        setSgFixedAmount,
-        editingSgId,
-        setEditingSgId,
-        deletingSgId,
-        setDeletingSgId,
-        previewPref,
-        setPreviewPref,
-        showInactive,
-        setShowInactive,
-        sgCompHealthRate,
-        setSgCompHealthRate,
-        sgCompCareRate,
-        setSgCompCareRate,
-        sgCompPensionRate,
-        setSgCompPensionRate,
-        sgChildAllowanceRate,
-        setSgChildAllowanceRate,
-        sgCompFixedAmount,
-        setSgCompFixedAmount,
         branches,
         setBranches,
         editingBranchId,
@@ -950,13 +742,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         saveCompany,
         startEditPg,
         resetPgForm,
-        getRates,
-        rates,
-        saveSocialGroup,
-        resetSgForm,
-        startEditSg,
-        getPlaceholder,
-        toggleSocialGroupStatus,
         savePayrollGroup,
         deletePayrollGroup,
         saveBranch,
@@ -965,8 +750,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         deleteBranch,
         saveRoundingSettings,
         searchCorporateNumber,
-        activeGroups,
-        inactiveGroups,
     };
 }
 

@@ -8,14 +8,16 @@ import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
+import { insurerOf, loadHealthInsurers } from '../../utils/healthInsurer';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 /** 明細を開いたときに読むもの（給与規定グループの設定などのほか）。読み込み中・読み込めなかったときは確定しない */
-type LoadPart = "group" | "items" | "yearEnd" | "flatTax";
+type LoadPart = "group" | "insurer" | "items" | "yearEnd" | "flatTax";
 type LoadStatus = "loading" | "ok" | "error";
-const LOAD_PARTS: LoadPart[] = ["group", "items", "yearEnd", "flatTax"];
+const LOAD_PARTS: LoadPart[] = ["group", "insurer", "items", "yearEnd", "flatTax"];
 const LOAD_PART_LABELS: Record<LoadPart, string> = {
   group: "給与規定グループの設定",
+  insurer: "社会保険規定（健康保険組合の料率など）",
   items: "給与項目",
   yearEnd: "年末調整の過不足額",
   flatTax: "定額減税の残り",
@@ -63,7 +65,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   });
 
   // 給与規定グループの設定・給与項目・年末調整の過不足額・定額減税の残りの読み込み（読み込み中・読み込めなかったときは確定しない）
-  const [loadStatus, setLoadStatus] = useState<Record<LoadPart, LoadStatus>>({ group: "loading", items: "loading", yearEnd: "loading", flatTax: "loading" });
+  const [loadStatus, setLoadStatus] = useState<Record<LoadPart, LoadStatus>>({ group: "loading", insurer: "loading", items: "loading", yearEnd: "loading", flatTax: "loading" });
   const markLoad = (part: LoadPart, status: LoadStatus) => setLoadStatus(p => (p[part] === status ? p : { ...p, [part]: status }));
 
   // ヘルパー関数: 時間のフォーマット
@@ -72,6 +74,25 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     const m = Math.round((num - h) * 60);
     return `${h}:${String(m).padStart(2, '0')}`;
   };
+
+  // 社会保険規定（健康保険の保険者）の読み込み：健康保険組合は組合の料率、国保組合は従業員ごとの月額で計算する（utils/healthInsurer.ts）
+  useEffect(() => {
+    let cancelled = false;
+    markLoad("insurer", "loading");
+    (async () => {
+      if (!db) return;
+      try {
+        const insurers = await loadHealthInsurers(db);
+        if (cancelled) return;
+        setExtras(p => ({ ...p, healthInsurer: insurerOf(insurers, staff.social_insurance_group_id) }));
+        markLoad("insurer", "ok");
+      } catch (e) {
+        console.error("社会保険規定の読み込みエラー:", e);
+        if (!cancelled) markLoad("insurer", "error");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [db, staff.social_insurance_group_id]);
 
   // 給与項目の読み込み（ほかの人の明細に切り替えたときに、前の人の項目で確定しないように、読み終わるまで確定しない）
   useEffect(() => {
@@ -326,7 +347,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     + (salary.paidLeavePay > 0 ? 1 : 0)
     + (salary.specialLeavePay > 0 ? 1 : 0)
     + 1 + 1 + 1 + customEarningItems.length;
-  const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + customDeductionItems.length;
+  const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + (salary.kokuhoPremium > 0 ? 1 : 0) + customDeductionItems.length;
   const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
 
   // まだ読み込んでいるもの・読み込めなかったもの（どちらかがあれば確定しない。明細の額が足りないかもしれないため）
@@ -351,6 +372,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     }
     if (salary.prefectureUnknown) {
       alert("都道府県がわからないため、健康保険料と介護保険料を計算していません。\n「都道府県」で健康保険料率に使う都道府県を選んでから、確定してください。");
+      return;
+    }
+    if (salary.insurerRateMissing) {
+      alert(`${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料と介護保険料を計算していません。\n会社設定の「社会保険規定」で、組合の料率（何年何月分から）を入れてから、確定してください。`);
       return;
     }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);

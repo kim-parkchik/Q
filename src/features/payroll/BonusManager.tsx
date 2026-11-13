@@ -687,6 +687,22 @@ export default function BonusManager({ db, staffList }: Props) {
             ) : null;
           })()}
 
+          {/* 健康保険組合の、賞与を支給する月の分の料率がない人（健康保険料・介護保険料を計算していない。確定できない） */}
+          {selectedSettingId && items.length > 0 && (() => {
+            const missing = bonusStaffList
+              .map(s => ({ s, c: calcBonusForStaff(s) }))
+              .filter(({ c }) => !!c && c.totalEarnings > 0 && c.insurerRateMissing);
+            return missing.length > 0 ? (
+              <div style={{ ...S.card, marginBottom: 16, backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13 }}>
+                ⚠ 次の人は、健康保険組合の、賞与を支給する月の分の料率が入っていないため、健康保険料と介護保険料を計算していません（0円）。
+                会社設定の「社会保険規定」で組合の料率を入れるまで、この賞与は確定できません。
+                <div style={{ marginTop: 4, fontSize: 12 }}>
+                  {missing.map(({ s, c }) => <div key={s.id}>・{s.name}：{c?.insurerName}</div>)}
+                </div>
+              </div>
+            ) : null;
+          })()}
+
           {/* 前月に給与を払うはずなのに、まだ確定していない人（前月の給与がないものとして所得税を計算している） */}
           {selectedSettingId && items.length > 0 && prevMonth && (() => {
             const names = bonusStaffList
@@ -768,6 +784,9 @@ export default function BonusManager({ db, staffList }: Props) {
                           ¥{calc.healthInsurance.toLocaleString()}
                           {calc.prefectureUnknown && (
                             <div style={{ fontSize: 10, color: "#b91c1c" }}>⚠ 都道府県が不明</div>
+                          )}
+                          {calc.insurerRateMissing && (
+                            <div style={{ fontSize: 10, color: "#b91c1c" }}>⚠ 組合の料率がない</div>
                           )}
                           {calc.isHealthTarget && calc.healthHyojun < calc.hyojunBonus && (
                             <div style={{ fontSize: 10, color: "#b45309" }}>年度の上限（573万円）まで</div>

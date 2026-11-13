@@ -7,6 +7,7 @@ import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
+import { describeUnionRate, INSURER_TYPE_LABELS } from '../../utils/healthInsurer';
 
 interface Props {
   db: any;
@@ -48,13 +49,20 @@ export default function PayStubModal(props: Props) {
         <div className="no-print" style={S.panelS}>
           <h3 style={{ margin: "0 0 12px 0", fontSize: 15 }}>給与明細 設定</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-            <div>
-              <label style={S.labelS}>都道府県</label>
-              <select value={extras.prefecture} onChange={e => setExtras(p => ({ ...p, prefecture: e.target.value }))} style={S.inputS}>
-                {!extras.prefecture && <option value="">（選んでください）</option>}
-                {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
+            {salary.insurer.type === "kyokai" ? (
+              <div>
+                <label style={S.labelS}>都道府県</label>
+                <select value={extras.prefecture} onChange={e => setExtras(p => ({ ...p, prefecture: e.target.value }))} style={S.inputS}>
+                  {!extras.prefecture && <option value="">（選んでください）</option>}
+                  {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label style={S.labelS}>健康保険（{INSURER_TYPE_LABELS[salary.insurer.type]}）</label>
+                <div style={{ ...S.inputS, backgroundColor: "#f8fafc" }} title="従業員の画面の「適用する社保規定」。料率は会社設定の「社会保険規定」">{salary.insurer.name}</div>
+              </div>
+            )}
             <div>
               <label style={S.labelS}>{salary.taxColumn === "hei" ? "扶養人数（丙欄では使いません）" : "扶養人数"}</label>
               <input type="number" min={0} max={7} value={extras.dependents} onChange={e => setExtras(p => ({ ...p, dependents: Number(e.target.value) }))} style={S.inputS} />
@@ -68,16 +76,17 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              disabled={salary.prefectureUnknown || loadingParts.length > 0 || loadErrors.length > 0}
+              disabled={salary.prefectureUnknown || salary.insurerRateMissing || loadingParts.length > 0 || loadErrors.length > 0}
               title={salary.prefectureUnknown
                 ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
+                : salary.insurerRateMissing ? `${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料を計算していません。会社設定の「社会保険規定」で料率を入れてから確定してください`
                 : loadErrors.length > 0 ? `${loadErrors.join("・")}を読み込めなかったので、確定できません`
                 : loadingParts.length > 0 ? `${loadingParts.join("・")}を読み込んでいます`
                 : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
               style={{
                 ...S.printBtnS, flex: 1,
-                backgroundColor: salary.prefectureUnknown || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
-                cursor: salary.prefectureUnknown || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
+                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
+                cursor: salary.prefectureUnknown || salary.insurerRateMissing || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
               }}
             >
               {loadingParts.length > 0 && loadErrors.length === 0 ? "読み込んでいます…" : isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
@@ -109,7 +118,13 @@ export default function PayStubModal(props: Props) {
               {branchPrefectureProblem && <div style={{ fontWeight: "normal" }}>{branchPrefectureProblem}</div>}
             </div>
           )}
-          {!salary.prefectureUnknown && branchPrefectureProblem && (
+          {salary.insurerRateMissing && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ {salary.insurer.name}の、{insMonthLabel}の料率が入っていないため、健康保険料と介護保険料を計算していません（0円）。
+              会社設定の「社会保険規定」で、組合から知らされた本人負担の料率を「何年何月分から」と一緒に入れてください。入れるまで確定できません。
+            </div>
+          )}
+          {salary.insurer.type === "kyokai" && !salary.prefectureUnknown && branchPrefectureProblem && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               ⚠ {branchPrefectureProblem}
               {extras.prefecture && `この明細は、「都道府県」で選んだ${extras.prefecture}の料率で計算しています。`}
@@ -396,6 +411,9 @@ export default function PayStubModal(props: Props) {
                   {salary.childSupport > 0 && (
                     <tr><td style={S.tdS}>子ども・子育て支援金</td><td style={S.rtdS}>¥{salary.childSupport.toLocaleString()}</td></tr>
                   )}
+                  {salary.kokuhoPremium > 0 && (
+                    <tr><td style={S.tdS}>国保組合の保険料</td><td style={S.rtdS}>¥{salary.kokuhoPremium.toLocaleString()}</td></tr>
+                  )}
                   <tr><td style={S.tdS}>厚生年金保険料</td><td style={S.rtdS}>¥{salary.welfarePension.toLocaleString()}</td></tr>
                   <tr><td style={S.tdS}>雇用保険料</td><td style={S.rtdS}>¥{salary.empInsurance.toLocaleString()}</td></tr>
                   <tr><td style={S.tdS}>所得税</td><td style={S.rtdS}>¥{salary.incomeTax.toLocaleString()}</td></tr>
@@ -501,7 +519,13 @@ export default function PayStubModal(props: Props) {
           </div>
 
           <div style={{ marginTop: 18, fontSize: 10, color: "#999", borderTop: "1px solid #ddd", paddingTop: 8 }}>
-            ※ {salary.prefectureUnknown
+            ※ {salary.insurer.type === "kokuho"
+              ? `${salary.insurer.name}（国民健康保険組合）の人なので、健康保険料・介護保険料・子ども・子育て支援金はかからず、国保組合の保険料（従業員の画面の月額）を引いています。`
+              : salary.insurer.type === "union"
+                ? (salary.unionRate
+                  ? `健康保険料・介護保険料・子ども・子育て支援金は${salary.insurer.name}の料率（${describeUnionRate(salary.unionRate)}）、`
+                  : `健康保険料・介護保険料は、${salary.insurer.name}の料率が入っていないため計算していません。`)
+              : salary.prefectureUnknown
               ? "健康保険料・介護保険料は、都道府県がわからないため計算していません。"
               : `健康保険料は協会けんぽ${extras.prefecture}支部の${insMaster.MASTER_YEAR}年${insMaster.MASTER_MONTH}月分からの料率、`}
             厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月からの料率で計算。

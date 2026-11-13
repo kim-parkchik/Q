@@ -175,6 +175,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetEmploymentInsNum, setTargetEmploymentInsNum] = useState(""); // 雇用保険被保険者番号
 
     const [targetSocialInsGroupId, setTargetSocialInsGroupId] = useState(1); // 🆕 追加
+    const [targetKokuhoPremium, setTargetKokuhoPremium] = useState(0); // 国保組合の保険料（月額。社保規定が国保組合の人だけ）
     const [targetEmpInsType, setTargetEmpInsType] = useState(""); // 🆕 追加 (NULL=会社設定に従う)
 
     // =========================================================
@@ -339,6 +340,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetIsEmploymentInsEligible(1);
         setTargetHealthInsNum(""); setTargetPensionNum(""); setTargetEmploymentInsNum("");
         setTargetSocialInsGroupId(1);
+        setTargetKokuhoPremium(0);
         setTargetEmpInsType("");
         setEditingId(null);
     };
@@ -395,6 +397,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetRemunerationHistory(remunerationHistoryOf(s));
         // 社保規定が空（NULL）なら「未加入 / 適用除外」
         setTargetSocialInsGroupId(s.social_insurance_group_id ?? 0);
+        setTargetKokuhoPremium(Number(s.kokuho_premium) || 0);
         setTargetEmpInsType(s.employment_insurance_type || "");
         setTargetIsExecutive(s.is_executive || 0);
         setTargetIsEmploymentInsEligible(s.is_employment_ins_eligible ?? 1); // 雇用保険はデフォルト1なので??を使用
@@ -470,6 +473,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetPatternId) !== Number(original.calendar_pattern_id || 0) ||
             Number(targetPayrollGroupId) !== Number(original.payroll_group_id || 1) ||
             Number(targetSocialInsGroupId) !== Number(original.social_insurance_group_id ?? 0) ||
+            Number(targetKokuhoPremium) !== Number(original.kokuho_premium || 0) ||
             String(targetEmpInsType || "") !== String(original.employment_insurance_type || "") ||
             String(targetHealthInsNum) !== String(original.health_ins_num || "") ||
             String(targetPensionNum) !== String(original.pension_num || "") ||
@@ -519,6 +523,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 // 🆕 追加
                 // 「未加入 / 適用除外」(0) は NULL で保存する（0 という社保規定は無いので、そのままだと外部キーの制約で保存できない）
                 Number(targetSocialInsGroupId) || null, // social_insurance_group_id
+                // 国保組合の保険料（月額）。国保組合ではない規定を選んだときは残さない
+                socialGroups.find(sg => Number(sg.id) === Number(targetSocialInsGroupId))?.type === "kokuho" ? Math.max(0, Math.floor(Number(targetKokuhoPremium) || 0)) : 0,
                 targetEmpInsType || null,     // employment_insurance_type
                 Number(targetPayrollGroupId) || 1,
                 targetHealthInsNum, targetPensionNum, targetEmploymentInsNum,
@@ -546,7 +552,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         scheduled_work_hours=?, standard_remuneration=?,
                         work_days=?, is_executive=?, is_employment_ins_eligible=?,
                         is_overtime_eligible=?, fixed_overtime_hours=?, fixed_overtime_allowance=?,
-                        social_insurance_group_id=?, employment_insurance_type=?, -- 🆕 追加
+                        social_insurance_group_id=?, kokuho_premium=?, employment_insurance_type=?, -- 🆕 追加
                         payroll_group_id=?,
                         health_ins_num=?, pension_num=?, employment_ins_num=?,
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
@@ -567,7 +573,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         scheduled_work_hours, standard_remuneration,
                         work_days, is_executive, is_employment_ins_eligible,
                         is_overtime_eligible, fixed_overtime_hours, fixed_overtime_allowance,
-                        social_insurance_group_id, employment_insurance_type, -- 🆕 追加
+                        social_insurance_group_id, kokuho_premium, employment_insurance_type, -- 🆕 追加
                         payroll_group_id,
                         health_ins_num, pension_num, employment_ins_num,
                         scheduled_in, is_flex, core_start, core_end,
@@ -629,7 +635,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     const fetchSocialGroups = async () => {
         try {
-            const res = await db.select<any[]>("SELECT id, name FROM social_insurance_groups WHERE is_active = 1 ORDER BY id ASC");
+            const res = await db.select<any[]>("SELECT id, name, type FROM social_insurance_groups WHERE is_active = 1 ORDER BY id ASC");
             setSocialGroups(res);
             
             // 新規登録時のデフォルト値をセット（リストが空でない場合）
@@ -807,6 +813,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetEmploymentInsNum,
         targetSocialInsGroupId,
         setTargetSocialInsGroupId,
+        targetKokuhoPremium,
+        setTargetKokuhoPremium,
         targetEmpInsType,
         setTargetEmpInsType,
         socialGroups,

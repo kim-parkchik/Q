@@ -1,5 +1,4 @@
 import { HOLIDAY_CSV_URL_DEFAULT } from "../constants/appConfig";
-import * as Master from '../constants';
 
 /**
  * 従業員ごとの記録の表（出勤簿・賃金台帳・年次有給休暇管理簿などの元になるもの）
@@ -112,6 +111,7 @@ export const DB_SCHEMAS = [
     is_executive INTEGER DEFAULT 0,
     payroll_group_id INTEGER DEFAULT 1,
     social_insurance_group_id INTEGER DEFAULT 1, -- 社保規定グループとの紐付け
+    kokuho_premium INTEGER DEFAULT 0,  -- 国民健康保険組合の保険料（月額・本人負担。社保規定が国保組合の人だけ使う。utils/healthInsurer.ts）
     calendar_pattern_id INTEGER DEFAULT 1,
     work_days TEXT,
     scheduled_in TEXT DEFAULT '',
@@ -290,6 +290,7 @@ export const DB_SCHEMAS = [
     child_support INTEGER DEFAULT 0,  -- 子ども・子育て支援金（令和8年4月分から）
     welfare_pension INTEGER DEFAULT 0,
     emp_insurance INTEGER DEFAULT 0,
+    kokuho_premium INTEGER DEFAULT 0, -- 国民健康保険組合の保険料（国保組合の人だけ。social_ins_total に入れる）
     social_ins_total INTEGER DEFAULT 0,
     income_tax INTEGER DEFAULT 0,
     flat_tax_reduction INTEGER DEFAULT 0, -- 定額減税額（令和6年6月〜12月。income_tax はこれを引いた後の額）
@@ -388,28 +389,24 @@ export const DB_SCHEMAS = [
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,
 
-  // 18. 社会保険規定グループ
+  // 18. 社会保険規定グループ（健康保険の保険者。くわしくは utils/healthInsurer.ts）
   `CREATE TABLE IF NOT EXISTS social_insurance_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    type TEXT DEFAULT 'kyokai',      -- 'kyokai', 'union', 'kokuho'
-    is_fixed INTEGER DEFAULT 0,      -- 0:料率(標準報酬), 1:定額
-    
-    -- ★ 本人負担率（給与から引く分）
-    health_rate REAL DEFAULT 0.0,    
-    care_rate REAL DEFAULT 0.0,      
-    pension_rate REAL DEFAULT ${Master.INSURANCE_2026.PENSION_RATE[0]},  -- 厚生年金は折半後(18.3 / 2)の値を保持
-
-    -- ★ 会社負担率（会社が納付する分：法定福利費の計算用）
-    -- 協会けんぽ以外（組合健保など）で負担割合が折半でない場合に対応
-    comp_health_rate REAL DEFAULT 0.0,
-    comp_care_rate REAL DEFAULT 0.0,
-    comp_pension_rate REAL DEFAULT ${Master.INSURANCE_2026.PENSION_RATE[0]},
-    child_allowance_rate REAL DEFAULT ${Master.INSURANCE_2026.CHILD_ALLOWANCE_RATE}, -- 子ども・子育て拠出金（会社全額負担分）
-
-    fixed_amount INTEGER DEFAULT 0,  -- 定額時の金額
-    comp_fixed_amount INTEGER DEFAULT 0, -- 定額時の会社負担額
+    type TEXT DEFAULT 'kyokai',      -- kyokai：協会けんぽ（料率は都道府県ごと）／union：健康保険組合（下の料率の表）／kokuho：国民健康保険組合（従業員ごとの月額）
     is_active INTEGER DEFAULT 1
+  );`,
+
+  // 18-2. 健康保険組合の料率（本人負担の%。「何年何月分から」ごと）
+  `CREATE TABLE IF NOT EXISTS social_insurance_group_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    from_month TEXT NOT NULL,              -- この料率を使いはじめる保険料の月（YYYY-MM）
+    health_rate REAL NOT NULL DEFAULT 0,   -- 健康保険（本人負担の%）
+    care_rate REAL NOT NULL DEFAULT 0,     -- 介護保険（本人負担の%。40〜64歳）
+    child_support_rate REAL NOT NULL DEFAULT 0, -- 子ども・子育て支援金（本人負担の%。令和8年4月分から）
+    UNIQUE(group_id, from_month),
+    FOREIGN KEY (group_id) REFERENCES social_insurance_groups(id) ON DELETE CASCADE
   );`,
 
   // log

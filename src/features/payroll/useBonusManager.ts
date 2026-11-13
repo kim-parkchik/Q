@@ -7,6 +7,7 @@ import { calcBonusWithholdingTax, toTaxColumn } from '../../utils/incomeTax';
 import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
 import { branchPrefectureOf } from '../../utils/branchPrefecture';
+import { healthPremiumsOf, insurerOf, loadHealthInsurers, type HealthInsurer } from '../../utils/healthInsurer';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 import { checkLeaveExemptBonus, exemptLeavePeriodsOf } from '../../utils/leaveExemption';
 import { executeBatch } from '../../utils/dbBatch';
@@ -52,6 +53,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
   /** 給与規定グループ（前月に支払う給与の計算期間を出すのに使う） */
   const [payrollGroups, setPayrollGroups] = useState<(PayrollGroupForPeriod & { id: number })[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  // 社会保険規定（健康保険の保険者）。健康保険組合は組合の料率、国保組合の人は賞与から健康保険料を引かない（utils/healthInsurer.ts）
+  const [insurers, setInsurers] = useState<Map<number, HealthInsurer>>(new Map());
   const [companySettings, setCompanySettings] = useState<any>({});
 
   const [settingName, setSettingName] = useState('夏季賞与');
@@ -169,6 +172,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     loadSettings();
     loadItems();
     db.select<any[]>("SELECT * FROM branches ORDER BY id ASC").then(setBranches);
+    loadHealthInsurers(db).then(setInsurers).catch((e) => console.error("社会保険規定の読み込みエラー:", e));
     db.select<any[]>("SELECT * FROM company WHERE id = 1").then(res => { if (res?.[0]) setCompanySettings(res[0]); });
     db.select<any[]>("SELECT id, closing_day, is_next_month FROM payroll_groups ORDER BY id ASC").then(res => setPayrollGroups(res ?? []));
   }, [db, loadSettings, loadItems]);
@@ -370,8 +374,6 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const payYear = selectedSetting.target_year;
     const payMonth = selectedSetting.target_month;
     const ins = Master.getInsuranceMaster(payYear, payMonth);
-    const kenpoRate = branchPref.prefecture ? ins.KENPO_RATES[branchPref.prefecture] : undefined;
-    const healthRate = kenpoRate ? kenpoRate[1] : null; // 合計の料率(%)
 
     // 社会保険・雇用保険に加入していない人からは引かない（給与と同じ判定）
     const isSocialInsEnrolled = checkSocialInsEnrolled(staff, payYear, payMonth);
@@ -395,15 +397,18 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     // 健康保険・介護保険・子ども・子育て支援金の標準賞与額は、年度（4月〜翌3月）の累計で573万円まで
     const healthHyojun = cappedBonusStandard(hyojunBonus, earlier.health, ins.HEALTH_INS_ANNUAL_LIMIT);
 
-    // 本人負担分 = 標準賞与額 × 料率 ÷ 2（介護保険は「健康保険＋介護保険」でまとめて計算し、健康保険料を引く）
-    const prefectureUnknown = isHealthTarget && healthRate === null;
-    const healthInsurance = isHealthTarget && healthRate !== null ? calcPremium(healthHyojun, healthRate, sInsType) : 0;
-    const nursingInsurance = isNursing && healthRate !== null
-      ? calcPremium(healthHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType) - healthInsurance
-      : 0;
-    const childSupport = isHealthTarget && Master.isChildSupportMonth(ins, payYear, payMonth) && ins.CHILD_SUPPORT_RATE
-      ? calcPremium(healthHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType)
-      : 0;
+    // 健康保険料・介護保険料・子ども・子育て支援金（給与と同じ。utils/healthInsurer.ts）
+    // 協会けんぽは都道府県の料率を折半、健康保険組合は組合の本人負担の料率（賞与を支給する月の分）。
+    // 国保組合の人は、賞与からは何も引かない（国保組合の保険料は、毎月の給与で引く定額）
+    const insurer = insurerOf(insurers, staff.social_insurance_group_id);
+    const health = isHealthTarget
+      ? healthPremiumsOf({ base: healthHyojun, insurer, prefecture: branchPref.prefecture, year: payYear, month: payMonth, nursing: byAge.nursing, rounding: sInsType })
+      : null;
+    const prefectureUnknown = health?.missing === "prefecture";
+    const insurerRateMissing = health?.missing === "unionRate";
+    const healthInsurance = health?.health ?? 0;
+    const nursingInsurance = health?.nursing ?? 0;
+    const childSupport = health?.childSupport ?? 0;
 
     // 厚生年金の標準賞与額は1か月150万円まで（同じ月に前にも支払っていれば、合わせて150万円まで）
     const pensionHyojun = cappedBonusStandard(hyojunBonus, earlier.pensionSameMonth, ins.PENSION_INS_SINGLE_LIMIT);
@@ -442,6 +447,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       prevSalaryStatus, taxByMonthlyTable,
       /** 健康保険料がかかるのに、拠点の都道府県がわからないので、健康保険料・介護保険料を計算していない（確定できない） */
       prefectureUnknown, prefectureProblem: branchPref.problem,
+      /** 健康保険組合の人で、賞与を支給する月の分の組合の料率を入れていないので、健康保険料・介護保険料を計算していない（確定できない） */
+      insurerRateMissing, insurerName: insurer?.name ?? "",
     };
   };
 
@@ -508,6 +515,15 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
         `次の人は、拠点の都道府県がわからないため、健康保険料と介護保険料を計算していません。\n` +
         `会社の設定や従業員の設定で直してから、確定してください。\n\n` +
         unknownPrefecture.map(r => `・${r.staff.name}：${r.calc.prefectureProblem ?? ""}`).join("\n")
+      );
+    }
+    // 健康保険組合の、賞与を支給する月の分の料率がない人も、健康保険料と介護保険料を計算していないので、確定できない
+    const missingRate = rows.filter(r => r.calc.insurerRateMissing);
+    if (missingRate.length > 0) {
+      return dialog.warning(
+        `次の人は、健康保険組合の${selectedSetting.target_year}年${selectedSetting.target_month}月分の料率が入っていないため、健康保険料と介護保険料を計算していません。\n` +
+        `会社設定の「社会保険規定」で、組合の料率（何年何月分から）を入れてから、確定してください。\n\n` +
+        missingRate.map(r => `・${r.staff.name}：${r.calc.insurerName}`).join("\n")
       );
     }
     // 前月に給与を払うはずなのに確定していない人は、前月の給与がないものとして所得税を計算している

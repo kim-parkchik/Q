@@ -38,8 +38,12 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetEmploymentInsNum,
         targetSocialInsGroupId,
         setTargetSocialInsGroupId,
+        targetKokuhoPremium,
+        setTargetKokuhoPremium,
         socialGroups,
     } = cm;
+    // 選んでいる社保規定の種類（健康保険組合・国保組合。utils/healthInsurer.ts）
+    const selectedGroup = socialGroups.find(sg => Number(sg.id) === Number(targetSocialInsGroupId));
 
     return (
         <div style={{ marginTop: "10px" }}>
@@ -165,7 +169,31 @@ export default function InsuranceSection({ cm }: Props) {
                                 <option key={sg.id} value={sg.id}>{sg.name}</option>
                             ))}
                         </select>
+                        {selectedGroup?.type === "union" && (
+                            <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>
+                                健康保険料・介護保険料・子ども・子育て支援金は、会社設定の「社会保険規定」で入れた組合の料率（本人負担）で計算します。
+                            </div>
+                        )}
                     </div>
+
+                    {/* 国保組合の人：保険料は人ごとの月額（家族の人数などで違う） */}
+                    {selectedGroup?.type === "kokuho" && (
+                        <div>
+                            <label style={labelStyle}>国保組合の保険料（月額・本人が払う分）</label>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <div style={{ position: "relative", display: "flex", alignItems: "center", width: "160px" }}>
+                                    <input type="number" min={0} value={targetKokuhoPremium}
+                                        onChange={e => setTargetKokuhoPremium(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                                        style={{ ...inputStyle, paddingRight: "30px", textAlign: "right" }} />
+                                    <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>円</span>
+                                </div>
+                                <span style={{ fontSize: "11px", color: targetKokuhoPremium > 0 ? "#64748b" : "#b45309" }}>
+                                    国保組合から知らされた、この人の毎月の保険料（家族の分も含め、給与から引く額）。毎月の給与から引き、賞与からは引きません。
+                                    健康保険料・介護保険料・子ども・子育て支援金はかかりません。厚生年金は、標準報酬月額を入れるとかかります。
+                                </span>
+                            </div>
+                        </div>
+                    )}
 
                     <RemunerationHistory cm={cm} />
                 </div>

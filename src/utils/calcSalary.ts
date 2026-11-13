@@ -110,6 +110,7 @@ import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
 import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './specialLeave';
 import { DEFAULT_FLEX_RULE, isFlexStaff, settleFlex, type FlexRule, type FlexSettlement } from './flexTime';
+import { healthPremiumsOf, type HealthInsurer, type InsurerType, type UnionRate } from './healthInsurer';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -119,7 +120,13 @@ export interface SalaryExtras {
   allowanceName: string;
   allowanceAmount: number;
   residentTax: number;
+  /** 協会けんぽの健康保険料率に使う都道府県（拠点の都道府県） */
   prefecture: string;
+  /**
+   * 従業員の社会保険規定（健康保険の保険者。utils/healthInsurer.ts の loadHealthInsurers・insurerOf で読む）
+   * 健康保険組合は組合の料率、国保組合は健康保険料をかけずに従業員ごとの月額を引く。null・省略は協会けんぽ
+   */
+  healthInsurer?: HealthInsurer | null;
   dependents: number;
   /** 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる）。fixed は「固定（毎月同額）」の項目（日割りする） */
   customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean; fixed?: boolean }[];
@@ -286,6 +293,14 @@ export interface SalaryResult {
   childSupport: number;
   welfarePension: number;
   empInsurance: number;
+  /** 国民健康保険組合の保険料（国保組合の人だけ。従業員ごとの月額。社会保険料として所得税の計算で引く） */
+  kokuhoPremium: number;
+  /** 健康保険の保険者（社会保険規定。協会けんぽなら name は空） */
+  insurer: { type: InsurerType; name: string };
+  /** 健康保険組合の人の、この給与で引いた最初の月の分の料率（ほかは null） */
+  unionRate: UnionRate | null;
+  /** 健康保険組合の人で、この給与で引く月の分の組合の料率を入れていないので、健康保険料・介護保険料を計算していない（0円）。確定できない */
+  insurerRateMissing: boolean;
   /** 源泉所得税（定額減税を引いた後の、実際に控除する額） */
   incomeTax: number;
   /** 定額減税を引く前の源泉所得税 */
@@ -659,9 +674,9 @@ export const saveSalaryResult = async (
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
       absence_deduction, prescribed_work_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours,
       total_earnings, taxable_amount,
-      health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
+      health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance, kokuho_premium,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -688,6 +703,7 @@ export const saveSalaryResult = async (
       child_support = excluded.child_support,
       welfare_pension = excluded.welfare_pension,
       emp_insurance = excluded.emp_insurance,
+      kokuho_premium = excluded.kokuho_premium,
       social_ins_total = excluded.social_ins_total,
       income_tax = excluded.income_tax,
       flat_tax_reduction = excluded.flat_tax_reduction,
@@ -709,8 +725,8 @@ export const saveSalaryResult = async (
     // フレックスタイム制で、次の月に繰り越す不足時間（次の月の計算で読む。utils/flexTime.ts の loadFlexCarryIn）
     result.flex ? result.flexCarryOutHours : null,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
-    result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
-    (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
+    result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance, result.kokuhoPremium,
+    (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance + result.kokuhoPremium),
     result.incomeTax, result.flatTaxReduction, result.residentTax, result.yearEndSettlement, result.netPay
   ];
 
@@ -765,8 +781,11 @@ export const socialInsMonthsOf = (
   return collectRetirementMonth && isRetirementMonthCollectable(staff, year, month, collection) ? [prev, { year, month }] : [prev];
 };
 
-/** ある月の分の社会保険料（健康保険・介護保険・子ども・子育て支援金・厚生年金）と、その月の加入・年齢・免除の状態 */
-const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: string, companySettings: any) => {
+/**
+ * ある月の分の社会保険料（健康保険・介護保険・子ども・子育て支援金・厚生年金・国保組合の保険料）と、その月の加入・年齢・免除の状態
+ * 健康保険料・介護保険料・子ども・子育て支援金は、従業員の社会保険規定（協会けんぽ・健康保険組合・国保組合）で決まる（utils/healthInsurer.ts）
+ */
+const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: string, companySettings: any, insurer: HealthInsurer | null) => {
   // 保険料の対象月に合った料率（健康保険は3月分から新年度）
   const ins = Master.getInsuranceMaster(year, month);
 
@@ -785,41 +804,43 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
   // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）
   const isLeaveExemptMonth = checkLeaveExemptMonth(exemptLeavePeriodsOf(staff), year, month);
   const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
-  // 健康保険の料率は都道府県（協会けんぽの支部）ごと。都道府県がわからなければ（拠点の都道府県が未登録など）、
-  // 健康保険料・介護保険料は計算しない（ほかの都道府県で仮に計算しない）。画面で知らせ、確定できないようにする
-  const kenpoRate = ins.KENPO_RATES[prefecture];
-  const healthRate = kenpoRate ? kenpoRate[1] : null; // 合計の料率(%)
   // 社会保険料（本人負担分）の端数：会社の設定（なければ、給与から引くときの原則の50銭以下切り捨て・50銭超切り上げ）
   const sInsType = companySettings?.round_social_ins || 'currency_law';
-  const kenpoHyojun = Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN);
 
-  let healthInsurance = 0, nursingInsurance = 0, childSupport = 0, welfarePension = 0;
-  /** 健康保険料がかかる月なのに、都道府県がわからないので計算していない */
-  const healthRateMissing = isSocialInsMonth && byAge.health && healthRate === null;
-  if (isSocialInsMonth && byAge.health) {
-    if (healthRate !== null) {
-      // 健康保険料
-      healthInsurance = calcPremium(kenpoHyojun, healthRate, sInsType);
+  // 健康保険料・介護保険料（40〜64歳）・子ども・子育て支援金（令和8年4月分から）
+  // 協会けんぽは都道府県（支部）の料率、健康保険組合は組合の本人負担の料率（その月の分）、国保組合の人はかからない（utils/healthInsurer.ts）
+  // 料率がわからなければ（協会けんぽの都道府県・組合のその月の分の料率がない）、健康保険料・介護保険料は計算しない（ほかの料率で仮に計算しない）。
+  // 画面で知らせ、確定できないようにする
+  const health = isSocialInsMonth && byAge.health
+    ? healthPremiumsOf({
+      base: Math.min(hyojunHoshu, ins.KENPO_MAX_HYOJUN), insurer, prefecture, year, month, nursing: byAge.nursing, rounding: sInsType,
+    })
+    : null;
+  const healthInsurance = health?.health ?? 0;
+  const nursingInsurance = health?.nursing ?? 0;
+  const childSupport = health?.childSupport ?? 0;
 
-      // 介護保険料（40〜64歳）
-      // 協会けんぽの保険料額表と同じく「健康保険＋介護保険」の料率でまとめて計算し、健康保険料を引いた残りを介護保険料とする
-      if (byAge.nursing) {
-        const combined = calcPremium(kenpoHyojun, healthRate + ins.KENPO_CARE_RATE[1], sInsType);
-        nursingInsurance = combined - healthInsurance;
-      }
-    }
-
-    // 子ども・子育て支援金（令和8年4月分から。健康保険と同じ標準報酬月額に支援金率を掛ける）
-    if (Master.isChildSupportMonth(ins, year, month) && ins.CHILD_SUPPORT_RATE) {
-      childSupport = calcPremium(kenpoHyojun, ins.CHILD_SUPPORT_RATE[1], sInsType);
-    }
-  }
+  let welfarePension = 0;
   if (isSocialInsMonth && byAge.pension) {
-    // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲）
+    // 厚生年金（標準報酬月額は 88,000円〜650,000円 の範囲。料率は、どの健康保険の人も同じ）
     const pensionHyojun = Math.max(ins.PENSION_MIN_HYOJUN, Math.min(hyojunHoshu, ins.PENSION_MAX_HYOJUN));
     welfarePension = calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType);
   }
-  return { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, healthInsurance, nursingInsurance, childSupport, welfarePension, healthRateMissing };
+
+  // 国保組合の保険料（従業員ごとの月額）：国保組合の人の、入社前・資格喪失日がある月・75歳の誕生月より前の月の分
+  // （厚生年金の標準報酬月額がない人（厚生年金に入らない事業所）からも引く。健康保険・厚生年金の産休・育休の免除とは別なので、
+  //  産休・育休の月も月額を引く。国保組合が保険料を減らすときは、従業員の画面の月額を直す）
+  const kokuhoPremium = insurer?.type === 'kokuho' && isInsuredMonth && byAge.health
+    ? Math.max(0, Math.floor(Number(staff.kokuho_premium) || 0))
+    : 0;
+
+  return {
+    isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth,
+    healthInsurance, nursingInsurance, childSupport, welfarePension, kokuhoPremium,
+    /** 健康保険料がかかる月なのに、料率がわからないので計算していない（prefecture：協会けんぽの都道府県／unionRate：組合のその月の分の料率） */
+    healthRateMissing: health?.missing ?? null,
+    unionRate: health?.unionRate ?? null,
+  };
 };
 
 /** 計算期間の途中で入社・退職した人の日割り：none: しない / workdays: 所定労働日数で / calendar: 暦日数で */
@@ -1683,13 +1704,15 @@ export const calculateSalary = (
   const socialInsCollection = toSocialInsCollection(extras.socialInsCollection);
   const retirementMonthCollectable = isRetirementMonthCollectable(staff, targetYear, targetMonth, socialInsCollection);
   const socialInsMonths = socialInsMonthsOf(staff, targetYear, targetMonth, socialInsCollection, !!extras.collectRetirementMonth);
-  const perMonth = socialInsMonths.map(({ year, month }) => socialPremiumsOf(staff, year, month, extras.prefecture, companySettings));
+  const insurer = extras.healthInsurer ?? null;
+  const perMonth = socialInsMonths.map(({ year, month }) => socialPremiumsOf(staff, year, month, extras.prefecture, companySettings, insurer));
   const main = perMonth[0];
   const { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth } = main;
   const healthInsurance = perMonth.reduce((sum, p) => sum + p.healthInsurance, 0);
   const nursingInsurance = perMonth.reduce((sum, p) => sum + p.nursingInsurance, 0);
   const childSupport = perMonth.reduce((sum, p) => sum + p.childSupport, 0);
   const welfarePension = perMonth.reduce((sum, p) => sum + p.welfarePension, 0);
+  const kokuhoPremium = perMonth.reduce((sum, p) => sum + p.kokuhoPremium, 0);
 
   // 雇用保険の料率は、賃金を支払った月のもの（社会保険料の徴収月とは関係ない）
   const ins = Master.getInsuranceMaster(targetYear, targetMonth);
@@ -1706,7 +1729,8 @@ export const calculateSalary = (
     : 0;
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
-  const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance;
+  // 国保組合の保険料も、給与から引く社会保険料として所得税の計算で引く（所得税法74条2項の社会保険料に、国民健康保険の保険料が入る）
+  const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance + kokuhoPremium;
   // 通勤手当は、その人の非課税限度額まで所得税がかからない（utils/commuteAllowance.ts）
   // 電車・バスなどだけの人は月15万円まで、マイカー・自転車などの人は片道の距離の区分の額（＋駐車場等・有料道路、両方の人は＋運賃等）まで
   // 限度額の表は、給与を支払う年月で選ぶ（令和7年4月・令和8年4月に改正）
@@ -1809,11 +1833,15 @@ export const calculateSalary = (
     taxableAmount,
 
     // --- 控除額 (Deductions) ---
-    healthInsurance, 
-    nursingInsurance, 
+    healthInsurance,
+    nursingInsurance,
     childSupport,
     welfarePension,
     empInsurance,
+    kokuhoPremium,
+    insurer: { type: insurer?.type ?? 'kyokai', name: insurer && insurer.type !== 'kyokai' ? insurer.name : '' },
+    unionRate: main.unionRate,
+    insurerRateMissing: perMonth.some((p) => p.healthRateMissing === 'unionRate'),
     incomeTax,
     incomeTaxBeforeReduction,
     taxColumn,
@@ -1840,6 +1868,6 @@ export const calculateSalary = (
     hyojunHoshu,
     isSocialInsEnrolled,
     isEmploymentInsEnrolled,
-    prefectureUnknown: perMonth.some((p) => p.healthRateMissing),
+    prefectureUnknown: perMonth.some((p) => p.healthRateMissing === 'prefecture'),
   };
 };

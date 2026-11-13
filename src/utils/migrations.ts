@@ -238,6 +238,49 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "company", "annual_leave_rule", "TEXT");
     },
   },
+  {
+    version: 16,
+    description:
+      "健康保険組合・国保組合の保険料を計算に入れる：組合の料率は「何年何月分から」ごとの表（social_insurance_group_rates。開くときに作る）に移し、" +
+      "国保組合の定額は従業員ごとの月額（staff.kokuho_premium）に移す。確定した給与に国保組合の保険料の列を足し、使っていなかった規定の列（会社負担率・厚生年金など）を消す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "kokuho_premium", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "salary_results", "kokuho_premium", "INTEGER DEFAULT 0");
+      const cols = (await db.select<{ name: string }[]>("PRAGMA table_info(social_insurance_groups)")).map((c) => c.name);
+      const old = [
+        "is_fixed", "health_rate", "care_rate", "pension_rate", "fixed_amount",
+        "comp_health_rate", "comp_care_rate", "comp_pension_rate", "child_allowance_rate", "comp_fixed_amount",
+      ];
+      if (!old.every((c) => cols.includes(c))) return;
+      // 前の形：健康保険組合の本人負担率（health_rate・care_rate）は、計算に使っていなかった。いつからの料率かがわからないので、
+      // Q が料率を持っているいちばん前の月（2020年3月分）からの料率として移す（会社設定の「社会保険規定」で直してもらう）
+      const groups = await db.select<{ id: number; type: string; is_fixed: number; health_rate: number; care_rate: number; fixed_amount: number }[]>(
+        "SELECT id, type, is_fixed, health_rate, care_rate, fixed_amount FROM social_insurance_groups",
+      );
+      for (const g of groups ?? []) {
+        if (g.type === "union" && Number(g.is_fixed) !== 1 && (Number(g.health_rate) > 0 || Number(g.care_rate) > 0)) {
+          await db.execute(
+            "INSERT OR IGNORE INTO social_insurance_group_rates (group_id, from_month, health_rate, care_rate, child_support_rate) VALUES (?, '2020-03', ?, ?, 0)",
+            [g.id, Number(g.health_rate) || 0, Number(g.care_rate) || 0],
+          );
+        }
+        // 国保組合の定額は、規定ではなく従業員ごと（家族の人数などで違う）にする。前の定額を、その規定の人に入れる
+        if (g.type === "kokuho" && Number(g.fixed_amount) > 0) {
+          await db.execute(
+            "UPDATE staff SET kokuho_premium = ? WHERE social_insurance_group_id = ? AND COALESCE(kokuho_premium, 0) = 0",
+            [Math.floor(Number(g.fixed_amount)), g.id],
+          );
+        }
+      }
+      for (const c of old) {
+        try {
+          await db.execute(`ALTER TABLE social_insurance_groups DROP COLUMN ${c}`);
+        } catch {
+          // 列を消せない古い SQLite では残す（使わない）
+        }
+      }
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

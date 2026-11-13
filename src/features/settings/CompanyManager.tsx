@@ -75,7 +75,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                     {activeSubTab === "info" && <CompanyInfoTab cm={cm} />}
 
                     {activeSubTab === "payroll" && <PayrollGroupTab cm={cm} />}
-                    {activeSubTab === "social" && <SocialInsuranceTab cm={cm} />}
+                    {activeSubTab === "social" && <SocialInsuranceTab db={db} />}
                     {activeSubTab === "leave" && <LeaveTypeTab db={db} />}
 
                     {activeSubTab === "branches" && <BranchTab cm={cm} />}
