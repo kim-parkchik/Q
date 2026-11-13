@@ -231,6 +231,13 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "flex_carry_hours", "REAL");
     },
   },
+  {
+    version: 15,
+    description: "年次有給休暇の付与日の決まり（入社日ごとか、毎年◯月◯日にそろえるか）の列を、会社に足す（初めは入社日ごと）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "company", "annual_leave_rule", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

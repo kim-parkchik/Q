@@ -3,6 +3,8 @@
  *
  * 特別休暇（夏季休暇など）は、休暇の種類（会社設定）ごとに付与と残りを出し、発生の日が来た付与を知らせる
  * （SpecialLeavePanel.tsx。数え方は utils/specialLeave.ts）。
+ * 年次有給休暇は、付与日（入社日ごとか、会社で決めた日にそろえる）が来て、まだ登録していない付与を、日数と出勤率と一緒に知らせ、
+ * 年5日を取れていない人も知らせる（AnnualLeavePanel.tsx。決まりは utils/annualLeaveGrant.ts）。
  *
  * 有給を取った日は、勤怠の画面で「全休(有給)」「半休(有給)」「時間有給」を入れて確定する（給与の計算と同じ記録）。
  * この画面では付与を登録し、確定した勤怠から数えた残り・取った日・期限で消えた日数を見る（数え方は utils/paidLeave.ts）。
@@ -43,6 +45,9 @@ import {
   type SpecialLeaveGrantRow,
 } from "../../utils/specialLeave";
 import { DueGrantBanner, SpecialLeaveSection } from "./SpecialLeavePanel";
+import { AnnualGrantDueBanner, FiveDayOverview, StaffAnnualInfo } from "./AnnualLeavePanel";
+import { loadAnnualLeaveOverview, type DueAnnualGrantInfo, type StaffAnnualLeave } from "../../utils/annualLeaveOverview";
+import { DEFAULT_ANNUAL_LEAVE_RULE, stageLabel, type AnnualLeaveRule } from "../../utils/annualLeaveGrant";
 
 interface Props {
   db: Database;
@@ -143,6 +148,18 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
   }, [db, dialog]);
   useEffect(() => { loadCompanyLeave(); }, [loadCompanyLeave]);
 
+  // 年次有給休暇：付与日が来て、まだ登録していない付与と、年5日の取得（会社全体。utils/annualLeaveOverview.ts）
+  const [annualOverview, setAnnualOverview] = useState<{ rule: AnnualLeaveRule; staff: StaffAnnualLeave[] } | null>(null);
+  const [annualBusy, setAnnualBusy] = useState(false);
+  const loadAnnual = useCallback(async () => {
+    try {
+      setAnnualOverview(await loadAnnualLeaveOverview(db, staffList, dayjs().format("YYYY-MM-DD")));
+    } catch (e) {
+      console.error("年次有給休暇の付与の知らせ・年5日の読み込みエラー:", e);
+    }
+  }, [db, staffList]);
+  useEffect(() => { loadAnnual(); }, [loadAnnual]);
+
   useEffect(() => {
     if (selectedStaffId) loadAllData(selectedStaffId);
     else setData(null);
@@ -190,7 +207,7 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
       );
       await writeLog(db, "INFO", "attendance", `${staffLabel}に、年次有給休暇 ${n}日（付与日 ${grantDate}・有効期限 ${expiryDate}）を登録しました`);
       toast.success(`年次有給休暇 ${n}日を登録しました`);
-      await loadAllData(selectedStaffId);
+      await Promise.all([loadAllData(selectedStaffId), loadAnnual()]);
     } catch (e) {
       console.error(e);
       dialog.error(`付与を登録できませんでした。\n${e}`);
@@ -213,7 +230,7 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
       await db.execute("DELETE FROM paid_leave_grants WHERE id = ? AND staff_id = ?", [g.id, selectedStaffId]);
       await writeLog(db, "INFO", "attendance", `${staffLabel}の${label}の付与（付与日 ${g.grant_date}・${g.days_granted}日）を取り消しました`);
       toast.success("付与を取り消しました");
-      await loadAllData(selectedStaffId);
+      await Promise.all([loadAllData(selectedStaffId), loadAnnual()]);
     } catch (e) {
       console.error(e);
       dialog.error(`付与を取り消せませんでした。\n${e}`);
@@ -292,6 +309,39 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
     } catch (e) {
       console.error(e);
       dialog.error(`付与を取り消せませんでした。\n${e}`);
+    }
+  };
+
+  // --- 年次有給休暇：付与日が来た付与を登録する（days が 0 なら「付与しない」。出勤率が8割未満のときなど） ---
+  const registerAnnualGrant = async (staffId: string, info: DueAnnualGrantInfo, days: number) => {
+    if (annualBusy) return;
+    const person = staffList.find(s => String(s.id) === staffId);
+    const label = `${person?.name ?? staffId}さん（${staffId}）`;
+    const what = days > 0
+      ? `${label}に、${info.grant.date} の年次有給休暇 ${days}日（${stageLabel(info.grant.stage)}${info.proportional ? "・比例付与" : ""}・有効期限 ${defaultExpiryDate(info.grant.date)}）を付与しますか？`
+        + (info.rate.ok === null ? "\n出勤率を Q の勤怠で確かめられません。出勤簿などで8割以上か確かめてください。" : "")
+        + (info.rate.ok === false ? "\n出勤率が8割未満です。付与しないときは「付与しない」を押してください。" : "")
+      : `${label}の ${info.grant.date} の年次有給休暇を、付与しないことにしますか？（出勤率が8割未満のときなど。0日の付与として残します）`;
+    const ok = await ask(what, { title: days > 0 ? "年次有給休暇の付与" : "付与しない", kind: "info", okLabel: days > 0 ? "付与する" : "付与しない", cancelLabel: "やめる" });
+    if (!ok) return;
+    setAnnualBusy(true);
+    try {
+      const expiry = defaultExpiryDate(info.grant.date);
+      await db.execute(
+        "INSERT INTO paid_leave_grants (staff_id, name, grant_date, expiry_date, days_granted) VALUES (?, ?, ?, ?, ?)",
+        [staffId, ANNUAL_LEAVE_GRANT_NAME, info.grant.date, expiry, days],
+      );
+      await writeLog(db, "INFO", "attendance", days > 0
+        ? `${label}に、年次有給休暇 ${days}日（付与日 ${info.grant.date}・有効期限 ${expiry}・${stageLabel(info.grant.stage)}）を付与しました`
+        : `${label}の ${info.grant.date} の年次有給休暇を付与しないことにしました`);
+      toast.success(days > 0 ? `年次有給休暇 ${days}日を付与しました` : "付与しないことにしました");
+      await loadAnnual();
+      if (selectedStaffId === staffId) await loadAllData(staffId);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`付与を登録できませんでした。\n${e}`);
+    } finally {
+      setAnnualBusy(false);
     }
   };
 
@@ -482,6 +532,14 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
         </div>
       </section>
 
+      <AnnualGrantDueBanner
+        items={annualOverview?.staff ?? []}
+        rule={annualOverview?.rule ?? DEFAULT_ANNUAL_LEAVE_RULE}
+        busy={annualBusy}
+        onGrant={(staffId, info) => registerAnnualGrant(staffId, info, info.days)}
+        onSkip={(staffId, info) => registerAnnualGrant(staffId, info, 0)}
+      />
+      <FiveDayOverview items={annualOverview?.staff ?? []} today={today} />
       <DueGrantBanner dues={dues} busy={specialBusy} onGrant={handleDueGrant} />
 
       {!selectedStaffId ? (
@@ -520,6 +578,9 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
               最初の付与（{view.summary.firstGrantDate}）より前の有給（{fmt(view.beforeFirst.reduce((sum, t) => sum + t.minutes, 0))}分）は、残りから引いていません。Q で有給を管理する前の分として扱っています。
             </div>
           )}
+
+          {/* 次の付与と、年5日の取得 */}
+          <StaffAnnualInfo info={annualOverview?.staff.find(s => s.staffId === String(selectedStaffId)) ?? null} today={today} />
 
           {/* 付与の登録・入れ方 */}
           <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>

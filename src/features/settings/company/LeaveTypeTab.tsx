@@ -4,6 +4,7 @@
  * 種類ごとに、有給か無給か・残りを数えるか・半日でも取れるか・時間単位でも取れるか・発生（毎年◯月◯日に◯日）・
  * 消滅（付与日から◯か月か、◯月◯日まで）を決める。子の看護等休暇・介護休暇は、見本から作れる（LEAVE_TYPE_TEMPLATES）。
  * 付与と残りは「有給休暇管理」の画面、取った日は勤怠の画面の区分で入れる（くわしくは utils/specialLeave.ts）。
+ * いちばん上で、年次有給休暇の付与日の決まり（入社日ごとか、毎年◯月◯日にそろえるか）も決める（utils/annualLeaveGrant.ts）。
  */
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 // @ts-ignore
@@ -18,6 +19,7 @@ import {
   type ExpiryRule, type GrantRule, type LeaveType,
 } from "../../../utils/specialLeave";
 import { addBoxStyle, branchCardStyle, editBtnStyle, inputStyle, miniLabelStyle, tabContentStyle } from "../CompanyManager.styles";
+import { describeAnnualLeaveRule, parseAnnualLeaveRule, stringifyAnnualLeaveRule, type AnnualLeaveRule } from "../../../utils/annualLeaveGrant";
 
 interface Props {
   db: Database;
@@ -95,6 +97,34 @@ export default function LeaveTypeTab({ db }: Props) {
   }, [db, dialog]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // 年次有給休暇の付与日の決まり（company.annual_leave_rule）
+  const [annualRule, setAnnualRule] = useState<AnnualLeaveRule>({ mode: "hire" });
+  const [savedAnnualRule, setSavedAnnualRule] = useState<string>("");
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = (await db.select("SELECT annual_leave_rule FROM company WHERE id = 1")) as { annual_leave_rule?: string | null }[];
+        const rule = parseAnnualLeaveRule(rows?.[0]?.annual_leave_rule);
+        setAnnualRule(rule);
+        setSavedAnnualRule(stringifyAnnualLeaveRule(rule));
+      } catch (e) {
+        console.error("年次有給休暇の付与日の決まりの読み込みエラー:", e);
+      }
+    })();
+  }, [db]);
+  const saveAnnualRule = async () => {
+    try {
+      const value = stringifyAnnualLeaveRule(annualRule);
+      await db.execute("UPDATE company SET annual_leave_rule = ? WHERE id = 1", [value]);
+      await writeLog(db, "INFO", "attendance", `年次有給休暇の付与日の決まりを「${describeAnnualLeaveRule(annualRule)}」にしました`);
+      setSavedAnnualRule(value);
+      toast.success("年次有給休暇の付与日の決まりを保存しました");
+    } catch (e) {
+      console.error(e);
+      dialog.error(`保存できませんでした。\n${e}`);
+    }
+  };
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
   const resetForm = () => { setEditingId(null); setForm(EMPTY_FORM); };
@@ -221,6 +251,52 @@ export default function LeaveTypeTab({ db }: Props) {
 
   return (
     <section style={tabContentStyle}>
+      {/* 年次有給休暇の付与日（労働基準法39条。日数は条文の表。付与日をそろえるのは平成6年1月4日 基発1号の斉一的取扱い） */}
+      <div style={{ ...noteStyle, backgroundColor: "#f0fdf4", borderColor: "#c6f6d5", marginBottom: "16px" }}>
+        <div style={{ fontWeight: "bold", color: "#22543d", marginBottom: "6px" }}>年次有給休暇の付与日</div>
+        <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <input type="radio" checked={annualRule.mode === "hire"} onChange={() => setAnnualRule({ mode: "hire" })} />
+          入社日ごと（入社6か月後、その後1年ごと。法定どおり）
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px", flexWrap: "wrap" }}>
+          <input type="radio" checked={annualRule.mode === "unified"}
+            onChange={() => setAnnualRule({ mode: "unified", month: 4, day: 1, first: "sixMonths" })} />
+          会社で決めた日にそろえる：毎年
+          <select style={smallSelectStyle} disabled={annualRule.mode !== "unified"}
+            value={annualRule.mode === "unified" ? annualRule.month : 4}
+            onChange={(e) => annualRule.mode === "unified" && setAnnualRule({ ...annualRule, month: Number(e.target.value) })}>
+            {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>月
+          <select style={smallSelectStyle} disabled={annualRule.mode !== "unified"}
+            value={annualRule.mode === "unified" ? annualRule.day : 1}
+            onChange={(e) => annualRule.mode === "unified" && setAnnualRule({ ...annualRule, day: Number(e.target.value) })}>
+            {DAYS.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>日
+        </label>
+        {annualRule.mode === "unified" && (
+          <div style={{ marginLeft: "22px", marginTop: "4px", display: "flex", flexDirection: "column", gap: "2px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <input type="radio" checked={annualRule.first === "sixMonths"} onChange={() => setAnnualRule({ ...annualRule, first: "sixMonths" })} />
+              初回は入社6か月後、2回目から決めた日（2回目は前倒しで、次の段の日数）
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <input type="radio" checked={annualRule.first === "unifiedFirst"} onChange={() => setAnnualRule({ ...annualRule, first: "unifiedFirst" })} />
+              入社6か月後より先に決めた日が来れば、その日に初回（来なければ6か月後）。その後は決めた日ごと
+            </label>
+          </div>
+        )}
+        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "6px", lineHeight: 1.6 }}>
+          付与の日が来たら「有給休暇管理」の画面で、日数（労働基準法39条の表。パートなどは比例付与の表）と出勤率（8割以上）と一緒に知らせます。
+          そろえるときも、法定の基準日（入社6か月後・その後1年ごと）より遅くはしません（前倒しにします）。前倒しで短くなった期間は、8割の出勤率では全部出勤したものとみなします
+          （平成6年1月4日 基発1号。次の年からも、同じかそれ以上前倒しにします）。年5日の取得は、人ごとに付与日から1年で確かめます。
+        </div>
+        <button onClick={saveAnnualRule} disabled={stringifyAnnualLeaveRule(annualRule) === savedAnnualRule}
+          style={{ marginTop: "8px", padding: "6px 16px", borderRadius: "6px", border: "none", fontWeight: "bold", cursor: "pointer", color: "white",
+            backgroundColor: stringifyAnnualLeaveRule(annualRule) === savedAnnualRule ? "#cbd5e1" : "#38a169" }}>
+          保存する
+        </button>
+      </div>
+
       <div style={noteStyle}>
         法定の年次有給休暇とは別の、会社が就業規則で決める休暇（夏季休暇・慶弔休暇・リフレッシュ休暇など）の種類を作ります。
         付与と残りは「有給休暇管理」の画面で、取った日は勤怠の画面の区分で入れます。

@@ -39,6 +39,13 @@ export default function PaidLeaveNotice({ am }: Props) {
           <>この人の有給の付与は登録されていないので、残りは数えていません（「有給休暇管理」の画面で付与を登録すると、ここに残りが出ます）。</>
         )}
       </div>
+      {paidLeave.fiveDay.map(f => (
+        <div key={f.from} style={{ marginTop: 6, fontSize: 13, color: f.state === "overdue" ? "#9b1c1c" : "#92400e", padding: "8px 12px", borderRadius: 6, backgroundColor: f.state === "overdue" ? "#fde8e8" : "#fef3c7" }}>
+          {f.state === "overdue"
+            ? `⚠ 年5日：${f.from}〜${f.to} に、年休を ${f.takenDays}日しか取れていません（${f.requiredDays}日を取らせる義務${f.merged ? "。1年の期間が重なったので、まとめて按分した日数" : ""}。労働基準法39条7項）。`
+            : `年5日：${f.to} までに、あと ${f.remainingDays}日の年休を取らせる必要があります（いま ${f.takenDays}日／${f.requiredDays}日${f.merged ? "。1年の期間が重なったので、まとめて按分した日数" : ""}。全休1日・半休0.5日で数え、時間単位は数えません）。`}
+        </div>
+      ))}
       {paidLeave.shortages.length > 0 && (
         <div style={{ marginTop: 6, fontSize: 13, color: "#9b1c1c", padding: "8px 12px", borderRadius: 6, backgroundColor: "#fde8e8" }}>
           ⚠ この期間に、残りが足りない有給があります：

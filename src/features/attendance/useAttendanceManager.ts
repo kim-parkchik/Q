@@ -17,6 +17,7 @@ import {
   collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, hourlyLeaveByGrantYear, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
   type AttendanceLeaveRow, type LeaveGrantRow, type ManualLeaveRecord,
 } from "../../utils/paidLeave";
+import { annualLeaveSettingsOf, fiveDayAlerts, fiveDaysOf } from "../../utils/annualLeaveOverview";
 import {
   isSpecialLeaveWorkType, loadLeaveTypes, loadSpecialLeaveData, maxHourlyLeave, parseLeaveOption,
   summarizeSpecialLeave, type LeaveType, type SpecialLeaveDay, type SpecialLeaveGrantRow,
@@ -173,9 +174,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     const hourlyOver = hourlyYears
       .filter(y => y.over && payrollPeriod && y.from <= payrollPeriod.endStr && y.to >= payrollPeriod.startStr)
       .map(y => ({ from: y.from, to: y.to, taken: formatLeaveMinutes(y.minutes, hours), limit: formatLeaveMinutes(y.limitMinutes, hours), hours: y.minutes / 60, limitHours: y.limitMinutes / 60 }));
+    // 年5日（付与日から1年。期間が重なるときは、まとめて按分。今日の時点で足りない期間と、過ぎて1年以内の足りなかった期間。utils/annualLeaveGrant.ts）
+    const today = dayjs().format("YYYY-MM-DD");
+    const fiveDay = fiveDayAlerts(fiveDaysOf(selectedStaff ?? {}, paidLeaveData.grants, taken, today, annualLeaveSettingsOf(companySettings)), today);
     return {
       hasGrants: summary.hasGrants,
       asOf,
+      fiveDay,
       remainingText: formatLeaveMinutes(summary.remainingMinutes, hours),
       hoursAssumed: assumed,
       leaveInPeriod: inPeriod.length > 0,
@@ -186,7 +191,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         .filter(t => t.shortageMinutes > 0)
         .map(t => ({ date: t.date, amount: formatTakenAmount(t), shortage: formatLeaveMinutes(t.shortageMinutes, hours) })),
     };
-  }, [paidLeaveData, selectedStaffId, selectedStaff, payrollPeriod, monthlyWorkData]);
+  }, [paidLeaveData, selectedStaffId, selectedStaff, payrollPeriod, monthlyWorkData, companySettings]);
 
   // --- 特別休暇の残り（有給休暇管理の画面と同じ数え方。utils/specialLeave.ts）---
   // この画面の計算期間の日は、まだ確定していない日も入れて数える（確定する前に、残りが足りないことに気づけるように）

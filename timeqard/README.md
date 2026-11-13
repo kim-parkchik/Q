@@ -171,6 +171,7 @@ cd timeqard/src-tauri && cargo test --offline
 - Q の勤怠の「休憩の一覧」の画面だけを確かめる：同じく `/dev/breaks.html` を開く（見本の打刻の休憩を直して、働いた時間を下に出す）
 - Q の会社独自の休暇（夏季休暇などの特別休暇）の画面を確かめる：同じく `/dev/leave.html` を開く（会社設定の「休暇の種類」・有給休暇管理の付与の知らせと残り・勤怠の区分。会社ファイルの代わりにページの中の表を使い、確定した日で計算した給与を下に出す）
 - Q のフレックスタイム制の清算を確かめる：同じく `/dev/flex.html` を開く（2026年6月・月給30万円の人で、時間外・法定内・足りない時間（引く・繰り越す）・時給制の見本を並べ、勤怠の画面の知らせと給与の計算の結果を出す）
+- Q の年次有給休暇の付与日の知らせと年5日の取得を確かめる：同じく `/dev/annual.html` を開く（見本の5人で、付与日の決まり（入社日ごと・4月1日にそろえる）を切り替えると、付与日・日数（比例付与も）・出勤率・次の付与・年5日の状態が変わる。年5日は、期間が重なってまとめて按分する人と、10日を分けて付与した人もいて、「半休を使う」を外すと按分した日数が1日単位に切り上がる）
 - 画面をブラウザで確かめる：`bun run --bun vite --config timeqard/dev/vite.preview.config.ts` を動かし、`http://localhost:1432/dev/preview.html`（TimeQard。記録はブラウザの中だけで、閉じると消える。カードの中身は開発者の道具の Console に出る）・`/dev/web-preview.html`（ブラウザ版の画面。入口のパソコンの代わりに、ページの中で `src/webApi.ts` が答える。人とパスワードは `dev/webPreview.ts` に書いてある）・`/dev/cards.html`（Q で印刷する打刻カードの見本）・`/dev/import.html`（Q の取り込みのまとめの見本）を開く
 - ブラウザ版のサーバー（`src-tauri/src/web.rs`）は、`timeqard/dist` の `web.html` と `assets/` を出す。`bun run timeqard:tauri dev` で試すときは、先に `bun run timeqard:build` で画面を作っておく
 - インストーラーを作る：`bun run timeqard:tauri build`（Mac では Mac 用だけができる）
