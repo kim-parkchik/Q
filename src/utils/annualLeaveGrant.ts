@@ -35,17 +35,37 @@ import { expiryAfterMonths, isAnnualLeaveGrant, type LeaveGrantRow, type LeaveTa
 import { isPrescribedWorkDay, parseWorkDays, type CalendarContext } from "./annualWorkDays";
 import { dateInYear } from "./specialLeave";
 import type { LeavePeriod } from "./leaveExemption";
+import { DEEMED_PRESENT_LEAVE_TYPES, leaveOn } from "./leaveOfAbsence";
 
 const fmt = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
 
 // ── 会社の付与のしかた ─────────────────────────────────────
 
-/** hire：入社日ごと（法定どおり）／unified：会社で決めた月日にそろえる（first：初回の付与） */
-export type AnnualLeaveRule =
+/**
+ * 私傷病の休職などの「その他の休職」の日を、出勤率でどう数えるか（法律に決まりがなく、就業規則で決める）
+ * exclude：全労働日から除く（初めの値。労働の義務がない日として、分母にも分子にも入れない）／absent：欠勤と同じに数える
+ * 産前産後休業・育児休業・介護休業・業務上の負傷や疾病による休業は、法律どおり出勤したものとみなす（労働基準法39条10項）
+ */
+export type OtherLeaveRateRule = "exclude" | "absent";
+
+export const OTHER_LEAVE_RATE_LABELS: Record<OtherLeaveRateRule, string> = {
+  exclude: "全労働日から除く",
+  absent: "欠勤と同じに数える",
+};
+
+/**
+ * hire：入社日ごと（法定どおり）／unified：会社で決めた月日にそろえる（first：初回の付与）
+ * otherLeave：その他の休職の日の、出勤率での数え方（省略は全労働日から除く）
+ */
+export type AnnualLeaveRule = (
   | { mode: "hire" }
-  | { mode: "unified"; month: number; day: number; first: "sixMonths" | "unifiedFirst" };
+  | { mode: "unified"; month: number; day: number; first: "sixMonths" | "unifiedFirst" }
+) & { otherLeave?: OtherLeaveRateRule };
 
 export const DEFAULT_ANNUAL_LEAVE_RULE: AnnualLeaveRule = { mode: "hire" };
+
+/** その他の休職の日の、出勤率での数え方（設定がなければ全労働日から除く） */
+export const otherLeaveRuleOf = (rule: AnnualLeaveRule): OtherLeaveRateRule => (rule.otherLeave === "absent" ? "absent" : "exclude");
 
 /** company.annual_leave_rule（JSON）を読む。ない・読めないときは入社日ごと */
 export const parseAnnualLeaveRule = (value: unknown): AnnualLeaveRule => {
@@ -54,10 +74,12 @@ export const parseAnnualLeaveRule = (value: unknown): AnnualLeaveRule => {
     const v = JSON.parse(value);
     const month = Number(v?.month);
     const day = Number(v?.day);
+    const other: { otherLeave?: OtherLeaveRateRule } = v?.otherLeave === "absent" ? { otherLeave: "absent" } : {};
     if (v?.mode === "unified" && Number.isInteger(month) && month >= 1 && month <= 12 && Number.isInteger(day) && day >= 1
       && day <= dayjs(new Date(2024, month - 1, 1)).daysInMonth()) {
-      return { mode: "unified", month, day, first: v?.first === "unifiedFirst" ? "unifiedFirst" : "sixMonths" };
+      return { mode: "unified", month, day, first: v?.first === "unifiedFirst" ? "unifiedFirst" : "sixMonths", ...other };
     }
+    return { mode: "hire", ...other };
   } catch {
     // 読めないときは入社日ごと
   }
@@ -70,6 +92,10 @@ export const describeAnnualLeaveRule = (rule: AnnualLeaveRule): string =>
   rule.mode === "hire"
     ? "入社日ごと（入社6か月後、その後1年ごと）"
     : `毎年${rule.month}月${rule.day}日にそろえる（${rule.first === "sixMonths" ? "初回は入社6か月後、2回目から" : "入社6か月後より先に来れば初回から"}）`;
+
+/** その他の休職の日の数え方の説明（出勤率） */
+export const describeOtherLeaveRule = (rule: AnnualLeaveRule): string =>
+  `私傷病の休職などの「その他の休職」の日は、出勤率で${OTHER_LEAVE_RATE_LABELS[otherLeaveRuleOf(rule)]}`;
 
 // ── 日付 ──────────────────────────────────────────────
 
@@ -212,14 +238,20 @@ export interface AttendanceForRate {
 }
 
 export interface AttendanceRate {
-  /** 全労働日（所定労働日。公休にした日を除き、前倒しで出勤したものとみなす日を含む） */
+  /** 全労働日（所定労働日。公休にした日・全労働日から除くその他の休職の日を除き、前倒しで出勤したものとみなす日を含む） */
   allDays: number;
-  /** 出勤した日（年休・特別休暇・産休・育休・前倒しでみなす日を含む） */
+  /** 出勤した日（年休・特別休暇・産休・育休・介護休業・業務上の負傷や疾病による休業・前倒しでみなす日を含む） */
   presentDays: number;
   /** Q に確定した勤怠がない所定労働日 */
   missingDays: number;
   /** 前倒しで出勤したものとみなした日 */
   deemedDays: number;
+  /** 休業（産休・育休・介護休業・業務上の負傷や疾病による休業）で、出勤したものとみなした所定労働日 */
+  leaveDays: number;
+  /** その他の休職の所定労働日（全労働日から除いた日か、欠勤と同じに数えた日） */
+  otherLeaveDays: number;
+  /** その他の休職の日の数え方（会社の決まり） */
+  otherLeaveRule: OtherLeaveRateRule;
   /** 出勤率（全労働日がなければ null） */
   rate: number | null;
   /** 8割以上か（勤怠がない日があれば、確かめられないので null） */
@@ -236,21 +268,33 @@ export const attendanceRateFor = (
   rows: AttendanceForRate[],
   leavePeriods: LeavePeriod[],
   deemed: { from: string; to: string } | null = null,
+  otherLeave: OtherLeaveRateRule = "exclude",
 ): AttendanceRate => {
   const byDate = new Map(rows.map((r) => [r.work_date, r]));
-  const onLeave = (date: string) => leavePeriods.some((p) => p.start && date >= p.start && (!p.end || date <= p.end));
   let allDays = 0;
   let presentDays = 0;
   let missingDays = 0;
   let deemedDays = 0;
+  let leaveDays = 0;
+  let otherLeaveDays = 0;
   const each = (a: string, b: string, fn: (date: string) => void) => {
     for (let d = dayjs(a); !d.isAfter(dayjs(b)); d = d.add(1, "day")) fn(fmt(d));
   };
   if (from && to && from <= to) {
     each(from, to, (date) => {
       if (!isPrescribedWorkDay(new Date(`${date}T00:00:00`), ctx)) return; // 所定労働日でない日は数えない
-      if (onLeave(date)) { allDays++; presentDays++; return; } // 産前産後休業・育児休業は出勤したものとみなす
       const row = byDate.get(date);
+      const leave = leaveOn(leavePeriods, date);
+      if (leave && DEEMED_PRESENT_LEAVE_TYPES.has(leave.type)) {
+        // 産前産後休業・育児休業・介護休業・業務上の負傷や疾病による休業は、出勤したものとみなす（労働基準法39条10項）
+        allDays++; presentDays++; leaveDays++; return;
+      }
+      if (leave && !(row && (Number(row.work_hours) || 0) > 0)) {
+        // その他の休職（働いた日を除く）：会社の決まりで、全労働日から除くか、欠勤と同じに数える
+        otherLeaveDays++;
+        if (otherLeave === "absent") allDays++;
+        return;
+      }
       if (!row) { missingDays++; return; }
       const type = row.work_type || "normal";
       if (type === "holiday") return; // 公休にした日は全労働日に入れない
@@ -270,7 +314,7 @@ export const attendanceRateFor = (
   }
   const rate = allDays > 0 ? presentDays / allDays : null;
   return {
-    allDays, presentDays, missingDays, deemedDays, rate,
+    allDays, presentDays, missingDays, deemedDays, leaveDays, otherLeaveDays, otherLeaveRule: otherLeave, rate,
     ok: missingDays > 0 ? null : rate === null ? true : rate >= ATTENDANCE_RATE_REQUIRED - 1e-9,
   };
 };

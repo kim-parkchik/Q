@@ -19,7 +19,10 @@ import {
   type ExpiryRule, type GrantRule, type LeaveType,
 } from "../../../utils/specialLeave";
 import { addBoxStyle, branchCardStyle, editBtnStyle, inputStyle, miniLabelStyle, tabContentStyle } from "../CompanyManager.styles";
-import { describeAnnualLeaveRule, parseAnnualLeaveRule, stringifyAnnualLeaveRule, type AnnualLeaveRule } from "../../../utils/annualLeaveGrant";
+import {
+  describeAnnualLeaveRule, describeOtherLeaveRule, otherLeaveRuleOf, OTHER_LEAVE_RATE_LABELS, parseAnnualLeaveRule, stringifyAnnualLeaveRule,
+  type AnnualLeaveRule, type OtherLeaveRateRule,
+} from "../../../utils/annualLeaveGrant";
 
 interface Props {
   db: Database;
@@ -117,7 +120,7 @@ export default function LeaveTypeTab({ db }: Props) {
     try {
       const value = stringifyAnnualLeaveRule(annualRule);
       await db.execute("UPDATE company SET annual_leave_rule = ? WHERE id = 1", [value]);
-      await writeLog(db, "INFO", "attendance", `年次有給休暇の付与日の決まりを「${describeAnnualLeaveRule(annualRule)}」にしました`);
+      await writeLog(db, "INFO", "attendance", `年次有給休暇の付与日の決まりを「${describeAnnualLeaveRule(annualRule)}」にしました（${describeOtherLeaveRule(annualRule)}）`);
       setSavedAnnualRule(value);
       toast.success("年次有給休暇の付与日の決まりを保存しました");
     } catch (e) {
@@ -255,12 +258,12 @@ export default function LeaveTypeTab({ db }: Props) {
       <div style={{ ...noteStyle, backgroundColor: "#f0fdf4", borderColor: "#c6f6d5", marginBottom: "16px" }}>
         <div style={{ fontWeight: "bold", color: "#22543d", marginBottom: "6px" }}>年次有給休暇の付与日</div>
         <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <input type="radio" checked={annualRule.mode === "hire"} onChange={() => setAnnualRule({ mode: "hire" })} />
+          <input type="radio" checked={annualRule.mode === "hire"} onChange={() => setAnnualRule({ mode: "hire", otherLeave: annualRule.otherLeave })} />
           入社日ごと（入社6か月後、その後1年ごと。法定どおり）
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px", flexWrap: "wrap" }}>
           <input type="radio" checked={annualRule.mode === "unified"}
-            onChange={() => setAnnualRule({ mode: "unified", month: 4, day: 1, first: "sixMonths" })} />
+            onChange={() => setAnnualRule({ mode: "unified", month: 4, day: 1, first: "sixMonths", otherLeave: annualRule.otherLeave })} />
           会社で決めた日にそろえる：毎年
           <select style={smallSelectStyle} disabled={annualRule.mode !== "unified"}
             value={annualRule.mode === "unified" ? annualRule.month : 4}
@@ -289,6 +292,21 @@ export default function LeaveTypeTab({ db }: Props) {
           付与の日が来たら「有給休暇管理」の画面で、日数（労働基準法39条の表。パートなどは比例付与の表）と出勤率（8割以上）と一緒に知らせます。
           そろえるときも、法定の基準日（入社6か月後・その後1年ごと）より遅くはしません（前倒しにします）。前倒しで短くなった期間は、8割の出勤率では全部出勤したものとみなします
           （平成6年1月4日 基発1号。次の年からも、同じかそれ以上前倒しにします）。年5日の取得は、人ごとに付与日から1年で確かめます。
+        </div>
+        <div style={{ fontWeight: "bold", color: "#22543d", margin: "10px 0 4px" }}>出勤率での「その他の休職」の日</div>
+        <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
+          {(Object.keys(OTHER_LEAVE_RATE_LABELS) as OtherLeaveRateRule[]).map((key) => (
+            <label key={key} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <input type="radio" checked={otherLeaveRuleOf(annualRule) === key}
+                onChange={() => setAnnualRule({ ...annualRule, otherLeave: key === "exclude" ? undefined : key })} />
+              {OTHER_LEAVE_RATE_LABELS[key]}{key === "exclude" ? "（初めの値）" : ""}
+            </label>
+          ))}
+        </div>
+        <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", lineHeight: 1.6 }}>
+          従業員の画面の「休業・休職」で入れた期間のうち、産前産後休業・育児休業・介護休業・業務上の負傷や疾病による休業は、出勤率では出勤したものとみなします（労働基準法39条10項）。
+          私傷病の休職などの「その他の休職」の日は法律に決まりがないので、就業規則に合わせて選んでください。「全労働日から除く」は、労働の義務がない日として出勤率の計算に入れません。
+          「欠勤と同じに数える」は全労働日に入れて出勤しなかった日にするので、長く休職すると8割に届かず、付与しないことがあります。
         </div>
         <button onClick={saveAnnualRule} disabled={stringifyAnnualLeaveRule(annualRule) === savedAnnualRule}
           style={{ marginTop: "8px", padding: "6px 16px", borderRadius: "6px", border: "none", fontWeight: "bold", cursor: "pointer", color: "white",

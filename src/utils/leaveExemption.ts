@@ -23,11 +23,21 @@
  *       健康保険法施行規則135条（14日の数え方・続けて取った育児休業等）
  * ※ 産後パパ育休中に働いた日は14日から除くが、Q は働いた日を数えずに計算する。
  * ※ 休日をはさんで続けて休んだ（間に働いた日がない）ときも1つの育児休業等になるので、1つの期間として入力してもらう。
+ * ※ 従業員の画面では、介護休業・業務上の負傷や疾病による休業・その他の休職も入れられる（休業の日の給与・勤怠・年休の出勤率は
+ *   utils/leaveOfAbsence.ts）。この3つには保険料の免除がないので、免除の計算には使わない（exemptLeavePeriodsOf で除く）。
  */
 import dayjs, { type Dayjs } from 'dayjs';
 
-/** maternity: 産前産後休業 / childcare: 育児休業等（産後パパ育休を含む） */
-export type LeaveType = 'maternity' | 'childcare';
+/** 社会保険料の免除がある休業（maternity: 産前産後休業 / childcare: 育児休業等（産後パパ育休を含む）） */
+export type ExemptLeaveType = 'maternity' | 'childcare';
+
+/**
+ * 休業・休職の種類（従業員の画面で入れる。staff.leave_periods）
+ * 免除がある2つに加えて、family_care: 介護休業 / injury: 業務上の負傷・疾病による休業 / other: その他の休職・休業（私傷病の休職など）
+ */
+export type LeaveType = ExemptLeaveType | 'family_care' | 'injury' | 'other';
+
+export const LEAVE_TYPES: LeaveType[] = ['maternity', 'childcare', 'family_care', 'injury', 'other'];
 
 export interface LeavePeriod {
   type: LeaveType;
@@ -35,6 +45,11 @@ export interface LeavePeriod {
   start: string;
   /** 終了日（YYYY-MM-DD）。まだ決まっていなければ空 */
   end: string;
+}
+
+/** 社会保険料の免除に使う休業（産前産後休業・育児休業等） */
+export interface ExemptLeavePeriod extends LeavePeriod {
+  type: ExemptLeaveType;
 }
 
 /** 令和4年10月の改正（14日以上の月・賞与の1か月超）が当てはまる育児休業等の開始日 */
@@ -47,23 +62,26 @@ export const parseLeavePeriods = (json: unknown): LeavePeriod[] => {
     const list = JSON.parse(json);
     if (!Array.isArray(list)) return [];
     return list
-      .filter((p) => (p?.type === 'maternity' || p?.type === 'childcare') && typeof p.start === 'string' && p.start)
+      .filter((p) => LEAVE_TYPES.includes(p?.type) && typeof p.start === 'string' && p.start)
       .map((p) => ({ type: p.type, start: p.start, end: typeof p.end === 'string' ? p.end : '' }));
   } catch {
     return [];
   }
 };
 
-/** その人がその休業で、保険料の免除を受けられるか（役員の育児休業等は受けられない。産前産後休業は受けられる） */
+/**
+ * その人がその休業で、保険料の免除を受けられるか（産前産後休業と、役員でない人の育児休業等だけ。
+ * 役員の育児休業等と、介護休業・業務上の負傷や疾病による休業・その他の休職は受けられない）
+ */
 export const canExemptLeave = (staff: { is_executive?: unknown } | null | undefined, leave: Pick<LeavePeriod, 'type'>): boolean =>
-  !(leave.type === 'childcare' && Number(staff?.is_executive) === 1);
+  leave.type === 'maternity' || (leave.type === 'childcare' && Number(staff?.is_executive) !== 1);
 
 /**
  * 保険料の免除に使う期間：従業員の leave_periods のうち、その人が免除を受けられる休業だけ
- * （役員は育児休業等を除く。従業員の画面には、入れた期間をそのまま出す）
+ * （役員は育児休業等を除く。介護休業などは入れない。従業員の画面には、入れた期間をそのまま出す）
  */
-export const exemptLeavePeriodsOf = (staff: { leave_periods?: unknown; is_executive?: unknown } | null | undefined): LeavePeriod[] =>
-  parseLeavePeriods(staff?.leave_periods).filter((p) => canExemptLeave(staff, p));
+export const exemptLeavePeriodsOf = (staff: { leave_periods?: unknown; is_executive?: unknown } | null | undefined): ExemptLeavePeriod[] =>
+  parseLeavePeriods(staff?.leave_periods).filter((p): p is ExemptLeavePeriod => canExemptLeave(staff, p));
 
 /** 保存用の JSON。期間がなければ空文字 */
 export const stringifyLeavePeriods = (leaves: LeavePeriod[]): string =>
@@ -86,7 +104,7 @@ interface Span {
 }
 
 /** 同じ種類の期間を並べ、続けて取った（重なる・翌日から始まる）期間を1つにまとめる */
-const mergeSpans = (leaves: LeavePeriod[], type: LeaveType): Span[] => {
+const mergeSpans = (leaves: LeavePeriod[], type: ExemptLeaveType): Span[] => {
   const spans = leaves
     .filter((p) => p.type === type && !validateLeavePeriod(p))
     .map((p) => ({ start: dayjs(p.start), end: p.end ? dayjs(p.end) : null }))

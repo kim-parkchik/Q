@@ -11,6 +11,7 @@ import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
+import { parseLeavePeriods } from "../../utils/leaveExemption";
 import {
   GENDER_LABELS, ROSTER_COLUMNS, attendanceBookCsv, attendanceBookRows, attendanceBookTotals, hoursText, parseLedger, rosterCsv, rosterMissing,
   rosterRowOf, wageLedgerCsv, wageLedgerRows, type AttendanceBookRow, type WageLedgerColumn, type WageLedgerRow,
@@ -115,7 +116,8 @@ export default function LegalBooksManager({ db, staffList }: Props) {
            WHERE a.staff_id = ? AND a.work_date BETWEEN ? AND ? ORDER BY a.work_date`,
           [String(staff.id), range.start, range.end],
         ) as any[];
-        if (!cancelled) setBookRows(attendanceBookRows(range, records ?? []));
+        // 休業・休職の日は、区分に「育児休業」などと書く（従業員の画面で入れた期間）
+        if (!cancelled) setBookRows(attendanceBookRows(range, records ?? [], parseLeavePeriods(staff.leave_periods)));
       } catch (e) {
         console.error(e);
         if (!cancelled) setBookRows([]);

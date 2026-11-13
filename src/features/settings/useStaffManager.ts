@@ -123,7 +123,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetDependentsHistoryPast, setTargetDependentsHistoryPast] = useState<DependentsEntry[]>([]);
     const [targetDependentsFrom, setTargetDependentsFrom] = useState("");
     const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
-    const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 産休・育休の期間（社会保険料の免除）
+    const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 休業・休職の期間（産休・育休の社会保険料の免除・休業の日の給与と勤怠）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄・丙欄）
     const [targetResidentTax, setTargetResidentTax] = useState(0); // 住民税の月額（以前の入れ方。年度の額を入れていない月に使う）
     const [targetResidentTaxSchedule, setTargetResidentTaxSchedule] = useState<ResidentTaxYear[]>([]); // 住民税の年度ごとの12か月（utils/residentTax.ts）
@@ -523,7 +523,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         );
     };
 
-    // 産休・育休の期間に、開始日が空・終了日が開始日より前のものがないか
+    // 休業・休職の期間に、開始日が空・終了日が開始日より前のものがないか
     const isLeavePeriodsValid = targetLeavePeriods.every(p => !validateLeavePeriod(p));
 
     // 振込先口座の入れ方の間違い（口座ごとの間違いと、残りを振り込む口座がちょうど1つか）

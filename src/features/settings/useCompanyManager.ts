@@ -18,6 +18,7 @@ import {
 } from "../../utils/calcSalary";
 import { parseFixedBreak, stringifyFixedBreak, type FixedBreakRule } from "../../utils/fixedBreak";
 import { DEFAULT_FLEX_RULE, parseFlexRule, stringifyFlexRule, type FlexRule } from "../../utils/flexTime";
+import { toLeaveProrationMethod, type LeaveProrationMethod } from "../../utils/leaveOfAbsence";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -67,6 +68,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgTaxMethod, setPgTaxMethod] = useState<TaxCalcMethod>("table"); // 源泉所得税の計算方法
     const [pgSocialInsCollection, setPgSocialInsCollection] = useState<SocialInsCollection>("current"); // 社会保険料の徴収（当月・翌月）
     const [pgProrationMethod, setPgProrationMethod] = useState<ProrationMethod>("none"); // 途中入社・退職の日割り
+    const [pgLeaveProrationMethod, setPgLeaveProrationMethod] = useState<LeaveProrationMethod>("workdays"); // 休業の月の日割り（utils/leaveOfAbsence.ts）
     const [pgAbsenceDeductionMethod, setPgAbsenceDeductionMethod] = useState<AbsenceDeductionMethod>("workdays"); // 月給制の人の欠勤控除
     const [pgTardyDeductionMethod, setPgTardyDeductionMethod] = useState<TardyDeductionMethod>("none"); // 月給制・日給制の人の遅刻・早退・中抜けの控除
     const [pgFixedBreak, setPgFixedBreak] = useState<FixedBreakRule | null>(null); // 決まった休憩（null は使わない。utils/fixedBreak.ts）
@@ -332,6 +334,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTaxMethod(pg.tax_calc_method === "densanki" ? "densanki" : "table");
         setPgSocialInsCollection(toSocialInsCollection(pg.social_ins_collection));
         setPgProrationMethod(toProrationMethod(pg.proration_method));
+        setPgLeaveProrationMethod(toLeaveProrationMethod(pg.leave_proration_method));
         setPgAbsenceDeductionMethod(toAbsenceDeductionMethod(pg.absence_deduction_method));
         setPgTardyDeductionMethod(toTardyDeductionMethod(pg.tardy_deduction_method));
         setPgFixedBreak(parseFixedBreak(pg.fixed_break));
@@ -348,6 +351,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTaxMethod("table");
         setPgSocialInsCollection("current");
         setPgProrationMethod("none");
+        setPgLeaveProrationMethod("workdays");
         setPgAbsenceDeductionMethod("workdays");
         setPgTardyDeductionMethod("none");
         setPgFixedBreak(null);
@@ -369,14 +373,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=?, flex_rule=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, leave_proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=?, flex_rule=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgLeaveProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method, tardy_deduction_method, fixed_break, flex_rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule)]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, fixed_break, flex_rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgLeaveProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule)]
                 );
             }
             resetPgForm();
@@ -687,6 +691,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgSocialInsCollection,
         pgProrationMethod,
         setPgProrationMethod,
+        pgLeaveProrationMethod,
+        setPgLeaveProrationMethod,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
         pgTardyDeductionMethod,

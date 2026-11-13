@@ -301,6 +301,16 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "bonus_results", "ledger", "TEXT");
     },
   },
+  {
+    version: 19,
+    description:
+      "休業・休職の日の給与：給与規定グループに「休業の月の日割り」（初めは所定労働日数で日割り）、" +
+      "確定した給与に休業の月に払った日数（算定・月変の支払基礎日数に使う。いままでの給与は空）の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "leave_proration_method", "TEXT DEFAULT 'workdays'");
+      await addColumnIfMissing(db, "salary_results", "leave_paid_days", "REAL");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

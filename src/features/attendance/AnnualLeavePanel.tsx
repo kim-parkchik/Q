@@ -6,7 +6,7 @@
  * ・StaffAnnualInfo：選んだ人の、次の付与と、年5日の取得
  */
 import { useState, type CSSProperties } from "react";
-import { describeAnnualLeaveRule, describeFiveDay, stageLabel, type AnnualLeaveRule, type FiveDayStatus } from "../../utils/annualLeaveGrant";
+import { describeAnnualLeaveRule, describeFiveDay, otherLeaveRuleOf, stageLabel, type AnnualLeaveRule, type FiveDayStatus } from "../../utils/annualLeaveGrant";
 import { fiveDayAlerts, type DueAnnualGrantInfo, type StaffAnnualLeave } from "../../utils/annualLeaveOverview";
 import { ATTENDANCE_RATE_REQUIRED, OBLIGATION_DAYS } from "../../constants/annualLeave";
 
@@ -17,7 +17,12 @@ const daysLabel = (n: number) => `${Math.round(n * 2) / 2}日`;
 const rateText = (d: DueAnnualGrantInfo) => {
   const r = d.rate;
   if (r.ok === null) return `確かめられません（確定した勤怠がない所定労働日が ${r.missingDays}日）`;
-  const base = `${pct(r.rate)}（${r.presentDays}日 ÷ ${r.allDays}日${r.deemedDays > 0 ? `。前倒しで ${r.deemedDays}日を出勤とみなす` : ""}）`;
+  const notes = [
+    ...(r.deemedDays > 0 ? [`前倒しで ${r.deemedDays}日を出勤とみなす`] : []),
+    ...(r.leaveDays > 0 ? [`休業の ${r.leaveDays}日を出勤とみなす`] : []),
+    ...(r.otherLeaveDays > 0 ? [`その他の休職の ${r.otherLeaveDays}日を${r.otherLeaveRule === "absent" ? "欠勤と同じに数える" : "全労働日から除く"}`] : []),
+  ];
+  const base = `${pct(r.rate)}（${r.presentDays}日 ÷ ${r.allDays}日${notes.map((n) => `。${n}`).join("")}）`;
   return r.ok ? base : `${base}：8割未満`;
 };
 
@@ -67,7 +72,9 @@ export function AnnualGrantDueBanner(props: {
         </tbody>
       </table>
       <p style={hint}>
-        出勤率は、Q で確定した勤怠から数えます（年休・特別休暇の日と、産休・育休の期間は出勤したものとみなし、公休にした日は全労働日に入れません）。
+        出勤率は、Q で確定した勤怠から数えます（年休・特別休暇の日と、従業員の画面で入れた産休・育休・介護休業・業務上の負傷や疾病による休業の期間は
+        出勤したものとみなし、公休にした日は全労働日に入れません。私傷病の休職などの「その他の休職」の日は、
+        {otherLeaveRuleOf(props.rule) === "absent" ? "欠勤と同じに数えます" : "全労働日から除きます"}。会社設定の「休暇の種類」で変えられます）。
         Q を使う前の期間などで「確かめられません」のときは、出勤簿などで8割以上かを確かめてから付与してください。
         付与しない人（8割未満）は、0日の付与として残します（あとで取り消せます）。有効期限は付与日から2年です。
       </p>

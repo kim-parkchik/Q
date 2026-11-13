@@ -44,7 +44,7 @@
 import dayjs from 'dayjs';
 import * as Master from '../constants';
 import { birthdayAt, checkInsuredMonth, checkSocialInsEnrolled, getInsuranceByAge } from './calcSalary';
-import { canExemptLeave, checkLeaveExemptMonth, exemptLeavePeriodsOf, type LeavePeriod } from './leaveExemption';
+import { canExemptLeave, checkLeaveExemptMonth, exemptLeavePeriodsOf, type ExemptLeavePeriod, type LeavePeriod } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
 
 export interface YouikuEntry {
@@ -342,7 +342,7 @@ export const judgeYouikuEntries = (staff: any, entries: YouikuEntry[], today: st
 
 export interface YouikuCandidate {
   staff: any;
-  leave: LeavePeriod;
+  leave: ExemptLeavePeriod;
   /** 休業の終了日の翌日（申出書の養育特例開始年月日） */
   nextDay: string;
   /** 基準月（休業の終了日の翌日がある月の前月）の厚生年金の標準報酬月額 */

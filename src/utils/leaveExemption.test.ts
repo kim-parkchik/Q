@@ -114,6 +114,25 @@ describe("役員（育児休業等の免除は受けられない。産前産後�
     });
 });
 
+describe("介護休業・業務上の負傷や疾病による休業・その他の休職（免除はない。給与・勤怠は leaveOfAbsence.ts）", () => {
+    test("期間は読むが、免除に使う期間には入れない（その月の保険料も、賞与の保険料も引く）", () => {
+        const others: LeavePeriod[] = [
+            { type: "family_care", start: "2026-04-01", end: "2026-06-30" },
+            { type: "injury", start: "2026-07-01", end: "2026-08-31" },
+            { type: "other", start: "2026-09-01", end: "" },
+        ];
+        const staff = { leave_periods: stringifyLeavePeriods(others) };
+        expect(parseLeavePeriods(staff.leave_periods)).toEqual(others);
+        expect(exemptLeavePeriodsOf(staff)).toEqual([]);
+        expect(exemptMonths2026(others)).toEqual([]);
+        expect(checkLeaveExemptBonus(others, "2026-06-10")).toBe(false);
+        for (const p of others) expect(canExemptLeave({}, p)).toBe(false);
+        // 産休・育休と一緒に入れても、免除は産休・育休の分だけ
+        const mixed = [maternity("2026-01-10", "2026-03-31"), ...others];
+        expect(exemptLeavePeriodsOf({ leave_periods: stringifyLeavePeriods(mixed) })).toEqual([mixed[0]]);
+    });
+});
+
 describe("入力と保存", () => {
     test("保存した JSON を読み直すと同じ期間になる", () => {
         const leaves = [maternity("2026-03-01", "2026-06-10"), childcare("2026-06-11", "")];

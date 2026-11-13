@@ -149,7 +149,7 @@ export const DB_SCHEMAS = [
     pension_num TEXT,         -- 厚生年金整理番号
     employment_ins_num TEXT,  -- 雇用保険被保険者番号
     flat_tax_reduction_persons INTEGER DEFAULT 0, -- 令和6年分 定額減税の人数（本人＋同一生計配偶者＋扶養親族。0なら月次減税をしない）
-    leave_periods TEXT,       -- 産休・育休の期間（社会保険料の免除に使う。JSON。詳しくは utils/leaveExemption.ts）
+    leave_periods TEXT,       -- 休業・休職の期間（産休・育休・介護休業・業務上の負傷や疾病による休業・その他の休職。JSON。社会保険料の免除は utils/leaveExemption.ts、給与・勤怠は utils/leaveOfAbsence.ts）
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
@@ -288,6 +288,7 @@ export const DB_SCHEMAS = [
     unpaid_leave_deduction INTEGER,             -- 無給の特別休暇の控除の額（月給制。欠勤控除と同じ計算。v11 より前に確定した給与は NULL）
     flex_carry_hours REAL,                      -- フレックスタイム制で、次の月に繰り越す不足時間（フレックスタイム制の人だけ。ほかは NULL）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
+    leave_paid_days REAL,                       -- 休業の日がある月に、給与（月給）を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月は NULL。算定・月変の支払基礎日数に使う）
 
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,
@@ -391,6 +392,7 @@ export const DB_SCHEMAS = [
     tax_calc_method TEXT DEFAULT 'table', -- 源泉所得税の計算方法 'table':月額表 / 'densanki':電算機計算の特例
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
+    leave_proration_method TEXT DEFAULT 'workdays', -- 計算期間の途中で休業が始まる・終わる月の日割り 'workdays':所定労働日数 / 'calendar':暦日数 / 'none':しない（utils/leaveOfAbsence.ts）
     absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
     tardy_deduction_method TEXT DEFAULT 'none',       -- 月給制・日給制の人の遅刻・早退・中抜けの控除 'none':しない / 'annual':1か月平均所定労働時間で割る / 'period':計算期間の所定労働時間で割る
     flex_rule TEXT,                                   -- フレックスタイム制の決まり（JSON。総労働時間・法定の総枠・不足時間。NULL は初めの決まり。utils/flexTime.ts）

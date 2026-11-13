@@ -1606,3 +1606,112 @@ describe("出勤日数と日額の通勤手当", () => {
         expect(r.commutePay).toBe(1000);
     });
 });
+
+describe("休業・休職の日の給与（決まりは leaveOfAbsence.ts。2026年6月は平日22日）", () => {
+    const JUNE = { start: "2026-06-01", end: "2026-06-30" };
+    const leaves = (...list: [string, string, string][]) => JSON.stringify(list.map(([type, start, end]) => ({ type, start, end })));
+    // 6月16日から休業：休業していない所定労働日は 6/1〜15 の平日11日
+    const fromJune16 = (type = "childcare") => leaves([type, "2026-06-16", "2027-03-31"]);
+    const opts = (o: Partial<SalaryExtras> = {}): Partial<SalaryExtras> => ({ period: JUNE, periodWorkDays: 22, nonLeaveWorkDays: 11, ...o });
+    const items = [
+        { name: "役職手当", amount: 20000, type: "earning" as const, fixed: true },
+        { name: "資格手当", amount: 5000, type: "earning" as const, fixed: false },
+    ];
+
+    test("まるごと休業の月：月給・固定の支給項目・固定残業代・通勤手当（月額）を払わない（「変動」の項目は入れた額）", () => {
+        const staff = {
+            ...monthly, commute_type: "monthly", commute_amount: 10000, fixed_overtime_allowance: 30000, fixed_overtime_hours: 20,
+            leave_periods: leaves(["childcare", "2026-05-20", "2027-03-31"]),
+        };
+        const r = calc(staff, [], opts({ nonLeaveWorkDays: 0, customItems: items }));
+        expect(r.leave).toEqual({ types: ["childcare"], days: 30, full: true, paidDays: 0, workedDates: [] });
+        expect([r.basePay, r.commutePay, r.fixedOvertimeAllowance]).toEqual([0, 0, 0]);
+        expect(r.customEarningLines).toEqual([{ name: "役職手当", amount: 0 }, { name: "資格手当", amount: 5000 }]);
+        expect(r.totalEarnings).toBe(5000);
+        // 育休なので社会保険料は免除（雇用保険料は払った給与にかかる）
+        expect([r.healthInsurance, r.welfarePension]).toEqual([0, 0]);
+    });
+    test("途中で休業が始まる月：所定労働日数で日割り（初めの値）。通勤手当・固定残業代は日割りしない", () => {
+        const staff = { ...monthly, commute_type: "monthly", commute_amount: 10000, leave_periods: fromJune16() };
+        const r = calc(staff, [], opts({ customItems: items }));
+        expect(r.proration).toEqual({ method: "workdays", numerator: 11, denominator: 22, reason: "leave" });
+        expect(r.basePay).toBe(150000);
+        expect(r.customEarningLines[0]).toEqual({ name: "役職手当", amount: 10000 });
+        expect(r.commutePay).toBe(10000);
+        expect(r.leave).toMatchObject({ days: 15, full: false, paidDays: 11 });
+    });
+    test("暦日数で日割り・日割りしない（まるごと休業の月は、日割りしない設定でも払わない）", () => {
+        const cal = calc({ ...monthly, leave_periods: fromJune16() }, [], opts({ leaveProrationMethod: "calendar" }));
+        expect(cal.proration).toEqual({ method: "calendar", numerator: 15, denominator: 30, reason: "leave" });
+        expect(cal.basePay).toBe(150000);
+        expect(cal.leave?.paidDays).toBe(15);
+        const none = calc({ ...monthly, leave_periods: fromJune16() }, [], opts({ leaveProrationMethod: "none" }));
+        expect([none.basePay, none.leave?.paidDays]).toEqual([300000, null]);
+        const fullNone = calc({ ...monthly, leave_periods: leaves(["childcare", "2026-05-20", "2027-03-31"]) }, [], opts({ leaveProrationMethod: "none", nonLeaveWorkDays: 0 }));
+        expect(fullNone.basePay).toBe(0);
+    });
+    test("休業の日のほかに所定労働日がない月も、まるごと休業の月にする（休業していない日が休日だけ）", () => {
+        // 6/29 から復帰でも、会社カレンダーで 6/29・30 が休日なら、休業していない所定労働日は0日
+        const r = calc({ ...monthly, commute_type: "monthly", commute_amount: 10000, leave_periods: leaves(["family_care", "2026-05-01", "2026-06-28"]) }, [],
+            opts({ nonLeaveWorkDays: 0, leaveProrationMethod: "calendar" }));
+        expect(r.leave?.full).toBe(true);
+        expect([r.basePay, r.commutePay]).toEqual([0, 0]);
+    });
+    test("計算期間に所定労働日がまったくない（出勤曜日の入れ忘れなど）ときは、休業1日でまるごと休業にしない", () => {
+        const r = calc({ ...monthly, leave_periods: leaves(["other", "2026-06-30", "2026-06-30"]) }, [], opts({ periodWorkDays: 0, nonLeaveWorkDays: 0 }));
+        expect(r.leave?.full).toBe(false);
+        expect(r.basePay).toBe(300000);
+        expect(r.prorationNote).toContain("所定労働日がない");
+    });
+    test("会社カレンダーを読み込めていないときは、所定労働日数で日割りせずに知らせる", () => {
+        const r = calc({ ...monthly, leave_periods: fromJune16() }, [], opts({ nonLeaveWorkDays: null, periodWorkDays: null }));
+        expect(r.basePay).toBe(300000);
+        expect(r.prorationNote).toContain("休業の日の分を日割りしていません");
+        expect(r.leave?.paidDays).toBeNull();
+    });
+    test("休業の日の欠勤・公休の記録は使わない（欠勤控除を2回しない）。休業していない日の欠勤は引く", () => {
+        const r = calc({ ...monthly, leave_periods: fromJune16() }, [day("10", 0, "absent"), day("17", 0, "absent"), day("18", 0, "holiday")], opts());
+        expect(r.basePay).toBe(150000);
+        expect(r.absenceDeduction).toBe(13636); // 300,000 ÷ 22日 × 1日（6/10 だけ）
+        expect(r.leave?.workedDates).toEqual([]);
+    });
+    test("休業の日に働いた記録は、働いた時間の分を払い、知らせる（時給制）", () => {
+        const r = calc({ ...hourly, leave_periods: fromJune16() }, [day("08", 8), day("17", 8)], opts());
+        expect(r.basePay).toBe(1200 * 16);
+        expect(r.leave).toMatchObject({ workedDates: ["2026-06-17"], paidDays: null });
+    });
+    test("介護休業は保険料の免除がないので、給与がない月も社会保険料を引く（差引支給額がマイナス。雇用保険料・所得税は0円）", () => {
+        const r = calc({ ...monthly, leave_periods: leaves(["family_care", "2026-05-01", "2026-08-31"]) }, [], opts({ nonLeaveWorkDays: 0, residentTax: 12000 }));
+        expect(r.totalEarnings).toBe(0);
+        expect(r.isLeaveExemptMonth).toBe(false);
+        expect(r.healthInsurance).toBe(calc(monthly, []).healthInsurance);
+        expect(r.welfarePension).toBe(calc(monthly, []).welfarePension);
+        expect([r.empInsurance, r.incomeTax, r.residentTax]).toEqual([0, 0, 12000]);
+        expect(r.netPay).toBe(-r.totalDeductions);
+        expect(r.netPay).toBeLessThan(0);
+    });
+    test("フレックスタイム制：休業していない日で清算する（休業の日の分を不足時間として引かない）", () => {
+        const flex = { ...monthly, is_flex: 1, leave_periods: fromJune16() };
+        const worked = ["01", "02", "03", "04", "05", "08", "09", "10", "11", "12", "15"].map((d) => day(d, 8));
+        const r = calc(flex, worked, opts());
+        expect(r.flex?.requiredHours).toBe(88); // 11日 × 8時間
+        expect(r.flex?.shortageHours).toBe(0);
+        expect(r.flexShortageDeduction).toBe(0);
+        expect(r.basePay).toBe(150000);
+        // 決めた時間（160時間）は、所定労働日数のうち休業していない日の割合（11/22）で80時間にする
+        const fixed = calc(flex, worked, opts({ flexRule: { total: { mode: "fixed", hours: 160 }, limit: "standard", shortage: "deduct" } }));
+        expect(fixed.flex?.requiredHours).toBe(80);
+        expect(fixed.flexShortageDeduction).toBe(0);
+    });
+    test("確定すると、休業の月に払った日数を残す（算定・月変の支払基礎日数に使う）", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const staff = { ...monthly, leave_periods: fromJune16() };
+        await saveSalaryResult(asyncDb, "S001", 2026, 6, calc(staff, [], opts()), staff);
+        expect(db.query("SELECT leave_paid_days AS d, total_earnings AS t FROM salary_results").get()).toEqual({ d: 11, t: 150000 });
+        await saveSalaryResult(asyncDb, "S001", 2026, 5, calc(monthly, [], opts()), monthly);
+        expect(db.query("SELECT leave_paid_days AS d FROM salary_results WHERE target_month = 5").get()).toEqual({ d: null });
+    });
+});

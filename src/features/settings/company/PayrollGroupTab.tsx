@@ -30,6 +30,7 @@ import {
     toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod,
     type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection, type TardyDeductionMethod,
 } from '../../../utils/calcSalary';
+import { LEAVE_PRORATION_METHOD_LABELS, toLeaveProrationMethod, type LeaveProrationMethod } from '../../../utils/leaveOfAbsence';
 import {
     DEFAULT_LENGTH_RULES, LENGTH_COMBINE_LABELS, TIME_COMBINE_LABELS, describeCombine, describeFixedBreak, parseFixedBreak,
     type LengthCombine, type LengthRule, type TimeCombine,
@@ -57,6 +58,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgSocialInsCollection,
         pgProrationMethod,
         setPgProrationMethod,
+        pgLeaveProrationMethod,
+        setPgLeaveProrationMethod,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
         pgTardyDeductionMethod,
@@ -104,6 +107,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 所得税: {TAX_CALC_METHOD_LABELS[(pg.tax_calc_method === "densanki" ? "densanki" : "table") as TaxCalcMethod]}
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                         / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
+                                        / 休業の月: {LEAVE_PRORATION_METHOD_LABELS[toLeaveProrationMethod(pg.leave_proration_method)]}
                                         / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
                                         / 遅刻・早退・中抜け: {TARDY_DEDUCTION_METHOD_LABELS[toTardyDeductionMethod(pg.tardy_deduction_method)]}
                                         / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}{parseFixedBreak(pg.fixed_break) ? `（${describeCombine(parseFixedBreak(pg.fixed_break))}）` : ""}
@@ -243,6 +247,23 @@ export default function PayrollGroupTab({ cm }: Props) {
                         月給制の人の基本給と、給与項目のうち「固定（毎月同額）」の支給項目を日割りします（1円未満は切り上げ）。
                         固定残業代・通勤手当・「変動」の項目は日割りしないので、規程で日割りするなら金額を直してください。
                         所定労働日数は、会社カレンダー（従業員の出勤曜日）から数えます。
+                    </p>
+
+                    <label style={miniLabelStyle}>計算期間の途中で休業・休職が始まる・終わる月の月給</label>
+                    <select
+                        value={pgLeaveProrationMethod}
+                        onChange={e => setPgLeaveProrationMethod(e.target.value as LeaveProrationMethod)}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                    >
+                        <option value="workdays">{LEAVE_PRORATION_METHOD_LABELS.workdays}（月額 × 休業していない日の所定労働日数 ÷ 計算期間の所定労働日数）</option>
+                        <option value="calendar">{LEAVE_PRORATION_METHOD_LABELS.calendar}（月額 × 休業していない暦日数 ÷ 計算期間の暦日数）</option>
+                        <option value="none">{LEAVE_PRORATION_METHOD_LABELS.none}（休業の日の分も払う）</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        産休・育休・介護休業などの休業の日は働いていないので、その日の分の給与は払いません（従業員の画面の「休業・休職」で期間を入れます）。
+                        計算期間がまるごと休業の月は、この設定にかかわらず、月給・固定の支給項目・固定残業代・通勤手当（月額）を払いません。
+                        途中で始まる・終わる月は、月給と固定の支給項目を、ここで選んだしかたで日割りします（1円未満は切り上げ。入社・退職の月と同じく、固定残業代・通勤手当は日割りしません）。
+                        日割りした日数は、算定・月変の支払基礎日数にもなります。
                     </p>
 
                     <label style={miniLabelStyle}>月給制の人の欠勤控除</label>

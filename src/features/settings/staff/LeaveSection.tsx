@@ -1,6 +1,6 @@
 /**
- * 「産休・育休（社会保険料の免除）」：産前産後休業・育児休業等の期間
- * 免除の決まりは utils/leaveExemption.ts
+ * 「休業・休職」：産前産後休業・育児休業等・介護休業・業務上の負傷や疾病による休業・その他の休職の期間
+ * 社会保険料の免除（産休・育休だけ）の決まりは utils/leaveExemption.ts、給与・勤怠・年休の出勤率での扱いは utils/leaveOfAbsence.ts
  */
 import { Baby, Plus, Trash2 } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
@@ -14,6 +14,9 @@ interface Props {
 const LEAVE_TYPE_OPTIONS: { value: LeaveType; label: string }[] = [
     { value: 'maternity', label: '産前産後休業' },
     { value: 'childcare', label: '育児休業（産後パパ育休を含む）' },
+    { value: 'family_care', label: '介護休業' },
+    { value: 'injury', label: '業務上の負傷・疾病による休業（労災）' },
+    { value: 'other', label: 'その他の休職（私傷病の休職など）' },
 ];
 
 export default function LeaveSection({ cm }: Props) {
@@ -30,7 +33,7 @@ export default function LeaveSection({ cm }: Props) {
         <div style={{ marginTop: "10px" }}>
             <h4 style={{ borderLeft: "4px solid #ec4899", paddingLeft: "10px", margin: "0 0 10px 0", fontSize: "14px" }}>
                 <Baby size={14} style={{ marginRight: "4px", verticalAlign: "middle" }} />
-                産休・育休（社会保険料の免除）
+                休業・休職（産休・育休・介護休業など）
             </h4>
 
             {targetLeavePeriods.length > 0 && (
@@ -79,9 +82,18 @@ export default function LeaveSection({ cm }: Props) {
             </button>
 
             <p style={{ fontSize: "11px", color: "#64748b", margin: "6px 0 0 0", lineHeight: 1.6 }}>
-                年金事務所（健康保険組合）に申出をした期間を入れてください。開始日がある月の分から、終了日の翌日がある月の前月分まで、
-                健康保険・介護保険・子ども・子育て支援金・厚生年金の保険料を引きません（雇用保険料は引きます）。
-                休日をはさんで続けて休むときも、1つの期間として入れてください。
+                休業・休職の日は働いていないので、その日の分の給与を払いません。計算期間がまるごと休業の月は、月給・固定の支給項目・固定残業代・通勤手当（月額）を払わず、
+                途中で始まる・終わる月は、月給と固定の支給項目を、給与規定グループの「休業の月の日割り」で日割りします（時給制・日給制は、働いた分だけ払います）。
+                勤怠の画面と出勤簿には、休業の日を「育休」などと出します。
+            </p>
+            <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
+                産前産後休業・育児休業は、年金事務所（健康保険組合）に申出をした期間を入れてください。開始日がある月の分から、終了日の翌日がある月の前月分まで、
+                健康保険・介護保険・子ども・子育て支援金・厚生年金の保険料を引きません（雇用保険料は引きます）。休日をはさんで続けて休むときも、1つの期間として入れてください。
+                介護休業・業務上の負傷や疾病による休業・その他の休職には保険料の免除がないので、給与がない月も社会保険料・住民税を引きます（差引支給額がマイナスになることがあります）。
+            </p>
+            <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
+                年次有給休暇の出勤率では、産前産後休業・育児休業・介護休業・業務上の負傷や疾病による休業の期間は出勤したものとみなします（労働基準法39条10項）。
+                その他の休職は、会社設定の「休暇の種類」で決めた数え方（全労働日から除く・欠勤と同じに数える）で数えます。
             </p>
             {targetIsExecutive === 1 && hasChildcare && (
                 <p style={{ fontSize: "11px", color: "#b45309", margin: "4px 0 0 0", lineHeight: 1.6 }}>

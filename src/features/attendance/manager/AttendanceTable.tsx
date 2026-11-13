@@ -15,6 +15,7 @@ import type { AttendanceViewModel } from './types';
 import { durationLabel } from '../../../utils/fixedBreak';
 import { effectiveBreaks, isCompleteSpan, spanLabel, type BreakSpan } from '../../../utils/breaks';
 import { SPECIAL_LEAVE_FULL, SPECIAL_LEAVE_HALF, isSpecialLeaveWorkType, leaveOptionValue, specialLeaveLabel } from '../../../utils/specialLeave';
+import { describeLeave, LEAVE_TYPE_SHORT_NAMES } from '../../../utils/leaveOfAbsence';
 
 interface Props {
   am: AttendanceViewModel;
@@ -51,6 +52,7 @@ export default function AttendanceTable({ am }: Props) {
     hourlyLeaveEnabled,
     halfDayLeaveEnabled,
     leaveTypes,
+    leaveDays,
   } = am;
   // 休憩の一覧の画面を開いている日
   const [breakDialogDate, setBreakDialogDate] = useState<string | null>(null);
@@ -184,7 +186,12 @@ export default function AttendanceTable({ am }: Props) {
           const cSetting = companyHolidays[dateStr];
           const isRedDay = (cSetting === 1) || (cSetting === undefined && (dayOfWeek === "日" || !!hName));
           const isBlueDay = dayOfWeek === "土" && !isRedDay;
-          const rowBgColor = S.rowBgColor(isRedDay, isBlueDay);
+          // 休業・休職の日（従業員の画面で入れた期間）は、薄い紫にする
+          const leave = leaveDays[dateStr];
+          const rowBgColor = leave ? "#f5f3ff" : S.rowBgColor(isRedDay, isBlueDay);
+          // 休業の日に、働いた・休暇の記録を入れている（給与は働いた時間の分を払うので知らせる）
+          const leaveHasRecord = !!leave && (!!rowData.in || !!rowData.out || ["paid_full", "paid_half", "special", "special_half"].includes(row.workType)
+            || Number(rowData.paidHours) > 0 || Number(rowData.specialHours) > 0);
           const dateTextColor = S.dateTextColor(isRedDay, isBlueDay);
 
           // --- 1. 状態判定 ---
@@ -256,6 +263,17 @@ export default function AttendanceTable({ am }: Props) {
                       <span style={{ fontSize: "12px", marginLeft: "2px" }}>({dayOfWeek})</span>                           
                       {hName && <span style={S.holidayBadge}>{hName}</span>}
                     </div>
+                    {leave && (
+                      <div
+                        title={`${describeLeave(leave)}。休業の日は働いていないので、給与を払いません（月給は、給与規定グループの「休業の月の日割り」で日割り）`}
+                        style={{ display: "inline-block", margin: "2px 0", padding: "1px 6px", borderRadius: 4, fontSize: 11, fontWeight: "bold", color: "#6d28d9", backgroundColor: "#ede9fe" }}
+                      >
+                        {LEAVE_TYPE_SHORT_NAMES[leave.type]}
+                      </div>
+                    )}
+                    {leaveHasRecord && (
+                      <div style={{ fontSize: 10, color: "#b45309", fontWeight: "normal", lineHeight: 1.3 }}>⚠ 休業の期間の日です</div>
+                    )}
 
                     <select
                       value={selectValue}

@@ -4,6 +4,7 @@ import { generateAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from "../../utils/calcSalary";
 import { isFlexStaff, loadFlexCarryIn, parseFlexRule } from "../../utils/flexTime";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
+import { countNonLeaveWorkDays, leaveByDate, toLeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
 import { useToast } from "../../components/Toast";
@@ -552,13 +553,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
   // --- 給与集計に使う、給与項目と所定労働日数（残業代の時給・日割り。給与明細と同じ読み方） ---
   const [customItems, setCustomItems] = useState<SalaryExtras['customItems']>([]);
-  const [workDays, setWorkDays] = useState<{ annual: number | null; period: number | null; employed: number | null }>({ annual: null, period: null, employed: null });
+  const [workDays, setWorkDays] = useState<{ annual: number | null; period: number | null; employed: number | null; nonLeave: number | null }>({ annual: null, period: null, employed: null, nonLeave: null });
   const periodStart = payrollPeriod?.startStr ?? "";
   const periodEnd = payrollPeriod?.endStr ?? "";
   useEffect(() => {
     let cancelled = false;
     setCustomItems([]);
-    setWorkDays({ annual: null, period: null, employed: null });
+    setWorkDays({ annual: null, period: null, employed: null, nonLeave: null });
     if (!db || !selectedStaff) return;
     (async () => {
       try {
@@ -572,6 +573,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           annual: countPrescribedWorkDays(ctx, `${y}-01-01`, `${y}-12-31`),
           period: periodStart ? countPrescribedWorkDays(ctx, periodStart, periodEnd) : null,
           employed: periodStart ? countPrescribedWorkDays(ctx, from, to) : null,
+          // 在籍していて休業していない日の所定労働日数（休業の月の日割り。utils/leaveOfAbsence.ts）
+          nonLeave: periodStart ? countNonLeaveWorkDays(ctx, selectedStaff, { start: periodStart, end: periodEnd }) : null,
         });
       } catch (e) {
         console.error("給与項目・所定労働日数の読み込みエラー:", e);
@@ -664,6 +667,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         annualWorkDays: workDays.annual,
         // 計算期間の途中で入社・退職した月給制の人の日割り（給与規定グループの設定）
         prorationMethod: toProrationMethod(currentGroup?.proration_method),
+        // 休業の月の日割り（給与規定グループの設定。初めは所定労働日数で日割り）
+        leaveProrationMethod: toLeaveProrationMethod(currentGroup?.leave_proration_method),
         // 月給制の人の欠勤控除（給与規定グループの設定。計算期間の所定労働日数か、1年間の月平均で割る）
         absenceDeductionMethod: toAbsenceDeductionMethod(currentGroup?.absence_deduction_method),
         // 月給制・日給制の人の遅刻・早退・中抜けの控除（給与規定グループの設定。初めは引かない）
@@ -671,6 +676,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         period: periodStart ? { start: periodStart, end: periodEnd } : null,
         periodWorkDays: workDays.period,
         employedWorkDays: workDays.employed,
+        nonLeaveWorkDays: workDays.nonLeave,
         // 週40時間の累計に、前の計算期間の日も足す
         weekCarryOver,
         // 社会保険料の徴収（給与規定グループの設定。翌月徴収の退職月は、当月払いなら退職した月の分も引く）
@@ -854,12 +860,16 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     checkMonthStatus();
   }, [checkMonthStatus]);
 
+  // 休業・休職の日（従業員の画面で入れた期間。勤怠の画面に「育休」などと出す。utils/leaveOfAbsence.ts）
+  const leaveDays = useMemo(() => leaveByDate(selectedStaff, dateList), [selectedStaff, dateList]);
+
   return {
     activeTab, setActiveTab,
     selectedStaff, selectedStaffId, setSelectedStaffId,
     isLoading,
     isClosed,
     monthlyWorkData, setMonthlyWorkData, dateList, payrollPeriod,
+    leaveDays,
     paidLeave,
     // 会社独自の休暇（特別休暇）の種類と、この人の残り
     leaveTypes,

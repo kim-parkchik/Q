@@ -13,6 +13,8 @@
 import { WORK_TYPE_LABELS } from "./paidLeave";
 import { formatBreakList, parseBreaksJson, effectiveBreaks } from "./breaks";
 import type { SalaryResult } from "./calcSalary";
+import type { LeavePeriod } from "./leaveExemption";
+import { hasWorkRecord, leaveOn, LEAVE_TYPE_NAMES } from "./leaveOfAbsence";
 import { OVERTIME_PREMIUM_RATE, OVERTIME_RATE, HOLIDAY_WORK_RATE } from "../constants";
 
 // ── 賃金台帳の内訳（確定するときに残す） ─────────────────────────────
@@ -280,21 +282,30 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 /**
  * 出勤簿の行（期間の毎日。勤怠がない日も行を作る）
  * @param records 勤怠の行（attendance の列。特別休暇の名前は leave_name）
+ * @param leaves  休業・休職の期間（従業員の画面の leave_periods。休業の日は区分に「育児休業」などと書く。utils/leaveOfAbsence.ts）
  */
-export const attendanceBookRows = (period: { start: string; end: string }, records: any[]): AttendanceBookRow[] => {
+export const attendanceBookRows = (period: { start: string; end: string }, records: any[], leaves: LeavePeriod[] = []): AttendanceBookRow[] => {
   const byDate = new Map(records.map((r) => [String(r.work_date), r]));
   const rows: AttendanceBookRow[] = [];
   for (let d = new Date(`${period.start}T00:00:00`); ymd(d) <= period.end; d.setDate(d.getDate() + 1)) {
     const date = ymd(d);
     const r = byDate.get(date);
+    const leave = leaveOn(leaves, date);
     if (!r) {
-      rows.push({ date, weekday: WEEKDAYS[d.getDay()], type: "", entry: "", exit: "", breaks: "", workHours: null, nightHours: null, paidLeaveHours: null, memo: "", finalized: null });
+      rows.push({
+        date, weekday: WEEKDAYS[d.getDay()], type: leave ? LEAVE_TYPE_NAMES[leave.type] : "", entry: "", exit: "", breaks: "",
+        workHours: null, nightHours: null, paidLeaveHours: null, memo: "", finalized: null,
+      });
       continue;
     }
     const type = String(r.work_type || "normal");
-    const label = (type === "special" || type === "special_half") && r.leave_name
+    const recordLabel = (type === "special" || type === "special_half") && r.leave_name
       ? `${r.leave_name}${type === "special_half" ? "（半日）" : ""}`
       : WORK_TYPE_LABELS[type] ?? type;
+    // 休業の日：働いた・休暇の記録があれば、その区分に休業の期間であることを足す。なければ休業の名前（欠勤・公休の記録は給与に使わない）
+    const label = !leave ? recordLabel
+      : hasWorkRecord(r) ? `${recordLabel}（${LEAVE_TYPE_NAMES[leave.type]}の期間）`
+      : LEAVE_TYPE_NAMES[leave.type];
     const breaks = effectiveBreaks(parseBreaksJson(r.breaks), parseBreaksJson(r.csv_breaks) ?? []);
     // 確定したときに引いた決まった休憩（utils/fixedBreak.ts。「12:00〜13:00」「45分」）も、休憩として書く
     const autoBreak = String(r.auto_break ?? "").trim();

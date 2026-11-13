@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   afterMonths, attendanceRateFor, describeAnnualLeaveRule, describeFiveDay, dueAnnualGrants, fiveDayStatuses, grantDaysFor, parseAnnualLeaveRule,
-  periodMonths, plannedGrants, stageLabel, stringifyAnnualLeaveRule, workScaleOf, type AnnualLeaveRule,
+  otherLeaveRuleOf, periodMonths, plannedGrants, stageLabel, stringifyAnnualLeaveRule, workScaleOf, type AnnualLeaveRule,
 } from "./annualLeaveGrant";
 import { NORMAL_GRANT_DAYS } from "../constants/annualLeave";
 import type { CalendarContext } from "./annualWorkDays";
@@ -112,6 +112,30 @@ describe("出勤率（全労働日の8割以上。年休・特別休暇・産休
   test("Q に確定した勤怠がない日があれば、確かめられない（null）", () => {
     const r = attendanceRateFor("2026-06-01", "2026-06-12", MON_FRI, all.slice(0, 5).map((d) => row(d)), []);
     expect([r.missingDays, r.ok]).toEqual([5, null]);
+  });
+  test("介護休業・業務上の負傷や疾病による休業も、出勤したものとみなす（労働基準法39条10項）", () => {
+    const rows = all.slice(0, 6).map((d) => row(d));
+    const r = attendanceRateFor("2026-06-01", "2026-06-12", MON_FRI, rows, [
+      { type: "family_care", start: "2026-06-09", end: "2026-06-10" },
+      { type: "injury", start: "2026-06-11", end: "2026-06-12" },
+    ]);
+    expect([r.allDays, r.presentDays, r.leaveDays, r.missingDays, r.ok]).toEqual([10, 10, 4, 0, true]);
+  });
+  test("その他の休職は、会社の決まりで数える（初めは全労働日から除く。欠勤と同じにもできる。働いた日は出勤）", () => {
+    const rows = [...all.slice(0, 5).map((d) => row(d)), row("09")];
+    const other = [{ type: "other" as const, start: "2026-06-08", end: "2026-06-30" }];
+    const excluded = attendanceRateFor("2026-06-01", "2026-06-12", MON_FRI, rows, other);
+    expect([excluded.allDays, excluded.presentDays, excluded.otherLeaveDays, excluded.ok, excluded.otherLeaveRule]).toEqual([6, 6, 4, true, "exclude"]);
+    const absent = attendanceRateFor("2026-06-01", "2026-06-12", MON_FRI, rows, other, null, "absent");
+    expect([absent.allDays, absent.presentDays, absent.otherLeaveDays, absent.ok]).toEqual([10, 6, 4, false]);
+  });
+  test("会社の決まり（JSON）に、その他の休職の数え方を残す（なければ全労働日から除く）", () => {
+    expect(otherLeaveRuleOf(parseAnnualLeaveRule(null))).toBe("exclude");
+    const hire = parseAnnualLeaveRule(stringifyAnnualLeaveRule({ mode: "hire", otherLeave: "absent" }));
+    expect(hire).toEqual({ mode: "hire", otherLeave: "absent" });
+    const unified = parseAnnualLeaveRule(JSON.stringify({ mode: "unified", month: 4, day: 1, first: "sixMonths", otherLeave: "absent" }));
+    expect(otherLeaveRuleOf(unified)).toBe("absent");
+    expect(otherLeaveRuleOf(parseAnnualLeaveRule(JSON.stringify({ mode: "unified", month: 4, day: 1, otherLeave: "何か" })))).toBe("exclude");
   });
   test("前倒しで短くなった期間は、全部出勤したものとみなす", () => {
     const rows = all.slice(0, 5).map((d, i) => (i < 3 ? row(d) : row(d, "absent", 0)));

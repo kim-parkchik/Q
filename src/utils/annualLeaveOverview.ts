@@ -7,7 +7,7 @@ import { countPrescribedWorkDays, loadCalendarContext, type CalendarContext } fr
 import { parseLeavePeriods } from "./leaveExemption";
 import { collectLeaveTaken, loadPaidLeaveData, type LeaveGrantRow, type LeaveTaken } from "./paidLeave";
 import {
-  afterMonths, attendanceRateFor, dueAnnualGrants, fiveDayStatuses, grantDaysFor, parseAnnualLeaveRule, plannedGrants, workScaleOf,
+  afterMonths, attendanceRateFor, dueAnnualGrants, fiveDayStatuses, grantDaysFor, otherLeaveRuleOf, parseAnnualLeaveRule, plannedGrants, workScaleOf,
   type AnnualLeaveRule, type AttendanceForRate, type AttendanceRate, type FiveDayStatus, type PlannedGrant,
 } from "./annualLeaveGrant";
 
@@ -105,7 +105,8 @@ export const loadStaffAnnualLeave = async (db: SelectDb, staff: any, settings: A
   const dueInfo = due.map((grant): DueAnnualGrantInfo => {
     const { days, proportional } = grantDaysFor(grant.stage, scaleFor(grant.date));
     const deemed = grant.deemedFrom && grant.deemedTo ? { from: grant.deemedFrom, to: grant.deemedTo } : null;
-    return { grant, days, proportional, rate: attendanceRateFor(grant.periodFrom, grant.periodTo, ctx, rows, leavePeriods, deemed) };
+    // その他の休職の日は、会社の決まり（会社設定の「休暇の種類」）で数える
+    return { grant, days, proportional, rate: attendanceRateFor(grant.periodFrom, grant.periodTo, ctx, rows, leavePeriods, deemed, otherLeaveRuleOf(settings.rule)) };
   });
   const next = nextPlan
     ? { date: nextPlan.date, stage: nextPlan.stage, legalDate: nextPlan.legalDate, ...grantDaysFor(nextPlan.stage, scaleFor(nextPlan.date)) }

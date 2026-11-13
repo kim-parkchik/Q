@@ -30,6 +30,8 @@ import { getPeriodForPayMonth, type PayrollGroupForPeriod } from './payrollPerio
 import { getStandardRemuneration, remunerationHistoryOf } from './standardRemuneration';
 import { staffAsOf } from './staffHistory';
 import { isSpecialLeaveWorkType, SPECIAL_LEAVE_FULL, specialLeaveOfRow } from './specialLeave';
+import { parseLeavePeriods } from './leaveExemption';
+import { leaveOn } from './leaveOfAbsence';
 
 /** general: 一般 / part: 短時間就労者（パートなど） / short: 特定適用事業所の短時間労働者 */
 export type SanteiWorkerKind = 'general' | 'part' | 'short';
@@ -115,10 +117,13 @@ export const decideTeiji = (
  * ・月給制：給与の計算期間の暦日数。欠勤控除をした月は、所定労働日数 − 欠勤日数（無給の特別休暇（1日）の日も引く。
  *   半日の日は、残りの半日の給与を払っているので引かない）
  *   （欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
+ *   休業・休職の日がある月（utils/leaveOfAbsence.ts）：給与を払わない休業の日は数えず、月給を払った日数（日割りの日数。
+ *   まるごと休業の月は0日。確定したときに残した leave_paid_days）から、欠勤控除をした日を引く
  * @param rows             給与の計算期間の確定済み勤怠
  * @param prescribedDays   計算期間の所定労働日数（確定した給与に残した、会社カレンダーから数えた日数）
  * @param absenceDeducted  欠勤控除（無給の特別休暇の控除を含む）をしたか（確定した給与に額を残していないときは undefined。
  *                         欠勤があれば、したとみなす）
+ * @param leavePaidDays    休業の日がある月に、月給を払った日数（確定した給与の leave_paid_days。休業の日がない・日割りしない月は null）
  */
 export const paymentBasisDays = (
   wageType: string,
@@ -126,9 +131,13 @@ export const paymentBasisDays = (
   rows: { work_date: string; work_type?: string; work_hours?: number | string; leave_paid?: number | string | null }[],
   prescribedDays: number,
   absenceDeducted?: boolean,
+  leavePaidDays?: number | null,
 ): number => {
   if (wageType === 'monthly') {
     const absent = rows.filter((r) => r.work_type === 'absent' || (r.work_type === SPECIAL_LEAVE_FULL && !specialLeaveOfRow(r).paid)).length;
+    if (leavePaidDays !== null && leavePaidDays !== undefined) {
+      return absent > 0 && absenceDeducted !== false ? Math.max(0, leavePaidDays - absent) : Math.max(0, leavePaidDays);
+    }
     if (absent > 0 && absenceDeducted !== false) return Math.max(0, prescribedDays - absent);
     const start = new Date(`${period.startStr}T00:00:00`);
     const end = new Date(`${period.endStr}T00:00:00`);
@@ -196,6 +205,8 @@ export interface SalaryRecord {
   unpaid_leave_deduction?: number | null;
   /** 確定したときの計算期間の所定労働日数（会社カレンダーから数えたもの。わからないときは null） */
   prescribed_work_days?: number | null;
+  /** 休業の日がある月に、月給を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月・会社ファイルの形式 v19 より前は null） */
+  leave_paid_days?: number | null;
 }
 
 /** 確定した勤怠（支払基礎日数を数えるのに使う項目） */
@@ -228,8 +239,11 @@ export const monthFigures = (
     const unfinalized = !!period && (!staff.join_date || staff.join_date <= period.endStr);
     return { figures: { month, days: null, amount: null, partialJoin: false }, unfinalized, baseWage: null };
   }
+  // 休業・休職の日の勤怠は、働いた時間がある日だけを使う（給与の計算と同じ。欠勤・公休の記録は使わない。utils/leaveOfAbsence.ts）
+  const leaves = parseLeavePeriods(staff.leave_periods);
   const rows = attendance.filter((a) =>
-    String(a.staff_id) === String(staff.id) && a.work_date >= period.startStr && a.work_date <= period.endStr);
+    String(a.staff_id) === String(staff.id) && a.work_date >= period.startStr && a.work_date <= period.endStr
+    && (!leaveOn(leaves, a.work_date) || (Number(a.work_hours) || 0) > 0));
   // 欠勤控除をした月の「所定労働日数」は、確定したときに会社カレンダーから数えて残した日数
   // （残していない前の給与は、その月の土日を除いた日数）。欠勤控除をしたかも、確定したときの額で見る
   const prescribedDays = salary.prescribed_work_days === null || salary.prescribed_work_days === undefined
@@ -241,7 +255,7 @@ export const monthFigures = (
     figures: {
       month,
       // 給与形態は、その月の分の履歴の値（utils/staffHistory.ts）
-      days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedDays, absenceDeducted),
+      days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedDays, absenceDeducted, salary.leave_paid_days),
       amount: Number(salary.total_earnings) || 0,
       // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
       partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,

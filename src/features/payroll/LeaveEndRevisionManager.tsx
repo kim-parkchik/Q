@@ -68,7 +68,7 @@ export default function LeaveEndRevisionManager({ db, staffList, onDataChange }:
             </thead>
             <tbody>
               {z.rows.length === 0 && !z.isLoading && (
-                <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={7}>{z.year}年に産休・育休が終わった人はいません（従業員画面の「産休・育休の期間」に終了日を入れた人が出ます）</td></tr>
+                <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={7}>{z.year}年に産休・育休が終わった人はいません（従業員画面の「休業・休職」に、産前産後休業・育児休業の終了日を入れた人が出ます）</td></tr>
               )}
               {z.rows.map((r) => <LeaveEndTableRow key={r.key} r={r} z={z} />)}
             </tbody>

@@ -28,7 +28,7 @@
  */
 import dayjs from 'dayjs';
 import type { PayrollGroupForPeriod } from './payrollPeriod';
-import { exemptLeavePeriodsOf, type LeavePeriod, type LeaveType } from './leaveExemption';
+import { exemptLeavePeriodsOf, type ExemptLeavePeriod, type ExemptLeaveType } from './leaveExemption';
 import {
   gradeOfStandard, groupOf, lookupGrade, monthFigures,
   type AttendanceRecord, type SalaryRecord, type SanteiWorkerKind,
@@ -36,7 +36,7 @@ import {
 import { getStandardRemuneration, remunerationHistoryOf } from './standardRemuneration';
 import { addMonths, type ZuijiMonth } from './zuiji';
 
-export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+export const LEAVE_TYPE_LABELS: Record<ExemptLeaveType, string> = {
   maternity: '産前産後休業',
   childcare: '育児休業等',
 };
@@ -107,7 +107,7 @@ export const judgeLeaveEnd = (
 
 export interface LeaveEndCandidate {
   staff: any;
-  leave: LeavePeriod;
+  leave: ExemptLeavePeriod;
   /** 終了日の翌日（YYYY-MM-DD） */
   nextDay: string;
   /** 終了日の翌日が属する月（3か月の最初の月） */

@@ -10,6 +10,7 @@ import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
 import { insurerOf, loadHealthInsurers } from '../../utils/healthInsurer';
 import { flatTaxRemainingFor, loadFlatTaxPayments, salaryPayDate, type FlatTaxPayment } from '../../utils/flatTaxReduction';
+import { countNonLeaveWorkDays, toLeaveProrationMethod } from '../../utils/leaveOfAbsence';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 /** 明細を開いたときに読むもの（給与規定グループの設定などのほか）。読み込み中・読み込めなかったときは確定しない */
@@ -123,10 +124,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method, tardy_deduction_method, flex_rule FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, flex_rule FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
         ) as {
-          tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string;
+          tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; leave_proration_method?: string;
           absence_deduction_method?: string; tardy_deduction_method?: string; flex_rule?: string | null;
         }[];
         if (cancelled) return;
@@ -137,6 +138,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           socialInsCollection: toSocialInsCollection(rows?.[0]?.social_ins_collection),
           collectRetirementMonth: Number(rows?.[0]?.is_next_month) !== 1,
           prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
+          // 休業の月の日割り（初めは所定労働日数で日割り。utils/leaveOfAbsence.ts）
+          leaveProrationMethod: toLeaveProrationMethod(rows?.[0]?.leave_proration_method),
           absenceDeductionMethod: toAbsenceDeductionMethod(rows?.[0]?.absence_deduction_method),
           tardyDeductionMethod: toTardyDeductionMethod(rows?.[0]?.tardy_deduction_method),
           // フレックスタイム制の決まり（utils/flexTime.ts）
@@ -242,6 +245,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       let days: number | null = null;
       let periodWorkDays: number | null = null;
       let employedWorkDays: number | null = null;
+      let nonLeaveWorkDays: number | null = null;
       let ctx: CalendarContext | null = null;
       try {
         ctx = await loadCalendarContext(db, staff);
@@ -251,16 +255,18 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
         const from = staff.join_date && staff.join_date > periodStart ? staff.join_date : periodStart;
         const to = staff.retirement_date && staff.retirement_date < periodEnd ? staff.retirement_date : periodEnd;
         employedWorkDays = countPrescribedWorkDays(ctx, from, to);
+        // 在籍していて休業していない日の所定労働日数（休業の月の日割り。utils/leaveOfAbsence.ts）
+        nonLeaveWorkDays = countNonLeaveWorkDays(ctx, staff, { start: periodStart, end: periodEnd });
       } catch (e) {
         console.error("会社カレンダー（所定労働日数）の読み込みエラー:", e);
       }
       if (!cancelled) {
         setCalendarCtx(ctx);
-        setExtras(p => ({ ...p, annualWorkDays: days, period: { start: periodStart, end: periodEnd }, periodWorkDays, employedWorkDays }));
+        setExtras(p => ({ ...p, annualWorkDays: days, period: { start: periodStart, end: periodEnd }, periodWorkDays, employedWorkDays, nonLeaveWorkDays }));
       }
     })();
     return () => { cancelled = true; };
-  }, [db, staff.calendar_pattern_id, staff.work_days, staff.join_date, staff.retirement_date, periodStart, periodEnd]);
+  }, [db, staff.calendar_pattern_id, staff.work_days, staff.join_date, staff.retirement_date, staff.leave_periods, periodStart, periodEnd]);
 
   // 週40時間の累計に足す、前の計算期間の日（計算期間の初めの日がある週のうち、初めの日より前の日）の確定した勤怠
   // undefined：読み込み中（この間は確定しない）

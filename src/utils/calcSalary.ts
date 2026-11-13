@@ -105,7 +105,8 @@ import {
   getWeekKey
 } from './timeUtils';
 import { calcDailyHeiTaxByTable, calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
-import { checkLeaveExemptMonth, exemptLeavePeriodsOf } from './leaveExemption';
+import { checkLeaveExemptMonth, exemptLeavePeriodsOf, type LeaveType } from './leaveExemption';
+import { hasWorkRecord, periodLeaveOf, toLeaveProrationMethod, type LeaveProrationMethod } from './leaveOfAbsence';
 import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
 import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './specialLeave';
@@ -157,6 +158,13 @@ export interface SalaryExtras {
    */
   periodWorkDays?: number | null;
   employedWorkDays?: number | null;
+  /** 計算期間の途中で休業が始まる・終わる月の日割り（給与規定グループの設定。省略時は所定労働日数で日割り。utils/leaveOfAbsence.ts） */
+  leaveProrationMethod?: LeaveProrationMethod;
+  /**
+   * 計算期間のうち、在籍していて休業していない日の所定労働日数（呼び出し側が会社カレンダーから数える。utils/leaveOfAbsence.ts の
+   * countNonLeaveWorkDays）。休業の月の日割りと、まるごと休業の月か（休業の日のほかに所定労働日がないか）に使う
+   */
+  nonLeaveWorkDays?: number | null;
   /**
    * 計算期間の初めの日がある週のうち、計算期間より前の日の確定した勤怠（前の計算期間の日。weekCarryOverRange で読む）
    * 週40時間の累計にだけ足し、その日の給与は払わない。undefined は読み込み中（給与明細は、その間は確定しない）
@@ -271,10 +279,17 @@ export interface SalaryResult {
   /** 給与項目ごとの支給額・控除額（固定の支給項目は日割りした額） */
   customEarningLines: { name: string; amount: number }[];
   customDeductionLines: { name: string; amount: number }[];
-  /** 計算期間の途中で入社・退職したときの日割り（日割りしなければ null）。基本給（月給制）と固定の支給項目に使う */
+  /** 計算期間の途中で入社・退職したとき・休業の月の日割り（日割りしなければ null）。基本給（月給制）と固定の支給項目に使う */
   proration: Proration | null;
   /** 日割りできなかったときの注意 */
   prorationNote: string | null;
+  /**
+   * 計算期間の休業・休職（休業の日がなければ null。utils/leaveOfAbsence.ts）
+   * full：まるごと休業の月（月給・固定の支給項目・固定残業代・通勤手当（月額）を払わない）
+   * paidDays：月給を払った日数（月給制の人だけ。日割りの日数、まるごと休業の月は 0。日割りしない・わからなければ null）。算定・月変の支払基礎日数に使う
+   * workedDates：休業の日なのに、働いた・休暇の記録がある日（働いた時間の分は払う）
+   */
+  leave: { types: LeaveType[]; days: number; full: boolean; paidDays: number | null; workedDates: string[] } | null;
   totalEarnings: number;
   /**
    * 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・「変動（毎月入力）」の支給項目）。残りは固定的賃金
@@ -675,11 +690,11 @@ export const saveSalaryResult = async (
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
-      absence_deduction, prescribed_work_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours,
+      absence_deduction, prescribed_work_days, leave_paid_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance, kokuho_premium,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay, ledger
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -696,6 +711,7 @@ export const saveSalaryResult = async (
       non_fixed_earnings = excluded.non_fixed_earnings,
       absence_deduction = excluded.absence_deduction,
       prescribed_work_days = excluded.prescribed_work_days,
+      leave_paid_days = excluded.leave_paid_days,
       tardy_deduction = excluded.tardy_deduction,
       unpaid_leave_deduction = excluded.unpaid_leave_deduction,
       flex_carry_hours = excluded.flex_carry_hours,
@@ -725,7 +741,10 @@ export const saveSalaryResult = async (
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
     result.fixedOvertimeAllowance, result.fixedOvertimeExcess, result.nonFixedEarnings,
     // 欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う。utils/santei.ts）
-    result.absenceDeduction, result.periodWorkDays, result.tardyDeduction, result.unpaidLeaveDeduction,
+    result.absenceDeduction, result.periodWorkDays,
+    // 休業の日がある月に月給を払った日数（日割りの日数。まるごと休業の月は 0。算定・月変の支払基礎日数に使う。utils/leaveOfAbsence.ts）
+    result.leave ? result.leave.paidDays : null,
+    result.tardyDeduction, result.unpaidLeaveDeduction,
     // フレックスタイム制で、次の月に繰り越す不足時間（次の月の計算で読む。utils/flexTime.ts の loadFlexCarryIn）
     result.flex ? result.flexCarryOutHours : null,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
@@ -1059,6 +1078,8 @@ export interface Proration {
   method: ProrationMethod;
   numerator: number;
   denominator: number;
+  /** 休業の月の日割り（休業していない日 ÷ 計算期間の日数）。入社・退職の月の日割りは省く */
+  reason?: 'leave';
 }
 
 /** 月額を日割りする（1円未満は切り上げる。払う額が少なくならないように） */
@@ -1204,12 +1225,25 @@ const heiDaysOf = (
 
 export const calculateSalary = (
   staff: any,
-  attendanceData: any[],
+  rawAttendanceData: any[],
   extras: SalaryExtras,
   targetYear: number,
   targetMonth: number,
   companySettings: any,
 ): SalaryResult => {
+
+  // ── 休業・休職（utils/leaveOfAbsence.ts）────────────────────────────
+  // 休業の日は働いていないので、その日の分は払わない。休業の日の勤怠は、働いた時間がある日だけを使う
+  // （欠勤・公休・休暇の区分は使わない。休業の日に欠勤控除をすると、日割りと合わせて2回引くことになるため）
+  const periodLeave = periodLeaveOf(staff, extras.period);
+  const leaveDateSet = new Set(periodLeave?.dates ?? []);
+  const attendanceData = leaveDateSet.size === 0
+    ? rawAttendanceData
+    : rawAttendanceData.filter(row => !leaveDateSet.has(String(row.work_date)) || (Number(row.work_hours) || 0) > 0);
+  const leaveWorkedDates = rawAttendanceData
+    .filter(row => leaveDateSet.has(String(row.work_date)) && hasWorkRecord(row))
+    .map(row => String(row.work_date))
+    .sort();
 
   const weekStartDay: number = companySettings?.week_start_day ?? 0; // デフォルト日曜
   const scheduledHours = Number(staff.scheduled_work_hours) || 8;
@@ -1311,9 +1345,44 @@ export const calculateSalary = (
   }
 
   // ── 計算期間の途中で入社・退職した人の日割り ─────────────────────
-  const { proration, note: prorationNote } = prorationOf(
+  const joinProration = prorationOf(
     staff, toProrationMethod(extras.prorationMethod), extras.period, extras.periodWorkDays, extras.employedWorkDays,
   );
+  let proration = joinProration.proration;
+  let prorationNote = joinProration.note;
+
+  // ── 休業の月：まるごと休業なら払わない。途中で始まる・終わるなら、休業していない日の分だけ日割り ──────
+  // まるごと休業の月：在籍した日がすべて休業の日か、休業の日のほかに所定労働日がない月
+  // （計算期間に所定労働日がまったくない（出勤曜日の入れ忘れなど）ときは、所定労働日で決めない。休業1日で給与が0円にならないように）
+  const nonLeaveWorkDays = extras.nonLeaveWorkDays;
+  const leaveFull = !!periodLeave && (periodLeave.allDays || (nonLeaveWorkDays === 0 && (Number(extras.periodWorkDays) || 0) > 0));
+  let leavePaidDays: number | null = null;
+  if (periodLeave) {
+    const leaveMethod = toLeaveProrationMethod(extras.leaveProrationMethod);
+    if (leaveFull) {
+      proration = { method: 'workdays', numerator: 0, denominator: Math.max(1, Number(extras.periodWorkDays) || periodLeave.periodDays), reason: 'leave' };
+      prorationNote = null;
+      leavePaidDays = 0;
+    } else if (leaveMethod === 'calendar') {
+      const days = periodLeave.employedDays - periodLeave.dates.length;
+      proration = { method: 'calendar', numerator: days, denominator: periodLeave.periodDays, reason: 'leave' };
+      prorationNote = null;
+      leavePaidDays = days;
+    } else if (leaveMethod === 'workdays') {
+      const periodWorkDays = extras.periodWorkDays;
+      if (periodWorkDays === null || periodWorkDays === undefined || nonLeaveWorkDays === null || nonLeaveWorkDays === undefined) {
+        prorationNote = '会社カレンダーを読み込めていないため、休業の日の分を日割りしていません';
+      } else if (periodWorkDays <= 0) {
+        prorationNote = '計算期間に所定労働日がないため、休業の日の分を日割りしていません（従業員画面の出勤曜日・会社カレンダーを確かめてください）';
+      } else {
+        const days = Math.min(nonLeaveWorkDays, periodWorkDays);
+        proration = { method: 'workdays', numerator: days, denominator: periodWorkDays, reason: 'leave' };
+        prorationNote = null;
+        leavePaidDays = days;
+      }
+    }
+    // none：休業の日の分も払う（入社・退職の月の日割りだけをする）
+  }
 
   // ── 残業代の時給（割増賃金の基礎）─────────────────────────────
   // 月給と月額の手当は「1年間における1か月平均所定労働時間」で割って時間あたりにする（上の「残業代の時給」）
@@ -1565,10 +1634,17 @@ export const calculateSalary = (
     // 計算期間の途中で入社・退職した月は、在籍した日だけで清算する
     const from = staff.join_date && staff.join_date > periodStart ? staff.join_date : periodStart;
     const to = staff.retirement_date && staff.retirement_date < periodEnd ? staff.retirement_date : periodEnd;
+    // 休業の日がある月は、休業していない日で清算する（総労働時間は休業していない日の所定労働日数で数え、
+    // 決めた時間は、計算期間の所定労働日数のうち休業していない日の割合で減らす）。月給の休業の日の分は、日割りで引いている
+    const baseRule = extras.flexRule ?? DEFAULT_FLEX_RULE;
+    const leaveWorkDays = periodLeave && nonLeaveWorkDays !== null && nonLeaveWorkDays !== undefined ? nonLeaveWorkDays : null;
+    const flexRule: FlexRule = leaveWorkDays !== null && baseRule.total.mode === 'fixed' && (Number(extras.periodWorkDays) || 0) > 0
+      ? { ...baseRule, total: { mode: 'fixed', hours: (baseRule.total.hours * leaveWorkDays) / Number(extras.periodWorkDays) } }
+      : baseRule;
     const settled = settleFlex({
-      rule: extras.flexRule ?? DEFAULT_FLEX_RULE,
+      rule: flexRule,
       from, to,
-      workDays: extras.employedWorkDays ?? extras.periodWorkDays ?? null,
+      workDays: leaveWorkDays ?? extras.employedWorkDays ?? extras.periodWorkDays ?? null,
       dayHours: scheduledHours,
       carryInHours: Number(extras.flexCarryIn) || 0,
       rows: sorted,
@@ -1631,8 +1707,9 @@ export const calculateSalary = (
   }
 
   // ── 通勤手当・任意手当 ──────────────────────────────────────
+  // まるごと休業の月は、月額の通勤手当を払わない（日額は、働いた日の分）
   const commutePay = staff.commute_type === 'daily'   ? (Number(staff.commute_amount) || 0) * workDays
-                  : staff.commute_type === 'monthly' ? (Number(staff.commute_amount) || 0) : 0;
+                  : staff.commute_type === 'monthly' && !leaveFull ? (Number(staff.commute_amount) || 0) : 0;
   const allowanceAmount = Number(extras.allowanceAmount) || 0;
 
   // 固定（毎月同額）の支給項目は、基本給と同じく日割りする（変動の項目は、その月に入れた額のまま）
@@ -1673,8 +1750,8 @@ export const calculateSalary = (
   const holidayLine = applyRounding(holidayWorkPay || 0, roundOvertime);
   const nightLine = applyRounding(nightPay || 0, roundOvertime);
 
-  // 固定残業代（月給制の人だけ）：時間外労働の割増賃金の代わりに定額を払い、法定の計算額が上回る分だけ足す
-  const fixedOvertimeAllowance = staff.wage_type === 'monthly'
+  // 固定残業代（月給制の人だけ）：時間外労働の割増賃金の代わりに定額を払い、法定の計算額が上回る分だけ足す（まるごと休業の月は払わない）
+  const fixedOvertimeAllowance = staff.wage_type === 'monthly' && !leaveFull
     ? Math.max(0, Math.floor(Number(staff.fixed_overtime_allowance) || 0))
     : 0;
   const fixedOvertimeHours = fixedOvertimeAllowance > 0 ? Math.max(0, Number(staff.fixed_overtime_hours) || 0) : 0;
@@ -1831,6 +1908,9 @@ export const calculateSalary = (
     customDeductionLines,
     proration,
     prorationNote,
+    leave: periodLeave
+      ? { types: periodLeave.types, days: periodLeave.dates.length, full: leaveFull, paidDays: staff.wage_type === 'monthly' ? leavePaidDays : null, workedDates: leaveWorkedDates }
+      : null,
     totalEarnings,
     nonFixedEarnings,
     nonTaxableCommute,

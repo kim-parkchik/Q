@@ -174,3 +174,16 @@ describe("出勤簿", () => {
     expect(lines[4]).toBe("合計,,出勤 2日,,,,20:22,0:30,2:00,,");
   });
 });
+
+describe("出勤簿の休業の日", () => {
+  test("休業・休職の日は、区分に休業の名前を書く（働いた記録がある日は、休業の期間であることを足す）", () => {
+    const leaves = [{ type: "childcare" as const, start: "2026-06-03", end: "2026-06-30" }];
+    const rows = attendanceBookRows({ start: "2026-06-01", end: "2026-06-05" }, [
+      { work_date: "2026-06-02", work_type: "normal", csv_entry_time: "09:00", csv_exit_time: "18:00", work_hours: 8, is_finalized: 1 },
+      { work_date: "2026-06-04", work_type: "absent", work_hours: 0, is_finalized: 1 },
+      { work_date: "2026-06-05", work_type: "normal", csv_entry_time: "10:00", csv_exit_time: "12:00", work_hours: 2, is_finalized: 1 },
+    ], leaves);
+    expect(rows.map((r) => r.type)).toEqual(["", "出勤（平日）", "育児休業", "育児休業", "出勤（平日）（育児休業の期間）"]);
+    expect(rows[2]).toMatchObject({ finalized: null, workHours: null });
+  });
+});

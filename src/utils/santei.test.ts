@@ -86,6 +86,12 @@ describe("支払基礎日数", () => {
         expect(paymentBasisDays("monthly", period, rows, 22)).toBe(20);
         expect(paymentBasisDays("monthly", period, rows, 22, true)).toBe(20);
     });
+    test("月給制で休業の日がある月は、月給を払った日数（欠勤控除をした日は、さらに引く）", () => {
+        expect(paymentBasisDays("monthly", period, [], 22, undefined, 11)).toBe(11);
+        expect(paymentBasisDays("monthly", period, [], 22, undefined, 0)).toBe(0);
+        expect(paymentBasisDays("monthly", period, [{ work_date: "2026-04-06", work_type: "absent" }], 22, true, 11)).toBe(10);
+        expect(paymentBasisDays("monthly", period, [], 22, undefined, null)).toBe(30);
+    });
     test("欠勤控除をしない月給制（完全月給制）は、欠勤があっても暦日数（日本年金機構 算定基礎届の記入・提出ガイドブック：欠勤日数分だけ給料が差し引かれる場合だけ）", () => {
         const rows = [{ work_date: "2026-04-06", work_type: "absent" }, { work_date: "2026-04-07", work_type: "absent" }];
         expect(paymentBasisDays("monthly", period, rows, 22, false)).toBe(30);
@@ -175,6 +181,26 @@ describe("確定した給与と勤怠から、1人ずつの値を作る", () => 
         // 欠勤控除の額・所定労働日数を残していない前の給与は、土日を除いた日数（21日）− 欠勤日数
         const [old] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth], [salary("A", 5, 271430)], attendance);
         expect(old.months[1]).toMatchObject({ month: 5, days: 19 });
+    });
+    test("休業・休職の日がある月（月給制）：確定したときに残した、月給を払った日数（まるごと休業の月は0日で、算定に使わない）", () => {
+        const leave_periods = JSON.stringify([{ type: "childcare", start: "2026-04-01", end: "2026-05-15" }]);
+        const staff = { ...monthly, id: "A", leave_periods };
+        // 4月はまるごと育休（0日・0円）、5月は16日から復帰（所定労働日数で日割りして10日分）、6月はいつもどおり
+        const salaries = [
+            { ...salary("A", 4, 0), absence_deduction: 0, prescribed_work_days: 21, leave_paid_days: 0 },
+            { ...salary("A", 5, 166667), absence_deduction: 0, prescribed_work_days: 18, leave_paid_days: 10 },
+            { ...salary("A", 6, 300000), absence_deduction: 0, prescribed_work_days: 22, leave_paid_days: null },
+        ];
+        // 休業の日の欠勤の記録は使わない。休業していない日の欠勤は引く
+        const attendance = [
+            { staff_id: "A", work_date: "2026-05-11", work_type: "absent", work_hours: 0 },
+            { staff_id: "A", work_date: "2026-05-20", work_type: "absent", work_hours: 0 },
+        ];
+        const [r] = buildSanteiInputs([staff], 2026, [endOfMonth], salaries, attendance);
+        expect(r.months.map((m) => m.days)).toEqual([0, 10, 30]);
+        const deducted = salaries.map((s) => (s.target_month === 5 ? { ...s, absence_deduction: 16667 } : s));
+        const [d] = buildSanteiInputs([staff], 2026, [endOfMonth], deducted, attendance);
+        expect(d.months[1].days).toBe(9);
     });
     test("計算期間の途中で入社した月は「途中入社で日割り」", () => {
         const [r] = buildSanteiInputs([{ ...monthly, id: "A", join_date: "2026-04-10" }], 2026, [endOfMonth],

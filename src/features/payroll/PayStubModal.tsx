@@ -9,6 +9,7 @@ import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
 import { describeUnionRate, INSURER_TYPE_LABELS } from '../../utils/healthInsurer';
 import { describeFlatTaxPayment } from '../../utils/flatTaxReduction';
+import { LEAVE_PRORATION_METHOD_LABELS, LEAVE_TYPE_NAMES } from '../../utils/leaveOfAbsence';
 
 interface Props {
   db: any;
@@ -157,11 +158,39 @@ export default function PayStubModal(props: Props) {
               この明細は勤怠に残した{staff.wage_type === "daily" ? "日給" : "時給"}で計算しています。履歴の値で計算するなら、勤怠の画面でその日を確定し直してください。
             </div>
           )}
-          {(salary.proration || salary.prorationNote) && (
+          {salary.leave && (() => {
+            // 休業・休職の月（utils/leaveOfAbsence.ts）
+            const names = salary.leave.types.map(t => LEAVE_TYPE_NAMES[t]).join("・");
+            const items = salary.customEarningLines.length > 0 ? "・固定の支給項目" : "";
+            return (
+              <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+                {salary.leave.full
+                  ? `計算期間がまるごと休業（${names}）なので、月給${items}・固定残業代・通勤手当（月額）は払いません。`
+                  : salary.proration?.reason === "leave"
+                    ? `休業（${names}）の日が${salary.leave.days}日あるため、月給${items.replace("・", "と")}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（休業していない日 ${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。固定残業代・通勤手当は日割りしていません。`
+                    : !salary.prorationNote
+                      ? `休業（${names}）の日が${salary.leave.days}日ありますが、給与規定グループの「休業の月の日割り」が「${LEAVE_PRORATION_METHOD_LABELS.none}」なので、月給を全額払います。`
+                      : null}
+                {salary.leave.workedDates.length > 0 && (
+                  <div style={{ color: "#b45309", marginTop: 2 }}>
+                    ⚠ 休業の期間に、働いた・休暇の記録がある日があります（{salary.leave.workedDates.map(md).join("・")}）。働いた時間の分は払っています。
+                    休業の期間（従業員の画面）か、勤怠を確かめてください。
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          {((salary.proration && salary.proration.reason !== "leave") || salary.prorationNote) && (
             <div style={{ marginTop: 10, fontSize: 12, color: salary.prorationNote ? "#b45309" : "#475569" }}>
-              {salary.proration
+              {salary.proration && salary.proration.reason !== "leave"
                 ? `計算期間の途中で入社・退職したため、月給${salary.customEarningLines.length > 0 ? "と固定の支給項目" : ""}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。固定残業代・通勤手当は日割りしていません。`
                 : `⚠ ${salary.prorationNote}`}
+            </div>
+          )}
+          {salary.netPay < 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              ⚠ 差引支給額がマイナスです（給与がない月も、社会保険料・住民税などを引いているため。産休・育休のほかの休業には、社会保険料の免除がありません）。
+              引ききれない分は本人から受け取るなどしてください。住民税は、市区町村に普通徴収への切り替えなどを相談できます。振込データには入れません。
             </div>
           )}
           {(salary.absenceDeductionDetail || salary.absenceDeductionNote) && (
@@ -342,7 +371,7 @@ export default function PayStubModal(props: Props) {
               <table style={S.tableS}>
                 <thead><tr style={S.theadS}><th colSpan={2} style={S.thS}>支給項目</th></tr></thead>
                 <tbody>
-                  <tr><td style={S.tdS}>{staff.wage_type === "daily" ? `日給(${Number(salary.dailyWageDays.toFixed(2))}日分)` : salary.proration && staff.wage_type === "monthly" ? `基本給(日割り ${salary.proration.numerator}/${salary.proration.denominator}日)` : "基本給/時給分"}</td><td style={S.rtdS}>¥{salary.basePay.toLocaleString()}</td></tr>
+                  <tr><td style={S.tdS}>{staff.wage_type === "daily" ? `日給(${Number(salary.dailyWageDays.toFixed(2))}日分)` : salary.leave?.full && staff.wage_type === "monthly" ? "基本給(休業)" : salary.proration && staff.wage_type === "monthly" ? `基本給(日割り ${salary.proration.numerator}/${salary.proration.denominator}日)` : "基本給/時給分"}</td><td style={S.rtdS}>¥{salary.basePay.toLocaleString()}</td></tr>
                   
                   {/* 欠勤控除 */}
                   {salary.absenceDeduction > 0 && (
