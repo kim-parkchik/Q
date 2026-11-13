@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import * as S from "./BonusManager.styles";
 import { useBonusManager } from "./useBonusManager";
+import { describeFlatTaxPayment } from "../../utils/flatTaxReduction";
 
 interface Props {
   db: Database;
@@ -809,6 +810,16 @@ export default function BonusManager({ db, staffList }: Props) {
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: calc.isEmploymentInsEnrolled ? "#666" : "#bbb" }}>¥{calc.empInsurance.toLocaleString()}</td>
                         <td style={{ ...S.td, textAlign: "right", fontSize: 12, color: "#666" }}>
                           ¥{calc.incomeTax.toLocaleString()}
+                          {calc.flatTaxReduction > 0 && (
+                            <div style={{ fontSize: 10, color: "#2f855a" }} title={`減税前の所得税 ¥${calc.incomeTaxBeforeReduction.toLocaleString()}／この賞与のあとに残る減税額 ¥${calc.flatTaxRemainingAfter.toLocaleString()}`}>
+                              定額減税 −¥{calc.flatTaxReduction.toLocaleString()}
+                            </div>
+                          )}
+                          {calc.totalEarnings > 0 && calc.flatTaxLaterUsed.length > 0 && (
+                            <div style={{ fontSize: 10, color: "#b45309" }} title={`${calc.flatTaxLaterUsed.map(describeFlatTaxPayment).join("・")}で、先に定額減税を引いて確定しています`}>
+                              ⚠ 後の給与・賞与で先に減税
+                            </div>
+                          )}
                           {calc.totalEarnings > 0 && calc.prevSalaryStatus === "unconfirmed" && (
                             <div style={{ fontSize: 10, color: "#b45309" }}>⚠ 前月の給与が未確定</div>
                           )}
@@ -859,6 +870,8 @@ export default function BonusManager({ db, staffList }: Props) {
               厚生年金の150万円は、同じ月に2回以上支払ったときは合わせた上限です。
               所得税は、前月に支払った給与（社会保険料等を引いた額）と扶養親族等の数から、算出率の表の率で計算します。前月の給与がない人と、賞与が前月の給与の10倍を超える人は、月額表を使う方法で計算します（国税庁「賞与に対する源泉徴収税額の算出率の表」の備考）。
               前月の給与は確定した給与から読むので、前月の給与を先に確定してください。
+              令和6年6月1日以後に支払う賞与は、定額減税（月次減税）の残りを所得税から引きます（本人と同一生計配偶者・扶養親族1人につき3万円の合計から、この賞与より前に支払った給与・賞与で引いた額を引いた残り。
+              同じ日に払う給与と賞与は給与から先に引きます）。定額減税は払う日の順に引くので、給与と賞与は払う日の順に確定してください。
               確定後は「賞与支払届」を年金事務所・健康保険組合に提出してください。
             </div>
           )}

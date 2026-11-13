@@ -362,7 +362,8 @@ export const DB_SCHEMAS = [
     child_support INTEGER,     -- 子ども・子育て支援金
     welfare_pension INTEGER,   -- 厚生年金
     emp_insurance INTEGER,     -- 雇用保険
-    income_tax INTEGER,        -- 所得税
+    income_tax INTEGER,        -- 所得税（定額減税を引いた後の額）
+    flat_tax_reduction INTEGER DEFAULT 0, -- 定額減税額（令和6年6月〜12月に支払う賞与。utils/flatTaxReduction.ts）
     custom_deductions INTEGER, -- カスタム控除の合計額
     net_pay INTEGER,           -- 差引支給額
     is_nursing INTEGER,        -- 当時、介護保険対象者だったか（0 or 1）

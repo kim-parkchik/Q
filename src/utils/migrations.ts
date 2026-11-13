@@ -281,6 +281,13 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 17,
+    description: "令和6年分の定額減税を賞与からも引く：確定した賞与に、引いた定額減税額の列を足す（いままでの賞与は 0）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "bonus_results", "flat_tax_reduction", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

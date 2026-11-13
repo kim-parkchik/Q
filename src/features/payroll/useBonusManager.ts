@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
-import { calcBonusWithholdingTax, toTaxColumn } from '../../utils/incomeTax';
+import { calcBonusWithholdingTax, flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
+import { describeFlatTaxPayment, flatTaxRemainingFor, loadFlatTaxPayments, type FlatTaxPayment } from '../../utils/flatTaxReduction';
 import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
 import { branchPrefectureOf } from '../../utils/branchPrefecture';
@@ -50,6 +51,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
   const [otherBonuses, setOtherBonuses] = useState<Record<string, OtherBonus[]>>({});
   /** 前月に支払った給与の、社会保険料等を引いた額（確定した給与がある人だけ。従業員ID → 額） */
   const [prevMonthTaxBases, setPrevMonthTaxBases] = useState<Record<string, number>>({});
+  // 令和6年分の定額減税：その年に確定した給与・賞与で引いた月次減税額（人ごと。読み込み中は null。utils/flatTaxReduction.ts）
+  const [flatTaxPayments, setFlatTaxPayments] = useState<Map<string, FlatTaxPayment[]> | null>(new Map());
   /** 給与規定グループ（前月に支払う給与の計算期間を出すのに使う） */
   const [payrollGroups, setPayrollGroups] = useState<(PayrollGroupForPeriod & { id: number })[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
@@ -184,11 +187,20 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       const fiscalYear = selectedSetting.target_month >= 4 ? selectedSetting.target_year : selectedSetting.target_year - 1;
       loadOtherBonuses(fiscalYear, selectedSettingId);
       loadPrevMonthSalary(selectedSetting.target_year, selectedSetting.target_month);
+      // 令和6年分の定額減税（その年の給与・賞与で引いた額）。対象の年でなければ読まない
+      if (Number(selectedSetting.target_year) === Master.FLAT_TAX_REDUCTION_2024.YEAR) {
+        setFlatTaxPayments(null);
+        loadFlatTaxPayments(db!, Number(selectedSetting.target_year))
+          .then(setFlatTaxPayments)
+          .catch((e) => { console.error("定額減税の読み込みエラー:", e); setFlatTaxPayments(new Map()); });
+      } else {
+        setFlatTaxPayments(new Map());
+      }
     }else {
       // 何も選択されていないときは空にする
       setActiveItemIds([]);
     }
-  }, [selectedSettingId, selectedSetting, loadActiveItemIds, loadStaffValues, loadOtherBonuses, loadPrevMonthSalary]);
+  }, [selectedSettingId, selectedSetting, loadActiveItemIds, loadStaffValues, loadOtherBonuses, loadPrevMonthSalary, db]);
 
   // --- Actions ---
   // 🆕 賞与設定の編集を開始する
@@ -429,7 +441,13 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const dependents = staffAsOf(staff, payYear, payMonth).dependents;
     const prevMonthTaxBase = prevMonthTaxBases[String(staff.id)] ?? 0;
     const bonusAfterSocial = Math.max(0, totalEarnings - socialTotal);
-    const incomeTax = calcBonusWithholdingTax(bonusAfterSocial, prevMonthTaxBase, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
+    const incomeTaxBeforeReduction = calcBonusWithholdingTax(bonusAfterSocial, prevMonthTaxBase, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
+    // 令和6年分の定額減税（月次減税）：令和6年6月1日以後に支払う賞与からも、残りの減税額を所得税から引く（国税庁「定額減税について」）。
+    // 残りは、減税額の合計から、この賞与より前に支払った給与・賞与（確定したもの）で引いた額を引いた額（utils/flatTaxReduction.ts）
+    const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, payYear, payMonth, toTaxColumn(staff.tax_column));
+    const flatTax = flatTaxRemainingFor(flatTaxTotal, flatTaxPayments?.get(String(staff.id)) ?? [], { date: payDate, kind: "bonus", order: selectedSetting.id });
+    const flatTaxReduction = Math.min(incomeTaxBeforeReduction, flatTax.remaining);
+    const incomeTax = incomeTaxBeforeReduction - flatTaxReduction;
     const prevSalaryStatus = prevSalaryStatusOfStaff(staff);
     // 算出率の表を使わず、月額表を使う方法で計算したか（前月の給与がない・賞与が前月の給与の10倍を超える）
     const taxByMonthlyTable = totalEarnings > 0 && (Math.floor(prevMonthTaxBase) <= 0 || bonusAfterSocial > Math.floor(prevMonthTaxBase) * 10);
@@ -441,6 +459,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     return {
       totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, childSupport, welfarePension,
       empInsurance, incomeTax, customDeductions, totalDeductions,
+      /** 令和6年分の定額減税：減税前の所得税・引いた額・この賞与のあとに残る額・先に定額減税を引いて確定した、後に払う給与・賞与 */
+      incomeTaxBeforeReduction, flatTaxTotal, flatTaxReduction, flatTaxRemainingAfter: flatTax.remaining - flatTaxReduction, flatTaxLaterUsed: flatTax.laterUsed,
       netPay: totalEarnings - totalDeductions, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled,
       /** この賞与より前に支払った賞与の健康保険の標準賞与額の累計と、この賞与の健康保険・厚生年金の標準賞与額（上限で切った額） */
       earlierHealthTotal: earlier.health, healthHyojun, pensionHyojun,
@@ -505,6 +525,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
    */
   const finalizeBonus = async () => {
     if (!db || !selectedSetting) return;
+    // 令和6年分の定額減税の残りを読み込むまでは、所得税が決まらないので確定しない
+    if (flatTaxPayments === null) {
+      return dialog.warning("定額減税の残り（その年に確定した給与・賞与で引いた額）を読み込んでいます。少し待ってから、もう一度確定してください。");
+    }
     const rows = bonusStaffList
       .map(staff => ({ staff, calc: calcBonusForStaff(staff) }))
       .filter((r): r is { staff: any; calc: NonNullable<ReturnType<typeof calcBonusForStaff>> } => !!r.calc && r.calc.totalEarnings > 0);
@@ -529,6 +553,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     // 前月に給与を払うはずなのに確定していない人は、前月の給与がないものとして所得税を計算している
     const unconfirmed = rows.filter(r => r.calc.prevSalaryStatus === 'unconfirmed').map(r => r.staff.name);
     const prev = prevMonthOf(selectedSetting.target_year, selectedSetting.target_month);
+    // 令和6年分の定額減税：この賞与より後に払う給与・賞与で、先に減税額を引いて確定した人（払う日の順に確定し直してもらう）
+    const flatTaxOutOfOrder = rows.filter(r => r.calc.flatTaxLaterUsed.length > 0);
     const ok = await ask(
       `「${selectedSetting.name}」を確定します（支給がある${rows.length}人）。\n` +
       `確定した賞与は、年末調整の1年分の集計に入ります。金額を直したときは、もう一度確定してください。` +
@@ -536,8 +562,13 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
         ? `\n\n⚠ 次の人は、前月（${prev.year}年${prev.month}月）に支払う給与がまだ確定していないため、前月の給与がないものとして所得税を計算しています：\n` +
           `${unconfirmed.join("・")}\n` +
           `前月の給与を確定してから、この賞与を確定するのをすすめます（休職などで前月に給与を払っていない人は、このままで構いません）。このまま確定しますか？`
+        : "") +
+      (flatTaxOutOfOrder.length > 0
+        ? `\n\n⚠ 次の人は、この賞与より後に払う給与・賞与で、先に定額減税を引いて確定しています（定額減税は払う日の順に引きます）：\n` +
+          flatTaxOutOfOrder.map(r => `・${r.staff.name}：${r.calc.flatTaxLaterUsed.map(describeFlatTaxPayment).join("・")}`).join("\n") +
+          `\nこの賞与を確定したあと、後の給与・賞与を確定し直してください（減税額の合計を超えて引かないよう、この賞与で引く額は減らしてあります）。`
         : ""),
-      { title: '賞与の確定', kind: unconfirmed.length > 0 ? 'warning' : 'info' }
+      { title: '賞与の確定', kind: unconfirmed.length > 0 || flatTaxOutOfOrder.length > 0 ? 'warning' : 'info' }
     );
     if (!ok) return;
     try {

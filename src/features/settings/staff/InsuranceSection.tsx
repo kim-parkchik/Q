@@ -139,7 +139,7 @@ export default function InsuranceSection({ cm }: Props) {
                 {/* 住民税（年度ごとの6月分〜翌年5月分） */}
                 <ResidentTaxEditor cm={cm} />
 
-                {/* 令和6年分の定額減税（2024年6月〜12月に支払う給与だけで使う） */}
+                {/* 令和6年分の定額減税（2024年6月〜12月に支払う給与・賞与だけで使う） */}
                 <div style={{ gridColumn: "span 2", display: "flex", alignItems: "center", gap: "10px" }}>
                     <label style={{ ...labelStyle, marginBottom: 0, whiteSpace: "nowrap" }}>定額減税の人数（令和6年分）</label>
                     <div style={{ position: "relative", display: "flex", alignItems: "center", width: "90px" }}>
@@ -147,7 +147,7 @@ export default function InsuranceSection({ cm }: Props) {
                         <span style={{ position: "absolute", right: "10px", fontSize: "12px", color: "#7f8c8d" }}>人</span>
                     </div>
                     <span style={{ fontSize: "11px", color: "#64748b" }}>
-                        本人＋同一生計配偶者＋扶養親族（16歳未満も含む）。1人3万円を2024年6月以後の給与の所得税から引きます。0なら減税しません。
+                        本人＋同一生計配偶者＋扶養親族（16歳未満も含む）。1人3万円を2024年6月以後の給与・賞与の所得税から、払う日の順に引きます。0なら減税しません。
                     </span>
                 </div>
 

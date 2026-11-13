@@ -8,6 +8,7 @@ import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
 import { describeUnionRate, INSURER_TYPE_LABELS } from '../../utils/healthInsurer';
+import { describeFlatTaxPayment } from '../../utils/flatTaxReduction';
 
 interface Props {
   db: any;
@@ -23,7 +24,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, loadingParts, loadErrors, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, fmtH,
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
     monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem,
   } = usePayStubModal(props);
   /** "2026-11-29" → "11月29日" */
@@ -110,6 +111,12 @@ export default function PayStubModal(props: Props) {
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
+          {flatTaxLaterUsed.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
+              ⚠ この給与より後に払う給与・賞与（{flatTaxLaterUsed.map(describeFlatTaxPayment).join("・")}）で、先に定額減税を引いて確定しています。
+              定額減税は払う日の順に引くので、この給与を確定したあと、後の給与・賞与を確定し直してください（減税額の合計を超えて引かないよう、この給与で引く額は減らしてあります）。
             </div>
           )}
           {salary.prefectureUnknown && (

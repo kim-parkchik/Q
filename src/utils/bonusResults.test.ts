@@ -31,7 +31,7 @@ const setup = () => {
 
 const calc = (total: number): BonusResultCalc => ({
     totalEarnings: total, hyojunBonus: Math.floor(total / 1000) * 1000, healthInsurance: 10000, nursingInsurance: 0, childSupport: 200,
-    welfarePension: 18300, empInsurance: 1000, incomeTax: 20000, customDeductions: 0, netPay: total - 49500, isNursing: false,
+    welfarePension: 18300, empInsurance: 1000, incomeTax: 20000, flatTaxReduction: 0, customDeductions: 0, netPay: total - 49500, isNursing: false,
 });
 
 describe("賞与を追加する", () => {
@@ -60,6 +60,12 @@ describe("賞与を確定する・確定を取り消す", () => {
         // 佐藤さんの賞与をなくして確定し直す
         await executeBatch(batchDb(db), buildFinalizeBonusStatements(id, [{ staff: { id: "S001" }, calc: calc(520000) }]));
         expect(db.query("SELECT staff_id, total_earnings FROM bonus_results").all()).toEqual([{ staff_id: "S001", total_earnings: 520000 }]);
+    });
+    test("令和6年分の定額減税で引いた額も残す（所得税は引いた後の額）", async () => {
+        const db = setup();
+        const id = (await executeBatch(batchDb(db), buildAddBonusSettingStatements("夏季賞与", "2024-07-10")))[0].lastInsertId;
+        await executeBatch(batchDb(db), buildFinalizeBonusStatements(id, [{ staff: { id: "S001" }, calc: { ...calc(500000), incomeTax: 0, flatTaxReduction: 20000 } }]));
+        expect(db.query("SELECT income_tax AS t, flat_tax_reduction AS r FROM bonus_results").get()).toEqual({ t: 0, r: 20000 });
     });
     test("途中で失敗したら、前の確定結果のまま残る（前の結果を消したところで止まらない）", async () => {
         const db = setup();

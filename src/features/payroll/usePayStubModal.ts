@@ -9,6 +9,7 @@ import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
 import { insurerOf, loadHealthInsurers } from '../../utils/healthInsurer';
+import { flatTaxRemainingFor, loadFlatTaxPayments, salaryPayDate, type FlatTaxPayment } from '../../utils/flatTaxReduction';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 /** 明細を開いたときに読むもの（給与規定グループの設定などのほか）。読み込み中・読み込めなかったときは確定しない */
@@ -150,11 +151,15 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     return () => { cancelled = true; };
   }, [db, staff.payroll_group_id]);
 
-  // 定額減税（令和6年6月〜）：その人の減税額の合計から、前の月までの確定済みの給与で差し引いた額を引いた残り
-  // ※ 前の月の給与を確定してから次の月を確定すること（確定した額をもとに繰り越すため）
+  // 定額減税（令和6年6月〜）：その人の減税額の合計から、この給与より前に払った給与・賞与（確定したもの）で差し引いた額を引いた残り
+  // （賞与からも引くので、前に払った賞与も数える。同じ日に払う賞与より給与が先。utils/flatTaxReduction.ts）
+  // ※ 給与・賞与は払う日の順に確定すること（確定した額をもとに繰り越すため）。後に払う給与・賞与を先に確定していたら知らせる
   const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, year, month, toTaxColumn(staff.tax_column));
+  /** この給与より後に払うのに、先に定額減税を引いて確定した給与・賞与 */
+  const [flatTaxLaterUsed, setFlatTaxLaterUsed] = useState<FlatTaxPayment[]>([]);
   useEffect(() => {
     let cancelled = false;
+    setFlatTaxLaterUsed([]);
     if (!db || flatTaxTotal === 0) {
       setExtras(p => ({ ...p, flatTaxReductionRemaining: 0 }));
       markLoad("flatTax", "ok");
@@ -163,13 +168,15 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     markLoad("flatTax", "loading");
     (async () => {
       try {
-        const rows = await db.select(
-          "SELECT COALESCE(SUM(flat_tax_reduction), 0) AS used FROM salary_results WHERE staff_id = ? AND target_year = ? AND target_month < ?",
-          [staff.id, year, month]
-        ) as { used: number }[];
+        const [payments, groups] = await Promise.all([
+          loadFlatTaxPayments(db, year),
+          db.select("SELECT payment_day FROM payroll_groups WHERE id = ?", [staff.payroll_group_id || 1]) as Promise<{ payment_day?: number }[]>,
+        ]);
         if (cancelled) return;
-        const used = Number(rows?.[0]?.used) || 0;
-        setExtras(p => ({ ...p, flatTaxReductionRemaining: Math.max(0, flatTaxTotal - used) }));
+        const date = salaryPayDate(year, month, groups?.[0]?.payment_day ?? 25);
+        const { remaining, laterUsed } = flatTaxRemainingFor(flatTaxTotal, payments.get(String(staff.id)) ?? [], { date, kind: "salary", order: 0 });
+        setExtras(p => ({ ...p, flatTaxReductionRemaining: remaining }));
+        setFlatTaxLaterUsed(laterUsed);
         markLoad("flatTax", "ok");
       } catch (e) {
         console.error("定額減税の読み込みエラー:", e);
@@ -177,7 +184,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       }
     })();
     return () => { cancelled = true; };
-  }, [db, staff.id, year, month, flatTaxTotal]);
+  }, [db, staff.id, staff.payroll_group_id, year, month, flatTaxTotal]);
 
   // 年末調整の過不足額：この月に支払う給与で精算すると決めた年末調整があれば、その過不足額を載せる
   // （精算する給与を決めていなければ、その年の12月に支払う給与で精算する）
@@ -446,6 +453,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     absentOnCalendarHolidays,
     yearEndYear,
     flatTaxTotal,
+    flatTaxLaterUsed,
     fmtH
   };
 }
