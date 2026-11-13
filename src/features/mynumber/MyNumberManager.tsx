@@ -9,6 +9,7 @@ import { Lock, LockOpen } from "lucide-react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { formatMyNumber, MASKED_MY_NUMBER, type MyNumberEntry, type MyNumberStaffRow } from "../../utils/myNumber";
+import type { MyNumberRetention } from "../../utils/myNumberRetention";
 import { PASSWORD_MIN_LENGTH, RECOVERY_KEY_LENGTH } from "../../utils/myNumberCrypto";
 import type { MyNumberUser } from "./myNumberStore";
 import { VAULT_IDLE_MINUTES } from "./myNumberVault";
@@ -21,6 +22,8 @@ interface Props {
   currentUser: MyNumberUser | null;
   /** 開いている会社ファイルの場所（暗号化を始める前のバックアップを探すため） */
   companyPath?: string | null;
+  /** 番号を消したとき（メニューの「保存期間が過ぎた番号」の知らせを数え直す） */
+  onNumbersChanged?: () => void;
 }
 
 type Z = ReturnType<typeof useMyNumberManager>;
@@ -42,6 +45,17 @@ const dateJa = (d: string) => {
 
 /** 見せてから、自動で隠すまでの秒数 */
 const REVEAL_SECONDS = 30;
+
+/** 保存期間の書き方（登録してある番号だけ。在籍している・いちばん新しい申告書に載っている番号は出さない） */
+function RetentionNote({ r }: { r: MyNumberRetention | undefined }) {
+  if (!r) return null;
+  if (r.expired && r.keepUntil) {
+    return <div style={{ color: "#dc2626", marginTop: 2 }}>⚠ 保存期間が過ぎています（{dateJa(r.keepUntil)}まで保管：{r.basis}）。できるだけ早く消してください</div>;
+  }
+  if (r.keepUntil) return <div style={{ color: "#64748b", marginTop: 2 }}>保管：{dateJa(r.keepUntil)}まで（{r.basis}）</div>;
+  if (r.unknown) return <div style={{ color: "#b45309", marginTop: 2 }}>{r.basis}</div>;
+  return null;
+}
 
 function EntryRow({ row, e, z }: { row: MyNumberStaffRow; e: MyNumberEntry; z: Z }) {
   const [shown, setShown] = useState<string | null>(null);
@@ -95,6 +109,8 @@ function EntryRow({ row, e, z }: { row: MyNumberStaffRow; e: MyNumberEntry; z: Z
         {e.orphan
           ? "年末調整の申告書に見当たりません（氏名・生年月日が変わった、扶養から外れたなど）。要らなければ消してください"
           : e.years.length > 0 ? `申告書：${e.years.map((y) => `${y}年分`).join("・")}` : ""}
+        {e.registered && !e.orphan && <RetentionNote r={z.retention.byStaff[row.staffId]?.[e.key]} />}
+        {e.registered && e.orphan && z.retention.byStaff[row.staffId]?.[e.key]?.keepUntil && <RetentionNote r={z.retention.byStaff[row.staffId]?.[e.key]} />}
       </td>
     </tr>
   );
@@ -175,6 +191,51 @@ function PlainBackupsCard({ z }: { z: Z }) {
   );
 }
 
+/**
+ * 保存期間が過ぎた番号（退職した人の本人・家族、扶養から外れた家族）を出し、まとめて消せるようにする
+ * 決まりは utils/myNumberRetention.ts（扶養控除等申告書の保存期間：提出期限の年の翌年1月11日から7年）
+ */
+function ExpiredCard({ z }: { z: Z }) {
+  const items = z.retention.expired;
+  if (items.length === 0) return null;
+  return (
+    <div style={{ ...card, borderLeft: "4px solid #dc2626" }}>
+      <div style={title}>保存期間が過ぎたマイナンバー（{items.length}件）</div>
+      <p style={note}>
+        要らなくなり、扶養控除等申告書の保存期間（提出期限の年の翌年1月11日から7年。所得税法施行規則76条の3）が過ぎた番号です。
+        できるだけ早く消してください（個人情報保護委員会「特定個人情報の適正な取扱いに関するガイドライン（事業者編）」）。
+        消したことは、下の取扱いの記録に残ります（記録に番号は書きません）。消しても、それより前に作った会社ファイルのバックアップには残ります。
+      </p>
+      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+        <thead>
+          <tr><th style={th}>従業員</th><th style={th}>人</th><th style={th}>保管する日</th><th style={th}>保存期間</th><th style={th}></th></tr>
+        </thead>
+        <tbody>
+          {items.map((x) => (
+            <tr key={`${x.row.staffId}:${x.entry.key}`}>
+              <td style={{ ...td, whiteSpace: "nowrap" }}>
+                {x.row.name}<span style={{ color: "#94a3b8", marginLeft: 6, fontSize: 11 }}>{x.row.staffId}</span>
+                {x.row.retiredOn && <div style={{ fontSize: 11, color: "#b45309" }}>退職（{dateJa(x.row.retiredOn)}）</div>}
+              </td>
+              <td style={{ ...td, whiteSpace: "nowrap" }}>{x.entry.relation}{x.entry.relation !== "本人" && `・${x.entry.name}`}</td>
+              <td style={{ ...td, whiteSpace: "nowrap", color: "#dc2626" }}>{x.retention.keepUntil ? `${dateJa(x.retention.keepUntil)}まで` : ""}</td>
+              <td style={{ ...td, fontSize: 11, color: "#64748b" }}>{x.retention.basis}</td>
+              <td style={{ ...td, whiteSpace: "nowrap" }}>
+                <button type="button" disabled={z.busy} style={{ ...button, color: "#e74c3c" }} onClick={() => z.remove(x.row, x.entry)}>消す</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" disabled={z.busy}
+        style={{ ...mainButton, backgroundColor: "#dc2626", marginTop: 10, opacity: z.busy ? 0.6 : 1 }}
+        onClick={() => z.removeExpired(items)}>
+        {items.length}件をまとめて消す
+      </button>
+    </div>
+  );
+}
+
 /** 鍵が開いているか・開け閉め */
 function VaultBar({ z }: { z: Z }) {
   const open = z.vault.open;
@@ -246,8 +307,8 @@ function KeySettingsCard({ z }: { z: Z }) {
   );
 }
 
-export default function MyNumberManager({ db, staffList, currentUser, companyPath = null }: Props) {
-  const z = useMyNumberManager(db, staffList, currentUser, companyPath);
+export default function MyNumberManager({ db, staffList, currentUser, companyPath = null, onNumbersChanged }: Props) {
+  const z = useMyNumberManager(db, staffList, currentUser, companyPath, onNumbersChanged);
 
   if (z.access === null || (z.access && z.setUp === null)) return <div style={{ ...card, color: "#94a3b8", fontSize: 13 }}>確かめています…</div>;
   if (!z.access) {
@@ -290,11 +351,14 @@ export default function MyNumberManager({ db, staffList, currentUser, companyPat
         <div style={{ display: "flex", gap: 24, marginTop: 10, fontSize: 13, color: "#1e293b" }}>
           <div>登録済み：<b>{registered}件</b></div>
           {z.setUp && selfMissing > 0 && <div style={{ color: "#b45309" }}>⚠ 本人の番号が未登録（在籍している人）：{selfMissing}人</div>}
+          {z.retention.expired.length > 0 && <div style={{ color: "#dc2626" }}>⚠ 保存期間が過ぎた番号：{z.retention.expired.length}件</div>}
         </div>
         {z.setUp && <VaultBar z={z} />}
       </div>
 
       {!z.setUp && <SetupCard z={z} plainCount={registered} />}
+
+      <ExpiredCard z={z} />
 
       {z.setUp && <PlainBackupsCard z={z} />}
 

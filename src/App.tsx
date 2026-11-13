@@ -1,4 +1,4 @@
-import React, { useEffect } from "react"; // 🆕 ここが重要！
+import React, { useEffect, useRef, useState } from "react"; // 🆕 ここが重要！
 // @ts-ignore
 import pkg from "../package.json";
 import { useApp } from "./useApp";
@@ -45,6 +45,8 @@ import TimeQardManager from "./features/timeqard/TimeQardManager";
 import PaySlipManager from "./features/payroll/PaySlipManager";
 import TransferDataManager from "./features/payroll/TransferDataManager";
 import LegalBooksManager from "./features/legalBooks/LegalBooksManager";
+import { useExpiredMyNumberCount } from "./features/mynumber/useExpiredMyNumberCount";
+import { useToast } from "./components/Toast";
 import BonusManager from "./features/payroll/BonusManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
@@ -176,6 +178,18 @@ function App() {
     refreshData
   } = useApp();
 
+  // 保存期間が過ぎたマイナンバーの数（事務取扱担当者だけ。メニューに出し、会社ファイルを開いたときに1回知らせる。utils/myNumberRetention.ts）
+  const toast = useToast();
+  const [myNumberCheck, setMyNumberCheck] = useState(0);
+  const expiredMyNumbers = useExpiredMyNumberCount(db, currentUser, staffList, `${myNumberCheck}:${activeTab}`);
+  const expiredNoticeShown = useRef(false);
+  useEffect(() => { expiredNoticeShown.current = false; }, [db, currentUser?.id]);
+  useEffect(() => {
+    if (!expiredMyNumbers || expiredNoticeShown.current) return;
+    expiredNoticeShown.current = true;
+    toast.info(`保存期間が過ぎたマイナンバーが${expiredMyNumbers}件あります。「マイナンバー」の画面で確かめて消してください`);
+  }, [expiredMyNumbers]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (isLoading) {
     return <div style={{ padding: "20px" }}>起動しています...</div>; // ✨ 起動中のチラつき防止
   }
@@ -294,6 +308,12 @@ function App() {
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   {TAB_ICONS[tabKey]}
                   <span>{TAB_NAMES[tabKey]}</span>
+                  {tabKey === "mynumber" && !!expiredMyNumbers && (
+                    <span title={`保存期間が過ぎたマイナンバーが${expiredMyNumbers}件あります`}
+                      style={{ marginLeft: "auto", padding: "1px 6px", borderRadius: "9px", backgroundColor: "#dc2626", color: "white", fontSize: "11px", fontWeight: "bold" }}>
+                      要削除 {expiredMyNumbers}
+                    </span>
+                  )}
                 </div>
               </li>
             );
@@ -422,7 +442,7 @@ function App() {
                 <ResidentTaxPaymentManager db={db} staffList={staffList} />
               )}
               {activeTab === "mynumber" && db && (
-                <MyNumberManager db={db} staffList={staffList} currentUser={currentUser} companyPath={dbPath} />
+                <MyNumberManager db={db} staffList={staffList} currentUser={currentUser} companyPath={dbPath} onNumbersChanged={() => setMyNumberCheck((n) => n + 1)} />
               )}
               {activeTab === "payslip" && db && (
                 <PaySlipManager 

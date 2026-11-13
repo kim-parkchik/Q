@@ -17,8 +17,10 @@ import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { buildMyNumberList, myNumberError, normalizeMyNumber, SELF_KEY, type MyNumberEntry, type MyNumberStaffRow } from "../../utils/myNumber";
 import { decryptNumber, encryptNumber, numberHash, passwordError, recoveryKeyError } from "../../utils/myNumberCrypto";
-import { parseDeclaration } from "../../utils/nenchoDeclaration";
-import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "./myNumberStore";
+import { jaDate, myNumberRetentions, todayYmd, type ExpiredMyNumber } from "../../utils/myNumberRetention";
+import {
+  declarationYearsOf, hasMyNumberAccess, loadDeclarations, loadLastPayYears, loadRegisteredPeople, logMyNumber, type MyNumberUser,
+} from "./myNumberStore";
 import { useMyNumberUnlock, useVaultState } from "./MyNumberUnlock";
 import { changeVaultPassword, loadKeyRecord, lockVault, recoverVault, renewVaultRecoveryKey, setupVault } from "./myNumberVault";
 
@@ -49,8 +51,11 @@ const newPasswordError = (password: string, confirm: string) =>
 
 /**
  * @param companyPath 開いている会社ファイルの場所（暗号化を始める前のバックアップを探すため。わからなければ探さない）
+ * @param onNumbersChanged 番号を消したとき（メニューの「保存期間が過ぎた番号」の知らせを数え直す）
  */
-export function useMyNumberManager(db: Database, staffList: any[], user: MyNumberUser | null, companyPath: string | null = null) {
+export function useMyNumberManager(
+  db: Database, staffList: any[], user: MyNumberUser | null, companyPath: string | null = null, onNumbersChanged?: () => void,
+) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const unlock = useMyNumberUnlock();
@@ -60,8 +65,10 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
   /** 暗号化を始めているか（null は確かめている途中） */
   const [setUp, setSetUp] = useState<boolean | null>(null);
   const [companyName, setCompanyName] = useState("");
-  const [declarations, setDeclarations] = useState<{ staffId: string; year: number; declaration: ReturnType<typeof parseDeclaration> }[]>([]);
+  const [declarations, setDeclarations] = useState<Awaited<ReturnType<typeof loadDeclarations>>>([]);
   const [registered, setRegistered] = useState<{ staffId: string; person: string; name: string; relation: string }[]>([]);
+  /** 従業員IDごとの、最後に給与か賞与を払った年（保存期間を数える） */
+  const [lastPayYears, setLastPayYears] = useState<Record<string, number>>({});
   const [logs, setLogs] = useState<MyNumberLog[]>([]);
   /** 見せる回復用キー（見せ終わったら消す） */
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
@@ -97,12 +104,11 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
       setPlainBackups(null);
     }
     const c = await db.select<any[]>("SELECT name FROM company WHERE id = 1");
-    const d = await db.select<any[]>("SELECT staff_id, year, declaration FROM year_end_adjustments");
-    const r = await db.select<any[]>("SELECT staff_id, person, name, relation FROM my_numbers");
     const l = await db.select<any[]>("SELECT created_at, user_name, message FROM app_logs WHERE category = 'mynumber' ORDER BY id DESC LIMIT 100");
     setCompanyName(String(c[0]?.name ?? ""));
-    setDeclarations(d.map((x) => ({ staffId: String(x.staff_id), year: Number(x.year), declaration: parseDeclaration(x.declaration) })));
-    setRegistered(r.map((x) => ({ staffId: String(x.staff_id), person: String(x.person), name: String(x.name ?? ""), relation: String(x.relation ?? "") })));
+    setDeclarations(await loadDeclarations(db));
+    setRegistered(await loadRegisteredPeople(db));
+    setLastPayYears(await loadLastPayYears(db));
     setLogs(l.map((x) => ({ at: String(x.created_at), user: String(x.user_name ?? ""), message: String(x.message) })));
   };
 
@@ -117,6 +123,11 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
   }, [db, user?.id, vault.open]);
 
   const rows = useMemo(() => buildMyNumberList(staffList, declarations, registered), [staffList, declarations, registered]);
+  // 保存期間（本人は在籍中なら保管、退職した人は最後の扶養控除等申告書の保存期間まで。家族は最後に載った申告書の保存期間まで）と、過ぎた番号
+  const retention = useMemo(
+    () => myNumberRetentions(rows, staffList, lastPayYears, declarationYearsOf(declarations), todayYmd()),
+    [rows, staffList, lastPayYears, declarations],
+  );
 
   /** 番号を見せる（記録に残す） */
   const reveal = async (row: MyNumberStaffRow, e: MyNumberEntry): Promise<string | null> => {
@@ -191,12 +202,50 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
     if (!ok) return;
     try {
       await db.execute("DELETE FROM my_numbers WHERE staff_id = ? AND person = ?", [row.staffId, e.key]);
-      await logMyNumber(db, user, `マイナンバーを消しました：${whoOf(row, e)}`);
+      const r = retention.byStaff[row.staffId]?.[e.key];
+      await logMyNumber(db, user, `マイナンバーを消しました：${whoOf(row, e)}${r?.expired && r.keepUntil ? `（保存期間が過ぎたため。${jaDate(r.keepUntil)}まで保管：${r.basis}）` : ""}`);
       toast.success("マイナンバーを消しました");
       await load();
+      onNumbersChanged?.();
     } catch (err) {
       console.error(err);
       dialog.error(`マイナンバーを消せませんでした。\n${err}`);
+    }
+  };
+
+  /**
+   * 保存期間が過ぎた番号をまとめて消す（一覧を見せて確かめてから。1件ずつ、何の保存期間が過ぎたかを記録に残す。記録に番号は書かない）
+   * 番号を読まずに消すので、鍵は開けなくてよい
+   */
+  const removeExpired = async (items: ExpiredMyNumber[]) => {
+    if (items.length === 0) return;
+    const ok = await ask(
+      `保存期間が過ぎたマイナンバー${items.length}件を消します。\n\n`
+      + items.map((x) => `・${whoOf(x.row, x.entry)}（${jaDate(x.retention.keepUntil ?? "")}まで保管）`).join("\n")
+      + "\n\n消した番号は元に戻せません（それより前に作った会社ファイルのバックアップには残ります）。消したことは記録に残します。\n\n消しますか？",
+      { title: "保存期間が過ぎたマイナンバーを消す", kind: "warning", okLabel: "消す", cancelLabel: "やめる" },
+    );
+    if (!ok) return;
+    if (!(await hasMyNumberAccess(db, user))) {
+      dialog.warning("マイナンバーを扱える印がありません（管理者がシステム設定で付けます）");
+      return;
+    }
+    setBusy(true);
+    let removed = 0;
+    try {
+      for (const x of items) {
+        await db.execute("DELETE FROM my_numbers WHERE staff_id = ? AND person = ?", [x.row.staffId, x.entry.key]);
+        await logMyNumber(db, user, `マイナンバーを消しました：${whoOf(x.row, x.entry)}（保存期間が過ぎたため。${jaDate(x.retention.keepUntil ?? "")}まで保管：${x.retention.basis}）`);
+        removed++;
+      }
+      toast.success(`保存期間が過ぎたマイナンバー${removed}件を消しました`);
+    } catch (err) {
+      console.error(err);
+      dialog.error(`マイナンバーを消せませんでした（${removed}件は消しました）。\n${err}`);
+    } finally {
+      setBusy(false);
+      await load().catch((e) => console.error(e));
+      onNumbersChanged?.();
     }
   };
 
@@ -335,8 +384,8 @@ export function useMyNumberManager(db: Database, staffList: any[], user: MyNumbe
   const closeVault = () => lockVault("manual");
 
   return {
-    access, setUp, vault, rows, logs, busy, companyName, recoveryKey, plainBackups,
+    access, setUp, vault, rows, logs, busy, companyName, recoveryKey, plainBackups, retention,
     closeRecoveryKey: () => setRecoveryKey(null),
-    reveal, save, remove, setup, recover, changePassword, renewRecovery, openVault, closeVault, removePlainBackups,
+    reveal, save, remove, removeExpired, setup, recover, changePassword, renewRecovery, openVault, closeVault, removePlainBackups,
   };
 }
