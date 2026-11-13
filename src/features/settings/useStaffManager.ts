@@ -179,6 +179,12 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     const [targetSocialInsGroupId, setTargetSocialInsGroupId] = useState(1); // 🆕 追加
     const [targetKokuhoPremium, setTargetKokuhoPremium] = useState(0); // 国保組合の保険料（月額。社保規定が国保組合の人だけ）
+    // 労働者名簿の項目（労働基準法107条・施行規則53条。utils/legalBooks.ts）
+    const [targetJobType, setTargetJobType] = useState("");             // 従事する業務の種類
+    const [targetCareerHistory, setTargetCareerHistory] = useState(""); // 履歴
+    const [targetRetirementReason, setTargetRetirementReason] = useState(""); // 退職の事由（解雇はその理由も）
+    const [targetDeathDate, setTargetDeathDate] = useState("");         // 死亡の年月日
+    const [targetDeathCause, setTargetDeathCause] = useState("");       // 死亡の原因
     // 振込先口座（給与・賞与の振込データ。固定額の口座と、残りを振り込む口座。utils/bankAccounts.ts）
     const [targetBankAccounts, setTargetBankAccounts] = useState<StaffAccountForm[]>([]);
     const [savedBankAccounts, setSavedBankAccounts] = useState("[]");
@@ -349,6 +355,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetKokuhoPremium(0);
         setTargetBankAccounts([]);
         setSavedBankAccounts("[]");
+        setTargetJobType(""); setTargetCareerHistory(""); setTargetRetirementReason(""); setTargetDeathDate(""); setTargetDeathCause("");
         setTargetEmpInsType("");
         setEditingId(null);
     };
@@ -418,6 +425,11 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         // 社保規定が空（NULL）なら「未加入 / 適用除外」
         setTargetSocialInsGroupId(s.social_insurance_group_id ?? 0);
         setTargetKokuhoPremium(Number(s.kokuho_premium) || 0);
+        setTargetJobType(s.job_type || "");
+        setTargetCareerHistory(s.career_history || "");
+        setTargetRetirementReason(s.retirement_reason || "");
+        setTargetDeathDate(s.death_date || "");
+        setTargetDeathCause(s.death_cause || "");
         setTargetEmpInsType(s.employment_insurance_type || "");
         setTargetIsExecutive(s.is_executive || 0);
         setTargetIsEmploymentInsEligible(s.is_employment_ins_eligible ?? 1); // 雇用保険はデフォルト1なので??を使用
@@ -495,6 +507,11 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetSocialInsGroupId) !== Number(original.social_insurance_group_id ?? 0) ||
             Number(targetKokuhoPremium) !== Number(original.kokuho_premium || 0) ||
             JSON.stringify(targetBankAccounts) !== savedBankAccounts ||
+            String(targetJobType) !== String(original.job_type || "") ||
+            String(targetCareerHistory) !== String(original.career_history || "") ||
+            String(targetRetirementReason) !== String(original.retirement_reason || "") ||
+            String(targetDeathDate) !== String(original.death_date || "") ||
+            String(targetDeathCause) !== String(original.death_cause || "") ||
             String(targetEmpInsType || "") !== String(original.employment_insurance_type || "") ||
             String(targetHealthInsNum) !== String(original.health_ins_num || "") ||
             String(targetPensionNum) !== String(original.pension_num || "") ||
@@ -566,7 +583,10 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 stringifyResidentTaxSchedule(targetResidentTaxSchedule),
                 targetResidentTaxMunicipality || null,
                 stringifyCommuteSetting(targetCommuteSetting),
-                targetFixedBreakApply ? 1 : 0
+                targetFixedBreakApply ? 1 : 0,
+                // 労働者名簿の項目
+                targetJobType.trim() || null, targetCareerHistory.trim() || null, targetRetirementReason.trim() || null,
+                targetDeathDate || null, targetDeathCause.trim() || null,
             ];
 
             if (editingId) {
@@ -586,7 +606,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         scheduled_in=?, is_flex=?, core_start=?, core_end=?,
                         flat_tax_reduction_persons=?, leave_periods=?, tax_column=?,
                         standard_remuneration_history=?, wage_history=?, dependents_history=?,
-                        resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?
+                        resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
+                        job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -608,6 +629,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         flat_tax_reduction_persons, leave_periods, tax_column,
                         standard_remuneration_history, wage_history, dependents_history,
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
+                        job_type, career_history, retirement_reason, death_date, death_cause,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -850,6 +872,11 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         targetBankAccounts,
         setTargetBankAccounts,
         bankAccountErrors,
+        targetJobType, setTargetJobType,
+        targetCareerHistory, setTargetCareerHistory,
+        targetRetirementReason, setTargetRetirementReason,
+        targetDeathDate, setTargetDeathDate,
+        targetDeathCause, setTargetDeathCause,
         targetEmpInsType,
         setTargetEmpInsType,
         socialGroups,

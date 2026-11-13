@@ -27,6 +27,7 @@ import {
   LogOut,
   QrCode,
   Send,
+  Library,
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -43,6 +44,7 @@ import TimeQardManager from "./features/timeqard/TimeQardManager";
 // payroll フォルダ
 import PaySlipManager from "./features/payroll/PaySlipManager";
 import TransferDataManager from "./features/payroll/TransferDataManager";
+import LegalBooksManager from "./features/legalBooks/LegalBooksManager";
 import BonusManager from "./features/payroll/BonusManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
@@ -88,6 +90,7 @@ const TAB_NAMES: Record<string, string> = {
   mynumber: "マイナンバー",
   payslip: "明細書出力",
   furikomi: "振込データ",
+  choubo: "法定三帳簿",
   user_management: "システム設定"
 };
 
@@ -114,6 +117,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   mynumber: <IdCard size={18} />,
   payslip: <FileText size={18} />,
   furikomi: <Send size={18} />,
+  choubo: <Library size={18} />,
   user_management: <UserCog size={18} />
 };
 
@@ -274,10 +278,11 @@ function App() {
             "nonyu",
             "mynumber",
             "payslip",
-            "furikomi"
+            "furikomi",
+            "choubo"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -429,6 +434,9 @@ function App() {
               )}
               {activeTab === "furikomi" && db && (
                 <TransferDataManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "choubo" && db && (
+                <LegalBooksManager db={db} staffList={staffList} />
               )}
             </>
           )}

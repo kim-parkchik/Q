@@ -112,6 +112,12 @@ export const DB_SCHEMAS = [
     payroll_group_id INTEGER DEFAULT 1,
     social_insurance_group_id INTEGER DEFAULT 1, -- 社保規定グループとの紐付け
     kokuho_premium INTEGER DEFAULT 0,  -- 国民健康保険組合の保険料（月額・本人負担。社保規定が国保組合の人だけ使う。utils/healthInsurer.ts）
+    -- 労働者名簿の項目（労働基準法107条・施行規則53条。utils/legalBooks.ts）
+    job_type TEXT,                     -- 従事する業務の種類（常時30人未満の事業では書かなくてよい）
+    career_history TEXT,               -- 履歴
+    retirement_reason TEXT,            -- 退職の事由（解雇のときは、その理由も）
+    death_date TEXT,                   -- 死亡の年月日
+    death_cause TEXT,                  -- 死亡の原因
     calendar_pattern_id INTEGER DEFAULT 1,
     work_days TEXT,
     scheduled_in TEXT DEFAULT '',
@@ -292,6 +298,7 @@ export const DB_SCHEMAS = [
     emp_insurance INTEGER DEFAULT 0,
     kokuho_premium INTEGER DEFAULT 0, -- 国民健康保険組合の保険料（国保組合の人だけ。social_ins_total に入れる）
     social_ins_total INTEGER DEFAULT 0,
+    ledger TEXT,                      -- 賃金台帳の内訳（JSON。給与明細の支給・控除の行と、労働日数・時間数。utils/legalBooks.ts）
     income_tax INTEGER DEFAULT 0,
     flat_tax_reduction INTEGER DEFAULT 0, -- 定額減税額（令和6年6月〜12月。income_tax はこれを引いた後の額）
     resident_tax INTEGER DEFAULT 0,
@@ -365,6 +372,7 @@ export const DB_SCHEMAS = [
     income_tax INTEGER,        -- 所得税（定額減税を引いた後の額）
     flat_tax_reduction INTEGER DEFAULT 0, -- 定額減税額（令和6年6月〜12月に支払う賞与。utils/flatTaxReduction.ts）
     custom_deductions INTEGER, -- カスタム控除の合計額
+    ledger TEXT,               -- 賃金台帳の内訳（JSON。支給・控除の項目ごとの額。utils/legalBooks.ts）
     net_pay INTEGER,           -- 差引支給額
     is_nursing INTEGER,        -- 当時、介護保険対象者だったか（0 or 1）
     processed_at TEXT DEFAULT (DATETIME('now', 'localtime')),

@@ -141,7 +141,7 @@ export const expiryAfterMonths = (grantDate: string, months: number): string => 
 /** 付与日から2年の有効期限（2年後の応当日の前日。応当日がない2月29日の付与は、2年後の2月の末日） */
 export const defaultExpiryDate = (grantDate: string): string => expiryAfterMonths(grantDate, 24);
 
-const WORK_TYPE_LABELS: Record<string, string> = {
+export const WORK_TYPE_LABELS: Record<string, string> = {
   normal: "出勤（平日）",
   holiday: "公休",
   holiday_work: "所定休日出勤",

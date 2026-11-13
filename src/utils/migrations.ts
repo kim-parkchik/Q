@@ -288,6 +288,19 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "bonus_results", "flat_tax_reduction", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 18,
+    description:
+      "法定三帳簿：従業員に労働者名簿の項目（従事する業務の種類・履歴・退職の事由・死亡の年月日と原因）、" +
+      "確定した給与・賞与に賃金台帳の内訳（支給・控除の行と、労働日数・時間数）の列を足す（いままでに確定したものは空。確定し直すと入る）",
+    up: async (db) => {
+      for (const c of ["job_type", "career_history", "retirement_reason", "death_date", "death_cause"]) {
+        await addColumnIfMissing(db, "staff", c, "TEXT");
+      }
+      await addColumnIfMissing(db, "salary_results", "ledger", "TEXT");
+      await addColumnIfMissing(db, "bonus_results", "ledger", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

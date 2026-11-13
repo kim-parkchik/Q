@@ -6,6 +6,7 @@
  * 途中で失敗したら、前の確定結果のまま残る。
  */
 import type { SqlStatement } from "./dbBatch";
+import type { PayLedger } from "./legalBooks";
 
 /** 確定する1人分の賞与の計算結果（bonus_results の1行） */
 export interface BonusResultCalc {
@@ -23,6 +24,8 @@ export interface BonusResultCalc {
   customDeductions: number;
   netPay: number;
   isNursing: boolean;
+  /** 賃金台帳の内訳（支給・控除の項目ごとの額。utils/legalBooks.ts） */
+  ledger: PayLedger;
 }
 
 /**
@@ -51,12 +54,12 @@ export const buildFinalizeBonusStatements = (
   { sql: "DELETE FROM bonus_results WHERE bonus_setting_id = ?", values: [settingId] },
   ...rows.map(({ staff, calc }) => ({
     sql: `INSERT INTO bonus_results (bonus_setting_id, staff_id, total_earnings, hyojun_bonus, health_insurance, nursing_insurance,
-            child_support, welfare_pension, emp_insurance, income_tax, flat_tax_reduction, custom_deductions, net_pay, is_nursing)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            child_support, welfare_pension, emp_insurance, income_tax, flat_tax_reduction, custom_deductions, net_pay, is_nursing, ledger)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     values: [
       settingId, String(staff.id), calc.totalEarnings, calc.hyojunBonus, calc.healthInsurance, calc.nursingInsurance,
       calc.childSupport, calc.welfarePension, calc.empInsurance, calc.incomeTax, calc.flatTaxReduction, calc.customDeductions, calc.netPay,
-      calc.isNursing ? 1 : 0,
+      calc.isNursing ? 1 : 0, JSON.stringify(calc.ledger),
     ],
   })),
   { sql: "UPDATE bonus_settings SET is_closed = 1 WHERE id = ?", values: [settingId] },

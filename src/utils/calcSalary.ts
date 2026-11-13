@@ -111,6 +111,7 @@ import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commu
 import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './specialLeave';
 import { DEFAULT_FLEX_RULE, isFlexStaff, settleFlex, type FlexRule, type FlexSettlement } from './flexTime';
 import { healthPremiumsOf, type HealthInsurer, type InsurerType, type UnionRate } from './healthInsurer';
+import { salaryLedgerOf } from './legalBooks';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -662,7 +663,9 @@ export const saveSalaryResult = async (
   year: number, 
   month: number, 
   result: SalaryResult,
-  staffMaster: any // その月の分の基本給（utils/staffHistory.ts の staffAsOf を通した従業員）。確定した結果に残す
+  staffMaster: any, // その月の分の基本給（utils/staffHistory.ts の staffAsOf を通した従業員）。確定した結果に残す
+  /** 賃金台帳の内訳に書く、任意手当の名前と賃金計算期間（給与明細の設定） */
+  ledgerOptions: { allowanceName?: string | null; period?: { start: string; end: string } | null } = {},
 ) => {
   const sql = `
     INSERT INTO salary_results (
@@ -675,8 +678,8 @@ export const saveSalaryResult = async (
       absence_deduction, prescribed_work_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance, kokuho_premium,
-      social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay, ledger
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -710,6 +713,7 @@ export const saveSalaryResult = async (
       resident_tax = excluded.resident_tax,
       year_end_adjustment = excluded.year_end_adjustment,
       net_pay = excluded.net_pay,
+      ledger = excluded.ledger,
       processed_at = DATETIME('now', 'localtime');
   `;
 
@@ -727,7 +731,9 @@ export const saveSalaryResult = async (
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance, result.kokuhoPremium,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance + result.kokuhoPremium),
-    result.incomeTax, result.flatTaxReduction, result.residentTax, result.yearEndSettlement, result.netPay
+    result.incomeTax, result.flatTaxReduction, result.residentTax, result.yearEndSettlement, result.netPay,
+    // 賃金台帳の内訳（給与明細の支給・控除の行と、労働日数・時間数。utils/legalBooks.ts）
+    JSON.stringify(salaryLedgerOf(result, { wageType: staffMaster?.wage_type, allowanceName: ledgerOptions.allowanceName, period: ledgerOptions.period })),
   ];
 
   try {

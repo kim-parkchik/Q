@@ -5,6 +5,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import * as Master from '../../constants';
 import { calcBonusWithholdingTax, flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { describeFlatTaxPayment, flatTaxRemainingFor, loadFlatTaxPayments, type FlatTaxPayment } from '../../utils/flatTaxReduction';
+import { bonusLedgerOf } from '../../utils/legalBooks';
 import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
 import { branchPrefectureOf } from '../../utils/branchPrefecture';
@@ -455,10 +456,17 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     // 🆕 カスタム控除も有効なものだけ合計
     const customDeductions = deductionItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
     const totalDeductions = socialTotal + incomeTax + customDeductions;
+    // 賃金台帳の内訳（賞与の支給項目・控除項目ごとの額。確定するときに残す。utils/legalBooks.ts）
+    const ledger = bonusLedgerOf({
+      earnings: earningItems.map((item) => ({ name: item.name, amount: vals[item.id] ?? 0 })),
+      healthInsurance, nursingInsurance, childSupport, welfarePension, empInsurance, incomeTax,
+      customDeductions: deductionItems.map((item) => ({ name: item.name, amount: vals[item.id] ?? 0 })),
+      totalEarnings, totalDeductions, netPay: totalEarnings - totalDeductions,
+    });
 
     return {
       totalEarnings, hyojunBonus, healthInsurance, nursingInsurance, childSupport, welfarePension,
-      empInsurance, incomeTax, customDeductions, totalDeductions,
+      empInsurance, incomeTax, customDeductions, totalDeductions, ledger,
       /** 令和6年分の定額減税：減税前の所得税・引いた額・この賞与のあとに残る額・先に定額減税を引いて確定した、後に払う給与・賞与 */
       incomeTaxBeforeReduction, flatTaxTotal, flatTaxReduction, flatTaxRemainingAfter: flatTax.remaining - flatTaxReduction, flatTaxLaterUsed: flatTax.laterUsed,
       netPay: totalEarnings - totalDeductions, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled,

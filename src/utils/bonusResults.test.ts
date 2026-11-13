@@ -32,6 +32,10 @@ const setup = () => {
 const calc = (total: number): BonusResultCalc => ({
     totalEarnings: total, hyojunBonus: Math.floor(total / 1000) * 1000, healthInsurance: 10000, nursingInsurance: 0, childSupport: 200,
     welfarePension: 18300, empInsurance: 1000, incomeTax: 20000, flatTaxReduction: 0, customDeductions: 0, netPay: total - 49500, isNursing: false,
+    ledger: {
+        periodStart: null, periodEnd: null, workDays: 0, workHours: 0, overtimeHours: 0, holidayHours: 0, nightHours: 0,
+        earnings: [{ name: "基本賞与", amount: total }], deductions: [], totalEarnings: total, totalDeductions: 49500, netPay: total - 49500, yearEndSettlement: 0,
+    },
 });
 
 describe("賞与を追加する", () => {

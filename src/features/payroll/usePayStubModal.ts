@@ -385,7 +385,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       alert(`${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料と介護保険料を計算していません。\n会社設定の「社会保険規定」で、組合の料率（何年何月分から）を入れてから、確定してください。`);
       return;
     }
-    const result = await saveSalaryResult(db, staff.id, year, month, salary, staff);
+    const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });
     if (result.success) {
       setIsSaved(true);
       await writeLog(db, "INFO", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を確定しました`);
