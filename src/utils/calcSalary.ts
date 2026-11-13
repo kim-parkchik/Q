@@ -82,6 +82,15 @@
  *  - 無給の休暇：月給制は、欠勤控除と同じ計算（給与規定グループの欠勤控除のしかた）で引き、明細では欠勤とは分けて出す。
  *    日給制・時給制は払わない（半日の日は、残りの半日に働いた分の日給・時給を払う）
  *  - 半日の日は、半休と同じく、所定労働時間の半分を働く日として残業・遅刻早退を数える
+ *
+ * フレックスタイム制（従業員の「フレックスタイム制を適用」。月給制・時給制。清算期間は計算期間の1か月。utils/flexTime.ts）:
+ *  - 1日8時間・週40時間では残業を数えず、計算期間の合計で清算する。実労働（法定休日の労働を除く）が法定の総枠を超えた時間が時間外労働
+ *    （25%。月60時間を超えた分は50%）。総労働時間を超えて法定の総枠までの時間は、法定内（1.0倍）
+ *  - 月給制：総労働時間に足りない時間は、給与規定グループの決まりで、その月に引く（月給 ÷ 1か月平均所定労働時間 × 時間）か、次の月に繰り越す。
+ *    欠勤・遅刻早退・無給の休暇は、別に引かず、この不足時間に入る
+ *  - 時給制：働いた時間の分を払うので、不足時間は引かない。時間外労働の割増分だけを足す
+ *  - 法定休日の労働（35%）・深夜（25%）は、いままでどおり日ごとに払う
+ *
  *  - 時間単位の休暇（子の看護等休暇・介護休暇など。attendance.special_leave_hours）：時間有給と同じく、所定労働時間から引いて残業・遅刻早退を数える。
  *    有給なら日給制・時給制はその時間の通常の賃金を払い、無給なら月給制は、遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く
  *    （給与規定グループで遅刻・早退・中抜けを「引かない」にしている会社は引かない。明細では「無給休暇控除」に入れる）
@@ -100,6 +109,7 @@ import { checkLeaveExemptMonth, exemptLeavePeriodsOf } from './leaveExemption';
 import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
 import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './specialLeave';
+import { DEFAULT_FLEX_RULE, isFlexStaff, settleFlex, type FlexRule, type FlexSettlement } from './flexTime';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -144,6 +154,10 @@ export interface SalaryExtras {
    * 週40時間の累計にだけ足し、その日の給与は払わない。undefined は読み込み中（給与明細は、その間は確定しない）
    */
   weekCarryOver?: WeekCarryOverRow[];
+  /** フレックスタイム制の決まり（給与規定グループの設定。省略時は初めの決まり。utils/flexTime.ts） */
+  flexRule?: FlexRule | null;
+  /** フレックスタイム制で、前の月から繰り越した不足時間（前の月の確定した給与の flex_carry_hours） */
+  flexCarryIn?: number;
 }
 
 /** 週40時間の累計に足す、前の計算期間の日の勤怠（attendance の必要な列） */
@@ -235,6 +249,14 @@ export interface SalaryResult {
   unpaidLeaveDeductionDetail: string | null;
   /** 無給の特別休暇の控除の注意（なければ null） */
   unpaidLeaveDeductionNote: string | null;
+  /** フレックスタイム制の清算（フレックスタイム制の人だけ。ほかは null） */
+  flex: FlexSettlement | null;
+  /** フレックスタイム制の不足時間の控除（月給制） */
+  flexShortageDeduction: number;
+  /** フレックスタイム制の不足時間の控除の計算式（なければ null） */
+  flexShortageDetail: string | null;
+  /** フレックスタイム制で、次の月に繰り越す不足時間（確定した結果に残し、次の月の計算で使う） */
+  flexCarryOutHours: number;
   commutePay: number;
   allowanceAmount: number;
   customEarnings: number;
@@ -635,11 +657,11 @@ export const saveSalaryResult = async (
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
-      absence_deduction, prescribed_work_days, tardy_deduction, unpaid_leave_deduction,
+      absence_deduction, prescribed_work_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours,
       total_earnings, taxable_amount,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -658,6 +680,7 @@ export const saveSalaryResult = async (
       prescribed_work_days = excluded.prescribed_work_days,
       tardy_deduction = excluded.tardy_deduction,
       unpaid_leave_deduction = excluded.unpaid_leave_deduction,
+      flex_carry_hours = excluded.flex_carry_hours,
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
       health_insurance = excluded.health_insurance,
@@ -683,6 +706,8 @@ export const saveSalaryResult = async (
     result.fixedOvertimeAllowance, result.fixedOvertimeExcess, result.nonFixedEarnings,
     // 欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う。utils/santei.ts）
     result.absenceDeduction, result.periodWorkDays, result.tardyDeduction, result.unpaidLeaveDeduction,
+    // フレックスタイム制で、次の月に繰り越す不足時間（次の月の計算で読む。utils/flexTime.ts の loadFlexCarryIn）
+    result.flex ? result.flexCarryOutHours : null,
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance),
@@ -1161,6 +1186,8 @@ export const calculateSalary = (
 
   const weekStartDay: number = companySettings?.week_start_day ?? 0; // デフォルト日曜
   const scheduledHours = Number(staff.scheduled_work_hours) || 8;
+  // フレックスタイム制で計算する人（月給制・時給制。utils/flexTime.ts）
+  const flex = isFlexStaff(staff);
 
   // ── 勤怠集計 ──────────────────────────────────────────────
   // ── 1. まず、確定データの中から「欠勤」と「全休」の日数を正確に把握する ──
@@ -1295,38 +1322,41 @@ export const calculateSalary = (
       hourlyRate = overtimeBaseHours > 0 ? (monthlyWage + overtimeBaseAllowances) / overtimeBaseHours : 0;
       overtimeHourlyRate = hourlyRate;
 
-      // 欠勤控除：給与規定グループの設定で、計算期間の所定労働日数か、1年間の月平均の所定労働日数で割る（absenceDeductionOf）
-      // 会社カレンダーを読み込めていないときだけ、その月の土日を除いた日数で割る
-      const absence = absenceDeductionOf(
-        absenceDeductionMethod, monthlyWage, actualAbsentDays, basePay,
-        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth),
-      );
-      absenceDeduction = absence.amount;
-      absenceDeductionDetail = absence.detail;
-      absenceDeductionNote = absence.note;
+      // フレックスタイム制の人は、欠勤・遅刻早退・無給の休暇を別に引かず、計算期間の合計の不足時間で引く（下の「フレックスタイム制の清算」）
+      if (!flex) {
+        // 欠勤控除：給与規定グループの設定で、計算期間の所定労働日数か、1年間の月平均の所定労働日数で割る（absenceDeductionOf）
+        // 会社カレンダーを読み込めていないときだけ、その月の土日を除いた日数で割る
+        const absence = absenceDeductionOf(
+          absenceDeductionMethod, monthlyWage, actualAbsentDays, basePay,
+          extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth),
+        );
+        absenceDeduction = absence.amount;
+        absenceDeductionDetail = absence.detail;
+        absenceDeductionNote = absence.note;
 
-      // 無給の特別休暇：欠勤控除と同じ計算で引く（引く額は、欠勤控除を引いたあとの基本給まで）
-      const unpaid = absenceDeductionOf(
-        absenceDeductionMethod, monthlyWage, unpaidLeaveDays, basePay - absenceDeduction,
-        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '無給の休暇',
-      );
-      // 無給の時間単位の特別休暇：遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く（引く額は、そこまでに引いたあとの基本給まで）
-      const unpaidHours = tardyDeductionOf(
-        tardyDeductionMethod, monthlyWage, unpaidLeaveMinutes, basePay - absenceDeduction - unpaid.amount, scheduledHours,
-        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '無給の休暇',
-      );
-      unpaidLeaveDeduction = unpaid.amount + unpaidHours.amount;
-      unpaidLeaveDeductionDetail = [unpaid.detail, unpaidHours.detail].filter(Boolean).join('／') || null;
-      unpaidLeaveDeductionNote = [unpaid.note, unpaidHours.note].filter(Boolean).join(' ') || null;
+        // 無給の特別休暇：欠勤控除と同じ計算で引く（引く額は、欠勤控除を引いたあとの基本給まで）
+        const unpaid = absenceDeductionOf(
+          absenceDeductionMethod, monthlyWage, unpaidLeaveDays, basePay - absenceDeduction,
+          extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '無給の休暇',
+        );
+        // 無給の時間単位の特別休暇：遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く（引く額は、そこまでに引いたあとの基本給まで）
+        const unpaidHours = tardyDeductionOf(
+          tardyDeductionMethod, monthlyWage, unpaidLeaveMinutes, basePay - absenceDeduction - unpaid.amount, scheduledHours,
+          extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '無給の休暇',
+        );
+        unpaidLeaveDeduction = unpaid.amount + unpaidHours.amount;
+        unpaidLeaveDeductionDetail = [unpaid.detail, unpaidHours.detail].filter(Boolean).join('／') || null;
+        unpaidLeaveDeductionNote = [unpaid.note, unpaidHours.note].filter(Boolean).join(' ') || null;
 
-      // 遅刻・早退・中抜けの控除：給与規定グループの設定で、1か月平均所定労働時間か、計算期間の所定労働時間で割る（tardyDeductionOf）
-      const tardy = tardyDeductionOf(
-        tardyDeductionMethod, monthlyWage, tardyMinutes, basePay - absenceDeduction - unpaidLeaveDeduction, scheduledHours,
-        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth),
-      );
-      tardyDeduction = tardy.amount;
-      tardyDeductionDetail = tardy.detail;
-      tardyDeductionNote = tardy.note;
+        // 遅刻・早退・中抜けの控除：給与規定グループの設定で、1か月平均所定労働時間か、計算期間の所定労働時間で割る（tardyDeductionOf）
+        const tardy = tardyDeductionOf(
+          tardyDeductionMethod, monthlyWage, tardyMinutes, basePay - absenceDeduction - unpaidLeaveDeduction, scheduledHours,
+          extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth),
+        );
+        tardyDeduction = tardy.amount;
+        tardyDeductionDetail = tardy.detail;
+        tardyDeductionNote = tardy.note;
+      }
     }
 
     for (const row of sorted) {
@@ -1374,8 +1404,9 @@ export const calculateSalary = (
         // すでに下の nightPay で 0.25 分が計算されるため、差分は不要
         // (もし1.6倍として別に管理したい場合はここで調整)
 
-      } else {
+      } else if (!flex) {
         // ── 【平日 または 所定休日】（土曜日など） ──────────
+        // フレックスタイム制の人は、日ごとに残業を数えない（下の「フレックスタイム制の清算」で、計算期間の合計で数える）
         
         // 1. 法定外残業の判定（日8h超 または 週40h超）
         const legalOvertimeFromDay = Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY);
@@ -1458,6 +1489,11 @@ export const calculateSalary = (
         addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
         continue;
       }
+      // フレックスタイム制の人は、日ごとに残業を数えない（下の「フレックスタイム制の清算」で、計算期間の合計で数える）
+      if (flex) {
+        addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
+        continue;
+      }
 
       // 1日8h超
       const legalOvertimeFromDay = Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY);
@@ -1489,6 +1525,72 @@ export const calculateSalary = (
       }
       addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
     }
+  }
+
+  // ── フレックスタイム制の清算（清算期間は計算期間の1か月。utils/flexTime.ts）────────────────
+  let flexSettlement: FlexSettlement | null = null;
+  let flexShortageDeduction = 0;
+  let flexShortageDetail: string | null = null;
+  let flexShortageNote: string | null = null;
+  if (flex) {
+    const periodStart = extras.period?.start || sorted[0]?.work_date || '';
+    const periodEnd = extras.period?.end || sorted[sorted.length - 1]?.work_date || '';
+    // 計算期間の途中で入社・退職した月は、在籍した日だけで清算する
+    const from = staff.join_date && staff.join_date > periodStart ? staff.join_date : periodStart;
+    const to = staff.retirement_date && staff.retirement_date < periodEnd ? staff.retirement_date : periodEnd;
+    const settled = settleFlex({
+      rule: extras.flexRule ?? DEFAULT_FLEX_RULE,
+      from, to,
+      workDays: extras.employedWorkDays ?? extras.periodWorkDays ?? null,
+      dayHours: scheduledHours,
+      carryInHours: Number(extras.flexCarryIn) || 0,
+      rows: sorted,
+    });
+    // 時給制の人は、働いた時間の分を払うので、不足時間を引かず、繰り越しもしない
+    flexSettlement = staff.wage_type === 'hourly' ? { ...settled, carryOutHours: 0, deductHours: 0 } : settled;
+    const fs = flexSettlement;
+    const overtime0 = overtimeTotal();
+    // 月60時間を超えた時間（50%）は、あとのほうの時間なので、総労働時間を超えた時間から先に当たる
+    const split = splitOvertimeHours(fs.overtimeHours, 0, to || '9999-12-31', isSmallBusiness);
+    const highFull = Math.min(fs.fullOvertimeHours, split.high);
+    const highOnly = split.high - highFull;
+    const stdFull = fs.fullOvertimeHours - highFull;
+    const stdOnly = Math.max(0, fs.premiumOnlyHours - highOnly);
+    if (staff.wage_type === 'monthly') {
+      const rate = overtimeHourlyRate; // (月給 ＋ 手当) ÷ 1か月平均所定労働時間
+      // 総労働時間を超えた時間：法定内は1.0倍、時間外は1.25倍・1.5倍。総労働時間の中の時間外（繰り越しで総枠を超えたとき）は割増分だけ
+      statutoryOvertimePay += rate * fs.innerHours;
+      totalStatutoryOvertimeHours += fs.innerHours;
+      standardOvertimePay += rate * (Master.OVERTIME_RATE * stdFull + (Master.OVERTIME_RATE - 1) * stdOnly);
+      highOvertimePay += rate * (Master.OVERTIME_PREMIUM_RATE * highFull + (Master.OVERTIME_PREMIUM_RATE - 1) * highOnly);
+      // 不足時間：月給 × 時間 ÷ 1か月平均所定労働時間（遅刻・早退・中抜けの控除と同じ1時間あたりの額。引く額は基本給まで）
+      if (fs.deductHours > 0) {
+        const monthlyWage = Number(staff.base_wage ?? staff.baseWage ?? 0);
+        const d = tardyDeductionOf(
+          'annual', monthlyWage, Math.round(fs.deductHours * 60), basePay, scheduledHours,
+          extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), 'フレックスの不足時間',
+        );
+        flexShortageDeduction = d.amount;
+        flexShortageDetail = d.detail;
+        flexShortageNote = d.note;
+      }
+    } else {
+      // 時給制：時給の1.0倍分は働いた時間の賃金で払っているので、時間外労働の割増分だけを足す（手当の分は割増率をそのまま掛ける。
+      // 総労働時間の中の時間外は、手当の1.0倍分も月額の手当で払っているので、手当の分も割増分だけ）
+      const wage = Number(staff.base_wage) || 0;
+      standardOvertimePay += (wage * (Master.OVERTIME_RATE - 1) + allowancePerHour * Master.OVERTIME_RATE) * split.standard
+        - allowancePerHour * stdOnly;
+      highOvertimePay += (wage * (Master.OVERTIME_PREMIUM_RATE - 1) + allowancePerHour * Master.OVERTIME_PREMIUM_RATE) * split.high
+        - allowancePerHour * highOnly;
+    }
+    standardPremiumHours += split.standard;
+    highPremiumHours += split.high;
+    deferredHighPremiumHours += split.deferred;
+    overtimeWithinScheduleHours += fs.premiumOnlyHours;
+    totalOvertimeHours += fs.overtimeHours;
+    // 丙欄の日ごとの給与：清算した残業代は、計算期間の最後の日に入れる
+    const lastDate = sorted[sorted.length - 1]?.work_date;
+    if (lastDate) addDayPay(lastDate, 0, overtimeTotal() - overtime0);
   }
 
   // ── 残業代の対象外（管理監督者など。労働基準法41条）────────────────────
@@ -1525,7 +1627,7 @@ export const calculateSalary = (
         + (raw > limit ? ` ＝ ¥${raw.toLocaleString()} → 日給の合計 ¥${limit.toLocaleString()} まで` : '');
     }
   }
-  if ((staff.wage_type === 'monthly' || isDaily) && tardyDeductionMethod !== 'none' && zeroWorkDays > 0) {
+  if ((staff.wage_type === 'monthly' || isDaily) && !flex && tardyDeductionMethod !== 'none' && zeroWorkDays > 0) {
     tardyDeductionNote = [tardyDeductionNote, `出勤（平日）なのに働いた時間が0の日が${zeroWorkDays}日あります。遅刻・早退・中抜けの控除には入れていません（休んだ日なら、勤怠を「欠勤」にしてください）。`]
       .filter(Boolean).join(' ');
   }
@@ -1558,6 +1660,7 @@ export const calculateSalary = (
                     - (absenceDeduction || 0)
                     - (unpaidLeaveDeduction || 0)
                     - (tardyDeduction || 0)
+                    - (flexShortageDeduction || 0)
                     + statutoryLine
                     + roundedPremiums
                     + Math.floor(paidLeavePay || 0)
@@ -1685,6 +1788,12 @@ export const calculateSalary = (
     unpaidLeaveDeduction,
     unpaidLeaveDeductionDetail,
     unpaidLeaveDeductionNote,
+    flex: flexSettlement
+      ? { ...flexSettlement, notes: [...flexSettlement.notes, ...(flexShortageNote ? [flexShortageNote] : [])] }
+      : null,
+    flexShortageDeduction,
+    flexShortageDetail,
+    flexCarryOutHours: flexSettlement?.carryOutHours ?? 0,
     commutePay,
     allowanceAmount,
     customEarnings,

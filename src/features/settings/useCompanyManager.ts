@@ -17,6 +17,7 @@ import {
     type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection, type TardyDeductionMethod,
 } from "../../utils/calcSalary";
 import { parseFixedBreak, stringifyFixedBreak, type FixedBreakRule } from "../../utils/fixedBreak";
+import { DEFAULT_FLEX_RULE, parseFlexRule, stringifyFlexRule, type FlexRule } from "../../utils/flexTime";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -69,6 +70,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgAbsenceDeductionMethod, setPgAbsenceDeductionMethod] = useState<AbsenceDeductionMethod>("workdays"); // 月給制の人の欠勤控除
     const [pgTardyDeductionMethod, setPgTardyDeductionMethod] = useState<TardyDeductionMethod>("none"); // 月給制・日給制の人の遅刻・早退・中抜けの控除
     const [pgFixedBreak, setPgFixedBreak] = useState<FixedBreakRule | null>(null); // 決まった休憩（null は使わない。utils/fixedBreak.ts）
+    const [pgFlexRule, setPgFlexRule] = useState<FlexRule>(DEFAULT_FLEX_RULE); // フレックスタイム制の決まり（utils/flexTime.ts）
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
 
@@ -354,6 +356,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgAbsenceDeductionMethod(toAbsenceDeductionMethod(pg.absence_deduction_method));
         setPgTardyDeductionMethod(toTardyDeductionMethod(pg.tardy_deduction_method));
         setPgFixedBreak(parseFixedBreak(pg.fixed_break));
+        setPgFlexRule(parseFlexRule(pg.flex_rule));
     };
 
     // フォームのリセット（キャンセル時）
@@ -369,6 +372,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgAbsenceDeductionMethod("workdays");
         setPgTardyDeductionMethod("none");
         setPgFixedBreak(null);
+        setPgFlexRule(DEFAULT_FLEX_RULE);
     };
 
     // 計算用のヘルパー
@@ -535,14 +539,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=?, flex_rule=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method, tardy_deduction_method, fixed_break) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, absence_deduction_method, tardy_deduction_method, fixed_break, flex_rule) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule)]
                 );
             }
             resetPgForm();
@@ -863,6 +867,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTardyDeductionMethod,
         pgFixedBreak,
         setPgFixedBreak,
+        pgFlexRule,
+        setPgFlexRule,
         setPgPaymentDay,
         editingPgId,
         setEditingPgId,

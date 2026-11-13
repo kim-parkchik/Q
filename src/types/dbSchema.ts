@@ -279,6 +279,7 @@ export const DB_SCHEMAS = [
     absence_deduction INTEGER,                  -- 欠勤控除の額（月給制。v8 より前に確定した給与は NULL）
     tardy_deduction INTEGER,                    -- 遅刻・早退・中抜けの控除の額（月給制・日給制。v10 より前に確定した給与は NULL）
     unpaid_leave_deduction INTEGER,             -- 無給の特別休暇の控除の額（月給制。欠勤控除と同じ計算。v11 より前に確定した給与は NULL）
+    flex_carry_hours REAL,                      -- フレックスタイム制で、次の月に繰り越す不足時間（フレックスタイム制の人だけ。ほかは NULL）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
 
     total_earnings INTEGER DEFAULT 0,
@@ -381,6 +382,7 @@ export const DB_SCHEMAS = [
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
     absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
     tardy_deduction_method TEXT DEFAULT 'none',       -- 月給制・日給制の人の遅刻・早退・中抜けの控除 'none':しない / 'annual':1か月平均所定労働時間で割る / 'period':計算期間の所定労働時間で割る
+    flex_rule TEXT,                                   -- フレックスタイム制の決まり（JSON。総労働時間・法定の総枠・不足時間。NULL は初めの決まり。utils/flexTime.ts）
     fixed_break TEXT,                -- 決まった休憩（休憩の時刻が入っていない日に引く。JSON。空なら使わない。utils/fixedBreak.ts）
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,

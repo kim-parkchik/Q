@@ -113,6 +113,12 @@ export default function WorkPatternSection({ cm }: Props) {
                                 フレックスタイム制を適用
                             </label>
                         </div>
+                        {targetIsFlex && (
+                            <span style={{ fontSize: "10px", color: "#64748b", display: "block", marginBottom: "6px", lineHeight: 1.5 }}>
+                                給与は、給与規定グループの「フレックスタイム制の決まり」で、計算期間（清算期間1か月）の合計で計算します（1日8時間・週40時間では残業を数えません）。
+                                月給制・時給制の人に使えます（日給制はまだ計算しません）。1日の所定労働時間は、総労働時間と年休の日の時間に使います。
+                            </span>
+                        )}
 
                         {/* コアタイム入力欄 */}
                         <div style={{ opacity: targetIsFlex ? 1 : 0.4, transition: "opacity 0.2s" }}>

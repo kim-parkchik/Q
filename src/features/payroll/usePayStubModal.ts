@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
 import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from '../../utils/calcSalary';
+import { isFlexStaff, loadFlexCarryIn, parseFlexRule } from '../../utils/flexTime';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
@@ -100,11 +101,11 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method, tardy_deduction_method FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, absence_deduction_method, tardy_deduction_method, flex_rule FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
         ) as {
           tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string;
-          absence_deduction_method?: string; tardy_deduction_method?: string;
+          absence_deduction_method?: string; tardy_deduction_method?: string; flex_rule?: string | null;
         }[];
         if (cancelled) return;
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
@@ -116,6 +117,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
           absenceDeductionMethod: toAbsenceDeductionMethod(rows?.[0]?.absence_deduction_method),
           tardyDeductionMethod: toTardyDeductionMethod(rows?.[0]?.tardy_deduction_method),
+          // フレックスタイム制の決まり（utils/flexTime.ts）
+          flexRule: parseFlexRule(rows?.[0]?.flex_rule),
         }));
         markLoad("group", "ok");
       } catch (e) {
@@ -250,6 +253,28 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     return () => { cancelled = true; };
   }, [db, staff.id, periodStart, weekStartDay]);
 
+  // フレックスタイム制の人：前の月から繰り越した不足時間（前の月の確定した給与。undefined は読み込み中で、この間は確定しない）
+  const flexStaff = isFlexStaff(staff);
+  useEffect(() => {
+    let cancelled = false;
+    if (!flexStaff) {
+      setExtras(p => ({ ...p, flexCarryIn: 0 }));
+      return;
+    }
+    setExtras(p => ({ ...p, flexCarryIn: undefined }));
+    (async () => {
+      if (!db) return;
+      let carry = 0;
+      try {
+        carry = await loadFlexCarryIn(db, staff.id, year, month);
+      } catch (e) {
+        console.error("前の月から繰り越したフレックスの不足時間の読み込みエラー:", e);
+      }
+      if (!cancelled) setExtras(p => ({ ...p, flexCarryIn: carry }));
+    })();
+    return () => { cancelled = true; };
+  }, [db, staff.id, flexStaff, year, month]);
+
   // 会社カレンダーで休みの日に「出勤」で入れて働いた日。「出勤」の日は所定労働日として計算する
   // （所定労働時間の分は月給・日給に入っているとみなし、週40時間を超えても割増分だけを払う）ので、所定休日の出勤なら「所定休日出勤」にする
   const workOnCalendarHolidays = useMemo(() => !calendarCtx || staff.wage_type === 'hourly' ? [] : attendanceData
@@ -292,6 +317,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     + (salary.absenceDeduction > 0 ? 1 : 0)
     + (salary.unpaidLeaveDeduction > 0 ? 1 : 0)
     + (salary.tardyDeduction > 0 ? 1 : 0)
+    + (salary.flexShortageDeduction > 0 ? 1 : 0)
     + (salary.statutoryOvertimePay > 0 ? 1 : 0)
     + (salary.fixedOvertimeAllowance > 0
       ? 1 + (salary.fixedOvertimeExcess > 0 ? 1 : 0)
@@ -307,6 +333,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   const loadingParts = [
     ...(extras.annualWorkDays === undefined ? ["1年間の所定労働日数"] : []),
     ...(extras.weekCarryOver === undefined ? ["前の計算期間の勤怠（週40時間）"] : []),
+    ...(flexStaff && extras.flexCarryIn === undefined ? ["前の月から繰り越したフレックスの不足時間"] : []),
     ...LOAD_PARTS.filter(part => loadStatus[part] === "loading").map(part => LOAD_PART_LABELS[part]),
   ];
   const loadErrors = LOAD_PARTS.filter(part => loadStatus[part] === "error").map(part => LOAD_PART_LABELS[part]);

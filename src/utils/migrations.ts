@@ -223,6 +223,14 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "company", "half_day_leave", "INTEGER DEFAULT 1");
     },
   },
+  {
+    version: 14,
+    description: "フレックスタイム制の給与：給与規定グループにフレックスタイム制の決まり、確定した給与に次の月に繰り越す不足時間の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "flex_rule", "TEXT");
+      await addColumnIfMissing(db, "salary_results", "flex_carry_hours", "REAL");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

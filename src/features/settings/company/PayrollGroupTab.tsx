@@ -34,6 +34,7 @@ import {
     DEFAULT_LENGTH_RULES, LENGTH_COMBINE_LABELS, TIME_COMBINE_LABELS, describeCombine, describeFixedBreak, parseFixedBreak,
     type LengthCombine, type LengthRule, type TimeCombine,
 } from '../../../utils/fixedBreak';
+import { FLEX_LIMIT_LABELS, FLEX_SHORTAGE_LABELS, describeFlexRule, parseFlexRule, type FlexRule } from '../../../utils/flexTime';
 
 interface Props {
     cm: CompanyManagerState;
@@ -62,6 +63,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgTardyDeductionMethod,
         pgFixedBreak,
         setPgFixedBreak,
+        pgFlexRule,
+        setPgFlexRule,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -104,6 +107,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
                                         / 遅刻・早退・中抜け: {TARDY_DEDUCTION_METHOD_LABELS[toTardyDeductionMethod(pg.tardy_deduction_method)]}
                                         / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}{parseFixedBreak(pg.fixed_break) ? `（${describeCombine(parseFixedBreak(pg.fixed_break))}）` : ""}
+                                        / フレックスタイム制: {describeFlexRule(parseFlexRule(pg.flex_rule))}
                                     </span>
                                 </div>
                             </div>
@@ -354,6 +358,50 @@ export default function PayrollGroupTab({ cm }: Props) {
                         労働基準法34条では、労働時間が6時間を超えるときは45分以上、8時間を超えるときは1時間以上の休憩を、労働時間の途中に与えます。
                         就業規則の休憩時間に合わせてください。従業員ごとに、この休憩を使わないようにもできます（従業員の画面）。
                         確定済みの日の勤怠は変わりません（確定を解除して確定し直すと、新しい決まりで計算します）。
+                    </p>
+
+                    {/* フレックスタイム制の決まり（従業員の画面で「フレックスタイム制を適用」にした人に使う。utils/flexTime.ts） */}
+                    <label style={miniLabelStyle}>フレックスタイム制の決まり（清算期間は給与の計算期間の1か月）</label>
+                    <div style={{ fontSize: "12px", color: "#475569", display: "flex", flexDirection: "column", gap: "4px", marginBottom: "6px" }}>
+                        <span style={{ fontWeight: "bold" }}>総労働時間（清算期間に働く時間）</span>
+                        <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <input type="radio" checked={pgFlexRule.total.mode === "workdays"} onChange={() => setPgFlexRule({ ...pgFlexRule, total: { mode: "workdays" } })} />
+                            所定労働日数 × 1日の所定労働時間
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <input type="radio" checked={pgFlexRule.total.mode === "fixed"}
+                                onChange={() => setPgFlexRule({ ...pgFlexRule, total: { mode: "fixed", hours: pgFlexRule.total.mode === "fixed" ? pgFlexRule.total.hours : 160 } })} />
+                            決めた時間：
+                            <input type="number" min="1" max="744" step="0.5" disabled={pgFlexRule.total.mode !== "fixed"}
+                                value={pgFlexRule.total.mode === "fixed" ? pgFlexRule.total.hours : 160}
+                                onChange={e => setPgFlexRule({ ...pgFlexRule, total: { mode: "fixed", hours: Number(e.target.value) || 0 } })}
+                                style={{ ...inputStyle, width: "80px", padding: "4px" }} />
+                            時間
+                        </label>
+                        <span style={{ fontWeight: "bold", marginTop: "4px" }}>法定の総枠（これを超えて働いた時間が時間外労働）</span>
+                        {(Object.keys(FLEX_LIMIT_LABELS) as FlexRule["limit"][]).map(k => (
+                            <label key={k} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                <input type="radio" checked={pgFlexRule.limit === k} onChange={() => setPgFlexRule({ ...pgFlexRule, limit: k })} />
+                                {FLEX_LIMIT_LABELS[k]}
+                            </label>
+                        ))}
+                        <span style={{ fontWeight: "bold", marginTop: "4px" }}>総労働時間に足りない時間（月給制の人）</span>
+                        {(Object.keys(FLEX_SHORTAGE_LABELS) as FlexRule["shortage"][]).map(k => (
+                            <label key={k} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                <input type="radio" checked={pgFlexRule.shortage === k} onChange={() => setPgFlexRule({ ...pgFlexRule, shortage: k })} />
+                                {FLEX_SHORTAGE_LABELS[k]}
+                            </label>
+                        ))}
+                    </div>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        従業員の画面で「フレックスタイム制を適用」にした月給制・時給制の人に使います（労働基準法32条の3。就業規則と労使協定で決めたとおりにしてください）。
+                        1日8時間・週40時間では残業を数えず、給与の計算期間の合計で清算します。実際に働いた時間（法定休日の労働を除く）が法定の総枠
+                        （40時間 × 暦日数 ÷ 7。完全週休2日の会社は、労使協定で「所定労働日数 × 8時間」にできます）を超えた時間が時間外労働（25%増。月60時間を超えたら50%増）、
+                        総労働時間を超えて法定の総枠までの時間は法定内（1.0倍）です。総労働時間は、法定の総枠の中で決めます。
+                        年休の日は、総労働時間に足りているかを見るときだけ、1日の所定労働時間働いたものとして数えます。
+                        足りない時間は、月給制の人は、その月に月給 ÷ 1か月平均所定労働時間 × 時間を引くか、次の月に繰り越します（欠勤・遅刻早退は別に引かず、この時間に入ります）。
+                        時給制の人は働いた時間の分を払うので、足りない時間は引きません。法定休日の労働（35%増）・深夜（25%増）は、いままでどおり別に払います。
+                        清算期間が1か月を超える（2・3か月）フレックスタイム制には、まだ対応していません。
                     </p>
 
                     <div style={{ display: "flex", gap: "10px" }}>

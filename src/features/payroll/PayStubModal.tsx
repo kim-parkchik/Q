@@ -2,6 +2,7 @@ import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';
 import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES, TARDY_DEDUCTION_METHOD_LABELS } from '../../utils/calcSalary';
+import { flexHoursLabel } from '../../utils/flexTime';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
@@ -165,6 +166,20 @@ export default function PayStubModal(props: Props) {
               {salary.unpaidLeaveDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.unpaidLeaveDeductionNote}</div>}
             </div>
           )}
+          {salary.flex && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              フレックスタイム制（清算期間はこの計算期間）：総労働時間 {flexHoursLabel(salary.flex.requiredHours)}
+              {salary.flex.carryInHours > 0 && `（前の月から繰り越した ${flexHoursLabel(salary.flex.carryInHours)} を含む）`}
+              ・法定の総枠 {flexHoursLabel(salary.flex.limitHours)}・実労働 {flexHoursLabel(salary.flex.actualHours)}
+              {salary.flex.leaveHours > 0 && ` ＋ 有給 ${flexHoursLabel(salary.flex.leaveHours)}`}
+              {salary.flex.excessHours > 0 && ` → 超えた時間 ${flexHoursLabel(salary.flex.excessHours)}（法定内 ${flexHoursLabel(salary.flex.innerHours)}・時間外 ${flexHoursLabel(salary.flex.fullOvertimeHours)}）`}
+              {salary.flex.premiumOnlyHours > 0 && `。総労働時間の中で法定の総枠を超えた ${flexHoursLabel(salary.flex.premiumOnlyHours)} は割増分だけ`}
+              {salary.flex.shortageHours > 0 && ` → 足りない時間 ${flexHoursLabel(salary.flex.shortageHours)}`}
+              {salary.flex.carryOutHours > 0 && `（次の月に繰り越す ${flexHoursLabel(salary.flex.carryOutHours)}）`}
+              {salary.flexShortageDetail && <div>フレックスの不足時間の控除：{salary.flexShortageDetail}（1円未満切り捨て）</div>}
+              {salary.flex.notes.map((n, i) => <div key={i} style={{ color: "#b45309" }}>⚠ {n}</div>)}
+            </div>
+          )}
           {(salary.tardyDeductionDetail || salary.tardyDeductionNote) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
               {salary.tardyDeductionDetail && (
@@ -314,6 +329,10 @@ export default function PayStubModal(props: Props) {
                   {/* 無給の特別休暇の控除（月給制。欠勤控除と同じ計算） */}
                   {salary.unpaidLeaveDeduction > 0 && (
                     <tr><td style={{...S.tdS, color: "#c0392b"}}>無給休暇控除({salary.unpaidLeaveDays}日)</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.unpaidLeaveDeduction.toLocaleString()}</td></tr>
+                  )}
+                  {/* フレックスタイム制の不足時間の控除（月給制） */}
+                  {salary.flexShortageDeduction > 0 && (
+                    <tr><td style={{...S.tdS, color: "#c0392b"}}>フレックス不足時間控除({flexHoursLabel(salary.flex?.deductHours ?? 0)})</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.flexShortageDeduction.toLocaleString()}</td></tr>
                   )}
                   {/* 遅刻・早退・中抜けの控除 */}
                   {salary.tardyDeduction > 0 && (

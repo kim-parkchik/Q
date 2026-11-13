@@ -11,6 +11,7 @@ import StaffSelectBar from "./manager/StaffSelectBar";
 import AttendanceTable from "./manager/AttendanceTable";
 import SummaryBoard from "./manager/SummaryBoard";
 import PaidLeaveNotice from "./manager/PaidLeaveNotice";
+import FlexSummary from "./manager/FlexSummary";
 import BreakNotice from "./manager/BreakNotice";
 
 export default function AttendanceManager(props: AttendanceManagerProps) {
@@ -79,6 +80,7 @@ export default function AttendanceManager(props: AttendanceManagerProps) {
                   </div>
                 )}
                 <PaidLeaveNotice am={am} />
+                <FlexSummary am={am} />
                 <BreakNotice am={am} />
                 <AttendanceTable am={am} />
 

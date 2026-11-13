@@ -87,6 +87,14 @@ export default function SummaryBoard({ am }: Props) {
             </div>
           </div>
         )}
+        {calcResult && (calcResult as any).flexShortageDeduction > 0 && (
+          <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
+            <div style={{ fontSize: "12px", color: "#ff7675" }}>フレックスの不足時間</div>
+            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#ff7675" }}>
+              -¥{(calcResult as any).flexShortageDeduction.toLocaleString()}
+            </div>
+          </div>
+        )}
         {calcResult && (calcResult as any).tardyDeduction > 0 && (
           <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
             <div style={{ fontSize: "12px", color: "#ff7675" }}>遅刻・早退・中抜け</div>
