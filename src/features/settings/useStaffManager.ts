@@ -23,6 +23,9 @@ import { residentTaxScheduleOf, stringifyResidentTaxSchedule, type ResidentTaxYe
 import { loadCustomItems } from "../../utils/calcSalary";
 import { overtimeHourlyRateOf } from "../../utils/fixedOvertime";
 import { DEFAULT_COMMUTE_SETTING, parseCommuteSetting, stringifyCommuteSetting, type CommuteSetting } from "../../utils/commuteAllowance";
+import { fromStaffAccountForm, loadStaffBankAccounts, staffBankAccountStatements, toStaffAccountForm, type StaffAccountForm } from "../../utils/bankAccounts";
+import { bankAccountProblems } from "../../utils/zengin";
+import { executeBatch } from "../../utils/dbBatch";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -176,6 +179,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     const [targetSocialInsGroupId, setTargetSocialInsGroupId] = useState(1); // 🆕 追加
     const [targetKokuhoPremium, setTargetKokuhoPremium] = useState(0); // 国保組合の保険料（月額。社保規定が国保組合の人だけ）
+    // 振込先口座（給与・賞与の振込データ。固定額の口座と、残りを振り込む口座。utils/bankAccounts.ts）
+    const [targetBankAccounts, setTargetBankAccounts] = useState<StaffAccountForm[]>([]);
+    const [savedBankAccounts, setSavedBankAccounts] = useState("[]");
     const [targetEmpInsType, setTargetEmpInsType] = useState(""); // 🆕 追加 (NULL=会社設定に従う)
 
     // =========================================================
@@ -341,6 +347,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetHealthInsNum(""); setTargetPensionNum(""); setTargetEmploymentInsNum("");
         setTargetSocialInsGroupId(1);
         setTargetKokuhoPremium(0);
+        setTargetBankAccounts([]);
+        setSavedBankAccounts("[]");
         setTargetEmpInsType("");
         setEditingId(null);
     };
@@ -348,6 +356,18 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const startEdit = (s: any) => {
         setDeletingId(null);
         setEditingId(s.id);
+        // 振込先口座は別の表から読む
+        setTargetBankAccounts([]);
+        setSavedBankAccounts("[]");
+        if (db) {
+            loadStaffBankAccounts(db, s.id)
+                .then((map) => {
+                    const forms = (map.get(String(s.id)) ?? []).map(toStaffAccountForm);
+                    setTargetBankAccounts(forms);
+                    setSavedBankAccounts(JSON.stringify(forms));
+                })
+                .catch((e) => console.error("振込先口座の読み込みエラー:", e));
+        }
         setTargetId(s.id);
         setTargetName(s.name);
         setTargetFurigana(s.furigana || "");
@@ -474,6 +494,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetPayrollGroupId) !== Number(original.payroll_group_id || 1) ||
             Number(targetSocialInsGroupId) !== Number(original.social_insurance_group_id ?? 0) ||
             Number(targetKokuhoPremium) !== Number(original.kokuho_premium || 0) ||
+            JSON.stringify(targetBankAccounts) !== savedBankAccounts ||
             String(targetEmpInsType || "") !== String(original.employment_insurance_type || "") ||
             String(targetHealthInsNum) !== String(original.health_ins_num || "") ||
             String(targetPensionNum) !== String(original.pension_num || "") ||
@@ -488,10 +509,17 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     // 産休・育休の期間に、開始日が空・終了日が開始日より前のものがないか
     const isLeavePeriodsValid = targetLeavePeriods.every(p => !validateLeavePeriod(p));
 
+    // 振込先口座の入れ方の間違い（口座ごとの間違いと、残りを振り込む口座がちょうど1つか）
+    const bankAccountErrors = [
+        ...targetBankAccounts.flatMap((a, i) => bankAccountProblems(fromStaffAccountForm(a), a.holderName).map((p) => `口座${i + 1}：${p}`)),
+        ...(targetBankAccounts.length > 0 && targetBankAccounts.filter((a) => a.rest).length !== 1 ? ["残りを振り込む口座を1つ選んでください"] : []),
+        ...targetBankAccounts.flatMap((a, i) => (!a.rest && !(Number(a.fixedAmount) > 0) ? [`口座${i + 1}：固定額を入れてください`] : [])),
+    ];
+
     const canSave = () => {
         const hasRequiredFields = targetId.trim() !== "" && targetName.trim() !== "";
         return hasRequiredFields && isLeavePeriodsValid && !remunerationHistoryError && !wageHistoryError && !dependentsHistoryError
-            && !isIdDuplicated() && isChanged() && !isSaving;
+            && bankAccountErrors.length === 0 && !isIdDuplicated() && isChanged() && !isSaving;
     };
 
     const saveStaff = async () => {
@@ -584,6 +612,10 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
                 );
+            }
+            // 振込先口座（前の口座を消して入れ直す。まとめて1つのトランザクションで）
+            if (JSON.stringify(targetBankAccounts) !== savedBankAccounts) {
+                await executeBatch(db, staffBankAccountStatements(safeId, targetBankAccounts.map(fromStaffAccountForm)));
             }
             onDataChange();
             setTimeout(() => {
@@ -815,6 +847,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetSocialInsGroupId,
         targetKokuhoPremium,
         setTargetKokuhoPremium,
+        targetBankAccounts,
+        setTargetBankAccounts,
+        bankAccountErrors,
         targetEmpInsType,
         setTargetEmpInsType,
         socialGroups,

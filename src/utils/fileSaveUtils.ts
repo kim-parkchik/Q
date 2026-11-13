@@ -79,3 +79,29 @@ export const saveTextFile = async (
     await writeFile(path, new TextEncoder().encode(content));
     return { path, name: baseName(path) };
 };
+
+/**
+ * バイトのファイル（銀行に送る振込データなど）を、そのまま保存する
+ * @param filter 保存ダイアログで選べるファイルの種類（例: { name: "振込データ", extensions: ["txt"] }）
+ * @returns 保存したファイルの情報。キャンセルされたら null
+ */
+export const saveBinaryFile = async (
+    data: Uint8Array,
+    defaultFileName: string,
+    filter: { name: string; extensions: string[] }
+): Promise<SavedFile | null> => {
+    let defaultPath = defaultFileName;
+    try {
+        const exportDir = await join(await documentDir(), APP_DIR_NAME, EXPORT_DIR_NAME);
+        await mkdir(exportDir, { recursive: true });
+        defaultPath = await join(exportDir, defaultFileName);
+    } catch (e) {
+        console.warn("出力フォルダの準備に失敗しました:", e);
+    }
+
+    const path = await save({ title: "保存先を選んでください", defaultPath, filters: [filter] });
+    if (!path) return null; // キャンセル
+
+    await writeFile(path, data);
+    return { path, name: baseName(path) };
+};

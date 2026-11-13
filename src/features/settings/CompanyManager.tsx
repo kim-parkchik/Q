@@ -6,7 +6,8 @@ import {
     MapPin,
     Calculator,
     ShieldCheck,
-    CalendarHeart
+    CalendarHeart,
+    Landmark
 } from 'lucide-react';
 import { useCompanyManager } from "./useCompanyManager";
 import { subTabStyle } from './CompanyManager.styles';
@@ -17,6 +18,7 @@ import SocialInsuranceTab from "./company/SocialInsuranceTab";
 import BranchTab from "./company/BranchTab";
 import RoundingTab from "./company/RoundingTab";
 import LeaveTypeTab from "./company/LeaveTypeTab";
+import TransferSourceTab from "./company/TransferSourceTab";
 
 interface Props {
     db: Database;
@@ -59,6 +61,11 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                                     <CalendarHeart size={16} /> 休暇の種類
                                 </div>
                             </button>
+                            <button onClick={() => setActiveSubTab("transfer")} style={subTabStyle(activeSubTab === "transfer")}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                    <Landmark size={16} /> 振込元口座
+                                </div>
+                            </button>
                             <button onClick={() => setActiveSubTab("branches")} style={subTabStyle(activeSubTab === "branches")}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                                     <MapPin size={16} /> 支店リスト
@@ -77,6 +84,7 @@ export default function CompanyManager({ db, onSetupComplete }: Props) {
                     {activeSubTab === "payroll" && <PayrollGroupTab cm={cm} />}
                     {activeSubTab === "social" && <SocialInsuranceTab db={db} />}
                     {activeSubTab === "leave" && <LeaveTypeTab db={db} />}
+                    {activeSubTab === "transfer" && <TransferSourceTab db={db} />}
 
                     {activeSubTab === "branches" && <BranchTab cm={cm} />}
 

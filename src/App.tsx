@@ -25,7 +25,8 @@ import {
   Banknote, 
   UserCog, 
   LogOut,
-  QrCode
+  QrCode,
+  Send,
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -41,6 +42,7 @@ import TimeQardManager from "./features/timeqard/TimeQardManager";
 
 // payroll フォルダ
 import PaySlipManager from "./features/payroll/PaySlipManager";
+import TransferDataManager from "./features/payroll/TransferDataManager";
 import BonusManager from "./features/payroll/BonusManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
@@ -85,6 +87,7 @@ const TAB_NAMES: Record<string, string> = {
   nonyu: "住民税の納入",
   mynumber: "マイナンバー",
   payslip: "明細書出力",
+  furikomi: "振込データ",
   user_management: "システム設定"
 };
 
@@ -110,6 +113,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   nonyu: <Banknote size={18} />,
   mynumber: <IdCard size={18} />,
   payslip: <FileText size={18} />,
+  furikomi: <Send size={18} />,
   user_management: <UserCog size={18} />
 };
 
@@ -269,10 +273,11 @@ function App() {
             "juminzei",
             "nonyu",
             "mynumber",
-            "payslip"
+            "payslip",
+            "furikomi"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -421,6 +426,9 @@ function App() {
                   targetYear={targetYear} 
                   targetMonth={targetMonth} 
                 />
+              )}
+              {activeTab === "furikomi" && db && (
+                <TransferDataManager db={db} staffList={staffList} />
               )}
             </>
           )}

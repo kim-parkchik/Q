@@ -398,6 +398,39 @@ export const DB_SCHEMAS = [
     is_active INTEGER DEFAULT 1
   );`,
 
+  // 18-3. 振込元の口座（会社。給与・賞与の振込データ（全銀協規定形式）を作るときに選ぶ。utils/zengin.ts・utils/bankAccounts.ts）
+  `CREATE TABLE IF NOT EXISTS transfer_source_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT,                          -- 見分けるための名前（例：給与用 三菱UFJ 本店）
+    client_code TEXT NOT NULL,           -- 委託者コード（会社コード。銀行から知らされた10けたの番号）
+    client_name TEXT NOT NULL,           -- 委託者名（半角カナ）
+    bank_code TEXT NOT NULL,             -- 金融機関コード（4けた）
+    bank_name TEXT,                      -- 金融機関名（半角カナ）
+    branch_code TEXT NOT NULL,           -- 支店コード（3けた）
+    branch_name TEXT,                    -- 支店名（半角カナ）
+    account_type TEXT NOT NULL DEFAULT 'ordinary', -- ordinary：普通／current：当座
+    account_number TEXT NOT NULL,        -- 口座番号（7けたまで）
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1
+  );`,
+
+  // 18-4. 振込先の口座（従業員。固定額の口座と、残りを振り込む口座。従業員を消すと一緒に消える）
+  `CREATE TABLE IF NOT EXISTS staff_bank_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,                -- 並び（1〜3）
+    bank_code TEXT NOT NULL,
+    bank_name TEXT,
+    branch_code TEXT NOT NULL,
+    branch_name TEXT,
+    account_type TEXT NOT NULL DEFAULT 'ordinary',
+    account_number TEXT NOT NULL,
+    holder_name TEXT NOT NULL,           -- 口座名義（半角カナ）
+    fixed_amount INTEGER,                -- 固定額（NULL は残りを振り込む口座）
+    UNIQUE(staff_id, seq),
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
   // 18-2. 健康保険組合の料率（本人負担の%。「何年何月分から」ごと）
   `CREATE TABLE IF NOT EXISTS social_insurance_group_rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -36,3 +36,6 @@ Claude outputs/
 
 # 年末調整の元データ（国税庁の PDF。大きいので GitHub には上げない。入手元とハッシュは nencho-tables/README.md）
 nencho-tables/*.pdf
+
+# 銀行の振込データの仕様書（銀行に著作権があるので上げない。出どころと SHA-256 は zengin-format/README.md）
+zengin-format/source/

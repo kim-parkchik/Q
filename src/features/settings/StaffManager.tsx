@@ -8,6 +8,7 @@ import LeaveSection from "./staff/LeaveSection";
 import EmploymentSection from "./staff/EmploymentSection";
 import WageSection from "./staff/WageSection";
 import WorkPatternSection from "./staff/WorkPatternSection";
+import BankAccountSection from "./staff/BankAccountSection";
 import StaffFilterBar from "./staff/StaffFilterBar";
 import StaffTable from "./staff/StaffTable";
 
@@ -66,6 +67,8 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
 
                                 <WorkPatternSection cm={cm} />
                             </div>
+
+                            <BankAccountSection cm={cm} />
                         </div>
                     </div>
 
