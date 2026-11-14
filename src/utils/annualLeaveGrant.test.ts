@@ -109,6 +109,11 @@ describe("出勤率（全労働日の8割以上。年休・特別休暇・産休
     const r = attendanceRateFor("2026-06-01", "2026-06-13", MON_FRI, rows, [{ type: "childcare", start: "2026-06-12", end: "2026-06-30" }]);
     expect([r.allDays, r.presentDays, r.missingDays, r.ok]).toEqual([9, 9, 0, true]);
   });
+  test("会社都合で休ませた日は全労働日に入れない（平成25年7月10日 基発0710第3号）。少し働いた日は出勤", () => {
+    const rows = [...all.slice(0, 8).map((d) => row(d)), row("11", "company_leave", 0), row("12", "company_leave", 2)];
+    const r = attendanceRateFor("2026-06-01", "2026-06-12", MON_FRI, rows, []);
+    expect([r.allDays, r.presentDays, r.ok]).toEqual([9, 9, true]);
+  });
   test("Q に確定した勤怠がない日があれば、確かめられない（null）", () => {
     const r = attendanceRateFor("2026-06-01", "2026-06-12", MON_FRI, all.slice(0, 5).map((d) => row(d)), []);
     expect([r.missingDays, r.ok]).toEqual([5, null]);

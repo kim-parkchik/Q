@@ -66,6 +66,13 @@ export default function LeaveSection({ cm }: Props) {
                                         <Trash2 size={14} />
                                     </button>
                                 </div>
+                                {p.type === 'injury' && (
+                                    // 業務上の負傷・疾病：最初の3日（待期）の休業補償の平均賃金を数える日（utils/averageWage.ts）
+                                    <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "4px", fontSize: "11px", color: "#475569" }}>
+                                        <span>事故の日（病気は診断で決まった日。空なら開始日）</span>
+                                        <input type="date" value={p.accident ?? ''} onChange={e => update(i, { accident: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "160px" }} />
+                                    </div>
+                                )}
                                 {error && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>{error}</div>}
                             </div>
                         );
@@ -94,6 +101,11 @@ export default function LeaveSection({ cm }: Props) {
             <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
                 年次有給休暇の出勤率では、産前産後休業・育児休業・介護休業・業務上の負傷や疾病による休業の期間は出勤したものとみなします（労働基準法39条10項）。
                 その他の休職は、会社設定の「休暇の種類」で決めた数え方（全労働日から除く・欠勤と同じに数える）で数えます。
+            </p>
+            <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
+                業務上の負傷・疾病による休業の最初の3日（休日も数える）は、労災保険の休業補償給付が出ないので、会社が平均賃金の60%の休業補償を払います（労働基準法76条）。
+                給与明細に「休業補償(労災の待期)」として入れます（非課税で、社会保険料・雇用保険料もかかりません）。平均賃金は事故の日（病気は診断で決まった日）で数えます。
+                同じ事故で休業を分けて入れるときは、事故の日を同じにしてください（3日を通算します）。通勤中のけが（通勤災害）は、会社に補償の義務がないので、「その他の休職」で入れてください。
             </p>
             {targetIsExecutive === 1 && hasChildcare && (
                 <p style={{ fontSize: "11px", color: "#b45309", margin: "4px 0 0 0", lineHeight: 1.6 }}>

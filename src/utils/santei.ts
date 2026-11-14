@@ -113,7 +113,7 @@ export const decideTeiji = (
 
 /**
  * 支払基礎日数
- * ・時給制・日給制：出勤日数（働いた時間がある日と、有給休暇の日・有給の特別休暇の日）
+ * ・時給制・日給制：出勤日数（働いた時間がある日と、有給休暇の日・有給の特別休暇の日・会社都合で休ませて休業手当を払った日）
  * ・月給制：給与の計算期間の暦日数。欠勤控除をした月は、所定労働日数 − 欠勤日数（無給の特別休暇（1日）の日も引く。
  *   半日の日は、残りの半日の給与を払っているので引かない）
  *   （欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
@@ -146,7 +146,9 @@ export const paymentBasisDays = (
   const days = new Set(
     rows
       .filter((r) => (Number(r.work_hours) || 0) > 0 || r.work_type === 'paid_full' || r.work_type === 'paid_half'
-        || (isSpecialLeaveWorkType(r.work_type) && specialLeaveOfRow(r).paid))
+        || (isSpecialLeaveWorkType(r.work_type) && specialLeaveOfRow(r).paid)
+        // 会社都合で休ませた日は、休業手当（報酬）を払うので数える
+        || r.work_type === 'company_leave')
       .map((r) => r.work_date),
   );
   return days.size;
@@ -207,6 +209,8 @@ export interface SalaryRecord {
   prescribed_work_days?: number | null;
   /** 休業の日がある月に、月給を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月・会社ファイルの形式 v19 より前は null） */
   leave_paid_days?: number | null;
+  /** 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。報酬から除く。utils/averageWage.ts） */
+  non_remuneration?: number | null;
 }
 
 /** 確定した勤怠（支払基礎日数を数えるのに使う項目） */
@@ -256,7 +260,8 @@ export const monthFigures = (
       month,
       // 給与形態は、その月の分の履歴の値（utils/staffHistory.ts）
       days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedDays, absenceDeducted, salary.leave_paid_days),
-      amount: Number(salary.total_earnings) || 0,
+      // 報酬：支給合計から、報酬でない額（労災の待期の休業補償）を除く
+      amount: (Number(salary.total_earnings) || 0) - (Number(salary.non_remuneration) || 0),
       // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
       partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,
     },

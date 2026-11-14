@@ -11,6 +11,7 @@ import { writeLog } from '../../utils/logUtils';
 import { insurerOf, loadHealthInsurers } from '../../utils/healthInsurer';
 import { flatTaxRemainingFor, loadFlatTaxPayments, salaryPayDate, type FlatTaxPayment } from '../../utils/flatTaxReduction';
 import { countNonLeaveWorkDays, toLeaveProrationMethod } from '../../utils/leaveOfAbsence';
+import { useAverageWagePay } from './useAverageWagePay';
 import { ask } from '@tauri-apps/plugin-dialog';
 
 /** 明細を開いたときに読むもの（給与規定グループの設定などのほか）。読み込み中・読み込めなかったときは確定しない */
@@ -218,10 +219,14 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     return () => { cancelled = true; };
   }, [db, staff.id, year, month]);
 
+  // 会社都合で休ませた日の休業手当・労災の待期の休業補償に使う平均賃金（確定した給与から計算する。utils/averageWageStore.ts）
+  // 読み込み中（undefined）は確定しない
+  const averageWagePay = useAverageWagePay(db, staff, extras.period ?? null, attendanceData);
+
   // 給与計算
   const salary = useMemo(
-    () => calculateSalary(staff, attendanceData, extras, year, month, companySettings),
-    [staff, attendanceData, extras, year, month, companySettings]
+    () => calculateSalary(staff, attendanceData, { ...extras, averageWagePay }, year, month, companySettings),
+    [staff, attendanceData, extras, averageWagePay, year, month, companySettings]
   );
 
   const wageLabel = staff.wage_type === "monthly" ? "月給制" : staff.wage_type === "daily" ? "日給制" : "時給制";
@@ -359,6 +364,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     + (salary.holidayWorkPay > 0 ? 1 : 0)
     + (salary.paidLeavePay > 0 ? 1 : 0)
     + (salary.specialLeavePay > 0 ? 1 : 0)
+    // 会社都合の休業（休業の日の控除・休業手当）と、労災の待期の休業補償
+    + ((salary.shutdown?.deduction ?? 0) > 0 ? 1 : 0)
+    + ((salary.shutdown?.allowance ?? 0) > 0 ? 1 : 0)
+    + ((salary.injuryCompensation?.amount ?? 0) > 0 ? 1 : 0)
     + 1 + 1 + 1 + customEarningItems.length;
   const deductionItemsCount = 6 + (salary.childSupport > 0 ? 1 : 0) + (salary.kokuhoPremium > 0 ? 1 : 0) + customDeductionItems.length;
   const targetRows = Math.max(earningItemsCount, deductionItemsCount, 10);
@@ -368,6 +377,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     ...(extras.annualWorkDays === undefined ? ["1年間の所定労働日数"] : []),
     ...(extras.weekCarryOver === undefined ? ["前の計算期間の勤怠（週40時間）"] : []),
     ...(flexStaff && extras.flexCarryIn === undefined ? ["前の月から繰り越したフレックスの不足時間"] : []),
+    ...(salary.averageWageLoading ? ["平均賃金（休業手当・休業補償）"] : []),
     ...LOAD_PARTS.filter(part => loadStatus[part] === "loading").map(part => LOAD_PART_LABELS[part]),
   ];
   const loadErrors = LOAD_PARTS.filter(part => loadStatus[part] === "error").map(part => LOAD_PART_LABELS[part]);
@@ -389,6 +399,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     }
     if (salary.insurerRateMissing) {
       alert(`${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料と介護保険料を計算していません。\n会社設定の「社会保険規定」で、組合の料率（何年何月分から）を入れてから、確定してください。`);
+      return;
+    }
+    if (salary.averageWageMissing.length > 0) {
+      alert(`平均賃金を出せないので、次の額を計算していません。\n${salary.averageWageMissing.map(m => `・${m}`).join("\n")}\n\nメニューの「平均賃金」で理由を確かめ、必要なら平均賃金を手で入れてから、確定してください。`);
       return;
     }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });

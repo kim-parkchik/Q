@@ -131,6 +131,12 @@ describe("介護休業・業務上の負傷や疾病による休業・その他�
         const mixed = [maternity("2026-01-10", "2026-03-31"), ...others];
         expect(exemptLeavePeriodsOf({ leave_periods: stringifyLeavePeriods(mixed) })).toEqual([mixed[0]]);
     });
+    test("業務上の負傷・疾病による休業は、事故の日も残す（ほかの種類には残さない。事故の日は開始日より後にできない）", () => {
+        const injury: LeavePeriod = { type: "injury", start: "2026-07-01", end: "2026-08-31", accident: "2026-06-30" };
+        const json = stringifyLeavePeriods([injury, { type: "other", start: "2026-09-01", end: "", accident: "2026-08-30" }]);
+        expect(parseLeavePeriods(json)).toEqual([injury, { type: "other", start: "2026-09-01", end: "" }]);
+        expect(validateLeavePeriod({ ...injury, accident: "2026-07-02" })).toBe("事故の日が開始日より後です");
+    });
 });
 
 describe("入力と保存", () => {

@@ -52,7 +52,7 @@ describe("賃金台帳の内訳（給与明細の支給・控除の行）", () =
     await saveSalaryResult(asyncDb, "S001", 2026, 6, r, monthly, { period: { start: "2026-06-01", end: "2026-06-30" } });
     const saved = parseLedger((db.query("SELECT ledger FROM salary_results").get() as { ledger: string }).ledger);
     expect(saved?.totalEarnings).toBe(r.totalEarnings);
-    expect(saved?.earnings[0]).toEqual({ name: "基本給", amount: r.basePay });
+    expect(saved?.earnings[0]).toEqual({ name: "基本給", amount: r.basePay, avg: "month" });
     expect(parseLedger(null)).toBeNull();
     expect(parseLedger("{壊れた")).toBeNull();
   });

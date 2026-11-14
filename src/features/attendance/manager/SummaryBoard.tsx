@@ -104,6 +104,24 @@ export default function SummaryBoard({ am }: Props) {
           </div>
         )}
 
+        {/* 会社都合で休ませた日：休業の日の控除（月給制）と休業手当（平均賃金 × 率。utils/averageWage.ts） */}
+        {calcResult && ((calcResult as any).shutdown?.deduction ?? 0) > 0 && (
+          <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
+            <div style={{ fontSize: "12px", color: "#ff7675" }}>休業の日</div>
+            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#ff7675" }}>
+              -¥{(calcResult as any).shutdown.deduction.toLocaleString()}
+            </div>
+          </div>
+        )}
+        {calcResult && (calcResult as any).shutdown && (
+          <div style={{ borderLeft: "1px solid #eee", paddingLeft: "15px" }}>
+            <div style={{ fontSize: "12px", color: "#a29bfe" }}>休業手当</div>
+            <div style={{ fontSize: "18px", fontWeight: "bold", color: "#a29bfe" }}>
+              {(calcResult as any).averageWageLoading ? "…" : (calcResult as any).averageWageMissing?.length > 0 ? "平均賃金を出せません" : `¥${(calcResult as any).shutdown.allowance.toLocaleString()}`}
+            </div>
+          </div>
+        )}
+
         <div style={{ borderLeft: "1px solid #7f8c8d", paddingLeft: "20px", textAlign: "right", marginLeft: "auto" }}>
           <div style={{ fontSize: "12px", color: "#2ecc71" }}>
             <Banknote size={14} style={{ verticalAlign: "middle", marginRight: "4px" }} /> 
@@ -112,7 +130,7 @@ export default function SummaryBoard({ am }: Props) {
           <div style={{ fontSize: "28px", fontWeight: "bold", color: "#2ecc71" }}>
             ¥{(calcResult?.totalEarnings ?? 0).toLocaleString()}
           </div>
-          <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・手当・欠勤控除・遅刻早退控除を反映済</div>
+          <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・手当・欠勤控除・遅刻早退控除・休業手当を反映済</div>
         </div>
       </div>
     </>

@@ -5,6 +5,7 @@ import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeduction
 import { isFlexStaff, loadFlexCarryIn, parseFlexRule } from "../../utils/flexTime";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { countNonLeaveWorkDays, leaveByDate, toLeaveProrationMethod } from "../../utils/leaveOfAbsence";
+import { useAverageWagePay } from "../payroll/useAverageWagePay";
 import { staffAsOf } from "../../utils/staffHistory";
 import * as Master from '../../constants';
 import { useToast } from "../../components/Toast";
@@ -609,6 +610,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     return () => { cancelled = true; };
   }, [db, selectedStaff, flexStaff, targetYear, targetMonth]);
 
+  // --- 会社都合で休ませた日の休業手当・労災の待期の休業補償に使う平均賃金（給与明細と同じ読み方。utils/averageWageStore.ts） ---
+  const finalizedShutdownRows = useMemo(() => Object.entries(monthlyWorkData)
+    .filter(([_, row]) => row.is_finalized === 1 && row.workType === "company_leave")
+    .map(([date, row]) => ({ work_date: date, work_type: "company_leave", work_hours: Number(row.savedHours) || 0 })),
+  [monthlyWorkData]);
+  const averageWagePay = useAverageWagePay(db, selectedStaff, periodStart ? { start: periodStart, end: periodEnd } : null, finalizedShutdownRows);
+
   // --- 給与集計 ---
   const calcResult = useMemo(() => {
     // 1. 初期値をエンジン側の戻り値の構造と合わせる
@@ -685,6 +693,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         // フレックスタイム制の決まりと、前の月から繰り越した不足時間（utils/flexTime.ts）
         flexRule: parseFlexRule(currentGroup?.flex_rule),
         flexCarryIn,
+        // 休業手当・休業補償の平均賃金
+        averageWagePay,
       }, 
       targetYear, 
       targetMonth, 
@@ -693,7 +703,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexCarryIn]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexCarryIn, averageWagePay]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {

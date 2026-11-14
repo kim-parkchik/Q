@@ -185,6 +185,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetRetirementReason, setTargetRetirementReason] = useState(""); // 退職の事由（解雇はその理由も）
     const [targetDeathDate, setTargetDeathDate] = useState("");         // 死亡の年月日
     const [targetDeathCause, setTargetDeathCause] = useState("");       // 死亡の原因
+    const [targetProbationEnd, setTargetProbationEnd] = useState("");   // 試用期間の終わる日（平均賃金で、試用期間の日と賃金を除く。utils/averageWage.ts）
     // 振込先口座（給与・賞与の振込データ。固定額の口座と、残りを振り込む口座。utils/bankAccounts.ts）
     const [targetBankAccounts, setTargetBankAccounts] = useState<StaffAccountForm[]>([]);
     const [savedBankAccounts, setSavedBankAccounts] = useState("[]");
@@ -356,6 +357,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetBankAccounts([]);
         setSavedBankAccounts("[]");
         setTargetJobType(""); setTargetCareerHistory(""); setTargetRetirementReason(""); setTargetDeathDate(""); setTargetDeathCause("");
+        setTargetProbationEnd("");
         setTargetEmpInsType("");
         setEditingId(null);
     };
@@ -430,6 +432,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetRetirementReason(s.retirement_reason || "");
         setTargetDeathDate(s.death_date || "");
         setTargetDeathCause(s.death_cause || "");
+        setTargetProbationEnd(s.probation_end || "");
         setTargetEmpInsType(s.employment_insurance_type || "");
         setTargetIsExecutive(s.is_executive || 0);
         setTargetIsEmploymentInsEligible(s.is_employment_ins_eligible ?? 1); // 雇用保険はデフォルト1なので??を使用
@@ -512,6 +515,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             String(targetRetirementReason) !== String(original.retirement_reason || "") ||
             String(targetDeathDate) !== String(original.death_date || "") ||
             String(targetDeathCause) !== String(original.death_cause || "") ||
+            String(targetProbationEnd) !== String(original.probation_end || "") ||
             String(targetEmpInsType || "") !== String(original.employment_insurance_type || "") ||
             String(targetHealthInsNum) !== String(original.health_ins_num || "") ||
             String(targetPensionNum) !== String(original.pension_num || "") ||
@@ -587,6 +591,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 // 労働者名簿の項目
                 targetJobType.trim() || null, targetCareerHistory.trim() || null, targetRetirementReason.trim() || null,
                 targetDeathDate || null, targetDeathCause.trim() || null,
+                // 試用期間の終わる日
+                targetProbationEnd || null,
             ];
 
             if (editingId) {
@@ -607,7 +613,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         flat_tax_reduction_persons=?, leave_periods=?, tax_column=?,
                         standard_remuneration_history=?, wage_history=?, dependents_history=?,
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
-                        job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?
+                        job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
+                        probation_end=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -630,6 +637,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         standard_remuneration_history, wage_history, dependents_history,
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         job_type, career_history, retirement_reason, death_date, death_cause,
+                        probation_end,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -877,6 +885,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         targetRetirementReason, setTargetRetirementReason,
         targetDeathDate, setTargetDeathDate,
         targetDeathCause, setTargetDeathCause,
+        targetProbationEnd, setTargetProbationEnd,
         targetEmpInsType,
         setTargetEmpInsType,
         socialGroups,

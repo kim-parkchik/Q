@@ -118,6 +118,14 @@ describe("支払基礎日数", () => {
         expect(paymentBasisDays("monthly", period, rows, 22, true)).toBe(21);
         expect(paymentBasisDays("monthly", period, rows, 22, false)).toBe(30);
     });
+    test("会社都合で休ませた日：休業手当（報酬）を払うので、時給制は数え、月給制は欠勤のように引かない", () => {
+        const rows = [
+            { work_date: "2026-04-01", work_type: "normal", work_hours: 6 },
+            { work_date: "2026-04-02", work_type: "company_leave", work_hours: 0 },
+        ];
+        expect(paymentBasisDays("hourly", period, rows, 22)).toBe(2);
+        expect(paymentBasisDays("monthly", period, rows, 22, false)).toBe(30);
+    });
 });
 
 describe("算定基礎届の対象", () => {
@@ -150,6 +158,11 @@ describe("確定した給与と勤怠から、1人ずつの値を作る", () => 
             { month: 6, days: 30, amount: 305000, partialJoin: false },
         ]);
         expect(r.unfinalizedMonths).toEqual([]);
+    });
+    test("報酬は、総支給額から報酬でない額（労災の待期の休業補償）を除く", () => {
+        const [r] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth],
+            [{ ...salary("A", 4, 318000), non_remuneration: 18000 }, salary("A", 5, 300000), salary("A", 6, 300000)], []);
+        expect(r.months[0].amount).toBe(300000);
     });
     test("20日締め翌月払い：5月に支払う給与の計算期間は3月21日〜4月20日（31日）", () => {
         const [r] = buildSanteiInputs([{ ...monthly, id: "A", payroll_group_id: 2 }], 2026, [endOfMonth, close20Next],

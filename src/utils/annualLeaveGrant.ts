@@ -298,10 +298,13 @@ export const attendanceRateFor = (
       if (!row) { missingDays++; return; }
       const type = row.work_type || "normal";
       if (type === "holiday") return; // 公休にした日は全労働日に入れない
+      // 会社の都合で休ませた日（使用者の責めに帰すべき事由による休業の日）は、全労働日に入れない（平成25年7月10日 基発0710第3号）。
+      // 少し働いた日は、出勤した日として数える
+      if (type === "company_leave" && !((Number(row.work_hours) || 0) > 0)) return;
       allDays++;
       if (type === "absent") return;
       const worked = (Number(row.work_hours) || 0) > 0 || (Number(row.paid_leave_hours) || 0) > 0 || (Number(row.special_leave_hours) || 0) > 0;
-      if (type === "normal" ? worked : PRESENT_TYPES.has(type)) presentDays++;
+      if (type === "normal" || type === "company_leave" ? worked : PRESENT_TYPES.has(type)) presentDays++;
     });
   }
   if (deemed && deemed.from <= deemed.to) {

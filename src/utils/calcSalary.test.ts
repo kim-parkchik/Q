@@ -17,6 +17,7 @@ import { calcDailyHeiTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax }
 import { INSURANCE_2026 } from "../constants/insurance";
 import { TAX_2026 } from "../constants/tax";
 import { DB_SCHEMAS } from "../types/dbSchema";
+import type { AverageWagePay } from "./averageWage";
 
 const LAW = "currency_law";
 const company = { week_start_day: 0, round_overtime: "round", round_social_ins: LAW, round_emp_ins: LAW };
@@ -927,7 +928,8 @@ describe("計算期間の途中で入社・退職した人の日割り（会社�
         const r = calc(joined, [day("17", 0, "absent")], { prorationMethod: "calendar", period: june, customItems: items, annualWorkDays: 245 });
         expect(r.proration).toEqual({ method: "calendar", numerator: 15, denominator: 30 });
         expect(r.basePay).toBe(150000);
-        expect(r.customEarningLines).toEqual([{ name: "役職手当", amount: 10000 }, { name: "資格手当", amount: 5000 }]);
+        // avg は平均賃金での扱い（固定は月で決まる賃金、変動は日・時間で決まる賃金。utils/averageWage.ts）
+        expect(r.customEarningLines).toEqual([{ name: "役職手当", amount: 10000, avg: "month" }, { name: "資格手当", amount: 5000, avg: "time" }]);
         expect(r.customDeductionLines).toEqual([{ name: "社宅費", amount: 3000 }]);
         expect(r.absenceDeduction).toBe(13636); // 300,000 ÷ 22日（日割りする前の月給）
         expect(r.overtimeHourlyRate).toBeCloseTo((300000 + 25000) / (245 * 8 / 12), 10);
@@ -1442,9 +1444,9 @@ describe("残業代の時給（1年間における1か月平均所定労働時�
         db.exec("INSERT INTO staff_salary_values (staff_id, item_id, amount) VALUES ('S001', 1, 20000), ('S001', 2, 15000), ('S001', 3, 0), ('S001', 4, 5000)");
         const asyncDb = { select: async (sql: string, params: any[]) => db.prepare(sql).all(...params) };
         expect(await loadCustomItems(asyncDb, "S001")).toEqual([
-            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true, fixed: true },
-            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false, fixed: true },
-            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true, fixed: true },
+            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true, fixed: true, averageWage: "month" },
+            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false, fixed: true, averageWage: "month" },
+            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true, fixed: true, averageWage: "month" },
         ]);
     });
 });
@@ -1626,7 +1628,7 @@ describe("休業・休職の日の給与（決まりは leaveOfAbsence.ts。2026
         const r = calc(staff, [], opts({ nonLeaveWorkDays: 0, customItems: items }));
         expect(r.leave).toEqual({ types: ["childcare"], days: 30, full: true, paidDays: 0, workedDates: [] });
         expect([r.basePay, r.commutePay, r.fixedOvertimeAllowance]).toEqual([0, 0, 0]);
-        expect(r.customEarningLines).toEqual([{ name: "役職手当", amount: 0 }, { name: "資格手当", amount: 5000 }]);
+        expect(r.customEarningLines).toEqual([{ name: "役職手当", amount: 0, avg: "month" }, { name: "資格手当", amount: 5000, avg: "time" }]);
         expect(r.totalEarnings).toBe(5000);
         // 育休なので社会保険料は免除（雇用保険料は払った給与にかかる）
         expect([r.healthInsurance, r.welfarePension]).toEqual([0, 0]);
@@ -1636,7 +1638,7 @@ describe("休業・休職の日の給与（決まりは leaveOfAbsence.ts。2026
         const r = calc(staff, [], opts({ customItems: items }));
         expect(r.proration).toEqual({ method: "workdays", numerator: 11, denominator: 22, reason: "leave" });
         expect(r.basePay).toBe(150000);
-        expect(r.customEarningLines[0]).toEqual({ name: "役職手当", amount: 10000 });
+        expect(r.customEarningLines[0]).toEqual({ name: "役職手当", amount: 10000, avg: "month" });
         expect(r.commutePay).toBe(10000);
         expect(r.leave).toMatchObject({ days: 15, full: false, paidDays: 11 });
     });
@@ -1713,5 +1715,102 @@ describe("休業・休職の日の給与（決まりは leaveOfAbsence.ts。2026
         expect(db.query("SELECT leave_paid_days AS d, total_earnings AS t FROM salary_results").get()).toEqual({ d: 11, t: 150000 });
         await saveSalaryResult(asyncDb, "S001", 2026, 5, calc(monthly, [], opts()), monthly);
         expect(db.query("SELECT leave_paid_days AS d FROM salary_results WHERE target_month = 5").get()).toEqual({ d: null });
+    });
+});
+
+describe("会社都合で休ませた日の休業手当（労働基準法26条）と、労災の待期の休業補償（76条）。平均賃金は averageWage.test.ts", () => {
+    const JUNE = { start: "2026-06-01", end: "2026-06-30" };
+    const wage = (amountSen: number | null, error: string | null = null) => ({ amountSen, error, manual: false });
+    const pay = (o: Partial<AverageWagePay> = {}): AverageWagePay => ({ shutdownRate: 60, shutdownEvents: {}, waitingEvents: {}, wages: {}, ...o });
+    const opts = (o: Partial<SalaryExtras> = {}): Partial<SalaryExtras> => ({ period: JUNE, periodWorkDays: 22, ...o });
+
+    test("月給の人：休業の日を欠勤控除と同じ計算で引き、平均賃金 × 60% × 日数の休業手当を払う（続いている休業は初めの日の平均賃金）", () => {
+        const rows = [day("15", 0, "company_leave"), day("16", 0, "company_leave")];
+        const avg = pay({ shutdownEvents: { "2026-06-15": "2026-06-15", "2026-06-16": "2026-06-15" }, wages: { "2026-06-15": wage(1000000) } });
+        const r = calc(monthly, rows, opts({ averageWagePay: avg }));
+        // 休業の日の控除：300,000 × 2日 ÷ 22日 ＝ 27,272円（1円未満切り捨て）
+        expect(r.shutdown).toMatchObject({ days: 2, fullDays: 2, deduction: 27272, allowance: 12000, rate: 60 });
+        expect(r.shutdown?.lines[0]).toContain("平均賃金 10,000円00銭 × 60% ＝ 1日 6,000円 × 2日 ＝ ¥12,000");
+        expect(r.totalEarnings).toBe(300000 - 27272 + 12000);
+        // 休業手当は賃金（所得税・雇用保険の対象。月変では非固定的賃金）
+        expect([r.taxableAmount, r.nonRemuneration, r.nonFixedEarnings]).toEqual([r.totalEarnings, 0, 12000]);
+        // 率を上げた会社（80%）
+        expect(calc(monthly, rows, opts({ averageWagePay: { ...avg, shutdownRate: 80 } })).shutdown?.allowance).toBe(16000);
+    });
+    test("月給の人：働いた時間がある休業の日と、完全月給制は、月給を引かずに払うので休業手当は払わない", () => {
+        const avg = pay({ wages: { "2026-06-15": wage(1000000) } });
+        const worked = calc(monthly, [day("15", 3, "company_leave")], opts({ averageWagePay: avg }));
+        expect(worked.shutdown).toMatchObject({ deduction: 0, allowance: 0, partialDays: 1 });
+        expect(worked.shutdown?.notes[0]).toContain("月給を引かずに払う");
+        expect(worked.statutoryOvertimePay).toBe(0); // 働いた時間は所定労働時間の中（残業にしない）
+        const none = calc(monthly, [day("15", 0, "company_leave")], opts({ averageWagePay: avg, absenceDeductionMethod: "none" }));
+        expect(none.shutdown).toMatchObject({ deduction: 0, allowance: 0 });
+        expect(none.totalEarnings).toBe(300000);
+    });
+    test("時給の人：休業の日は払わず休業手当。少し働いた日は、働いた分の賃金との差額（平均賃金 8,000円 × 60% ＝ 4,800円）", () => {
+        const rows = [day("15", 0, "company_leave"), day("16", 2, "company_leave")];
+        const r = calc(hourly, rows, opts({ averageWagePay: pay({ wages: { "2026-06-15": wage(800000), "2026-06-16": wage(800000) } }) }));
+        expect(r.basePay).toBe(2400);
+        expect(r.shutdown?.allowance).toBe(4800 + (4800 - 2400));
+        expect(r.shutdownWorkedPay).toBe(2400);
+        expect(r.totalEarnings).toBe(2400 + 7200);
+    });
+    test("日給の人：少し働いた日は、働いた時間の割合の日給と、休業手当との差額", () => {
+        const daily = { ...hourly, wage_type: "daily", base_wage: 10000 };
+        const r = calc(daily, [day("16", 4, "company_leave")], opts({ averageWagePay: pay({ wages: { "2026-06-16": wage(900000) } }) }));
+        expect(r.basePay).toBe(5000);
+        expect(r.shutdown?.allowance).toBe(400); // 9,000 × 60% ＝ 5,400 − 5,000
+    });
+    test("フレックスタイム制：休ませた日の所定労働時間は、働かなければならない時間から除く（不足時間にしない）", () => {
+        const worked = ["01", "02", "03", "04", "05", "08", "09", "10", "11", "12", "16", "17", "18", "19", "22", "23", "24", "25", "26", "29", "30"].map((d) => day(d, 8));
+        const r = calc({ ...monthly, is_flex: 1 }, [...worked, day("15", 0, "company_leave")], opts({ averageWagePay: pay({ wages: { "2026-06-15": wage(1000000) } }) }));
+        expect(r.flex?.requiredHours).toBe(168); // 22日 × 8時間 − 8時間
+        expect(r.flexShortageDeduction).toBe(0);
+        expect(r.shutdown).toMatchObject({ deduction: 13636, allowance: 6000 });
+    });
+    test("平均賃金を読み込み中・出せないときは、休業手当を計算せず知らせる（給与明細は確定しない）", () => {
+        const rows = [day("15", 0, "company_leave")];
+        const loading = calc(monthly, rows, opts());
+        expect([loading.averageWageLoading, loading.shutdown?.allowance]).toEqual([true, 0]);
+        const missing = calc(monthly, rows, opts({ averageWagePay: pay({ wages: { "2026-06-15": wage(null, "2026年6月支給の給与を確定してください") } }) }));
+        expect(missing.averageWageLoading).toBe(false);
+        expect(missing.averageWageMissing).toEqual(["休業手当（6月15日からの休業）：2026年6月支給の給与を確定してください"]);
+    });
+    test("労災の待期の3日：平均賃金（事故の日）× 60% の休業補償。賃金ではないので、所得税・雇用保険の対象外", () => {
+        const staff = { ...monthly, leave_periods: JSON.stringify([{ type: "injury", start: "2026-06-10", end: "2026-06-30", accident: "2026-06-09" }]) };
+        const avg = pay({ wages: { "2026-06-09": wage(1000000) } });
+        const r = calc(staff, [], opts({ nonLeaveWorkDays: 7, averageWagePay: avg }));
+        expect(r.injuryCompensation).toMatchObject({ amount: 18000, days: 3 });
+        expect(r.injuryCompensation?.lines[0]).toContain("6月9日の事故の待期（6月10日・6月11日・6月12日）");
+        expect(r.nonRemuneration).toBe(18000);
+        expect(r.totalEarnings).toBe(r.basePay + 18000);
+        expect(r.taxableAmount).toBe(r.totalEarnings - 18000);
+        // 雇用保険料は、休業補償を除いた額にかかる（休業補償がないときと同じ）
+        const withoutComp = calc(staff, [], opts({ nonLeaveWorkDays: 7, averageWagePay: pay() }));
+        expect(withoutComp.averageWageMissing[0]).toContain("6月9日の事故");
+        expect(r.empInsurance).toBe(withoutComp.empInsurance);
+        // 月給を日割りしない設定なら、待期の日も月給を払っているので払わない
+        const none = calc(staff, [], opts({ nonLeaveWorkDays: 7, averageWagePay: avg, leaveProrationMethod: "none" }));
+        expect(none.injuryCompensation).toMatchObject({ amount: 0 });
+        expect(none.injuryCompensation?.notes[0]).toContain("日割りしない");
+    });
+    test("確定すると、休業の日の控除・休業手当・休業補償を内訳に残し（平均賃金での分け方も）、休業補償を賃金・報酬でない額に残す", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const staff = { ...monthly, leave_periods: JSON.stringify([{ type: "injury", start: "2026-06-25", end: "2026-07-31" }]) };
+        const avg = pay({ wages: { "2026-06-15": wage(1000000), "2026-06-25": wage(1000000) } });
+        const r = calc(staff, [day("15", 0, "company_leave")], opts({ nonLeaveWorkDays: 18, averageWagePay: avg }));
+        await saveSalaryResult(asyncDb, "S001", 2026, 6, r, staff);
+        const row = db.query("SELECT non_remuneration AS n, total_earnings AS t, ledger FROM salary_results").get() as { n: number; t: number; ledger: string };
+        expect([row.n, row.t]).toEqual([18000, r.totalEarnings]);
+        const lines = JSON.parse(row.ledger).earnings as { name: string; amount: number; avg: string }[];
+        expect(lines.filter((l) => l.name.startsWith("休業"))).toEqual([
+            { name: "休業の日の控除", amount: -r.shutdown!.deduction, avg: "month" },
+            { name: "休業手当", amount: 6000, avg: "none" },
+            { name: "休業補償(労災の待期)", amount: 18000, avg: "none" },
+        ]);
+        expect(lines.reduce((sum, l) => sum + l.amount, 0)).toBe(r.totalEarnings);
     });
 });

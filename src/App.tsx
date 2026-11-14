@@ -28,6 +28,7 @@ import {
   QrCode,
   Send,
   Library,
+  Scale,
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -45,6 +46,7 @@ import TimeQardManager from "./features/timeqard/TimeQardManager";
 import PaySlipManager from "./features/payroll/PaySlipManager";
 import TransferDataManager from "./features/payroll/TransferDataManager";
 import LegalBooksManager from "./features/legalBooks/LegalBooksManager";
+import AverageWageManager from "./features/payroll/AverageWageManager";
 import { useExpiredMyNumberCount } from "./features/mynumber/useExpiredMyNumberCount";
 import { useToast } from "./components/Toast";
 import BonusManager from "./features/payroll/BonusManager";
@@ -79,6 +81,7 @@ const TAB_NAMES: Record<string, string> = {
   attendance: "勤怠・月次給与",
   timeqard: "TimeQard（打刻）",
   bonus: "賞与計算",
+  heikin: "平均賃金",
   santei: "算定基礎（定時決定）",
   zuiji: "月変（随時改定）",
   kyugyo: "休業終了時改定",
@@ -106,6 +109,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   attendance: <Timer size={18} />,
   timeqard: <QrCode size={18} />,
   bonus: <Coins size={18} />,
+  heikin: <Scale size={18} />,
   santei: <ClipboardList size={18} />,
   zuiji: <TrendingUp size={18} />,
   kyugyo: <Baby size={18} />,
@@ -280,6 +284,7 @@ function App() {
             "attendance", 
             "timeqard",
             "bonus", 
+            "heikin",
             "santei",
             "zuiji",
             "kyugyo",
@@ -296,7 +301,7 @@ function App() {
             "choubo"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -457,6 +462,9 @@ function App() {
               )}
               {activeTab === "choubo" && db && (
                 <LegalBooksManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "heikin" && db && (
+                <AverageWageManager db={db} staffList={staffList} />
               )}
             </>
           )}

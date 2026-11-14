@@ -94,6 +94,12 @@
  *  - 時間単位の休暇（子の看護等休暇・介護休暇など。attendance.special_leave_hours）：時間有給と同じく、所定労働時間から引いて残業・遅刻早退を数える。
  *    有給なら日給制・時給制はその時間の通常の賃金を払い、無給なら月給制は、遅刻・早退・中抜けの控除と同じ1時間あたりの額で引く
  *    （給与規定グループで遅刻・早退・中抜けを「引かない」にしている会社は引かない。明細では「無給休暇控除」に入れる）
+ *
+ * 平均賃金を使う支給（平均賃金は呼び出し側が確定した給与から出す。utils/averageWage.ts・averageWageStore.ts）:
+ *  - 会社都合で休ませた日（勤怠の「休業（会社都合）」）の休業手当（労働基準法26条）：平均賃金 × 給与規定グループの率（60%以上）× 日数。
+ *    月給制は、その日の分を欠勤控除と同じ計算で引く（明細では「休業の日の控除」）。日給制・時給制で少し働いた日は、働いた分の賃金との差額
+ *  - 業務上の負傷・疾病による休業の最初の3日（待期）の休業補償（76条）：平均賃金 × 60%。賃金ではないので、所得税・社会保険・雇用保険の対象外
+ *  - 平均賃金を出せないとき（確定していない給与がある・入社して間もないなど）は計算せず、給与明細は確定できない
  */
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
@@ -113,6 +119,10 @@ import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './sp
 import { DEFAULT_FLEX_RULE, isFlexStaff, settleFlex, type FlexRule, type FlexSettlement } from './flexTime';
 import { healthPremiumsOf, type HealthInsurer, type InsurerType, type UnionRate } from './healthInsurer';
 import { salaryLedgerOf } from './legalBooks';
+import {
+  averageWageAmount, formatSen, INJURY_COMPENSATION_RATE, mdJa, perDayOf, SHUTDOWN_WORK_TYPE, toAverageWageKind, toShutdownRate, waitingDatesIn, yenText,
+  type AverageWageKind, type AverageWagePay,
+} from './averageWage';
 import * as Master from '../constants';
 
 // プラグインの有効化
@@ -130,8 +140,11 @@ export interface SalaryExtras {
    */
   healthInsurer?: HealthInsurer | null;
   dependents: number;
-  /** 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる）。fixed は「固定（毎月同額）」の項目（日割りする） */
-  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean; fixed?: boolean }[];
+  /**
+   * 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる）。fixed は「固定（毎月同額）」の項目（日割りする）
+   * averageWage は平均賃金での扱い（省略時は、固定なら月で決まる賃金、変動なら日・時間で決まる賃金。utils/averageWage.ts）
+   */
+  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean; fixed?: boolean; averageWage?: AverageWageKind }[];
   /** 源泉所得税の計算方法（給与規定グループの設定。省略時は月額表） */
   taxMethod?: TaxCalcMethod;
   /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
@@ -174,6 +187,11 @@ export interface SalaryExtras {
   flexRule?: FlexRule | null;
   /** フレックスタイム制で、前の月から繰り越した不足時間（前の月の確定した給与の flex_carry_hours） */
   flexCarryIn?: number;
+  /**
+   * 平均賃金を使う支給の材料（会社都合で休ませた日の休業手当・労災の最初の3日の休業補償。呼び出し側が確定した給与から平均賃金を出す。
+   * utils/averageWageStore.ts の loadAverageWagePay）。undefined は読み込み中（給与明細は、その間は確定しない）
+   */
+  averageWagePay?: AverageWagePay | null;
 }
 
 /** 週40時間の累計に足す、前の計算期間の日の勤怠（attendance の必要な列） */
@@ -276,8 +294,8 @@ export interface SalaryResult {
   commutePay: number;
   allowanceAmount: number;
   customEarnings: number;
-  /** 給与項目ごとの支給額・控除額（固定の支給項目は日割りした額） */
-  customEarningLines: { name: string; amount: number }[];
+  /** 給与項目ごとの支給額・控除額（固定の支給項目は日割りした額）。avg は平均賃金での扱い */
+  customEarningLines: { name: string; amount: number; avg?: AverageWageKind }[];
   customDeductionLines: { name: string; amount: number }[];
   /** 計算期間の途中で入社・退職したとき・休業の月の日割り（日割りしなければ null）。基本給（月給制）と固定の支給項目に使う */
   proration: Proration | null;
@@ -290,6 +308,26 @@ export interface SalaryResult {
    * workedDates：休業の日なのに、働いた・休暇の記録がある日（働いた時間の分は払う）
    */
   leave: { types: LeaveType[]; days: number; full: boolean; paidDays: number | null; workedDates: string[] } | null;
+  /**
+   * 会社都合で休ませた日（勤怠の「休業（会社都合）」の日。なければ null。utils/averageWage.ts）
+   * days：休業の日数（少し働いた日を含む） / deduction：月給制の、休業の日の控除（欠勤控除と同じ計算） /
+   * allowance：休業手当（平均賃金 × 率 × 日数。少し働いた日は、その日の賃金との差額） / lines：計算式（休業ごと）
+   */
+  shutdown: {
+    days: number; fullDays: number; partialDays: number; rate: number;
+    deduction: number; deductionDetail: string | null; deductionNote: string | null;
+    allowance: number; lines: string[]; notes: string[];
+  } | null;
+  /** 労災の待期（業務上の負傷・疾病による休業の最初の3日）の休業補償（平均賃金 × 60%。賃金ではない。なければ null） */
+  injuryCompensation: { amount: number; days: number; lines: string[]; notes: string[] } | null;
+  /** 会社都合で休ませた日に少し働いた分の賃金（時給制・日給制。確定した内訳に残し、平均賃金で除く） */
+  shutdownWorkedPay: number;
+  /** 平均賃金を読み込んでいる途中（休業手当・休業補償を計算していない。確定できない） */
+  averageWageLoading: boolean;
+  /** 平均賃金を出せないので、休業手当・休業補償を計算していないもの（その理由。確定できない） */
+  averageWageMissing: string[];
+  /** 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。所得税・社会保険・雇用保険の対象外） */
+  nonRemuneration: number;
   totalEarnings: number;
   /**
    * 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・「変動（毎月入力）」の支給項目）。残りは固定的賃金
@@ -372,7 +410,8 @@ export interface SalaryResult {
  * 時間単位の有給を取った時間は、所定労働時間から差し引く
  */
 const scheduledHoursOf = (type: string, scheduledHours: number, paidLeaveHours: number): number => {
-  const base = type === 'normal' ? scheduledHours
+  // 会社都合で休ませた日に少し働いた時間は、所定労働時間の中の時間（残業にしない）
+  const base = type === 'normal' || type === SHUTDOWN_WORK_TYPE ? scheduledHours
              : type === 'paid_half' || type === SPECIAL_LEAVE_HALF ? scheduledHours / 2
              : 0;
   return Math.max(0, base - paidLeaveHours);
@@ -629,16 +668,20 @@ export const calcDetailedDiff = (inT: string, outT: string, bStart: string, bEnd
  */
 export const loadCustomItems = async (db: any, staffId: string | number): Promise<SalaryExtras['customItems']> => {
   const rows = await db.select(
-    `SELECT m.name, m.type, m.category, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base
+    `SELECT m.name, m.type, m.category, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base, m.average_wage
     FROM salary_item_master m
     LEFT JOIN staff_salary_values v ON m.id = v.item_id AND v.staff_id = ?
     WHERE m.category != 'formula'
     ORDER BY m.type DESC, m.id ASC`,
     [staffId]
-  ) as { name: string; type: 'earning' | 'deduction'; category: string; amount: number; in_overtime_base: number }[];
+  ) as { name: string; type: 'earning' | 'deduction'; category: string; amount: number; in_overtime_base: number; average_wage: string | null }[];
   return rows
     .filter(r => Number(r.amount) > 0)
-    .map(r => ({ name: r.name, amount: Number(r.amount), type: r.type, inOvertimeBase: Number(r.in_overtime_base) !== 0, fixed: r.category === 'fixed' }));
+    .map(r => ({
+      name: r.name, amount: Number(r.amount), type: r.type, inOvertimeBase: Number(r.in_overtime_base) !== 0, fixed: r.category === 'fixed',
+      // 平均賃金での扱い（給与項目設定。設定がなければ、固定なら月で決まる賃金、変動なら日・時間で決まる賃金）
+      averageWage: toAverageWageKind(r.average_wage, r.category),
+    }));
 };
 
 /**
@@ -691,10 +734,10 @@ export const saveSalaryResult = async (
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
       absence_deduction, prescribed_work_days, leave_paid_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours,
-      total_earnings, taxable_amount,
+      total_earnings, taxable_amount, non_remuneration,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance, kokuho_premium,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay, ledger
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -717,6 +760,7 @@ export const saveSalaryResult = async (
       flex_carry_hours = excluded.flex_carry_hours,
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
+      non_remuneration = excluded.non_remuneration,
       health_insurance = excluded.health_insurance,
       nursing_insurance = excluded.nursing_insurance,
       child_support = excluded.child_support,
@@ -747,12 +791,16 @@ export const saveSalaryResult = async (
     result.tardyDeduction, result.unpaidLeaveDeduction,
     // フレックスタイム制で、次の月に繰り越す不足時間（次の月の計算で読む。utils/flexTime.ts の loadFlexCarryIn）
     result.flex ? result.flexCarryOutHours : null,
-    result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当を除く）
+    result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当・休業補償を除く）
+    // 賃金・報酬でない額（労災の待期の休業補償。算定・月変の報酬から除く。utils/averageWage.ts）
+    result.nonRemuneration,
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance, result.kokuhoPremium,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance + result.kokuhoPremium),
     result.incomeTax, result.flatTaxReduction, result.residentTax, result.yearEndSettlement, result.netPay,
     // 賃金台帳の内訳（給与明細の支給・控除の行と、労働日数・時間数。utils/legalBooks.ts）
-    JSON.stringify(salaryLedgerOf(result, { wageType: staffMaster?.wage_type, allowanceName: ledgerOptions.allowanceName, period: ledgerOptions.period })),
+    JSON.stringify(salaryLedgerOf(result, {
+      wageType: staffMaster?.wage_type, commuteType: staffMaster?.commute_type, allowanceName: ledgerOptions.allowanceName, period: ledgerOptions.period,
+    })),
   ];
 
   try {
@@ -1247,6 +1295,9 @@ export const calculateSalary = (
 
   const weekStartDay: number = companySettings?.week_start_day ?? 0; // デフォルト日曜
   const scheduledHours = Number(staff.scheduled_work_hours) || 8;
+  // 会社都合で休ませた日（勤怠の「休業（会社都合）」。下の「会社都合の休業」。utils/averageWage.ts）
+  const shutdownRows = attendanceData.filter(row => row.work_type === SHUTDOWN_WORK_TYPE);
+  const fullShutdownDays = shutdownRows.filter(row => !((Number(row.work_hours) || 0) > 0)).length;
   // フレックスタイム制で計算する人（月給制・時給制。utils/flexTime.ts）
   const flex = isFlexStaff(staff);
 
@@ -1487,6 +1538,11 @@ export const calculateSalary = (
           dailyWageDays += workShare;
           // 遅刻・早退・中抜け：日給 × 足りない時間 ÷ 1日の所定労働時間（モデル就業規則第45条：日給は 基本給 ÷ 1日の所定労働時間数）
           if (tardyDeductionMethod !== 'none') dailyTardyRaw += dayWage * tardyMinutesOf(row, scheduledHours) / (scheduledHours * 60);
+        } else if (h > 0 && type === SHUTDOWN_WORK_TYPE) {
+          // 会社都合で休ませた日に少し働いた：働いた時間の割合の日給を払う（休業手当との差額は、下の「会社都合の休業」で払う）
+          const workShare = Math.min(1, h / scheduledHours);
+          basePay += dayWage * workShare;
+          dailyWageDays += workShare;
         }
       }
 
@@ -1648,6 +1704,8 @@ export const calculateSalary = (
       dayHours: scheduledHours,
       carryInHours: Number(extras.flexCarryIn) || 0,
       rows: sorted,
+      // 会社都合で休ませた日（働いた時間がない日）の所定労働時間は、働かなければならない時間から除く（不足時間にしない）
+      excusedHours: fullShutdownDays * scheduledHours,
     });
     // 時給制の人は、働いた時間の分を払うので、不足時間を引かず、繰り越しもしない
     flexSettlement = staff.wage_type === 'hourly' ? { ...settled, carryOutHours: 0, deductHours: 0 } : settled;
@@ -1706,6 +1764,130 @@ export const calculateSalary = (
     holidayWorkPay = 0;
   }
 
+  // ── 会社都合の休業（勤怠の「休業（会社都合）」の日。労働基準法26条。utils/averageWage.ts）──────────────────
+  // 月給制：その日の分を欠勤控除と同じ計算で引き、休業手当を払う。欠勤控除をしない完全月給制は、月給をそのまま払うので休業手当は要らない。
+  //         働いた時間がある日は、月給を引かずに払うので、休業手当は要らない
+  // 日給制・時給制：その日は働いた分だけ払い、休業手当（平均賃金 × 率）との差額を払う（働いた分のほうが多ければ払わない）
+  // 平均賃金は、続いている休業の初めの日で数える（呼び出し側が確定した給与から出す）。出せないときは計算せず、確定できないようにする
+  const avgPay = extras.averageWagePay;
+  const averageWageMissing: string[] = [];
+  let averageWageLoading = false;
+  let shutdown: SalaryResult['shutdown'] = null;
+  let shutdownWorkedPay = 0;
+  /** その日に払った賃金（少し働いた日の、休業手当・休業補償との差額に使う） */
+  const paidOnDay = (date: string) => {
+    const d = dayPays[date];
+    return d ? d.pay + (isOvertimeEligible ? d.overtime : 0) : 0;
+  };
+  /** 平均賃金を数える日ごとにまとめる（full：まるごと休んだ日数、partial：少し働いた日の賃金） */
+  const groupByEvent = (items: { date: string; eventDate: string; pay: number | null }[]) => {
+    const groups = new Map<string, { full: number; partial: number[]; dates: string[] }>();
+    for (const t of items) {
+      const g = groups.get(t.eventDate) ?? { full: 0, partial: [], dates: [] };
+      if (t.pay === null) g.full++; else g.partial.push(t.pay);
+      g.dates.push(t.date);
+      groups.set(t.eventDate, g);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  };
+  const formulaOf = (w: { amountSen: number; manual: boolean }, rate: number, g: { full: number; partial: number[] }, amount: number) =>
+    `平均賃金 ${formatSen(w.amountSen)}${w.manual ? '（手で入れた額）' : ''} × ${rate}% ＝ 1日 ${yenText(perDayOf(w.amountSen, rate))}`
+    + (g.full > 0 ? ` × ${g.full}日` : '')
+    + (g.partial.length > 0 ? `${g.full > 0 ? '、' : ' '}少し働いた${g.partial.length}日は働いた分の賃金との差額` : '')
+    + ` ＝ ¥${amount.toLocaleString()}（1円未満四捨五入）`;
+  if (shutdownRows.length > 0) {
+    const isMonthly = staff.wage_type === 'monthly';
+    const rate = toShutdownRate(avgPay?.shutdownRate);
+    const notes: string[] = [];
+    const worked = (row: any) => (Number(row.work_hours) || 0) > 0;
+    const monthlyPaysAll = isMonthly && absenceDeductionMethod === 'none';
+    let deduction = 0;
+    let deductionDetail: string | null = null;
+    let deductionNote: string | null = null;
+    if (isMonthly && fullShutdownDays > 0 && !monthlyPaysAll) {
+      const monthlyWage = Number(staff.base_wage ?? staff.baseWage ?? 0);
+      const d = absenceDeductionOf(
+        absenceDeductionMethod, monthlyWage, fullShutdownDays,
+        basePay - absenceDeduction - unpaidLeaveDeduction - tardyDeduction - flexShortageDeduction,
+        extras.periodWorkDays, extras.annualWorkDays, prescribedWorkDays(staff, targetYear, targetMonth), '休業の日',
+      );
+      deduction = d.amount;
+      deductionDetail = d.detail;
+      deductionNote = d.note;
+    }
+    if (monthlyPaysAll && fullShutdownDays > 0) {
+      notes.push(`欠勤控除をしない設定（完全月給制）なので、休業の日も月給を払います（平均賃金の${rate}%より多いので、休業手当は払いません）`);
+    }
+    const workedRows = shutdownRows.filter(worked);
+    if (isMonthly && workedRows.length > 0) {
+      notes.push(`働いた時間がある休業の日（${workedRows.map(r => mdJa(String(r.work_date))).join('・')}）は、月給を引かずに払うので、休業手当は払いません`);
+    }
+    // 休業手当を払う日（月給制は、月給を引いた日だけ）
+    const targets = shutdownRows
+      .filter(r => !isMonthly || (!monthlyPaysAll && !worked(r)))
+      .map(r => {
+        const date = String(r.work_date);
+        const pay = !isMonthly && worked(r) ? paidOnDay(date) : null;
+        return { date, eventDate: avgPay?.shutdownEvents?.[date] ?? date, pay };
+      });
+    shutdownWorkedPay = Math.floor(targets.reduce((sum, t) => sum + (t.pay ?? 0), 0));
+    let allowance = 0;
+    const lines: string[] = [];
+    if (targets.length > 0 && avgPay === undefined) {
+      averageWageLoading = true;
+    } else {
+      for (const [ev, g] of groupByEvent(targets)) {
+        const w = avgPay?.wages?.[ev];
+        if (!w || w.amountSen === null) {
+          averageWageMissing.push(`休業手当（${mdJa(ev)}からの休業）：${w?.error ?? '平均賃金を読み込めていません'}`);
+          continue;
+        }
+        const amount = averageWageAmount(w.amountSen, rate, g.full, g.partial);
+        allowance += amount;
+        lines.push(`${mdJa(ev)}からの休業（${g.dates.map(mdJa).join('・')}）：${formulaOf({ amountSen: w.amountSen, manual: w.manual }, rate, g, amount)}`);
+      }
+    }
+    shutdown = {
+      days: shutdownRows.length, fullDays: fullShutdownDays, partialDays: workedRows.length, rate,
+      deduction, deductionDetail, deductionNote, allowance, lines, notes,
+    };
+  }
+
+  // ── 労災の待期の休業補償（業務上の負傷・疾病による休業の最初の3日。労働基準法76条。utils/averageWage.ts）──────
+  // 労災保険の休業補償給付が出ない最初の3日（休日も数える）に、会社が平均賃金の60%を払う（平均賃金は事故の日で数える）。
+  // 賃金ではないので、所得税・社会保険料・雇用保険料はかからない。少し働いた日は、働いた分の賃金との差額
+  // 月給制で、給与規定グループの「休業の月の日割り」が「日割りしない」なら、待期の日も月給を払っているので払わない
+  let injuryCompensation: SalaryResult['injuryCompensation'] = null;
+  const waiting = extras.period ? waitingDatesIn(staff, extras.period) : [];
+  if (waiting.length > 0) {
+    const notes: string[] = [];
+    const lines: string[] = [];
+    let amount = 0;
+    const monthlyPaid = staff.wage_type === 'monthly' && !leaveFull && toLeaveProrationMethod(extras.leaveProrationMethod) === 'none';
+    if (monthlyPaid) {
+      notes.push('給与規定グループの「休業の月の日割り」が「日割りしない」なので、待期の日も月給を払っています（休業補償は払いません）');
+    } else if (avgPay === undefined) {
+      averageWageLoading = true;
+    } else {
+      const items = waiting.map(w => ({
+        date: w.date,
+        eventDate: avgPay?.waitingEvents?.[w.date] ?? w.eventDate,
+        pay: dayPays[w.date] ? paidOnDay(w.date) : null,
+      }));
+      for (const [ev, g] of groupByEvent(items)) {
+        const w = avgPay?.wages?.[ev];
+        if (!w || w.amountSen === null) {
+          averageWageMissing.push(`休業補償（${mdJa(ev)}の事故）：${w?.error ?? '平均賃金を読み込めていません'}`);
+          continue;
+        }
+        const a = averageWageAmount(w.amountSen, INJURY_COMPENSATION_RATE, g.full, g.partial);
+        amount += a;
+        lines.push(`${mdJa(ev)}の事故の待期（${g.dates.map(mdJa).join('・')}）：${formulaOf({ amountSen: w.amountSen, manual: w.manual }, INJURY_COMPENSATION_RATE, g, a)}`);
+      }
+    }
+    injuryCompensation = { amount, days: waiting.length, lines, notes };
+  }
+
   // ── 通勤手当・任意手当 ──────────────────────────────────────
   // まるごと休業の月は、月額の通勤手当を払わない（日額は、働いた日の分）
   const commutePay = staff.commute_type === 'daily'   ? (Number(staff.commute_amount) || 0) * workDays
@@ -1714,7 +1896,10 @@ export const calculateSalary = (
 
   // 固定（毎月同額）の支給項目は、基本給と同じく日割りする（変動の項目は、その月に入れた額のまま）
   const customEarningLines = customItems.filter(i => i.type === 'earning')
-    .map(i => ({ name: i.name, amount: i.fixed ? prorate(i.amount, proration) : Number(i.amount) || 0 }));
+    .map(i => ({
+      name: i.name, amount: i.fixed ? prorate(i.amount, proration) : Number(i.amount) || 0,
+      avg: i.averageWage ?? toAverageWageKind(null, i.fixed ? 'fixed' : 'variable'),
+    }));
   const customDeductionLines = customItems.filter(i => i.type === 'deduction').map(i => ({ name: i.name, amount: Number(i.amount) || 0 }));
   const customEarnings   = customEarningLines.reduce((s, i) => s + i.amount, 0);
   const customDeductions = customDeductionLines.reduce((s, i) => s + i.amount, 0);
@@ -1760,25 +1945,33 @@ export const calculateSalary = (
   const roundedPremiums = (fixedOvertimeAllowance > 0 ? fixedOvertimeAllowance + fixedOvertimeExcess : overtimeLegalTotal)
     + holidayLine + nightLine;
 
+  const shutdownDeduction = shutdown?.deduction ?? 0;
+  const shutdownAllowance = shutdown?.allowance ?? 0;
+  // 労災の待期の休業補償は、賃金・報酬ではない（所得税・社会保険・雇用保険の対象外）
+  const nonRemuneration = injuryCompensation?.amount ?? 0;
   const totalEarnings = Math.floor(basePay || 0)
                     - (absenceDeduction || 0)
                     - (unpaidLeaveDeduction || 0)
                     - (tardyDeduction || 0)
                     - (flexShortageDeduction || 0)
+                    - shutdownDeduction
                     + statutoryLine
                     + roundedPremiums
                     + Math.floor(paidLeavePay || 0)
                     + Math.floor(specialLeavePay || 0)
                     + (commutePay || 0)
                     + (allowanceAmount || 0)
-                    + (customEarnings || 0);
+                    + (customEarnings || 0)
+                    + shutdownAllowance
+                    + nonRemuneration;
 
   // 非固定的賃金：勤務の実績で額が変わる報酬（残業代・休日や深夜の手当・「変動（毎月入力）」の支給項目）
   // 固定的賃金：支給額や支給率が決まっている報酬（基本給（時給制は時給×時間）・有給休暇の賃金・通勤手当・固定の支給項目・固定残業代）
   // 出典：日本年金機構 年金用語集「固定的賃金」https://www.nenkin.go.jp/service/yougo/kagyo/koteitekichingin.html
   //       「非固定的賃金」https://www.nenkin.go.jp/service/yougo/hagyo/hikoteitekichingin.html
   // ※ 名称でなく実態で判断するものなので、月変の年間平均の画面で直せるようにしている
-  const nonFixedEarnings = statutoryLine + roundedPremiums - fixedOvertimeAllowance
+  // 休業手当も、休業した日数で額が変わるので非固定的賃金
+  const nonFixedEarnings = statutoryLine + roundedPremiums - fixedOvertimeAllowance + shutdownAllowance
     + customItems.filter(i => i.type === 'earning' && !i.fixed).reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
   // ── 社会保険料 ──────────────────────────────────────────────
@@ -1808,7 +2001,7 @@ export const calculateSalary = (
   const empRates = ins.LABOR_INSURANCE_RATES[empInsKey] || ins.LABOR_INSURANCE_RATES.general;
   const empInsurance = isEmploymentInsEnrolled
     // 端数：会社の設定（なければ、賃金から引くときの原則の50銭以下切り捨て・50銭1厘以上切り上げ。厚生労働省「雇用保険被保険者からの雇用保険料の控除方法」）
-    ? calcPremium(totalEarnings, empRates[0] * 100, companySettings?.round_emp_ins || 'currency_law', 1)
+    ? calcPremium(totalEarnings - nonRemuneration, empRates[0] * 100, companySettings?.round_emp_ins || 'currency_law', 1)
     : 0;
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
@@ -1820,7 +2013,8 @@ export const calculateSalary = (
   const commuteSetting = parseCommuteSetting(staff.commute_setting);
   const commuteLimit = commuteLimitOf(commuteSetting, targetYear, targetMonth);
   const nonTaxableCommute = Math.min(commutePay, commuteLimit.limit);
-  const taxableAmount = totalEarnings - nonTaxableCommute;
+  // 労災の待期の休業補償は非課税（所得税法9条1項3号・所得税法施行令20条1項2号）
+  const taxableAmount = totalEarnings - nonTaxableCommute - nonRemuneration;
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
   // 扶養控除等申告書を出していない人は乙欄（扶養人数は「従たる給与についての扶養控除等申告書」の人数）
   // 日雇賃金は丙欄で、働いた日ごとに計算する（下の heiDaysOf）
@@ -1911,6 +2105,12 @@ export const calculateSalary = (
     leave: periodLeave
       ? { types: periodLeave.types, days: periodLeave.dates.length, full: leaveFull, paidDays: staff.wage_type === 'monthly' ? leavePaidDays : null, workedDates: leaveWorkedDates }
       : null,
+    shutdown,
+    injuryCompensation,
+    shutdownWorkedPay,
+    averageWageLoading,
+    averageWageMissing,
+    nonRemuneration,
     totalEarnings,
     nonFixedEarnings,
     nonTaxableCommute,

@@ -67,7 +67,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
         // 年間平均と比べるため、前年7月〜当年6月に支払った給与を読む
         const salaries = await db.select<any[]>(
           // 欠勤控除の額・計算期間の所定労働日数は、月給制の人の支払基礎日数に使う（utils/santei.ts の monthFigures）
-          "SELECT staff_id, target_year, target_month, total_earnings, absence_deduction, unpaid_leave_deduction, prescribed_work_days, leave_paid_days FROM salary_results " +
+          "SELECT staff_id, target_year, target_month, total_earnings, non_remuneration, absence_deduction, unpaid_leave_deduction, prescribed_work_days, leave_paid_days FROM salary_results " +
           "WHERE (target_year = ? AND target_month >= 7) OR (target_year = ? AND target_month <= 6)",
           [year - 1, year]
         );

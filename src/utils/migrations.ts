@@ -311,6 +311,18 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "leave_paid_days", "REAL");
     },
   },
+  {
+    version: 20,
+    description:
+      "平均賃金：給与項目に平均賃金での扱い（初めは固定なら月で決まる賃金、変動なら日・時間で決まる賃金）、給与規定グループに休業手当の率（初めは60%）、" +
+      "従業員に試用期間の終わる日、確定した給与に賃金・報酬でない額（労災の待期の休業補償。いままでの給与は 0）の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "salary_item_master", "average_wage", "TEXT");
+      await addColumnIfMissing(db, "payroll_groups", "shutdown_allowance_rate", "REAL DEFAULT 60");
+      await addColumnIfMissing(db, "staff", "probation_end", "TEXT");
+      await addColumnIfMissing(db, "salary_results", "non_remuneration", "INTEGER DEFAULT 0");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */

@@ -331,6 +331,8 @@ export default function AttendanceTable({ am }: Props) {
                       )}
                       {/* セレクトボックスの中も赤くしておくと親切 */}
                       <option value="absent" style={{ color: "#e74c3c" }}>欠勤</option>
+                      {/* 会社の都合で休ませた日（休業手当を払う。少し働いた日は出退勤も入れる。utils/averageWage.ts） */}
+                      <option value="company_leave" style={{ color: "#7c3aed" }}>休業（会社都合）</option>
                     </select>
                   </div>
                 </td>

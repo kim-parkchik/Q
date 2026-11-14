@@ -97,6 +97,10 @@ export interface FlexInput {
   /** 前の月から繰り越した不足時間 */
   carryInHours: number;
   rows: FlexAttendanceRow[];
+  /**
+   * 働かなければならない時間から除く時間（会社都合で休ませた日の所定労働時間。休業手当を払うので、不足時間にしない。utils/averageWage.ts）
+   */
+  excusedHours?: number;
 }
 
 export interface FlexSettlement {
@@ -193,7 +197,12 @@ export const settleFlex = (input: FlexInput): FlexSettlement => {
   }
 
   const carryInMinutes = Math.max(0, minutesOf(input.carryInHours));
-  const requiredMinutes = totalMinutes + carryInMinutes;
+  // 会社都合で休ませた日の所定労働時間は、働かなければならない時間から除く
+  const excusedMinutes = Math.min(totalMinutes, Math.max(0, minutesOf(input.excusedHours)));
+  if (excusedMinutes > 0) {
+    notes.push(`会社都合で休ませた日の ${flexHoursLabel(hoursOf(excusedMinutes))} は、働かなければならない時間から除きました（休業手当を払います）。`);
+  }
+  const requiredMinutes = totalMinutes - excusedMinutes + carryInMinutes;
   let actualMinutes = 0;
   let leaveMinutes = 0;
   for (const row of input.rows) {

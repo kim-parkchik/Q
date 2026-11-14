@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import * as S from "./CustomItemManager.styles";
 import { useCustomItemManager } from "./useCustomItemManager";
+import type { AverageWageKind } from "../../utils/averageWage";
 
 interface Props {
   db: any; // Database型
@@ -24,7 +25,7 @@ export default function CustomItemManager({ db, staffList }: Props) {
     activeTab, setActiveTab,
     earnings, deductions, selectedStaffId, setSelectedStaffId, staffValues,
     newItemName, setNewItemName, newItemType, setNewItemType, newItemCategory, setNewItemCategory,
-    addMasterItem, deleteMasterItem, saveAmount, setOvertimeBase,
+    addMasterItem, deleteMasterItem, saveAmount, setOvertimeBase, setAverageWage,
     moveItem // ← 忘れずに受け取る
   } = useCustomItemManager(db);
 
@@ -106,6 +107,7 @@ export default function CustomItemManager({ db, staffList }: Props) {
                   「残業代の時給に入れる」にチェックした手当は、基本給と合わせて残業代・休日手当・深夜手当の時給の計算に入れます。
                   入れなくてよいのは、家族手当・通勤手当・別居手当・子女教育手当・住宅手当・臨時に支払う賃金・1か月を超える期間ごとに支払う賃金だけです（労働基準法37条5項・施行規則21条）。
                   これに当たるかは名前ではなく中身で決まります（家族の人数に関係なく一律に払う家族手当、距離に関係なく一律に払う通勤手当などは入れます）。
+                  <br />「平均賃金」は、休業手当・休業補償・解雇予告手当に使う平均賃金（労働基準法12条）での扱いです。結婚祝金・見舞金などの臨時の賃金と、3か月を超える期間ごとに払う賃金は「入れない」にします。
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   {earnings.map((item, index) => (
@@ -122,6 +124,16 @@ export default function CustomItemManager({ db, staffList }: Props) {
                             onChange={e => setOvertimeBase(item.id, e.target.checked)}
                           />
                           残業代の時給に入れる
+                        </label>
+                        {/* 平均賃金（労働基準法12条）での扱い。休業手当・休業補償・解雇予告手当に使う（utils/averageWage.ts） */}
+                        <label style={{ fontSize: "11px", color: item.average_wage === "none" ? "#b45309" : "#333", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px" }}
+                          title="平均賃金を計算するときの扱い。月額で決まる手当は「月で決まる賃金」、歩合などは「日・時間・出来高で決まる賃金」（日給・時給の人の最低保障に使います）。結婚祝金・見舞金などの臨時の賃金と、3か月を超える期間ごとに払う賃金は「入れない」にします（労働基準法12条4項）">
+                          平均賃金：
+                          <select value={item.average_wage} onChange={e => setAverageWage(item.id, e.target.value as AverageWageKind)} style={{ fontSize: "11px", padding: "1px 2px" }}>
+                            <option value="month">月で決まる賃金</option>
+                            <option value="time">日・時間・出来高で決まる賃金</option>
+                            <option value="none">入れない（臨時の賃金など）</option>
+                          </select>
                         </label>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>

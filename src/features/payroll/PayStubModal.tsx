@@ -78,17 +78,18 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              disabled={salary.prefectureUnknown || salary.insurerRateMissing || loadingParts.length > 0 || loadErrors.length > 0}
+              disabled={salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
               title={salary.prefectureUnknown
                 ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
                 : salary.insurerRateMissing ? `${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料を計算していません。会社設定の「社会保険規定」で料率を入れてから確定してください`
+                : salary.averageWageMissing.length > 0 ? "平均賃金を出せないため、休業手当・休業補償を計算していません。メニューの「平均賃金」で確かめてから確定してください"
                 : loadErrors.length > 0 ? `${loadErrors.join("・")}を読み込めなかったので、確定できません`
                 : loadingParts.length > 0 ? `${loadingParts.join("・")}を読み込んでいます`
                 : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
               style={{
                 ...S.printBtnS, flex: 1,
-                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
-                cursor: salary.prefectureUnknown || salary.insurerRateMissing || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
+                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
+                cursor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
               }}
             >
               {loadingParts.length > 0 && loadErrors.length === 0 ? "読み込んでいます…" : isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
@@ -130,6 +131,13 @@ export default function PayStubModal(props: Props) {
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               ⚠ {salary.insurer.name}の、{insMonthLabel}の料率が入っていないため、健康保険料と介護保険料を計算していません（0円）。
               会社設定の「社会保険規定」で、組合から知らされた本人負担の料率を「何年何月分から」と一緒に入れてください。入れるまで確定できません。
+            </div>
+          )}
+          {salary.averageWageMissing.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ 平均賃金を出せないので、次の額を計算していません（0円）。確定できません。
+              {salary.averageWageMissing.map((m) => <div key={m} style={{ fontWeight: "normal" }}>・{m}</div>)}
+              <div style={{ fontWeight: "normal" }}>メニューの「平均賃金」で理由を確かめ、必要なら平均賃金を手で入れてください（入社して間もない人・3か月がすべて休業の人など）。</div>
             </div>
           )}
           {salary.insurer.type === "kyokai" && !salary.prefectureUnknown && branchPrefectureProblem && (
@@ -180,6 +188,31 @@ export default function PayStubModal(props: Props) {
               </div>
             );
           })()}
+          {salary.shutdown && (
+            // 会社都合で休ませた日（勤怠の「休業（会社都合）」。utils/averageWage.ts）
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              <div>
+                会社都合で休ませた日が{salary.shutdown.days}日あります。休業手当は、平均賃金の{salary.shutdown.rate}%（給与規定グループの設定）を払います（労働基準法26条）。
+              </div>
+              {salary.shutdown.deductionDetail && salary.shutdown.deduction > 0 && (
+                <div>休業の日の控除（欠勤控除と同じ計算）：{salary.shutdown.deductionDetail}（1円未満切り捨て）</div>
+              )}
+              {salary.shutdown.lines.map((l) => <div key={l}>休業手当：{l}</div>)}
+              {salary.shutdown.notes.map((n) => <div key={n}>{n}</div>)}
+              {salary.shutdown.deductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.shutdown.deductionNote}</div>}
+            </div>
+          )}
+          {salary.injuryCompensation && (
+            // 労災の待期の休業補償（労働基準法76条。utils/averageWage.ts）
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
+              <div>
+                業務上の負傷・疾病による休業の最初の3日（労災保険の休業補償給付が出ない待期期間）は、会社が平均賃金の60%の休業補償を払います（労働基準法76条）。
+                賃金ではないので、所得税・社会保険料・雇用保険料はかかりません。4日目からは、労災保険に休業補償給付を請求してください。
+              </div>
+              {salary.injuryCompensation.lines.map((l) => <div key={l}>休業補償：{l}</div>)}
+              {salary.injuryCompensation.notes.map((n) => <div key={n}>{n}</div>)}
+            </div>
+          )}
           {((salary.proration && salary.proration.reason !== "leave") || salary.prorationNote) && (
             <div style={{ marginTop: 10, fontSize: 12, color: salary.prorationNote ? "#b45309" : "#475569" }}>
               {salary.proration && salary.proration.reason !== "leave"
@@ -389,6 +422,10 @@ export default function PayStubModal(props: Props) {
                   {salary.tardyDeduction > 0 && (
                     <tr><td style={{...S.tdS, color: "#c0392b"}}>遅刻早退控除({fmtH(salary.tardyHours)})</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.tardyDeduction.toLocaleString()}</td></tr>
                   )}
+                  {/* 会社都合で休ませた日の控除（月給制。欠勤控除と同じ計算） */}
+                  {(salary.shutdown?.deduction ?? 0) > 0 && (
+                    <tr><td style={{...S.tdS, color: "#c0392b"}}>休業の日の控除({salary.shutdown!.fullDays}日)</td><td style={{...S.rtdS, color: "#c0392b"}}>－¥{salary.shutdown!.deduction.toLocaleString()}</td></tr>
+                  )}
 
                   {/* 残業手当の内訳分け */}
                   {salary.statutoryOvertimePay > 0 && (
@@ -430,6 +467,13 @@ export default function PayStubModal(props: Props) {
                   {customEarningItems.map((item, i) => (
                     <tr key={i}><td style={S.tdS}>{item.name}</td><td style={S.rtdS}>¥{item.amount.toLocaleString()}</td></tr>
                   ))}
+                  {/* 会社都合で休ませた日の休業手当・労災の待期の休業補償（平均賃金を使う。utils/averageWage.ts） */}
+                  {(salary.shutdown?.allowance ?? 0) > 0 && (
+                    <tr><td style={S.tdS}>休業手当({salary.shutdown!.days}日)</td><td style={S.rtdS}>¥{salary.shutdown!.allowance.toLocaleString()}</td></tr>
+                  )}
+                  {(salary.injuryCompensation?.amount ?? 0) > 0 && (
+                    <tr><td style={S.tdS}>休業補償(労災の待期・非課税)</td><td style={S.rtdS}>¥{salary.injuryCompensation!.amount.toLocaleString()}</td></tr>
+                  )}
 
                   {padRows(earningItemsCount, targetRows)}
                   <tr style={S.totalRowS}><td style={S.tdS}>支給合計</td><td style={S.rtdS}>¥{salary.totalEarnings.toLocaleString()}</td></tr>

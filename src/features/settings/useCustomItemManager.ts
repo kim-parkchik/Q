@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { executeBatch } from "../../utils/dbBatch";
+import { toAverageWageKind, type AverageWageKind } from "../../utils/averageWage";
 
 export interface SalaryItem {
   id: number;
@@ -10,6 +11,8 @@ export interface SalaryItem {
   display_order: number;
   /** 支給項目を残業代の時給（割増賃金の基礎）に入れるか（1: 入れる / 0: 入れない） */
   in_overtime_base: number;
+  /** 支給項目の平均賃金での扱い（設定がなければ、固定なら月で決まる賃金、変動なら日・時間で決まる賃金。utils/averageWage.ts） */
+  average_wage: AverageWageKind;
 }
 
 interface Database {
@@ -40,9 +43,10 @@ export function useCustomItemManager(db: Database) {
   const loadMasterItems = async () => {
     try {
       const res = await db.select<SalaryItem[]>(
-        "SELECT id, name, type, category, display_order, COALESCE(in_overtime_base, 1) AS in_overtime_base FROM salary_item_master ORDER BY display_order ASC, id ASC"
+        "SELECT id, name, type, category, display_order, COALESCE(in_overtime_base, 1) AS in_overtime_base, average_wage FROM salary_item_master ORDER BY display_order ASC, id ASC"
       );
-      setItems(res || []);
+      // 平均賃金での扱いが入っていない項目は、固定なら月で決まる賃金、変動なら日・時間で決まる賃金として出す
+      setItems((res || []).map(i => ({ ...i, average_wage: toAverageWageKind(i.average_wage, i.category) })));
     } catch (e) {
       console.error("マスター読み込みエラー:", e);
     }
@@ -164,6 +168,17 @@ export function useCustomItemManager(db: Database) {
     }
   };
 
+  // 支給項目の、平均賃金での扱い（月で決まる・日や時間で決まる・入れない）を変える
+  const setAverageWage = async (id: number, kind: AverageWageKind) => {
+    try {
+      await db.execute("UPDATE salary_item_master SET average_wage = ? WHERE id = ?", [kind, id]);
+      setItems(prev => prev.map(i => i.id === id ? { ...i, average_wage: kind } : i));
+    } catch (e) {
+      console.error("平均賃金での扱いの保存に失敗しました:", e);
+      alert("保存に失敗しました。");
+    }
+  };
+
   const saveAmount = async (itemId: number, amount: number) => {
     if (!selectedStaffId) return;
     await db.execute(
@@ -194,6 +209,7 @@ export function useCustomItemManager(db: Database) {
     deleteMasterItem, 
     saveAmount,
     setOvertimeBase,
+    setAverageWage,
     moveItem
   };
 }

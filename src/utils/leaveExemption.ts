@@ -45,6 +45,11 @@ export interface LeavePeriod {
   start: string;
   /** 終了日（YYYY-MM-DD）。まだ決まっていなければ空 */
   end: string;
+  /**
+   * 業務上の負傷・疾病による休業の、事故の日（病気は診断で決まった日。YYYY-MM-DD。空なら開始日）。
+   * 最初の3日の休業補償の平均賃金を数える日（労働基準法施行規則48条）。同じ事故の休業は、待期の3日を通算する（utils/averageWage.ts）
+   */
+  accident?: string;
 }
 
 /** 社会保険料の免除に使う休業（産前産後休業・育児休業等） */
@@ -63,7 +68,10 @@ export const parseLeavePeriods = (json: unknown): LeavePeriod[] => {
     if (!Array.isArray(list)) return [];
     return list
       .filter((p) => LEAVE_TYPES.includes(p?.type) && typeof p.start === 'string' && p.start)
-      .map((p) => ({ type: p.type, start: p.start, end: typeof p.end === 'string' ? p.end : '' }));
+      .map((p) => ({
+        type: p.type, start: p.start, end: typeof p.end === 'string' ? p.end : '',
+        ...(p.type === 'injury' && typeof p.accident === 'string' && p.accident ? { accident: p.accident } : {}),
+      }));
   } catch {
     return [];
   }
@@ -85,12 +93,15 @@ export const exemptLeavePeriodsOf = (staff: { leave_periods?: unknown; is_execut
 
 /** 保存用の JSON。期間がなければ空文字 */
 export const stringifyLeavePeriods = (leaves: LeavePeriod[]): string =>
-  leaves.length > 0 ? JSON.stringify(leaves.map(({ type, start, end }) => ({ type, start, end }))) : '';
+  leaves.length > 0
+    ? JSON.stringify(leaves.map(({ type, start, end, accident }) => ({ type, start, end, ...(type === 'injury' && accident ? { accident } : {}) })))
+    : '';
 
 /** 入力の誤り（開始日が空・終了日が開始日より前）。問題なければ null */
 export const validateLeavePeriod = (p: LeavePeriod): string | null => {
   if (!p.start) return '開始日を入れてください';
   if (p.end && p.end < p.start) return '終了日が開始日より前です';
+  if (p.type === 'injury' && p.accident && p.accident > p.start) return '事故の日が開始日より後です';
   return null;
 };
 

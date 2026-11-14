@@ -151,6 +151,7 @@ export const WORK_TYPE_LABELS: Record<string, string> = {
   special: "特別休暇",
   special_half: "特別休暇（半日）",
   absent: "欠勤",
+  company_leave: "休業（会社都合）",
 };
 
 /** 勤怠の1日の有給（全休 1日・半休 0.5日、時間有給の時間） */

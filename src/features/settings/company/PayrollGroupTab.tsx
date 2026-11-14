@@ -31,6 +31,7 @@ import {
     type AbsenceDeductionMethod, type ProrationMethod, type SocialInsCollection, type TardyDeductionMethod,
 } from '../../../utils/calcSalary';
 import { LEAVE_PRORATION_METHOD_LABELS, toLeaveProrationMethod, type LeaveProrationMethod } from '../../../utils/leaveOfAbsence';
+import { SHUTDOWN_ALLOWANCE_MIN_RATE, toShutdownRate } from '../../../utils/averageWage';
 import {
     DEFAULT_LENGTH_RULES, LENGTH_COMBINE_LABELS, TIME_COMBINE_LABELS, describeCombine, describeFixedBreak, parseFixedBreak,
     type LengthCombine, type LengthRule, type TimeCombine,
@@ -60,6 +61,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgProrationMethod,
         pgLeaveProrationMethod,
         setPgLeaveProrationMethod,
+        pgShutdownRate,
+        setPgShutdownRate,
         pgAbsenceDeductionMethod,
         setPgAbsenceDeductionMethod,
         pgTardyDeductionMethod,
@@ -108,6 +111,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                         / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
                                         / 休業の月: {LEAVE_PRORATION_METHOD_LABELS[toLeaveProrationMethod(pg.leave_proration_method)]}
+                                        / 休業手当: 平均賃金の{toShutdownRate(pg.shutdown_allowance_rate)}%
                                         / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
                                         / 遅刻・早退・中抜け: {TARDY_DEDUCTION_METHOD_LABELS[toTardyDeductionMethod(pg.tardy_deduction_method)]}
                                         / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}{parseFixedBreak(pg.fixed_break) ? `（${describeCombine(parseFixedBreak(pg.fixed_break))}）` : ""}
@@ -264,6 +268,21 @@ export default function PayrollGroupTab({ cm }: Props) {
                         計算期間がまるごと休業の月は、この設定にかかわらず、月給・固定の支給項目・固定残業代・通勤手当（月額）を払いません。
                         途中で始まる・終わる月は、月給と固定の支給項目を、ここで選んだしかたで日割りします（1円未満は切り上げ。入社・退職の月と同じく、固定残業代・通勤手当は日割りしません）。
                         日割りした日数は、算定・月変の支払基礎日数にもなります。
+                    </p>
+
+                    <label style={miniLabelStyle}>会社都合で休ませた日の休業手当（平均賃金の何%）</label>
+                    <input
+                        type="number" min={SHUTDOWN_ALLOWANCE_MIN_RATE} max={100} step={1}
+                        value={pgShutdownRate}
+                        onChange={e => setPgShutdownRate(Number(e.target.value))}
+                        onBlur={() => setPgShutdownRate(toShutdownRate(pgShutdownRate))}
+                        style={{ ...inputStyle, marginBottom: "6px", width: "120px" }}
+                    />
+                    <span style={{ fontSize: "12px", marginLeft: "6px" }}>%</span>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        仕事が減ったなど会社の都合で休ませた日（勤怠の区分「休業（会社都合）」）は、平均賃金の60%以上の休業手当を払います（労働基準法26条）。
+                        就業規則で60%より多く払うと決めているときは、その率にします（60%より少なくはできません）。
+                        月給の人は、その日の分を欠勤控除と同じ計算で引いて休業手当を払い、時給・日給の人は、少し働いた日は働いた分の賃金との差額を払います。
                     </p>
 
                     <label style={miniLabelStyle}>月給制の人の欠勤控除</label>

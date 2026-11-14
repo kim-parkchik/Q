@@ -44,7 +44,7 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
         const groups = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
         // その年の1月から、次の年の2月（12月が最初の月なら3か月目）までに支払った給与
         const salaries = await db.select<SalaryRecord[]>(
-          `SELECT staff_id, target_year, target_month, total_earnings, applied_base_wage, absence_deduction, unpaid_leave_deduction, prescribed_work_days, leave_paid_days
+          `SELECT staff_id, target_year, target_month, total_earnings, non_remuneration, applied_base_wage, absence_deduction, unpaid_leave_deduction, prescribed_work_days, leave_paid_days
            FROM salary_results WHERE (target_year * 12 + target_month) BETWEEN ? AND ?`,
           [year * 12 + 1, (year + 1) * 12 + 2]
         );

@@ -108,6 +108,7 @@ export const DB_SCHEMAS = [
     status TEXT DEFAULT 'active',
     join_date TEXT, 
     retirement_date TEXT, 
+    probation_end TEXT,                -- 試用期間の終わる日（空ならなし。平均賃金で、試用期間の日と賃金を除く。労働基準法12条3項5号。utils/averageWage.ts）
     is_executive INTEGER DEFAULT 0,
     payroll_group_id INTEGER DEFAULT 1,
     social_insurance_group_id INTEGER DEFAULT 1, -- 社保規定グループとの紐付け
@@ -248,7 +249,8 @@ export const DB_SCHEMAS = [
     type TEXT NOT NULL,
     category TEXT NOT NULL, 
     display_order INTEGER DEFAULT 0,
-    in_overtime_base INTEGER DEFAULT 1 -- 支給項目を残業代の時給（割増賃金の基礎）に入れるか（1: 入れる / 0: 入れない。家族手当・通勤手当・住宅手当など）
+    in_overtime_base INTEGER DEFAULT 1, -- 支給項目を残業代の時給（割増賃金の基礎）に入れるか（1: 入れる / 0: 入れない。家族手当・通勤手当・住宅手当など）
+    average_wage TEXT                   -- 支給項目の平均賃金での扱い 'month':月で決まる賃金 / 'time':日・時間・出来高で決まる賃金 / 'none':入れない（臨時の賃金など）。NULL は固定の項目なら month、変動なら time（utils/averageWage.ts）
   );`,
 
   // 11. スタッフ個別給与設定
@@ -289,6 +291,7 @@ export const DB_SCHEMAS = [
     flex_carry_hours REAL,                      -- フレックスタイム制で、次の月に繰り越す不足時間（フレックスタイム制の人だけ。ほかは NULL）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
     leave_paid_days REAL,                       -- 休業の日がある月に、給与（月給）を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月は NULL。算定・月変の支払基礎日数に使う）
+    non_remuneration INTEGER DEFAULT 0,         -- 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。所得税・社会保険・雇用保険の対象外。算定・月変の報酬から除く。utils/averageWage.ts）
 
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,
@@ -393,6 +396,7 @@ export const DB_SCHEMAS = [
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
     leave_proration_method TEXT DEFAULT 'workdays', -- 計算期間の途中で休業が始まる・終わる月の日割り 'workdays':所定労働日数 / 'calendar':暦日数 / 'none':しない（utils/leaveOfAbsence.ts）
+    shutdown_allowance_rate REAL DEFAULT 60,        -- 会社都合で休ませた日の休業手当（平均賃金の何%。60以上。労働基準法26条。utils/averageWage.ts）
     absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
     tardy_deduction_method TEXT DEFAULT 'none',       -- 月給制・日給制の人の遅刻・早退・中抜けの控除 'none':しない / 'annual':1か月平均所定労働時間で割る / 'period':計算期間の所定労働時間で割る
     flex_rule TEXT,                                   -- フレックスタイム制の決まり（JSON。総労働時間・法定の総枠・不足時間。NULL は初めの決まり。utils/flexTime.ts）
@@ -549,6 +553,17 @@ export const DB_SCHEMAS = [
   );`,
   // いま使えるカードは、1人に1枚だけ
   `CREATE UNIQUE INDEX IF NOT EXISTS timeqard_cards_one_active ON timeqard_cards(staff_id) WHERE revoked_at IS NULL;`,
+
+  // 手で入れた平均賃金（Q で計算できないとき・労働局長が決めたときなど。従業員・できごとの日ごと。utils/averageWageStore.ts）
+  `CREATE TABLE IF NOT EXISTS average_wage_overrides (
+    staff_id TEXT NOT NULL,
+    event_date TEXT NOT NULL,          -- できごとの日（YYYY-MM-DD）
+    amount_sen INTEGER NOT NULL,       -- 平均賃金（銭）
+    note TEXT,                         -- なぜ手で入れたか
+    created_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    PRIMARY KEY (staff_id, event_date),
+    FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
 
   `CREATE TABLE IF NOT EXISTS app_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

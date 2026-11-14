@@ -20,6 +20,8 @@ export default function EmploymentSection({ cm }: Props) {
         setTargetStatus,
         targetJoinDate,
         setTargetJoinDate,
+        targetProbationEnd,
+        setTargetProbationEnd,
         targetRetirementDate,
         setTargetRetirementDate,
         targetCommuteType,
@@ -107,6 +109,15 @@ export default function EmploymentSection({ cm }: Props) {
                 <div style={{ flex: 1, backgroundColor: "#f0f7ff", padding: "8px", borderRadius: "6px", border: "1px solid #dbeafe" }}>
                     <label style={{ ...labelStyle, fontSize: "11px", color: "#1e40af", marginBottom: "4px" }}>入社日</label>
                     <input type="date" value={targetJoinDate} onChange={e => setTargetJoinDate(e.target.value)} style={inputStyle} />
+                </div>
+                {/* 試用期間の終わる日（平均賃金で、試用期間の日と賃金を除く。労働基準法12条3項5号。utils/averageWage.ts） */}
+                <div style={{ flex: 1, backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px", border: "1px solid #e2e8f0" }}
+                    title="試用期間がある人だけ入れます。平均賃金（休業手当・休業補償・解雇予告手当）を計算するとき、試用期間の日とその賃金を除きます（試用期間の中のできごとなら除きません）">
+                    <label style={{ ...labelStyle, fontSize: "11px", color: "#475569", marginBottom: "4px" }}>試用期間の終わる日（なければ空）</label>
+                    <input type="date" value={targetProbationEnd} onChange={e => setTargetProbationEnd(e.target.value)} style={inputStyle} />
+                    {targetProbationEnd && targetJoinDate && targetProbationEnd < targetJoinDate && (
+                        <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "2px" }}>入社日より前になっています</div>
+                    )}
                 </div>
                 {/* 退職日 */}
                 <div style={{ flex: 1, backgroundColor: targetStatus === 'retired' ? "#fff1f2" : "#f1f5f9", padding: "8px", borderRadius: "6px" }}>
