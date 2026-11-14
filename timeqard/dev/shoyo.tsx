@@ -11,6 +11,7 @@
  *   パートの人：社会保険に入っていない（届け出ない）
  *   退職した人：11月30日に退職（12月10日の賞与は届け出ない）
  *   寸志（11月30日）：整理番号がない人・フリガナにスペースがない人（直すところがあるので、ファイルを作れない）
+ * 賞与支払予定月は7月・12月（7月は賞与を払っていないので、賞与不支給報告書を出す。12月は冬季賞与を払った）
  * 「電子申請用のファイルを保存」で保存の窓の代わりに、保存したバイトを window.__savedFile に入れる
  * 上には会社設定（CompanyInfoTab.tsx）の「社会保険 事業所整理記号・事業所番号」の欄を出す（保存すると、下の届書に使う）
  */
@@ -45,6 +46,7 @@ const store = {
   company: {
     id: 1, name: "株式会社健保産業", zip_code: "168-8505", address: "東京都杉並区高井戸3-5-24", phone: "03-2345-6789",
     representative: "健保 良一", shaho_office_symbol: "57-ケマ", shaho_office_number: "12345", shaho_media_seq: 23,
+    bonus_plan_months: "7,12" as string | null,
   },
   staff: [
     staff({ id: "1001", name: "山田 太郎", furigana: "ヤマダ タロウ", birthday: "1985-04-10", pension_num: "3" }),
@@ -77,6 +79,8 @@ const fakeDb = {
     if (q.startsWith("SELECT * FROM company WHERE id = 1")) return [store.company];
     if (q.startsWith("SELECT prefecture FROM branches WHERE id = 1")) return [{ prefecture: "東京都" }];
     if (q.startsWith("SELECT * FROM staff")) return store.staff;
+    if (q.startsWith("SELECT id, name, type FROM social_insurance_groups")) return [{ id: 1, name: "協会けんぽ", type: "kyokai" }];
+    if (q.startsWith("SELECT group_id, from_month")) return [];
     if (q.startsWith("SELECT s.id, s.name, s.target_year")) {
       return [...store.bonuses]
         .sort((a, b) => b.payment_date.localeCompare(a.payment_date) || b.id - a.id)
@@ -85,7 +89,7 @@ const fakeDb = {
     if (q.startsWith("SELECT r.bonus_setting_id AS settingId")) {
       return store.results
         .map(([settingId, staffId, totalEarnings]) => ({ settingId, staffId, totalEarnings, b: store.bonuses.find((b) => b.id === settingId)! }))
-        .filter((r) => r.b.payment_date.slice(0, 7) === params[0])
+        .filter((r) => r.b.payment_date.slice(0, String(params[0]).length) === params[0])
         .map((r) => ({ settingId: r.settingId, name: r.b.name, paymentDate: r.b.payment_date, staffId: r.staffId, totalEarnings: r.totalEarnings }));
     }
     console.warn("fakeDb: 知らない SELECT", q, params);
@@ -94,6 +98,7 @@ const fakeDb = {
   async execute(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
     if (q.startsWith("UPDATE company SET shaho_media_seq")) store.company.shaho_media_seq = Number(params[0]);
+    else if (q.startsWith("UPDATE company SET bonus_plan_months")) store.company.bonus_plan_months = params[0];
     else if (!q.startsWith("INSERT INTO app_logs")) console.warn("fakeDb: 知らない EXECUTE", q, params);
     return { rowsAffected: 1 };
   },

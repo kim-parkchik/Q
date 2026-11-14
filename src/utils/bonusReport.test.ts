@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { bonusReportDeadline, buildBonusReport, paymentsForBonus, reach70Date, reach75Date, splitBasicPensionNumber, type BonusPayment } from "./bonusReport";
+import { bonusReportDeadline, buildBonusReport, paymentsForBonus, type BonusPayment } from "./bonusReport";
+import { reach70Date, reach75Date, splitBasicPensionNumber } from "./shahoPerson";
 import { buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
 
 /** 仕様書の作成例の事業所（事業所整理記号 57-ケマ。東京都） */
@@ -43,6 +44,14 @@ describe("届書の1人分（仕様書の作成例と同じになる）", () => 
     expect([r.paymentDate, r.firstPaymentDay, r.currency, r.total]).toEqual(["2026-12-25", "05", 600500, 600000]);
     expect([r.values[9], r.values[10], r.values[19]]).toEqual(["9", "081225", "05"]);
     expect(r.notes[0]).toContain("同じ月に払った賞与（決算賞与 12月5日・冬季賞与 12月25日）を合わせて届け出ます");
+  });
+  test("健康保険組合・国民健康保険組合の70歳以上の人は、70歳以上被用者賞与支払届だけ（整理番号を書かない）", () => {
+    const old = person({ birthday: "1955-01-01", basic_pension_number: "1234567890" });
+    const kyokai = buildBonusReport([old], [pay({ paymentDate: "2026-07-10" })], office).rows[0];
+    expect([kyokai.values[4], kyokai.values[17], kyokai.values[20]]).toEqual(["1", "1", ""]);
+    const union = buildBonusReport([old], [pay({ paymentDate: "2026-07-10" })], office, () => "union").rows[0];
+    expect([union.values[4], union.values[17], union.values[20], union.problems]).toEqual(["", "1", "1", []]);
+    expect(union.notes.join("")).toContain("健康保険組合・国民健康保険組合の70歳以上の人");
   });
   test("二以上事業所勤務者は、備考の「二以上勤務」に 1", () => {
     expect(buildBonusReport([person({ birthday: "1990-05-27", multi_office: 1 })], [pay()], office).rows[0].values[18]).toBe("1");

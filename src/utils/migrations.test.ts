@@ -24,10 +24,10 @@ const header = (db: Database) => ({
 });
 
 describe("会社ファイルの形式（2026-11-14 の形を v1 とする。印は \"QP02\"）", () => {
-    test("v1 から始めて、今の最新も v1（積み重ねた更新 v2〜v21 は、表の定義にまとめた）", () => {
+    test("v1 から始めて、v2 から積み重ねる（前に積み重ねた更新 v2〜v21 は、v1 の表の定義にまとめた）", () => {
         expect(BASE_DB_VERSION).toBe(1);
-        expect(LATEST_DB_VERSION).toBe(1);
-        expect(MIGRATIONS).toEqual([]);
+        expect(LATEST_DB_VERSION).toBe(2);
+        expect(MIGRATIONS.map((m) => m.version)).toEqual([2]);
         expect(String.fromCharCode(Q_FILE_ID >>> 24, (Q_FILE_ID >>> 16) & 0xff, (Q_FILE_ID >>> 8) & 0xff, Q_FILE_ID & 0xff)).toBe("QP02");
     });
     test("新しいファイル：表を作り、Q の印と最新の番号を付ける（更新は実行しない）。前の更新で足した列も、はじめからある", async () => {
@@ -68,6 +68,25 @@ describe("会社ファイルの形式（2026-11-14 の形を v1 とする。印�
             backup.close();
             await Bun.file(path).delete();
         }
+    });
+});
+
+describe("更新（v2 から）", () => {
+    test("v1 のファイルに、v2 の列（会社の賞与支払予定月）を足して v2 にする（入れたデータはそのまま）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT)");
+        db.exec("INSERT INTO company (id, name) VALUES (1, 'テスト株式会社')");
+        db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
+        db.exec("PRAGMA user_version = 1");
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual(["v2: 会社に、年金機構に登録している賞与支払予定月（賞与不支給報告書に使う）の列を足す"]);
+        expect(columns(db, "company")).toContain("bonus_plan_months");
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 2 });
+        expect(db.query("SELECT name, bonus_plan_months FROM company").get()).toEqual({ name: "テスト株式会社", bonus_plan_months: null });
+    });
+    test("新しいファイルには、はじめから v2 の列がある", async () => {
+        const db = new Database(":memory:");
+        await prepareCompanyFile(wrap(db), DB_SCHEMAS);
+        expect(columns(db, "company")).toContain("bonus_plan_months");
     });
 });
 

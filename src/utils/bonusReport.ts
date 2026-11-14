@@ -22,10 +22,12 @@
  *       厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」（src/constants/shahoTodoke.ts）
  */
 import dayjs from "dayjs";
-import { SHAHO_BIRTH_ERA_CODES, SHAHO_BONUS_FIELDS, SHAHO_BONUS_FORM_CODE, SHAHO_PAY_ERA_CODES } from "../constants/shahoTodoke";
-import { birthdayAt, checkInsuredMonth, checkSocialInsEnrolled } from "./calcSalary";
+import { SHAHO_BONUS_FIELDS, SHAHO_BONUS_FORM_CODE, SHAHO_PAY_ERA_CODES } from "../constants/shahoTodoke";
+import { checkInsuredMonth, checkSocialInsEnrolled } from "./calcSalary";
+import type { InsurerType } from "./healthInsurer";
 import { checkLeaveExemptBonus, exemptLeavePeriodsOf } from "./leaveExemption";
-import { fieldProblem, hasNameSpace, shahoDate, toShahoKana, toShahoKanji, unusableChars } from "./shahoCsv";
+import { fieldProblem, shahoDate } from "./shahoCsv";
+import { reach70Date, reach75Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
 
 /** 1回の賞与の、1人に払った額（確定した賞与） */
 export interface BonusPayment {
@@ -82,16 +84,8 @@ const AMOUNT_OVER = 9999999;
 const TOTAL_OVER_SINGLE = 9999000;
 const TEN_MILLION = 10000000;
 
-/** 70歳に達する日（誕生日の前日。年齢計算ニ関スル法律）。この日から厚生年金の資格がない（70歳以上被用者） */
-export const reach70Date = (birthday: string): string => birthdayAt(birthday, 70).subtract(1, "day").format("YYYY-MM-DD");
-/** 75歳の誕生日。この日から健康保険の資格がない（後期高齢者医療） */
-export const reach75Date = (birthday: string): string => birthdayAt(birthday, 75).format("YYYY-MM-DD");
-
-/** 基礎年金番号（10けた）を、上4けた（課所符号）と下6けた（一連番号）に分ける。10けたでなければ null */
-export const splitBasicPensionNumber = (value: string | null | undefined): [string, string] | null => {
-  const digits = String(value ?? "").normalize("NFKC").replace(/[^0-9]/g, "");
-  return digits.length === 10 ? [digits.slice(0, 4), digits.slice(4)] : null;
-};
+/** 被保険者の項目（utils/shahoPerson.ts）の、この届書の項目の番号（0から） */
+const PERSON_FIELDS: Record<ShahoPersonPart, number[]> = { pensionNumber: [4], kana: [5], birth: [7, 8], basic: [15, 16] };
 
 /** 支払った日に被保険者だったか（入社した日以後、退職した日（資格喪失日の前日）まで） */
 const insuredOn = (staff: any, date: string): boolean =>
@@ -102,11 +96,13 @@ const insuredOn = (staff: any, date: string): boolean =>
  * @param staffList 従業員（社会保険の加入・生年月日・整理番号など）
  * @param payments その月（賞与を払った月）に払った、確定した賞与（1人1回ずつ）
  * @param office 事業所情報の12項目（utils/shahoCsv.ts の shahoOfficeValues。頭の3つが都道府県コード・郡市区符号・事業所記号）
+ * @param insurerTypeOf 従業員の健康保険の保険者（健康保険組合・国民健康保険組合の70歳以上の人は、70歳以上被用者賞与支払届だけを出す）
  */
 export const buildBonusReport = (
   staffList: any[],
   payments: BonusPayment[],
   office: string[],
+  insurerTypeOf: (staff: any) => InsurerType = () => "kyokai",
 ): { rows: BonusReportRow[]; skipped: BonusReportSkipped[] } => {
   const rows: BonusReportRow[] = [];
   const skipped: BonusReportSkipped[] = [];
@@ -167,7 +163,9 @@ export const buildBonusReport = (
     // 年齢（支払った日で数える）：70歳に達した日から厚生年金の資格がなく（70歳以上被用者）、75歳の誕生日から健康保険の資格もない
     const birthday = String(staff.birthday ?? "");
     const over70 = !!birthday && lastPaid.paymentDate >= reach70Date(birthday);
-    const over70Only = over70 && lastPaid.paymentDate >= reach75Date(birthday);
+    const over75 = over70 && lastPaid.paymentDate >= reach75Date(birthday);
+    // 75歳以上と、健康保険組合・国民健康保険組合の70歳以上の人は、年金事務所には70歳以上被用者の分だけを出す
+    const over70Only = over70 && (over75 || insurerTypeOf(staff) !== "kyokai");
     const multiOffice = Number(staff.multi_office) === 1;
     // 保険料はかからないが届け出る賞与
     if (!checkInsuredMonth(staff.join_date, staff.retirement_date, y, m)) {
@@ -176,33 +174,16 @@ export const buildBonusReport = (
     if (checkLeaveExemptBonus(exemptLeavePeriodsOf(staff), lastPaid.paymentDate)) {
       notes.push("産前産後休業・育児休業等で保険料が免除される期間の賞与ですが、届け出ます（標準賞与額は年度の累計に入ります）");
     }
-    if (over70Only) notes.push("75歳以上（健康保険の資格もない）なので、「70歳以上被用者賞与支払届」だけを出します（被保険者整理番号は書きません）");
+    if (over75) notes.push("75歳以上（健康保険の資格もない）なので、「70歳以上被用者賞与支払届」だけを出します（被保険者整理番号は書きません）");
+    else if (over70Only) notes.push("健康保険組合・国民健康保険組合の70歳以上の人なので、年金事務所には「70歳以上被用者賞与支払届」だけを出します（被保険者整理番号は書きません）");
     else if (over70) notes.push("70歳以上被用者なので、備考の「70歳以上被用者」に印を付け、基礎年金番号を書きます");
 
-    const pensionNumber = over70Only ? "" : String(staff.pension_num ?? "").normalize("NFKC").trim();
-    if (!over70Only && !pensionNumber) problem("被保険者整理番号がありません（従業員の画面の「厚生年金 整理番号」に、資格取得のときに知らされた番号を入れてください）", 4);
-    const kana = toShahoKana(staff.furigana);
-    if (!kana) problem("フリガナがありません（従業員の画面）", 5);
-    else if (!hasNameSpace(kana, " ")) problem("フリガナの姓と名の間に、スペースを入れてください（従業員の画面）", 5);
-    // 漢字の氏名は省略できる。書けない字がある・12文字を超える・姓と名の間にスペースがないときは書かない（カナの氏名で届く）
-    let kanji = toShahoKanji(staff.name);
-    const kanjiField = SHAHO_BONUS_FIELDS[6];
-    if (kanji && (unusableChars(kanji).length > 0 || [...kanji].length > kanjiField.max || !hasNameSpace(kanji, "　"))) {
-      notes.push(
-        unusableChars(kanji).length > 0 ? `漢字の氏名に届書に書けない字（${unusableChars(kanji).join("")}）があるので、漢字の氏名は書きません（カナの氏名で届きます）`
-        : [...kanji].length > kanjiField.max ? `漢字の氏名が${kanjiField.max}文字を超えるので、漢字の氏名は書きません（カナの氏名で届きます）`
-        : "漢字の氏名の姓と名の間にスペースがないので、漢字の氏名は書きません（カナの氏名で届きます。従業員の画面でスペースを入れると書きます）",
-      );
-      kanji = "";
-    }
-    const birth = shahoDate(birthday, SHAHO_BIRTH_ERA_CODES);
-    if (!birth) problem("生年月日がありません（従業員の画面）", 7, 8);
+    const person = shahoPersonValues(staff, { kanjiField: SHAHO_BONUS_FIELDS[6], withoutPensionNumber: over70Only, needBasic: over70 });
+    const { pensionNumber, kana, kanji, birth, basic } = person;
+    person.problems.forEach((p) => problem(p.message, ...PERSON_FIELDS[p.part]));
+    notes.push(...person.notes);
     const pay = shahoDate(lastPaid.paymentDate, SHAHO_PAY_ERA_CODES);
     if (!pay) problem(`支給日（${lastPaid.paymentDate}）を和暦にできません`, 9, 10);
-    const basic = over70 ? splitBasicPensionNumber(staff.basic_pension_number) : null;
-    if (over70 && !basic) {
-      problem("70歳以上被用者なので、基礎年金番号（10けた）を従業員の画面に入れてください", 15, 16);
-    }
     // 1千万円以上は 9999999（合計は、通貨か現物のどちらかだけなら 9999000、両方で1千万円以上なら 9999999）
     const total = Math.floor((currency + inKind) / 1000) * 1000;
     const currencyText = currency >= TEN_MILLION ? String(AMOUNT_OVER) : String(currency);

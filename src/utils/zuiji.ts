@@ -185,6 +185,49 @@ export const buildZuijiCandidate = (
   };
 };
 
+/** 確定した給与の基本給（時給制は時給）・固定残業代が、前の月から変わったこと（固定的賃金の変動） */
+export interface FixedWageChange {
+  direction: ZuijiDirection;
+  /** 変わったときだけ前と後の値（変わっていなければ null） */
+  base: { before: number; after: number } | null;
+  fixedOvertime: { before: number; after: number } | null;
+  /** 判定するときの注意（基本給と固定残業代が逆に変わり、合計が変わっていないとき） */
+  note: string | null;
+}
+
+/**
+ * その月に支払った給与で、固定的賃金（基本給と固定残業代）が前の月から変わったか（変わっていなければ null）
+ * 基本給は、どちらかの月がわからない・0 の月とは比べない。固定残業代は、わからない（空の）月とは比べない
+ */
+export const fixedWageChange = (staff: any, year: number, month: number, salaries: SalaryRecord[]): FixedWageChange | null => {
+  const valueOf = (y: number, m: number, key: 'applied_base_wage' | 'fixed_overtime_allowance') => {
+    const s = salaries.find((r) => String(r.staff_id) === String(staff.id) && Number(r.target_year) === y && Number(r.target_month) === m);
+    const v = s?.[key];
+    return v === null || v === undefined ? null : Number(v);
+  };
+  const prev = addMonths(year, month, -1);
+  const baseBefore = valueOf(prev.year, prev.month, 'applied_base_wage');
+  const baseAfter = valueOf(year, month, 'applied_base_wage');
+  const baseChanged = baseBefore !== null && baseAfter !== null && baseBefore > 0 && baseAfter > 0 && baseBefore !== baseAfter;
+  const fixedBefore = valueOf(prev.year, prev.month, 'fixed_overtime_allowance');
+  const fixedAfter = valueOf(year, month, 'fixed_overtime_allowance');
+  const fixedChanged = fixedBefore !== null && fixedAfter !== null && fixedBefore !== fixedAfter;
+  if (!baseChanged && !fixedChanged) return null;
+
+  // 固定的賃金（基本給と固定残業代）の合計が上がったか下がったか。合計が同じなら基本給の向き
+  const baseDiff = baseChanged ? baseAfter! - baseBefore! : 0;
+  const fixedDiff = fixedChanged ? fixedAfter! - fixedBefore! : 0;
+  const total = baseDiff + fixedDiff;
+  return {
+    direction: total !== 0 ? (total > 0 ? 'up' : 'down') : baseDiff > 0 ? 'up' : 'down',
+    base: baseChanged ? { before: baseBefore!, after: baseAfter! } : null,
+    fixedOvertime: fixedChanged ? { before: fixedBefore!, after: fixedAfter! } : null,
+    note: baseChanged && fixedChanged && total === 0
+      ? '基本給と固定残業代が逆向きに同じ額だけ変わり、固定的賃金の合計は変わっていません。対象になるかは年金事務所に確かめてください（ここでは基本給の向きで判定しています）'
+      : null,
+  };
+};
+
 /**
  * その年に変動月がある候補を、確定した給与の基本給（時給制は時給）と固定残業代の変化から探す
  * @param salaries その年の前の年の12月から、次の年の2月までに支払った給与（3か月目まで見るため）
@@ -196,36 +239,16 @@ export const findZuijiCandidates = (
   salaries: SalaryRecord[],
   attendance: AttendanceRecord[],
 ): ZuijiCandidate[] => {
-  const valueOf = (staff: any, y: number, m: number, key: 'applied_base_wage' | 'fixed_overtime_allowance') => {
-    const s = salaries.find((r) => String(r.staff_id) === String(staff.id) && Number(r.target_year) === y && Number(r.target_month) === m);
-    const v = s?.[key];
-    return v === null || v === undefined ? null : Number(v);
-  };
   const candidates: ZuijiCandidate[] = [];
   for (const staff of staffList) {
     for (let month = 1; month <= 12; month++) {
-      const prev = addMonths(year, month, -1);
-      const baseBefore = valueOf(staff, prev.year, prev.month, 'applied_base_wage');
-      const baseAfter = valueOf(staff, year, month, 'applied_base_wage');
-      const baseChanged = baseBefore !== null && baseAfter !== null && baseBefore > 0 && baseAfter > 0 && baseBefore !== baseAfter;
-      const fixedBefore = valueOf(staff, prev.year, prev.month, 'fixed_overtime_allowance');
-      const fixedAfter = valueOf(staff, year, month, 'fixed_overtime_allowance');
-      const fixedChanged = fixedBefore !== null && fixedAfter !== null && fixedBefore !== fixedAfter;
-      if (!baseChanged && !fixedChanged) continue;
+      const change = fixedWageChange(staff, year, month, salaries);
+      if (!change) continue;
       if (!checkSocialInsEnrolled(staff, year, month)) continue;
-
-      // 固定的賃金（基本給と固定残業代）の合計が上がったか下がったか。合計が同じなら基本給の向き
-      const baseDiff = baseChanged ? baseAfter! - baseBefore! : 0;
-      const fixedDiff = fixedChanged ? fixedAfter! - fixedBefore! : 0;
-      const total = baseDiff + fixedDiff;
-      const direction: ZuijiDirection = total !== 0 ? (total > 0 ? 'up' : 'down') : baseDiff > 0 ? 'up' : 'down';
-      const note = baseChanged && fixedChanged && total === 0
-        ? '基本給と固定残業代が逆向きに同じ額だけ変わり、固定的賃金の合計は変わっていません。対象になるかは年金事務所に確かめてください（ここでは基本給の向きで判定しています）'
-        : null;
       candidates.push(buildZuijiCandidate(
-        staff, year, month, direction, groups, salaries, attendance,
-        baseChanged ? { before: baseBefore, after: baseAfter } : { before: null, after: null },
-        fixedChanged ? { before: fixedBefore, after: fixedAfter, note } : { before: null, after: null, note },
+        staff, year, month, change.direction, groups, salaries, attendance,
+        change.base ?? { before: null, after: null },
+        change.fixedOvertime ? { ...change.fixedOvertime, note: change.note } : { before: null, after: null, note: change.note },
       ));
     }
   }

@@ -41,6 +41,7 @@ export const DB_SCHEMAS = [
     shaho_office_symbol TEXT,            -- 社会保険の事業所整理記号（納入告知書の「01-イロハ」のような記号。賞与支払届などの届書に書く。utils/shahoCsv.ts）
     shaho_office_number TEXT,            -- 社会保険の事業所番号（納入告知書の1〜5けたの番号）
     shaho_media_seq INTEGER DEFAULT 0,   -- 届書の電子申請用ファイルに、最後に付けた媒体通番（次は1を足す。999 の次は 1）
+    bonus_plan_months TEXT,              -- 年金機構に登録している賞与支払予定月（「7,12」のように月をカンマで。4つまで。賞与不支給報告書に使う。utils/bonusNonPayment.ts）
     labor_ins_num TEXT,
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など

@@ -10,6 +10,10 @@ import Database from "@tauri-apps/plugin-sql";
 import { useSanteiManager, type SanteiRow } from "./useSanteiManager";
 import { SANTEI_WORKER_KIND_LABELS, type SanteiWorkerKind } from "../../utils/santei";
 import { ANNUAL_STATUS_LABELS, ymOf, type AnnualStatus } from "../../utils/santeiAnnual";
+import { santeiReportPeriod } from "../../utils/remunerationReport";
+import { formatWareki } from "../../utils/wareki";
+import { RemunerationReportTable } from "./RemunerationReportTable";
+import { ShahoFilePanel, ShahoOfficeTable, shahoPrintStyle } from "./ShahoFilePanel";
 
 interface Props {
   db: Database;
@@ -24,6 +28,9 @@ const numInput: React.CSSProperties = { width: "100%", boxSizing: "border-box", 
 const yen = (n: number | null) => (n === null ? "—" : `${n.toLocaleString()}円`);
 const linkButton: React.CSSProperties = { marginTop: 4, padding: 0, border: "none", background: "none", color: "#2563eb", fontSize: 11, cursor: "pointer", textDecoration: "underline" };
 
+/** 算定基礎届を印刷するところ */
+const SANTEI_PRINT = "santei-report-print";
+
 /** 年間平均の欄に出す短い理由 */
 const ANNUAL_SHORT_LABELS: Record<AnnualStatus, string> = {
   target: "",
@@ -36,8 +43,9 @@ const ANNUAL_SHORT_LABELS: Record<AnnualStatus, string> = {
 const toNumberOrNull = (v: string) => (v.trim() === "" ? null : Math.max(0, Math.floor(Number(v) || 0)));
 
 export default function SanteiManager({ db, staffList, onDataChange }: Props) {
-  const { year, setYear, isLoading, isSaving, targets, excluded, selectedRows, updateRow, updateMonth, updateEarlierMonth, register, rateWarnings } =
-    useSanteiManager(db, staffList, onDataChange);
+  const s = useSanteiManager(db, staffList, onDataChange);
+  const { year, setYear, isLoading, isSaving, targets, excluded, selectedRows, updateRow, updateMonth, updateRetro, updateEarlierMonth, register, rateWarnings } = s;
+  const period = santeiReportPeriod(year);
 
   const thisYear = new Date().getFullYear();
   const years = Array.from({ length: thisYear - 2020 + 2 }, (_, i) => 2020 + i);
@@ -54,7 +62,8 @@ export default function SanteiManager({ db, staffList, onDataChange }: Props) {
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 }}>
           7月1日に社会保険に加入している人について、4・5・6月に支払った給与（確定したもの。通勤手当を含み、賞与は含まない）から、
           9月分から翌年8月分までの標準報酬月額を計算します。支払基礎日数が17日以上の月（短時間労働者は11日以上）の平均を等級表に当てはめます。
-          日数と報酬は直せます（遡って支払った昇給の差額などは、引いた額にしてください）。算定基礎届の提出期限は7月10日です。
+          日数と報酬は直せます。3月以前の分を4〜6月に遡って払った昇給の差額などは「うち遡及分」に入れると、平均から除きます
+          （算定基礎届には、払った額と遡及支払額を書き、差額を除いた平均を修正平均額に書きます）。算定基礎届の提出期限は7月10日です。
         </p>
         <p style={{ fontSize: 12, color: "#64748b", margin: "6px 0 0 0", lineHeight: 1.7 }}>
           「年間平均」の欄は、前年7月〜当年6月の1年間の平均です。4〜6月の平均と2等級以上の差があり、その差が仕事の性質上毎年出るもの
@@ -82,7 +91,7 @@ export default function SanteiManager({ db, staffList, onDataChange }: Props) {
                 <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={9}>対象になる人がいません</td></tr>
               )}
               {targets.map((r) => (
-                <SanteiTableRow key={r.staff.id} r={r} year={year} updateRow={updateRow} updateMonth={updateMonth} updateEarlierMonth={updateEarlierMonth} />
+                <SanteiTableRow key={r.staff.id} r={r} year={year} updateRow={updateRow} updateMonth={updateMonth} updateRetro={updateRetro} updateEarlierMonth={updateEarlierMonth} />
               ))}
             </tbody>
           </table>
@@ -102,6 +111,38 @@ export default function SanteiManager({ db, staffList, onDataChange }: Props) {
         </p>
       </div>
 
+      <style>{shahoPrintStyle(SANTEI_PRINT, true)}</style>
+      <div style={card} className="no-print">
+        <div style={{ fontSize: 14, fontWeight: "bold", color: "#334155", marginBottom: 6 }}>算定基礎届（電子申請用のファイル・印刷）</div>
+        <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px 0", lineHeight: 1.7 }}>
+          上の表で「登録」にチェックを付けた人の算定基礎届を作ります。7月改定の月変の人と、8月か9月に月変の予定がある人は、電子申請では
+          算定基礎届に入れないので、チェックを外してください（8月・9月の改定にならないとわかったら、その人の算定基礎届を出します）。
+          電子申請（e-Gov など）では、下で保存する SHFD0006.CSV を添付します（ファイル名は変えないでください）。紙で出すときは、届いた届書に書き写すか、印刷して確かめてください。
+          年間平均で申し立てる人は、申立書と同意書（年金機構の様式）を添えます。健康保険組合の会社は、組合にも組合の形で届け出ます（Q では作りません）。
+        </p>
+        <ShahoFilePanel
+          file={s.file} dataLines={s.report.length > 0 ? s.report.map((r) => r.values.join(",")) : null} blocked={s.reportBlocked}
+          label={`算定基礎届（${year}年）`} count={s.report.length} onPrint={() => window.print()} canPrint={s.report.length > 0}
+        />
+        <div style={{ fontSize: 13, fontWeight: "bold", color: "#b45309", marginTop: 6 }}>提出期間：{formatWareki(period.from)}〜{formatWareki(period.to)}</div>
+      </div>
+      {s.report.length > 0 && (
+        <div id={SANTEI_PRINT} style={card}>
+          <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 8 }}>
+            健康保険・厚生年金保険 被保険者報酬月額算定基礎届／厚生年金保険 70歳以上被用者算定基礎届
+            <span style={{ fontSize: 12, fontWeight: "normal", marginLeft: 8 }}>{year}年9月分から</span>
+          </div>
+          <ShahoOfficeTable office={s.file.office.values} />
+          <div style={{ overflowX: "auto" }}>
+            <RemunerationReportTable rows={s.report} rowKey={(r) => r.staffId} onRemarks={(key, v) => updateRow(key, { remarks: v })} />
+          </div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, lineHeight: 1.6 }}>
+            ⑭総計と⑮平均額は、支払基礎日数が17日以上の月（パートで17日以上の月がなければ15日以上、短時間労働者は11日以上）で計算します（灰色の月は入れません）。
+            途中入社で1か月分の給与を払っていない月と、遡って払った差額を除いた平均は、⑯修正平均額に書きます。現物で払った報酬は、Q ではないものとしています。
+          </div>
+        </div>
+      )}
+
       {excluded.length > 0 && (
         <div style={card}>
           <div style={{ fontSize: 13, fontWeight: "bold", color: "#475569", marginBottom: 8 }}>算定基礎届の対象にならない人</div>
@@ -116,11 +157,12 @@ export default function SanteiManager({ db, staffList, onDataChange }: Props) {
   );
 }
 
-function SanteiTableRow({ r, year, updateRow, updateMonth, updateEarlierMonth }: {
+function SanteiTableRow({ r, year, updateRow, updateMonth, updateRetro, updateEarlierMonth }: {
   r: SanteiRow;
   year: number;
   updateRow: ReturnType<typeof useSanteiManager>["updateRow"];
   updateMonth: ReturnType<typeof useSanteiManager>["updateMonth"];
+  updateRetro: ReturnType<typeof useSanteiManager>["updateRetro"];
   updateEarlierMonth: ReturnType<typeof useSanteiManager>["updateEarlierMonth"];
 }) {
   const [open, setOpen] = useState(false);
@@ -172,6 +214,14 @@ function SanteiTableRow({ r, year, updateRow, updateMonth, updateEarlierMonth }:
                 style={numInput}
               />
             </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: (r.retro[m.month] ?? 0) > 0 ? "#b45309" : "#94a3b8", marginTop: 4 }}>
+              うち遡及分
+              <input
+                type="number" min={0} value={r.retro[m.month] || ""} placeholder="0"
+                onChange={(e) => updateRetro(r.staff.id, m.month, Number(e.target.value) || 0)}
+                style={{ ...numInput, width: 80, fontSize: 11, padding: "2px 4px" }}
+              />
+            </label>
             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: m.partialJoin ? "#b45309" : "#94a3b8", marginTop: 4 }}>
               <input type="checkbox" checked={m.partialJoin} onChange={(e) => updateMonth(r.staff.id, m.month, { partialJoin: e.target.checked })} />
               途中入社で日割り

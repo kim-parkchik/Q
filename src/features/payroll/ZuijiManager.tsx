@@ -11,6 +11,9 @@ import { useZuijiManager, type ZuijiRow } from "./useZuijiManager";
 import { ZUIJI_STATUS_LABELS, type ZuijiDirection } from "../../utils/zuiji";
 import { ymOf } from "../../utils/santeiAnnual";
 import { ZUIJI_ANNUAL_STATUS_LABELS, type ZuijiAnnualStatus } from "../../utils/zuijiAnnual";
+import { warekiMonth, type GeppenReportRow } from "../../utils/remunerationReport";
+import { RemunerationReportTable } from "./RemunerationReportTable";
+import { ShahoFilePanel, ShahoOfficeTable, fieldStyle, input as fieldInput, labelStyle, shahoPrintStyle } from "./ShahoFilePanel";
 
 interface Props {
   db: Database;
@@ -25,6 +28,9 @@ const numInput: React.CSSProperties = { width: "100%", boxSizing: "border-box", 
 const select: React.CSSProperties = { padding: "6px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13 };
 const yen = (n: number | null) => (n === null ? "—" : `${n.toLocaleString()}円`);
 const toNumberOrNull = (v: string) => (v.trim() === "" ? null : Math.max(0, Math.floor(Number(v) || 0)));
+
+/** 月額変更届を印刷するところ */
+const GEPPEN_PRINT = "geppen-report-print";
 
 const linkButton: React.CSSProperties = { marginTop: 4, padding: 0, border: "none", background: "none", color: "#2563eb", fontSize: 11, cursor: "pointer", textDecoration: "underline" };
 
@@ -65,7 +71,7 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 }}>
           確定した給与の基本給（時給制は時給）か固定残業代が前の月と変わった月を「変動月」として、変動月から3か月の給与（通勤手当を含む）の平均で判定します。
           従前の標準報酬月額と2等級以上の差があり、3か月とも支払基礎日数が17日以上（短時間労働者は11日以上）なら、4か月目の分から改定します。
-          固定残業代は、追加・廃止・金額の変更を変動として扱います。
+          固定残業代は、追加・廃止・金額の変更を変動として扱います。昇給が遡って、3か月の給与に前の月の分の差額が入っているときは「うち遡及分」に入れると、平均から除きます。
           そのほかの手当・通勤手当の変更や、時給から月給への変更は自動で見つけられないので、下の欄で変動月を指定してください。月額変更届は「速やかに」提出します。
         </p>
         <p style={{ fontSize: 12, color: "#64748b", margin: "6px 0 0 0", lineHeight: 1.7 }}>
@@ -122,6 +128,67 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
           </button>
         </div>
       </div>
+
+      <style>{shahoPrintStyle(GEPPEN_PRINT, true)}</style>
+      <div style={card} className="no-print">
+        <div style={{ fontSize: 14, fontWeight: "bold", color: "#334155", marginBottom: 6 }}>月額変更届（電子申請用のファイル・印刷）</div>
+        <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px 0", lineHeight: 1.7 }}>
+          上の表で改定後の額を登録できる人の月額変更届を、改定年月ごとに作ります（随時改定の対象の人は、初めから入れています。
+          上限・下限の1等級差の注意がある人は、従前を決めたときの報酬月額を確かめてから入れてください）。
+          昇給・降給の理由は、確定した給与で変わったもの（基本給・固定残業代）から作ります。手当の変更などは、表の「4. 昇給・降給の理由」で直してください。
+          電子申請（e-Gov など）では、下で保存する SHFD0006.CSV を添付します。年間平均で申し立てる人は、申立書と同意書（年金機構の様式）を添えます。
+          健康保険組合の会社は、組合にも組合の形で届け出ます（Q では作りません）。
+        </p>
+        {z.reportMonths.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#94a3b8" }}>{z.year}年に変動月がある人で、月額変更届を出す人はいません。</div>
+        ) : (
+          <>
+            <ShahoFilePanel
+              file={z.file} dataLines={z.report.length > 0 ? z.report.map((r) => r.values.join(",")) : null} blocked={z.reportBlocked}
+              label={`月額変更届（${warekiMonth(z.reportMonth)}改定）`} count={z.report.length} onPrint={() => window.print()} canPrint={z.report.length > 0}
+            >
+              <label style={fieldStyle}>
+                <span style={labelStyle}>改定年月</span>
+                <select value={z.reportMonth} onChange={(e) => z.setReportMonth(e.target.value)} style={{ ...fieldInput, minWidth: 180 }}>
+                  {z.reportMonths.map((ym) => (
+                    <option key={ym} value={ym}>{warekiMonth(ym)}改定（{z.rows.filter((r) => r.eligible && r.revisionFrom === ym).length}人）</option>
+                  ))}
+                </select>
+              </label>
+            </ShahoFilePanel>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 8 }}>
+              {z.reportCandidates.map((r) => (
+                <label key={r.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                  <input type="checkbox" checked={r.include} onChange={(e) => z.setInclude(r.key, e.target.checked)} />
+                  {r.staff.name}（{r.year}年{r.month}月から{r.direction === "up" ? "昇給" : "降給"}
+                  {r.judgement.boundaryNote && !r.decided.byAnnual ? "・上限下限の注意あり" : ""}
+                  {r.registered !== null ? "・登録済み" : ""}）
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: "bold", color: "#b45309", marginTop: 8 }}>提出：速やかに（{warekiMonth(z.reportMonth)}分から改定）</div>
+          </>
+        )}
+      </div>
+      {z.report.length > 0 && (
+        <div id={GEPPEN_PRINT} style={card}>
+          <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 8 }}>
+            健康保険・厚生年金保険 被保険者報酬月額変更届／厚生年金保険 70歳以上被用者月額変更届
+            <span style={{ fontSize: 12, fontWeight: "normal", marginLeft: 8 }}>{warekiMonth(z.reportMonth)}改定</span>
+          </div>
+          <ShahoOfficeTable office={z.file.office.values} />
+          <div style={{ overflowX: "auto" }}>
+            <RemunerationReportTable
+              rows={z.report} rowKey={(r) => (r as GeppenReportRow).key}
+              onRemarks={(key, v) => z.setRemarks(key, v)} onReason={(key, v) => z.setReason(key, v)}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, lineHeight: 1.6 }}>
+            ⑮平均額は3か月の合計の3分の1です（1円未満切り捨て）。遡って払った差額を除いた平均と、年間平均で申し立てるときの年間平均額は、⑯修正平均額に書きます。
+            現物で払った報酬は、Q ではないものとしています。
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -131,8 +198,7 @@ function ZuijiTableRow({ r, z }: { r: ZuijiRow; z: ReturnType<typeof useZuijiMan
   const j = r.judgement;
   const a = r.annual;
   const [ry, rm] = r.revisionFrom.split("-").map(Number);
-  const canRegister = r.decided.standard !== null &&
-    (r.decided.byAnnual ? a.status === "target" : j.status === "target" || j.boundaryNote !== null);
+  const canRegister = r.eligible;
 
   return (
     <>
@@ -172,6 +238,11 @@ function ZuijiTableRow({ r, z }: { r: ZuijiRow; z: ReturnType<typeof useZuijiMan
                 <input type="number" min={0} value={m.amount ?? ""} placeholder="報酬"
                   onChange={(e) => z.updateMonth(r.key, i, { amount: toNumberOrNull(e.target.value) })} style={numInput} />
               </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: (r.retro[i] ?? 0) > 0 ? "#b45309" : "#94a3b8", marginTop: 3 }}>
+                うち遡及分
+                <input type="number" min={0} value={r.retro[i] || ""} placeholder="0"
+                  onChange={(e) => z.updateRetro(r.key, i, Number(e.target.value) || 0)} style={{ ...numInput, width: 70, fontSize: 11, padding: "2px 4px" }} />
+              </label>
             </div>
           ))}
         </div>

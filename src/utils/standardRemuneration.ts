@@ -83,11 +83,26 @@ export const latestStandardRemuneration = (entries: RemunerationEntry[]): number
  * その月の分の標準報酬月額（その月までに始まった、いちばん新しい履歴の値）
  * 最初の履歴より前の月は、最初の履歴の値を使う（それより前の値はわからないため）
  */
-export const getStandardRemuneration = (staff: any, year: number, month: number): number => {
+export const getStandardRemuneration = (staff: any, year: number, month: number): number =>
+  remunerationEntryAt(staff, year, month).amount;
+
+/** その月の分に使う履歴の1件（その月までに始まった、いちばん新しいもの。最初の履歴より前の月は、最初の1件） */
+export const remunerationEntryAt = (staff: any, year: number, month: number): RemunerationEntry => {
   const ym = `${year}-${String(month).padStart(2, '0')}`;
   const history = remunerationHistoryOf(staff);
   const applied = history.filter((e) => e.from <= ym);
-  return (applied.length > 0 ? applied[applied.length - 1] : history[0]).amount;
+  return applied.length > 0 ? applied[applied.length - 1] : history[0];
+};
+
+/**
+ * その月の分の標準報酬月額を、いつから使っているか（届書の「従前の改定月」。YYYY-MM）
+ * 入社したときからの1件（何年何月分からが空）は、入社した月（資格取得時決定の月）。入社日もなければ null
+ */
+export const remunerationFromAt = (staff: any, year: number, month: number): string | null => {
+  const entry = remunerationEntryAt(staff, year, month);
+  if (entry.from) return entry.from;
+  const join = String(staff?.join_date ?? '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(join) ? join.slice(0, 7) : null;
 };
 
 /** 入力の誤り（2件目からの適用開始月が空・同じ月が2回）。問題なければ null */

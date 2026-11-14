@@ -15,6 +15,7 @@
  *   ・v1: 2026-11-14 の dbSchema.ts の形（印 "QP02"）。開発中に積み重ねた更新（2026-11-03 の v1 から v21 まで）をまとめて、ここを v1 とした。
  *     それより前の開発中のQで作った会社ファイル（印 "QP01" のもの・印のないもの）は開けないので、作り直す。
  *     （2026-11-03 にも、それまでの更新 v1〜v13 をまとめて v1（印 "QP01"）にしている）
+ *   ・v2: 会社に賞与支払予定月（bonus_plan_months）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -58,6 +59,13 @@ export const addColumnIfMissing = async (
 
 export const MIGRATIONS: Migration[] = [
   // v1 は 2026-11-14 の dbSchema.ts の形（上の「形式の番号」を参照）。列を足す更新は version: 2 から。
+  {
+    version: 2,
+    description: "会社に、年金機構に登録している賞与支払予定月（賞与不支給報告書に使う）の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "company", "bonus_plan_months", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-14 の dbSchema.ts の形）の番号 */
