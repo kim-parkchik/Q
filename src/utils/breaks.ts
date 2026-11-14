@@ -8,7 +8,7 @@
  * ・leaveTypeId：その中抜けを、時間単位の特別休暇（子の看護等休暇・介護休暇など。utils/specialLeave.ts）にした印。
  *   時間有給と同じく、働いた時間にも休憩にも入れない。休暇の時間は、その日の「時間休」（attendance.special_leave_hours）で数える。
  *   1日に入れられる時間単位の特別休暇は1種類（勤怠の休暇の種類 attendance.leave_type_id が1つのため）。
- * ・一般的な勤怠ソフト（マネーフォワード クラウド勤怠・ジョブカンなど）も、休憩を1日に何回でも記録し、中抜けは休憩として扱う。
+ * ・一般的な勤怠ソフト（クラウド型の勤怠ソフトなど）も、休憩を1日に何回でも記録し、中抜けは休憩として扱う。
  */
 import { formatSpanList, type TimeSpan } from "../../shared/timeqard";
 

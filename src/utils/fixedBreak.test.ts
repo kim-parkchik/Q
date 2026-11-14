@@ -119,7 +119,7 @@ describe("時刻で決める（12:00〜13:00）", () => {
         const r = calcDayHours(day("09:00", "18:00", [b("13:00", "13:30")]), lunch);
         expect([r.total, r.breakMinutes, r.autoBreak]).toEqual([8.5, 30, ""]);
     });
-    test("合わせて引く：重なれば1つにまとめ（12:30〜13:30 なら 12:00〜13:30）、重ならなければ足す（ジョブカンの「時刻で管理」と同じ）", () => {
+    test("合わせて引く：重なれば1つにまとめ（12:30〜13:30 なら 12:00〜13:30）、重ならなければ足す（クラウド型の勤怠ソフトの「時刻で管理」と同じ）", () => {
         const over = calcDayHours(day("09:00", "18:00", [b("12:30", "13:30")]), lunchMerge);
         expect([over.total, over.breakMinutes, over.autoBreak]).toEqual([7.5, 90, "12:00〜13:00"]);
         const apart = calcDayHours(day("09:00", "18:00", [b("14:00", "15:00")]), lunchMerge);
@@ -176,7 +176,7 @@ describe("長さで決める（出勤から退勤までが6時間を超えたら
         expect(calcDayHours(day("09:00", "18:00", [b("14:00", "15:00", true)]), byLength))
             .toMatchObject({ total: 7.25, breakMinutes: 45, restMinutes: 45, leaveMinutes: 60 });
     });
-    test("入れた休憩との合わせ方：打刻を優先・長いほう・合算（ジョブカンの「時間で管理」と同じ）", () => {
+    test("入れた休憩との合わせ方：打刻を優先・長いほう・合算（クラウド型の勤怠ソフトの「時間で管理」と同じ）", () => {
         const smoke = [b("15:00", "15:15")];
         expect(calcDayHours(day("09:00", "18:00", smoke), byLength)).toMatchObject({ total: 8.75, breakMinutes: 15, autoBreak: "" });
         expect(calcDayHours(day("09:00", "18:00", smoke), { ...byLength, combine: "max" })).toMatchObject({ total: 8, breakMinutes: 60, autoBreak: "45分" });

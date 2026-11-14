@@ -183,7 +183,7 @@ describe("年5日（10日以上付与した人に、付与日から1年以内に
   test("10日より少ない付与（比例付与など）は対象にしない", () => {
     expect(fiveDayStatuses([g(1, "2026-10-01", 7)], [], "2026-11-13", opts)).toEqual([]);
   });
-  test("期間の月数は、まるまるの月数に、余りの日をその次の1か月の日数で割った分を足す（ジョブカンと同じ）", () => {
+  test("期間の月数は、まるまるの月数に、余りの日をその次の1か月の日数で割った分を足す（クラウド型の勤怠ソフトと同じ）", () => {
     expect(periodMonths("2025-10-15", "2027-03-31")).toEqual({ months: 17, extraDays: 17, total: 17 + 17 / 31 });
     expect(periodMonths("2019-10-01", "2021-03-31")).toEqual({ months: 18, extraDays: 0, total: 18 });
     expect(periodMonths("2026-10-01", "2027-09-30")).toEqual({ months: 12, extraDays: 0, total: 12 });
@@ -217,7 +217,7 @@ describe("年5日（10日以上付与した人に、付与日から1年以内に
     const [s] = fiveDayStatuses(grants, [], "2026-02-01", opts);
     expect([s.to, s.months, s.exactDays, s.requiredDays]).toEqual(["2026-12-31", 15, 6.25, 6.5]);
     expect(fiveDayStatuses(grants, [], "2026-02-01", { ...opts, halfDayLeave: false })[0].requiredDays).toBe(7);
-    // ジョブカンの例：2025-10-15〜2027-03-31（17か月と17日）→ 7.31日 → 7.5日
+    // クラウド型の勤怠ソフトの説明にある例：2025-10-15〜2027-03-31（17か月と17日）→ 7.31日 → 7.5日
     const [j] = fiveDayStatuses([g(3, "2025-10-15", 10), g(4, "2026-04-01", 11)], [], "2026-05-01", opts);
     expect([j.to, j.months, j.extraDays, Math.round(j.exactDays * 100) / 100, j.requiredDays]).toEqual(["2027-03-31", 17, 17, 7.31, 7.5]);
     // 7.31日に 5日取った人は、あと 2.5日（半休を使わない会社は 3日）

@@ -23,8 +23,8 @@
  * ・年次有給休暇の年5日の取得義務（労働基準法39条7項）には数えない（厚生労働省：特別休暇は、使用者による時季指定の対象にならない
  *   https://www.startup-roudou.mhlw.go.jp/qa/zigyonushi/hatarakikatakaikaku/q6.html ）。
  * ・会社が一斉に休む日（夏季休業など）を就業規則で「休日」にしているときは、休暇ではなく会社カレンダーで休日にする（所定労働日数が減る）。
- * ・一般的な勤怠ソフトと同じ形（マネーフォワード クラウド勤怠の「その他休日/休暇」：休暇を作り、従業員ごとに日数と失効日を付けて付与し、
- *   残りを数える https://biz.moneyforward.com/support/attendance/faq/paid_leave_rules/special_leave_patterns.html ）。
+ * ・一般的な勤怠ソフトと同じ形（クラウド型の勤怠ソフトの「その他休日/休暇」：休暇を作り、従業員ごとに日数と失効日を付けて付与し、
+ *   残りを数える）。
  */
 import dayjs from "dayjs";
 import { allocateLeave, expiryAfterMonths, type GrantStatus, type LeaveGrantRow, type TakenStatus } from "./paidLeave";
