@@ -288,7 +288,8 @@ export const DB_SCHEMAS = [
     absence_deduction INTEGER,                  -- 欠勤控除の額（月給制。v8 より前に確定した給与は NULL）
     tardy_deduction INTEGER,                    -- 遅刻・早退・中抜けの控除の額（月給制・日給制。v10 より前に確定した給与は NULL）
     unpaid_leave_deduction INTEGER,             -- 無給の特別休暇の控除の額（月給制。欠勤控除と同じ計算。v11 より前に確定した給与は NULL）
-    flex_carry_hours REAL,                      -- フレックスタイム制で、次の月に繰り越す不足時間（フレックスタイム制の人だけ。ほかは NULL）
+    flex_carry_hours REAL,                      -- フレックスタイム制で、次の清算期間に繰り越す不足時間（フレックスタイム制の人だけ。ほかは NULL）
+    flex_month TEXT,                            -- フレックスタイム制の、この月の清算の記録（JSON。実労働・週平均50時間を超えた時間など。清算期間の最後の月の清算に使う。utils/flexTime.ts）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
     leave_paid_days REAL,                       -- 休業の日がある月に、給与（月給）を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月は NULL。算定・月変の支払基礎日数に使う）
     non_remuneration INTEGER DEFAULT 0,         -- 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。所得税・社会保険・雇用保険の対象外。算定・月変の報酬から除く。utils/averageWage.ts）

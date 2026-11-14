@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import * as Master from '../../constants';
 import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from '../../utils/calcSalary';
-import { isFlexStaff, loadFlexCarryIn, parseFlexRule } from '../../utils/flexTime';
+import { isFlexStaff, loadFlexPeriod, parseFlexRule, stringifyFlexRule } from '../../utils/flexTime';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
@@ -292,27 +292,31 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     return () => { cancelled = true; };
   }, [db, staff.id, periodStart, weekStartDay]);
 
-  // フレックスタイム制の人：前の月から繰り越した不足時間（前の月の確定した給与。undefined は読み込み中で、この間は確定しない）
+  // フレックスタイム制の人：清算期間の位置・同じ清算期間の前の月の記録・前の清算期間から繰り越した不足時間
+  // （確定した給与から読む。undefined は読み込み中で、この間は確定しない。給与規定グループの決まりを読み込んでから読む。utils/flexTime.ts）
   const flexStaff = isFlexStaff(staff);
+  const flexRuleKey = extras.flexRule ? stringifyFlexRule(extras.flexRule) : null;
   useEffect(() => {
     let cancelled = false;
     if (!flexStaff) {
-      setExtras(p => ({ ...p, flexCarryIn: 0 }));
+      setExtras(p => ({ ...p, flexPeriod: null }));
       return;
     }
-    setExtras(p => ({ ...p, flexCarryIn: undefined }));
+    setExtras(p => ({ ...p, flexPeriod: undefined }));
+    if (!flexRuleKey) return;
     (async () => {
       if (!db) return;
-      let carry = 0;
       try {
-        carry = await loadFlexCarryIn(db, staff.id, year, month);
+        const ctx = await loadFlexPeriod(db, staff, parseFlexRule(flexRuleKey), year, month);
+        if (!cancelled) setExtras(p => ({ ...p, flexPeriod: ctx }));
       } catch (e) {
-        console.error("前の月から繰り越したフレックスの不足時間の読み込みエラー:", e);
+        // 読めなかったときは、清算期間1か月なら繰り越しなしで計算し、2・3か月なら清算できない（calcSalary の flexMissing で確定しない）
+        console.error("フレックスタイム制の清算期間（前の月の確定した給与）の読み込みエラー:", e);
+        if (!cancelled) setExtras(p => ({ ...p, flexPeriod: null }));
       }
-      if (!cancelled) setExtras(p => ({ ...p, flexCarryIn: carry }));
     })();
     return () => { cancelled = true; };
-  }, [db, staff.id, flexStaff, year, month]);
+  }, [db, staff.id, staff.join_date, staff.payroll_group_id, flexStaff, year, month, flexRuleKey]);
 
   // 会社カレンダーで休みの日に「出勤」で入れて働いた日。「出勤」の日は所定労働日として計算する
   // （所定労働時間の分は月給・日給に入っているとみなし、週40時間を超えても割増分だけを払う）ので、所定休日の出勤なら「所定休日出勤」にする
@@ -376,7 +380,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   const loadingParts = [
     ...(extras.annualWorkDays === undefined ? ["1年間の所定労働日数"] : []),
     ...(extras.weekCarryOver === undefined ? ["前の計算期間の勤怠（週40時間）"] : []),
-    ...(flexStaff && extras.flexCarryIn === undefined ? ["前の月から繰り越したフレックスの不足時間"] : []),
+    ...(flexStaff && extras.flexPeriod === undefined ? ["フレックスタイム制の清算期間（前の月の確定した給与）"] : []),
     ...(salary.averageWageLoading ? ["平均賃金（休業手当・休業補償）"] : []),
     ...LOAD_PARTS.filter(part => loadStatus[part] === "loading").map(part => LOAD_PART_LABELS[part]),
   ];
@@ -405,6 +409,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       alert(`平均賃金を出せないので、次の額を計算していません。\n${salary.averageWageMissing.map(m => `・${m}`).join("\n")}\n\nメニューの「平均賃金」で理由を確かめ、必要なら平均賃金を手で入れてから、確定してください。`);
       return;
     }
+    if (salary.flexMissing.length > 0) {
+      alert(`フレックスタイム制の清算期間の合計で清算できないので、確定できません。\n${salary.flexMissing.map(m => `・${m}`).join("\n")}\n\n清算期間の前の月の給与を確定してから、この月を確定してください。`);
+      return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });
     if (result.success) {
       setIsSaved(true);
@@ -421,9 +429,14 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
    */
   const handleCancelResult = async () => {
     if (!db || !staff) return;
+    // フレックスタイム制の清算期間の途中の月は、最後の月の清算にこの月の記録を使う
+    const flexNote = salary.flex && !salary.flex.final
+      ? `この月は、フレックスタイム制の清算期間（${salary.flex.periodLabel ?? ""}）の途中の月です。清算期間の最後の月${salary.flex.finalPayLabel ? `（${salary.flex.finalPayLabel}）` : ""}の給与は、この月の記録を使って清算します。最後の月を確定していたら、この月を確定し直したあとで、最後の月も確定し直してください。\n\n`
+      : "";
     const ok = await ask(
       `${staff.name}さんの${year}年${month}月分の給与の確定を取り消します。\n\n` +
       `取り消すと、この月の勤怠を直せるようになります。確定した給与は、年末調整・源泉徴収票・算定基礎・月変・住民税の納入などの集計から外れるので、直したら必ずもう一度確定してください。\n\n` +
+      flexNote +
       `よろしいですか？`,
       { title: "給与の確定を取り消す", kind: "warning" }
     );

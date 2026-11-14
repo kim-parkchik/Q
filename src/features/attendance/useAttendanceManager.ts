@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import dayjs from "dayjs";
 import { generateAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from "../../utils/calcSalary";
-import { isFlexStaff, loadFlexCarryIn, parseFlexRule } from "../../utils/flexTime";
+import { isFlexStaff, loadFlexPeriod, parseFlexRule, type FlexPeriodContext } from "../../utils/flexTime";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { countNonLeaveWorkDays, leaveByDate, toLeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { useAverageWagePay } from "../payroll/useAverageWagePay";
@@ -597,18 +597,20 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     return () => { cancelled = true; };
   }, [db, selectedStaff, periodStart, weekStartDay]);
 
-  // --- フレックスタイム制の人：前の月から繰り越した不足時間（前の月の確定した給与。給与明細と同じ読み方。utils/flexTime.ts） ---
-  const [flexCarryIn, setFlexCarryIn] = useState(0);
+  // --- フレックスタイム制の人：清算期間の位置・同じ清算期間の前の月の記録・前の清算期間から繰り越した不足時間 ---
+  // （確定した給与から読む。給与明細と同じ読み方。utils/flexTime.ts の loadFlexPeriod）
+  const [flexPeriod, setFlexPeriod] = useState<FlexPeriodContext | null>(null);
   const flexStaff = !!selectedStaff && isFlexStaff(selectedStaff);
+  const flexRuleJson = currentGroup?.flex_rule ?? null;
   useEffect(() => {
     let cancelled = false;
-    setFlexCarryIn(0);
-    if (!db || !selectedStaff || !flexStaff) return;
-    loadFlexCarryIn(db, selectedStaff.id, targetYear, targetMonth)
-      .then((carry) => { if (!cancelled) setFlexCarryIn(carry); })
-      .catch((e) => console.error("前の月から繰り越したフレックスの不足時間の読み込みエラー:", e));
+    setFlexPeriod(null);
+    if (!db || !selectedStaff || !flexStaff || !currentGroup) return;
+    loadFlexPeriod(db, selectedStaff, parseFlexRule(flexRuleJson), targetYear, targetMonth, currentGroup)
+      .then((ctx) => { if (!cancelled) setFlexPeriod(ctx); })
+      .catch((e) => console.error("フレックスタイム制の清算期間（前の月の確定した給与）の読み込みエラー:", e));
     return () => { cancelled = true; };
-  }, [db, selectedStaff, flexStaff, targetYear, targetMonth]);
+  }, [db, selectedStaff, flexStaff, targetYear, targetMonth, currentGroup, flexRuleJson]);
 
   // --- 会社都合で休ませた日の休業手当・労災の待期の休業補償に使う平均賃金（給与明細と同じ読み方。utils/averageWageStore.ts） ---
   const finalizedShutdownRows = useMemo(() => Object.entries(monthlyWorkData)
@@ -690,9 +692,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         // 社会保険料の徴収（給与規定グループの設定。翌月徴収の退職月は、当月払いなら退職した月の分も引く）
         socialInsCollection: toSocialInsCollection(currentGroup?.social_ins_collection),
         collectRetirementMonth: Number(currentGroup?.is_next_month) !== 1,
-        // フレックスタイム制の決まりと、前の月から繰り越した不足時間（utils/flexTime.ts）
+        // フレックスタイム制の決まりと、清算期間（前の月の記録・前の清算期間から繰り越した不足時間。utils/flexTime.ts）
         flexRule: parseFlexRule(currentGroup?.flex_rule),
-        flexCarryIn,
+        flexPeriod,
         // 休業手当・休業補償の平均賃金
         averageWagePay,
       }, 
@@ -703,7 +705,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexCarryIn, averageWagePay]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexPeriod, averageWagePay]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {

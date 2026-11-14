@@ -2,7 +2,7 @@ import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
 import * as Master from '../../constants';
 import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES, TARDY_DEDUCTION_METHOD_LABELS } from '../../utils/calcSalary';
-import { flexHoursLabel } from '../../utils/flexTime';
+import { describeFlexSettlement, flexHoursLabel } from '../../utils/flexTime';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
@@ -34,6 +34,8 @@ export default function PayStubModal(props: Props) {
   const insMonthLabel = salary.socialInsMonths.map(ym => { const [y, m] = ym.split('-').map(Number); return `${y}年${m}月分`; }).join("と");
   // 給与形態・基本給・扶養人数は、この月の分の履歴の値
   const staff = monthStaff;
+  // フレックスタイム制の清算の内訳（勤怠の画面と同じ文。utils/flexTime.ts）
+  const flexText = salary.flex ? describeFlexSettlement(salary.flex, staff.wage_type) : null;
 
   const padRows = (current: number, target: number) =>
   Array.from({ length: Math.max(0, target - current) }, (_, i) => (
@@ -78,18 +80,19 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              disabled={salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
+              disabled={salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
               title={salary.prefectureUnknown
                 ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
                 : salary.insurerRateMissing ? `${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料を計算していません。会社設定の「社会保険規定」で料率を入れてから確定してください`
                 : salary.averageWageMissing.length > 0 ? "平均賃金を出せないため、休業手当・休業補償を計算していません。メニューの「平均賃金」で確かめてから確定してください"
+                : salary.flexMissing.length > 0 ? "フレックスタイム制の清算期間の前の月の給与を確定していないため、清算期間の合計で清算できません。前の月を確定してから確定してください"
                 : loadErrors.length > 0 ? `${loadErrors.join("・")}を読み込めなかったので、確定できません`
                 : loadingParts.length > 0 ? `${loadingParts.join("・")}を読み込んでいます`
                 : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
               style={{
                 ...S.printBtnS, flex: 1,
-                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
-                cursor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
+                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
+                cursor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
               }}
             >
               {loadingParts.length > 0 && loadErrors.length === 0 ? "読み込んでいます…" : isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
@@ -138,6 +141,13 @@ export default function PayStubModal(props: Props) {
               ⚠ 平均賃金を出せないので、次の額を計算していません（0円）。確定できません。
               {salary.averageWageMissing.map((m) => <div key={m} style={{ fontWeight: "normal" }}>・{m}</div>)}
               <div style={{ fontWeight: "normal" }}>メニューの「平均賃金」で理由を確かめ、必要なら平均賃金を手で入れてください（入社して間もない人・3か月がすべて休業の人など）。</div>
+            </div>
+          )}
+          {salary.flexMissing.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ フレックスタイム制の清算期間の最後の月ですが、清算期間の合計で清算できません（総労働時間との過不足と、法定の総枠を超えた時間を計算していません）。確定できません。
+              {salary.flexMissing.map((m) => <div key={m} style={{ fontWeight: "normal" }}>・{m}</div>)}
+              <div style={{ fontWeight: "normal" }}>清算期間の前の月の給与を確定してから、この月を開き直してください。</div>
             </div>
           )}
           {salary.insurer.type === "kyokai" && !salary.prefectureUnknown && branchPrefectureProblem && (
@@ -250,18 +260,11 @@ export default function PayStubModal(props: Props) {
               {salary.unpaidLeaveDeductionNote && <div style={{ color: "#b45309" }}>⚠ {salary.unpaidLeaveDeductionNote}</div>}
             </div>
           )}
-          {salary.flex && (
+          {flexText && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>
-              フレックスタイム制（清算期間はこの計算期間）：総労働時間 {flexHoursLabel(salary.flex.requiredHours)}
-              {salary.flex.carryInHours > 0 && `（前の月から繰り越した ${flexHoursLabel(salary.flex.carryInHours)} を含む）`}
-              ・法定の総枠 {flexHoursLabel(salary.flex.limitHours)}・実労働 {flexHoursLabel(salary.flex.actualHours)}
-              {salary.flex.leaveHours > 0 && ` ＋ 有給 ${flexHoursLabel(salary.flex.leaveHours)}`}
-              {salary.flex.excessHours > 0 && ` → 超えた時間 ${flexHoursLabel(salary.flex.excessHours)}（法定内 ${flexHoursLabel(salary.flex.innerHours)}・時間外 ${flexHoursLabel(salary.flex.fullOvertimeHours)}）`}
-              {salary.flex.premiumOnlyHours > 0 && `。総労働時間の中で法定の総枠を超えた ${flexHoursLabel(salary.flex.premiumOnlyHours)} は割増分だけ`}
-              {salary.flex.shortageHours > 0 && ` → 足りない時間 ${flexHoursLabel(salary.flex.shortageHours)}`}
-              {salary.flex.carryOutHours > 0 && `（次の月に繰り越す ${flexHoursLabel(salary.flex.carryOutHours)}）`}
+              {flexText.title}：{flexText.lines.join("。")}
               {salary.flexShortageDetail && <div>フレックスの不足時間の控除：{salary.flexShortageDetail}（1円未満切り捨て）</div>}
-              {salary.flex.notes.map((n, i) => <div key={i} style={{ color: "#b45309" }}>⚠ {n}</div>)}
+              {salary.flex?.notes.map((n, i) => <div key={i} style={{ color: "#b45309" }}>⚠ {n}</div>)}
             </div>
           )}
           {(salary.tardyDeductionDetail || salary.tardyDeductionNote) && (

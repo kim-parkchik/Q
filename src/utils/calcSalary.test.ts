@@ -18,6 +18,7 @@ import { INSURANCE_2026 } from "../constants/insurance";
 import { TAX_2026 } from "../constants/tax";
 import { DB_SCHEMAS } from "../types/dbSchema";
 import type { AverageWagePay } from "./averageWage";
+import { DEFAULT_FLEX_RULE, flexPositionOf, parseFlexMonthRecord, type FlexMonthRecord, type FlexPeriodContext } from "./flexTime";
 
 const LAW = "currency_law";
 const company = { week_start_day: 0, round_overtime: "round", round_social_ins: LAW, round_emp_ins: LAW };
@@ -774,18 +775,23 @@ describe("フレックスタイム制（清算期間は計算期間の1か月。
     /** 6月1日から、その時間ずつ働いた日を n 日 */
     const june = (n: number, hours: number) => Array.from({ length: n }, (_, i) => day(String(i + 1).padStart(2, "0"), hours));
     const base = { period: { start: "2026-06-01", end: "2026-06-30" }, periodWorkDays: 22, employedWorkDays: 22, annualWorkDays: 245 };
-    const fiveDay = { total: { mode: "workdays" as const }, limit: "fiveDay" as const, shortage: "deduct" as const };
-    const fixed160 = { total: { mode: "fixed" as const, hours: 160 }, limit: "standard" as const, shortage: "deduct" as const };
+    const fiveDay = { total: { mode: "workdays" as const }, limit: "fiveDay" as const, shortage: "deduct" as const, months: 1 as const, startMonth: 1 };
+    const fixed160 = { total: { mode: "fixed" as const, hours: 160 }, limit: "standard" as const, shortage: "deduct" as const, months: 1 as const, startMonth: 1 };
+    /** 清算期間1か月（6月）で、前の月から繰り越した不足時間がある */
+    const carriedIn = (carryIn: number): FlexPeriodContext => ({
+        ...flexPositionOf(DEFAULT_FLEX_RULE, { closing_day: 99, is_next_month: 0 }, 2026, 6), previous: [], missing: [], carryIn,
+    });
 
     test("月給制：1日9時間でも日ごとの残業はなく、総枠（176時間）を超えた4時間だけ時間外（1,836.73…円 × 1.25 × 4時間 ＝ 9,184円）", () => {
         const r = calc(flexMonthly, june(20, 9), { ...base, flexRule: fiveDay });
         expect(r.flex).toMatchObject({ actualHours: 180, limitHours: 176, overtimeHours: 4, shortageHours: 0 });
         expect([r.totalOvertimeHours, r.standardOvertimePay, r.statutoryOvertimePay]).toEqual([4, 9184, 0]);
         expect(r.totalEarnings).toBe(300000 + 9184);
+        expect(r.flexMissing).toEqual([]);
         // フレックスでない人は、日ごとの1時間ずつ（20時間）と、週40時間を超えた時間（土日も働いているので40時間）が残業になる
         expect(calc(monthly, june(20, 9), base).totalOvertimeHours).toBe(60);
     });
-    test("月給制の不足時間：その月で清算するなら、月給 × 6時間 ÷ 1か月平均所定労働時間 ＝ 11,020円を引く。欠勤控除・遅刻早退控除は別に引かない", () => {
+    test("月給制の不足時間：清算期間の終わりに清算するなら、月給 × 6時間 ÷ 1か月平均所定労働時間 ＝ 11,020円を引く。欠勤控除・遅刻早退控除は別に引かない", () => {
         const rows = [...june(19, 8), day("25", 2), day("26", 0, "absent"), day("29", 7)];
         const r = calc(flexMonthly, rows.slice(0, 20), { ...base, flexRule: fixed160, tardyDeductionMethod: "annual" });
         expect(r.flex).toMatchObject({ actualHours: 154, shortageHours: 6, deductHours: 6 });
@@ -795,7 +801,7 @@ describe("フレックスタイム制（清算期間は計算期間の1か月。
         const withAbsent = calc(flexMonthly, rows.slice(0, 21), { ...base, flexRule: fixed160 });
         expect([withAbsent.absenceDeduction, withAbsent.absenceDays]).toEqual([0, 1]);
     });
-    test("月給制の不足時間：次の月に繰り越すなら引かずに残し、次の月の総労働時間に足す", async () => {
+    test("月給制の不足時間：次の清算期間に繰り越すなら引かずに残し、次の清算期間の総労働時間に足す", async () => {
         const rows = [...june(19, 8), day("25", 2)];
         const r = calc(flexMonthly, rows, { ...base, flexRule: { ...fixed160, shortage: "carry" } });
         expect([r.flexShortageDeduction, r.flexCarryOutHours, r.totalEarnings]).toEqual([0, 6, 300000]);
@@ -804,32 +810,35 @@ describe("フレックスタイム制（清算期間は計算期間の1か月。
         db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
         const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
         expect(await saveSalaryResult(asyncDb, "S001", 2026, 6, r, monthly)).toEqual({ success: true });
-        expect(db.query("SELECT flex_carry_hours AS h FROM salary_results").get()).toEqual({ h: 6 });
+        // 次の清算期間で読む、繰り越す時間と、この月の記録
+        const saved = db.query("SELECT flex_carry_hours AS h, flex_month AS m FROM salary_results").get() as { h: number; m: string };
+        expect(saved.h).toBe(6);
+        expect(parseFlexMonthRecord(saved.m)).toEqual(r.flex!.record);
         // 次の月：繰り越した6時間を足して166時間。166時間働けば足りる
-        const next = calc(flexMonthly, [...june(20, 8), day("25", 6)], { ...base, flexRule: fixed160, flexCarryIn: 6 });
+        const next = calc(flexMonthly, [...june(20, 8), day("25", 6)], { ...base, flexRule: fixed160, flexPeriod: carriedIn(6) });
         expect(next.flex).toMatchObject({ requiredHours: 166, carryInHours: 6, shortageHours: 0, excessHours: 0 });
-        // フレックスでない人の結果には、繰り越しを残さない
+        // フレックスでない人の結果には、繰り越しも記録も残さない
         const db2 = new Database(":memory:");
         for (const sql of DB_SCHEMAS) db2.exec(sql);
         db2.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
         await saveSalaryResult({ execute: async (sql: string, params: any[]) => db2.prepare(sql).run(...params) }, "S001", 2026, 6, calc(monthly, rows, base), monthly);
-        expect(db2.query("SELECT flex_carry_hours AS h FROM salary_results").get()).toEqual({ h: null });
+        expect(db2.query("SELECT flex_carry_hours AS h, flex_month AS m FROM salary_results").get()).toEqual({ h: null, m: null });
     });
-    test("総労働時間どおり働いても、総枠（171時間25分）を超えた4時間35分には割増分を払う（1,836.73…円 × 0.25 × 275分 ÷ 60 ＝ 2,104.59…円 → 2,105円）", () => {
+    test("総労働時間どおり働いても、総枠（171.4時間）を超えた4時間36分には割増分を払う（1,836.73…円 × 0.25 × 276分 ÷ 60 ＝ 2,112.24…円 → 2,112円）", () => {
         const r = calc(flexMonthly, june(22, 8), { ...base });
-        expect(r.standardOvertimePay).toBe(2105);
-        expect(r.totalEarnings).toBe(300000 + 2105);
+        expect(r.standardOvertimePay).toBe(2112);
+        expect(r.totalEarnings).toBe(300000 + 2112);
     });
     test("総労働時間を超えて法定の総枠までの時間は、法定内（1.0倍）で払う（総労働時間160時間で168時間なら8時間）", () => {
         const r = calc(flexMonthly, [...june(21, 8)], { ...base, flexRule: fixed160 });
         expect(r.flex).toMatchObject({ excessHours: 8, innerHours: 8, overtimeHours: 0 });
         expect([r.totalStatutoryOvertimeHours, r.statutoryOvertimePay]).toEqual([8, Math.round(300000 / (245 * 8 / 12) * 8)]);
     });
-    test("時給制：働いた時間の分を払い、法定の総枠（171時間25分）を超えた8時間35分の割増分（25%）だけを足す。不足時間は引かない", () => {
+    test("時給制：働いた時間の分を払い、法定の総枠（171.4時間）を超えた8時間36分の割増分（25%）だけを足す。不足時間は引かない", () => {
         const r = calc(flexHourly, june(20, 9), { ...base });
         expect(r.basePay).toBe(1200 * 180);
-        expect(Math.round(r.flex!.overtimeHours * 60)).toBe(8 * 60 + 35);
-        expect(r.standardOvertimePay).toBe(Math.round(1200 * 0.25 * (8 * 60 + 35) / 60));
+        expect(Math.round(r.flex!.overtimeHours * 60)).toBe(8 * 60 + 36);
+        expect(r.standardOvertimePay).toBe(Math.round(1200 * 0.25 * (8 * 60 + 36) / 60));
         expect(r.totalEarnings).toBe(1200 * 180 + r.standardOvertimePay);
         const short = calc(flexHourly, june(10, 8), { ...base });
         expect([short.flexShortageDeduction, short.flexCarryOutHours, short.flex!.deductHours]).toEqual([0, 0, 0]);
@@ -839,10 +848,128 @@ describe("フレックスタイム制（清算期間は計算期間の1か月。
         expect(r.flex).toMatchObject({ actualHours: 176, overtimeHours: 0 });
         expect([r.holidayWorkHours, r.holidayWorkPay]).toEqual([8, Math.round(300000 / (245 * 8 / 12) * 1.35 * 8)]);
     });
-    test("日給制の人は、まだフレックスタイム制で計算しない（日ごと・週ごとに残業を数える）", () => {
-        const r = calc({ ...hourly, wage_type: "daily", base_wage: 12000, is_flex: 1 }, june(5, 9), base);
-        expect(r.flex).toBeNull();
-        expect(r.totalOvertimeHours).toBe(5);
+    test("決めた時間は、入社した月は在籍した所定労働日の割合で減らす（月給の日割りと二重に引かない）", () => {
+        const joined = { ...flexMonthly, join_date: "2026-06-16" };
+        const r = calc(joined, Array.from({ length: 11 }, (_, i) => day(String(16 + i).padStart(2, "0"), 8)),
+            { ...base, employedWorkDays: 11, prorationMethod: "workdays", flexRule: fixed160 });
+        expect(r.flex).toMatchObject({ totalHours: 80, actualHours: 88, shortageHours: 0, excessHours: 8 });
+        expect(r.flexShortageDeduction).toBe(0);
+    });
+});
+
+describe("日給制のフレックスタイム制（日給を払った日数 × 1日の所定労働時間 ＋ 有給の時間と比べ、日給 ÷ 1日の所定労働時間で清算する）", () => {
+    /** 日給 12,000円・所定8時間（1時間あたり 1,500円） */
+    const flexDaily = { ...hourly, wage_type: "daily", base_wage: 12000, is_flex: 1 };
+    const june = (n: number, hours: number) => Array.from({ length: n }, (_, i) => day(String(i + 1).padStart(2, "0"), hours));
+    const base = { period: { start: "2026-06-01", end: "2026-06-30" }, periodWorkDays: 22, employedWorkDays: 22, annualWorkDays: 245 };
+
+    test("1日9時間 × 20日：日ごと・週ごとの残業はなく、日給20日分 ＋ 超えた20時間（法定内11時間24分・時間外8時間36分）。時給1,500円で180時間働いたのと同じ", () => {
+        const r = calc(flexDaily, june(20, 9), base);
+        expect(r.flex).toMatchObject({ requiredHours: 160, actualHours: 180, excessHours: 20 });
+        expect([Math.round(r.flex!.innerHours * 60), Math.round(r.flex!.overtimeHours * 60)]).toEqual([11 * 60 + 24, 8 * 60 + 36]);
+        expect([r.basePay, r.dailyWageDays]).toEqual([240000, 20]);
+        expect(r.statutoryOvertimePay).toBe(1500 * (11 * 60 + 24) / 60);
+        expect(r.standardOvertimePay).toBe(1500 * 1.25 * (8 * 60 + 36) / 60);
+        expect(r.totalEarnings).toBe(1500 * 180 + 1500 * 0.25 * (8 * 60 + 36) / 60);
+        // フレックスでない日給制の人は、1日8時間を超えた1時間ずつと、週40時間を超えた時間が残業になる
+        expect(calc({ ...flexDaily, is_flex: 0 }, june(20, 9), base).totalOvertimeHours).toBeGreaterThan(20);
+    });
+    test("足りない時間：日給 × 10時間 ÷ 8時間 ＝ 15,000円を引く。遅刻・早退は別に引かない", () => {
+        const r = calc(flexDaily, june(20, 7.5), { ...base, tardyDeductionMethod: "annual" });
+        expect(r.flex).toMatchObject({ requiredHours: 160, actualHours: 150, shortageHours: 10, deductHours: 10 });
+        expect([r.flexShortageDeduction, r.tardyDeduction]).toEqual([15000, 0]);
+        expect(r.flexShortageDetail).toBe("日給 ¥12,000 × フレックスの不足時間 10時間 ÷ 1日の所定労働時間 8時間");
+        expect(r.totalEarnings).toBe(240000 - 15000);
+    });
+    test("欠勤した日は日給を払わないので、足りない時間にしない。年休の日は日給を有給休暇の賃金として払い、清算では働いたものとして数える", () => {
+        const r = calc(flexDaily, [...june(18, 8), day("19", 0, "absent"), day("22", 0, "paid_full")], base);
+        expect(r.flex).toMatchObject({ requiredHours: 18 * 8 + 8, actualHours: 144, leaveHours: 8, shortageHours: 0, excessHours: 0 });
+        expect([r.basePay, r.paidLeavePay, r.flexShortageDeduction]).toEqual([18 * 12000, 12000, 0]);
+    });
+});
+
+describe("清算期間が2・3か月のフレックスタイム制（途中の月は週平均50時間を超えた時間を払い、最後の月に清算する）", () => {
+    const flexMonthly = { ...monthly, is_flex: 1 };
+    const r3 = { total: { mode: "fixed" as const, hours: 160 }, limit: "standard" as const, shortage: "deduct" as const, months: 3 as const, startMonth: 1 };
+    const group = { closing_day: 99, is_next_month: 0 };
+    /** 月給制の残業代の時給（月給 ÷ 1か月平均所定労働時間） */
+    const rate = 300000 / (245 * 8 / 12);
+    const periods: Record<number, { start: string; end: string }> = {
+        4: { start: "2026-04-01", end: "2026-04-30" }, 5: { start: "2026-05-01", end: "2026-05-31" }, 6: { start: "2026-06-01", end: "2026-06-30" },
+    };
+    /** その月の1日から、hours を n 日に分けて働いた勤怠 */
+    const monthRows = (m: number, hours: number, n = 20) =>
+        Array.from({ length: n }, (_, i) => ({ work_date: `2026-${String(m).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`, work_hours: hours / n, night_hours: 0, work_type: "normal" }));
+    /** 4〜6月の清算期間を、4月から順に計算する（前の月の記録を、確定した給与から読んだものとして渡す） */
+    const run = (hours: number[], staff: any = flexMonthly, o: Partial<SalaryExtras> = {}) => {
+        const previous: FlexMonthRecord[] = [];
+        return hours.map((h, i) => {
+            const m = 4 + i;
+            const pos = flexPositionOf(r3, group, 2026, m);
+            const r = calculateSalary(staff, monthRows(m, h), extras({
+                period: periods[m], periodWorkDays: 20, employedWorkDays: 20, annualWorkDays: 245, flexRule: r3,
+                flexPeriod: { ...pos, previous: [...previous], missing: [], carryIn: 0 }, ...o,
+            }), 2026, m, company);
+            if (r.flex) previous.push(r.flex.record);
+            return r;
+        });
+    };
+
+    test("手引きの例（4月220・5月180・6月140時間）：4月に5.8時間、6月に14.2時間の時間外（125%）を払い、6月に法定内40時間（総労働時間480時間との差）を払う", () => {
+        const [apr, may, jun] = run([220, 180, 140]);
+        expect([apr.flex!.final, may.flex!.final, jun.flex!.final]).toEqual([false, false, true]);
+        expect([apr.totalOvertimeHours, may.totalOvertimeHours, Math.round(jun.totalOvertimeHours * 10) / 10]).toEqual([5.8, 0, 14.2]);
+        expect(apr.standardOvertimePay).toBe(Math.round(rate * 1.25 * 5.8));
+        expect([apr.statutoryOvertimePay, apr.flexShortageDeduction, apr.totalEarnings]).toEqual([0, 0, 300000 + Math.round(rate * 1.25 * 5.8)]);
+        // 5月は総労働時間（160時間）より多く働いたが、清算期間の途中なので払わない（最後の月にまとめて清算する）
+        expect([may.statutoryOvertimePay, may.standardOvertimePay, may.totalEarnings]).toEqual([0, 0, 300000]);
+        expect(jun.standardOvertimePay).toBe(Math.round(rate * 1.25 * 14.2));
+        expect(jun.statutoryOvertimePay).toBe(Math.round(rate * 40));
+        expect(jun.flexMissing).toEqual([]);
+    });
+    test("清算期間の途中の月は、総労働時間に足りなくても引かない。最後の月に清算期間の合計で引く", () => {
+        const [apr, may, jun] = run([120, 150, 190]);
+        expect([apr.flexShortageDeduction, may.flexShortageDeduction]).toEqual([0, 0]);
+        expect(jun.flex).toMatchObject({ requiredHours: 480, actualHours: 460, shortageHours: 20 });
+        expect(jun.flexShortageDeduction).toBe(Math.floor(300000 * 20 * 60 * 12 / (245 * 8 * 60)));
+    });
+    test("最後の月の時間外が月60時間を超えたら、超えた時間は50%（手引きの例（ⅱ）：6月 95時間 → 60時間は25%・35時間は50%）", () => {
+        const [, , jun] = run([210, 220, 185]);
+        expect([jun.totalOvertimeHours, jun.standardPremiumHours, jun.highPremiumHours]).toEqual([95, 60, 35]);
+        // 総労働時間480時間を超えた135時間：法定内40時間・時間外95時間（通常の賃金も払う）
+        expect(jun.standardOvertimePay + jun.highOvertimePay).toBe(Math.round(rate * (1.25 * 60 + 1.5 * 35)));
+        expect(jun.statutoryOvertimePay).toBe(Math.round(rate * 40));
+    });
+    test("時給制：途中の月は、週平均50時間を超えた時間の割増分（25%）だけを足す", () => {
+        const [apr] = run([220, 180, 140], { ...hourly, is_flex: 1 });
+        expect(apr.basePay).toBe(1200 * 220);
+        expect(apr.standardOvertimePay).toBe(Math.round(1200 * 0.25 * 5.8));
+    });
+    test("日給制：途中の月は、週平均50時間を超えた時間を 日給 ÷ 8時間 × 125% で払う", () => {
+        const [apr] = run([220, 180, 140], { ...hourly, wage_type: "daily", base_wage: 12000, is_flex: 1 });
+        expect(apr.basePay).toBe(12000 * 20);
+        expect(apr.standardOvertimePay).toBe(Math.round(1500 * 1.25 * 5.8));
+    });
+    test("前の月の給与を確定していない・清算期間を読み込んでいないと、最後の月は清算できない（確定できない）", () => {
+        const pos = flexPositionOf(r3, group, 2026, 6);
+        const r = calculateSalary(flexMonthly, monthRows(6, 140), extras({
+            period: periods[6], periodWorkDays: 20, employedWorkDays: 20, annualWorkDays: 245, flexRule: r3,
+            flexPeriod: { ...pos, previous: [], missing: ["2026年4月支給の給与を確定していません"], carryIn: 0 },
+        }), 2026, 6, company);
+        expect(r.flexMissing).toEqual(["フレックスタイム制の清算期間（2026年4月1日〜6月30日）の2026年4月支給の給与を確定していません"]);
+        // 記録がある月だけで数えた仮の清算（入社・退職したのではないので、法定の総枠は清算期間の91日で数える）
+        expect(r.flex).toMatchObject({ partial: false, limitHours: 520 });
+        expect(r.flex!.notes.join("")).toContain("仮の清算");
+        expect(r.flex!.notes.join("")).not.toContain("入社");
+        const notLoaded = calculateSalary(flexMonthly, monthRows(6, 140), extras({ period: periods[6], periodWorkDays: 20, flexRule: r3 }), 2026, 6, company);
+        expect(notLoaded.flexMissing[0]).toContain("読み込んでいないため");
+        // 途中の月は、前の月がなくても確定できる
+        expect(run([220])[0].flexMissing).toEqual([]);
+    });
+    test("清算期間の途中で退職する人は、退職する月に働いた期間で清算する（5月31日退職：総枠 348.5時間、4月の5.8時間を除いて 45.7時間）", () => {
+        const [, may] = run([220, 180], { ...flexMonthly, retirement_date: "2026-05-31" });
+        expect(may.flex).toMatchObject({ final: true, partial: true });
+        expect(Math.round(may.totalOvertimeHours * 10) / 10).toBe(45.7);
     });
 });
 
@@ -872,7 +999,7 @@ describe("給与明細の行を足すと、ちょうど支給合計になる（�
             calc({ ...monthly, base_wage: 287654 }, [...weekdays({ work_hours: 9.1 }), day("15", 0, "special", { leave_paid: 0 })], { periodWorkDays: 22 }),
             // フレックスタイム制（時間外・法定内・不足時間）
             calc({ ...monthly, base_wage: 287654, is_flex: 1 }, Array.from({ length: 21 }, (_, i) => day(String(i + 1).padStart(2, "0"), 8.7)),
-                { period: { start: "2026-06-01", end: "2026-06-30" }, periodWorkDays: 22, annualWorkDays: 245, flexRule: { total: { mode: "fixed", hours: 165.5 }, limit: "standard", shortage: "deduct" } }),
+                { period: { start: "2026-06-01", end: "2026-06-30" }, periodWorkDays: 22, annualWorkDays: 245, flexRule: { total: { mode: "fixed", hours: 165.5 }, limit: "standard", shortage: "deduct", months: 1, startMonth: 1 } }),
             calc({ ...monthly, base_wage: 287654, is_flex: 1 }, Array.from({ length: 15 }, (_, i) => day(String(i + 1).padStart(2, "0"), 7.9)),
                 { period: { start: "2026-06-01", end: "2026-06-30" }, periodWorkDays: 22, annualWorkDays: 245 }),
             calc({ ...hourly, base_wage: 1163, is_flex: 1 }, Array.from({ length: 22 }, (_, i) => day(String(i + 1).padStart(2, "0"), 8.45)),
@@ -1701,7 +1828,7 @@ describe("休業・休職の日の給与（決まりは leaveOfAbsence.ts。2026
         expect(r.flexShortageDeduction).toBe(0);
         expect(r.basePay).toBe(150000);
         // 決めた時間（160時間）は、所定労働日数のうち休業していない日の割合（11/22）で80時間にする
-        const fixed = calc(flex, worked, opts({ flexRule: { total: { mode: "fixed", hours: 160 }, limit: "standard", shortage: "deduct" } }));
+        const fixed = calc(flex, worked, opts({ flexRule: { total: { mode: "fixed", hours: 160 }, limit: "standard", shortage: "deduct", months: 1, startMonth: 1 } }));
         expect(fixed.flex?.requiredHours).toBe(80);
         expect(fixed.flexShortageDeduction).toBe(0);
     });

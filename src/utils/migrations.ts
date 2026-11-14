@@ -323,6 +323,15 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "non_remuneration", "INTEGER DEFAULT 0");
     },
   },
+  {
+    version: 21,
+    description:
+      "フレックスタイム制の清算期間2・3か月：確定した給与に、その月の清算の記録（実労働・週平均50時間を超えた時間など。" +
+      "清算期間の最後の月の清算に使う。いままでの給与は空）の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "salary_results", "flex_month", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-03 の dbSchema.ts の形）の番号 */
