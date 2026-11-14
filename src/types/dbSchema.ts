@@ -38,7 +38,9 @@ export const DB_SCHEMAS = [
     phone TEXT,
     corporate_number TEXT,
     representative TEXT,
-    health_ins_num TEXT,
+    shaho_office_symbol TEXT,            -- 社会保険の事業所整理記号（納入告知書の「01-イロハ」のような記号。賞与支払届などの届書に書く。utils/shahoCsv.ts）
+    shaho_office_number TEXT,            -- 社会保険の事業所番号（納入告知書の1〜5けたの番号）
+    shaho_media_seq INTEGER DEFAULT 0,   -- 届書の電子申請用ファイルに、最後に付けた媒体通番（次は1を足す。999 の次は 1）
     labor_ins_num TEXT,
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
@@ -147,7 +149,9 @@ export const DB_SCHEMAS = [
     is_employment_ins_eligible INTEGER DEFAULT 1,
     employment_insurance_type TEXT,  -- 個人別の雇用保険区分（NULLなら会社設定に従う）
     health_ins_num TEXT,      -- 健康保険被保険者番号
-    pension_num TEXT,         -- 厚生年金整理番号
+    pension_num TEXT,         -- 厚生年金整理番号（被保険者整理番号。賞与支払届などの届書に書く）
+    basic_pension_number TEXT, -- 基礎年金番号（10けた。70歳以上被用者の届書に書く。utils/bonusReport.ts）
+    multi_office INTEGER DEFAULT 0, -- 2つ以上の適用事業所で働いている（二以上事業所勤務者。届書の備考に印を付ける）
     employment_ins_num TEXT,  -- 雇用保険被保険者番号
     flat_tax_reduction_persons INTEGER DEFAULT 0, -- 令和6年分 定額減税の人数（本人＋同一生計配偶者＋扶養親族。0なら月次減税をしない）
     leave_periods TEXT,       -- 休業・休職の期間（産休・育休・介護休業・業務上の負傷や疾病による休業・その他の休職。JSON。社会保険料の免除は utils/leaveExemption.ts、給与・勤怠は utils/leaveOfAbsence.ts）

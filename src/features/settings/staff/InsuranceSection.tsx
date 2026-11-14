@@ -34,6 +34,10 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetHealthInsNum,
         targetPensionNum,
         setTargetPensionNum,
+        targetBasicPensionNumber,
+        setTargetBasicPensionNumber,
+        targetMultiOffice,
+        setTargetMultiOffice,
         targetEmploymentInsNum,
         setTargetEmploymentInsNum,
         targetSocialInsGroupId,
@@ -249,6 +253,36 @@ export default function InsuranceSection({ cm }: Props) {
                             }} 
                             placeholder={targetStandardRemuneration > 0 ? "例: 67890" : "社会保険未加入"}
                         />
+                    </div>
+
+                    {/* 基礎年金番号・二以上事業所勤務者（賞与支払届などの届書に書く。utils/bonusReport.ts） */}
+                    <div>
+                        <label style={{ ...labelStyle, color: targetStandardRemuneration > 0 ? "#2c3e50" : "#bdc3c7" }}>
+                            基礎年金番号（70歳以上の人の届書に書く）
+                        </label>
+                        <input
+                            type="text"
+                            value={targetStandardRemuneration > 0 ? targetBasicPensionNumber : ""}
+                            onChange={e => setTargetBasicPensionNumber(e.target.value)}
+                            disabled={targetStandardRemuneration === 0}
+                            style={{
+                                ...inputStyle,
+                                backgroundColor: targetStandardRemuneration > 0 ? "#fff" : "#f1f5f9",
+                                cursor: targetStandardRemuneration > 0 ? "text" : "not-allowed"
+                            }}
+                            placeholder={targetStandardRemuneration > 0 ? "例: 1234-567890" : "社会保険未加入"}
+                        />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end" }}>
+                        <label style={{ fontSize: "12px", color: targetStandardRemuneration > 0 ? "#2c3e50" : "#bdc3c7", display: "flex", alignItems: "center", gap: "4px", paddingBottom: "8px" }}>
+                            <input
+                                type="checkbox"
+                                checked={targetStandardRemuneration > 0 && targetMultiOffice}
+                                onChange={e => setTargetMultiOffice(e.target.checked)}
+                                disabled={targetStandardRemuneration === 0}
+                            />
+                            2つ以上の会社（適用事業所）で社会保険に入っている（二以上事業所勤務者）
+                        </label>
                     </div>
 
                     {/* 雇用保険（こちらは既存の targetIsEmploymentInsEligible で制御） */}

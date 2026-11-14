@@ -49,8 +49,10 @@ export default function CompanyInfoTab({ cm }: Props) {
         setCompNum,
         compRep,
         setCompRep,
-        compHealth,
-        setCompHealth,
+        compShahoSymbol,
+        setCompShahoSymbol,
+        compShahoNumber,
+        setCompShahoNumber,
         compLabor,
         setCompLabor,
         headPref,
@@ -359,9 +361,13 @@ export default function CompanyInfoTab({ cm }: Props) {
                     <div style={{ gridColumn: "1 / 3", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", padding: "15px", backgroundColor: "#f0f9ff", borderRadius: "8px" }}>
                         <div>
                             <label style={labelStyle}>
-                                <ShieldCheck size={14} style={{ marginRight: '6px' }} /> 社会保険 整理記号・番号
+                                <ShieldCheck size={14} style={{ marginRight: '6px' }} /> 社会保険 事業所整理記号・事業所番号
                             </label>
-                            <input value={compHealth} onChange={e => setCompHealth(e.target.value)} placeholder="例: 12-あいう 1234" style={inputStyle} />
+                            <div style={{ display: "flex", gap: "8px" }}>
+                                <input value={compShahoSymbol} onChange={e => setCompShahoSymbol(e.target.value)} placeholder="整理記号 例: 01-イロハ" style={{ ...inputStyle, flex: 2 }} />
+                                <input value={compShahoNumber} onChange={e => setCompShahoNumber(e.target.value)} placeholder="番号 例: 12345" style={{ ...inputStyle, flex: 1 }} />
+                            </div>
+                            <span style={{ fontSize: "10px", color: "#64748b" }}>年金事務所から届く「納入告知書」に書いてある記号と番号です。賞与支払届などの届書に書きます。</span>
                         </div>
                         <div>
                             <label style={labelStyle}>

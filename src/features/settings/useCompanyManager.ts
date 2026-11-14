@@ -41,7 +41,9 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [compPhone, setCompPhone] = useState("");
     const [compNum, setCompNum] = useState(""); // 法人番号
     const [compRep, setCompRep] = useState("");
-    const [compHealth, setCompHealth] = useState(""); // ✨追加
+    // 社会保険の事業所整理記号・事業所番号（賞与支払届などの届書に書く。utils/shahoCsv.ts）
+    const [compShahoSymbol, setCompShahoSymbol] = useState("");
+    const [compShahoNumber, setCompShahoNumber] = useState("");
     const [compLabor, setCompLabor] = useState("");   // ✨追加
     const [headPref, setHeadPref] = useState("");
     const [isSaving, setIsSaving] = useState(false);
@@ -206,7 +208,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setIsSmallBusiness(Number(c.is_small_business) === 1);
                 setHourlyLeave(Number(c.hourly_leave) === 1);
                 setHalfDayLeave(Number(c.half_day_leave ?? 1) !== 0);
-                setCompHealth(c.health_ins_num || "");
+                setCompShahoSymbol(c.shaho_office_symbol || "");
+                setCompShahoNumber(c.shaho_office_number || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
                 setRoundOvertime(c.round_overtime || "round");
@@ -225,7 +228,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setSavedInfo({
                     compName: c.name || "", compZip: c.zip_code || "", compAddr: c.address || "",
                     compPhone: c.phone || "", compNum: c.corporate_number || "", compRep: c.representative || "",
-                    compHealth: c.health_ins_num || "", compLabor: c.labor_ins_num || "",
+                    compShahoSymbol: c.shaho_office_symbol || "", compShahoNumber: c.shaho_office_number || "", compLabor: c.labor_ins_num || "",
                     weekStartDay: c.week_start_day ?? 0, headPref: head?.prefecture || "",
                     isSmallBusiness: Number(c.is_small_business) === 1 ? 1 : 0,
                     hourlyLeave: Number(c.hourly_leave) === 1 ? 1 : 0,
@@ -286,13 +289,13 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             await db.execute(
                 `UPDATE company SET
                     name = ?, zip_code = ?, address = ?, phone = ?, corporate_number = ?, representative = ?,
-                    health_ins_num = ?, labor_ins_num = ?,
+                    shaho_office_symbol = ?, shaho_office_number = ?, labor_ins_num = ?,
                     round_overtime = ?, round_social_ins = ?, round_emp_ins = ?, week_start_day = ?,
                     is_small_business = ?, hourly_leave = ?, half_day_leave = ?
                 WHERE id = 1`,
                 [
                     compName, compZip, compAddr, compPhone, compNum, compRep, 
-                    compHealth, compLabor, 
+                    compShahoSymbol.trim(), compShahoNumber.trim(), compLabor, 
                     roundOvertime, roundSocialIns, roundEmpIns, weekStartDay,
                     isSmallBusiness ? 1 : 0,
                     hourlyLeave ? 1 : 0,
@@ -302,7 +305,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             await db.execute(
                 `UPDATE branches SET name = ?, zip_code = ?, prefecture = ?, address = ?, phone = ?, health_ins_num = ?, labor_ins_num = ? 
                 WHERE id = 1`, 
-                [compName, compZip, headPref, compAddr, compPhone, compHealth, compLabor]
+                [compName, compZip, headPref, compAddr, compPhone, compShahoSymbol.trim(), compLabor]
             );
 
             // --- 3. 【重要】カレンダーの再検証ロジックを走らせる ---
@@ -626,7 +629,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     // 変更があるか（保存ボタンの有効・無効に使う）
     const currentInfo: Record<string, string | number> = {
         compName, compZip, compAddr, compPhone, compNum, compRep,
-        compHealth, compLabor, weekStartDay, headPref,
+        compShahoSymbol, compShahoNumber, compLabor, weekStartDay, headPref,
         isSmallBusiness: isSmallBusiness ? 1 : 0,
         hourlyLeave: hourlyLeave ? 1 : 0,
         halfDayLeave: halfDayLeave ? 1 : 0,
@@ -656,8 +659,10 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setCompNum,
         compRep,
         setCompRep,
-        compHealth,
-        setCompHealth,
+        compShahoSymbol,
+        setCompShahoSymbol,
+        compShahoNumber,
+        setCompShahoNumber,
         compLabor,
         setCompLabor,
         headPref,
