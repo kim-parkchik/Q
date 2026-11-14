@@ -201,13 +201,13 @@ export interface SalaryRecord {
   fixed_overtime_allowance?: number | null;
   /** 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。わからないときは null） */
   non_fixed_earnings?: number | null;
-  /** 確定したときの欠勤控除の額（会社ファイルの形式 v8 より前に確定した給与は null） */
+  /** 確定したときの欠勤控除の額（わからないときは null） */
   absence_deduction?: number | null;
-  /** 確定したときの無給の特別休暇の控除の額（会社ファイルの形式 v11 より前に確定した給与は null） */
+  /** 確定したときの無給の特別休暇の控除の額（わからないときは null） */
   unpaid_leave_deduction?: number | null;
   /** 確定したときの計算期間の所定労働日数（会社カレンダーから数えたもの。わからないときは null） */
   prescribed_work_days?: number | null;
-  /** 休業の日がある月に、月給を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月・会社ファイルの形式 v19 より前は null） */
+  /** 休業の日がある月に、月給を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月は null） */
   leave_paid_days?: number | null;
   /** 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。報酬から除く。utils/averageWage.ts） */
   non_remuneration?: number | null;
@@ -249,7 +249,7 @@ export const monthFigures = (
     String(a.staff_id) === String(staff.id) && a.work_date >= period.startStr && a.work_date <= period.endStr
     && (!leaveOn(leaves, a.work_date) || (Number(a.work_hours) || 0) > 0));
   // 欠勤控除をした月の「所定労働日数」は、確定したときに会社カレンダーから数えて残した日数
-  // （残していない前の給与は、その月の土日を除いた日数）。欠勤控除をしたかも、確定したときの額で見る
+  // （わからないときは、その月の土日を除いた日数）。欠勤控除をしたかも、確定したときの額で見る
   const prescribedDays = salary.prescribed_work_days === null || salary.prescribed_work_days === undefined
     ? prescribedWorkDays(staff, year, month)
     : Number(salary.prescribed_work_days);

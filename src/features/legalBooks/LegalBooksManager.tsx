@@ -1,7 +1,7 @@
 /**
  * 「法定三帳簿」の画面：労働者名簿・賃金台帳・出勤簿を、画面に出して印刷（PDF 保存）・CSV で保存する（作り方は utils/legalBooks.ts）
  * ・労働者名簿：従業員の画面の値（労働者名簿の項目：業務の種類・履歴・退職の事由・死亡も）。退職した人も入れられる（退職から5年（当分の間3年）保存）
- * ・賃金台帳：1人の1年分。確定した給与（支給月ごと）と賞与を横に並べる（確定したときに残した内訳。前に確定した月は額だけ）
+ * ・賃金台帳：1人の1年分。確定した給与（支給月ごと）と賞与を横に並べる（確定したときに残した内訳。内訳がない月は額だけ）
  * ・出勤簿：1人の1か月分（給与の計算期間）。勤怠の記録から、日ごとの区分・出勤・退勤・休憩・労働時間
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -230,7 +230,7 @@ export default function LegalBooksManager({ db, staffList }: Props) {
               : <WageTable columns={wageColumns} />}
             {wageColumns?.some((c) => !c.ledger) && (
               <div className="no-print" style={{ ...small, color: "#b45309", marginTop: 6 }}>
-                ⚠ 内訳を残す前に確定した給与・賞与があります（{wageColumns.filter((c) => !c.ledger).map((c) => c.label).join("・")}）。総支給額・控除合計・差引支給額だけを出しています。
+                ⚠ 内訳がない給与・賞与があります（{wageColumns.filter((c) => !c.ledger).map((c) => c.label).join("・")}）。総支給額・控除合計・差引支給額だけを出しています。
                 給与明細・賞与の画面で確定し直すと、項目ごとの額と労働日数・時間数が入ります。
               </div>
             )}

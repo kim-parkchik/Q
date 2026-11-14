@@ -12,8 +12,9 @@
  * user_version と application_id は、バックアップ（VACUUM INTO で作る .qb）にもそのまま写る。
  *
  * ■ 形式の番号
- *   ・v1: 2026-11-03 の dbSchema.ts の形。開発中に積み重ねた更新（v1〜v13）をまとめて、ここを v1 とした。
- *     それより前の開発中のQで作った会社ファイルは開けないので、作り直す。
+ *   ・v1: 2026-11-14 の dbSchema.ts の形（印 "QP02"）。開発中に積み重ねた更新（2026-11-03 の v1 から v21 まで）をまとめて、ここを v1 とした。
+ *     それより前の開発中のQで作った会社ファイル（印 "QP01" のもの・印のないもの）は開けないので、作り直す。
+ *     （2026-11-03 にも、それまでの更新 v1〜v13 をまとめて v1（印 "QP01"）にしている）
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -22,7 +23,7 @@
  *   ※ 新しい表を足すだけなら、番号は要らない（開くたびに CREATE TABLE IF NOT EXISTS で作られる）
  *
  * ■ 開発中の方針（まだ一般に配布していない間）
- *   ・表の定義の正は dbSchema.ts。変更がたまったら、MIGRATIONS を空にし、Q_FILE_ID を次の値（"QP02" など）に変えて、
+ *   ・表の定義の正は dbSchema.ts。変更がたまったら、MIGRATIONS を空にし、Q_FILE_ID を次の値（"QP03" など）に変えて、
  *     今の形を v1 に戻してよい。（Q_FILE_ID を変えないと、前の形式の v2 以後のファイルを、新しい v2 以後と取り違える）
  *   ・戻すと、前のQで作った会社ファイルは開けなくなるので、作り直す。
  *   ・最初のリリース以降は戻さず、番号を積み重ねていく（利用者のファイルを守るため）。
@@ -56,292 +57,20 @@ export const addColumnIfMissing = async (
 };
 
 export const MIGRATIONS: Migration[] = [
-  // v1 は 2026-11-03 の dbSchema.ts の形（上の「形式の番号」を参照）。列を足す更新は version: 2 から。
-  {
-    version: 2,
-    description: "従業員に、住民税の特別徴収の額（年度ごとの6月分〜翌年5月分）を追加（初めは空。今までの月額は、年度の額を入れていない月に使う）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "resident_tax_schedule", "TEXT");
-    },
-  },
-  {
-    version: 3,
-    description: "従業員に、住民税の市区町村（1月1日の住所の市区町村。給与支払報告書の提出先）を追加（初めは空）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "resident_tax_municipality", "TEXT");
-    },
-  },
-  {
-    version: 4,
-    description: "ユーザーに、マイナンバーを扱える（事務取扱担当者）の印を追加（初めは誰にも付けない。管理者がシステム設定で付ける）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "users", "my_number_access", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 5,
-    description: "住民税の市区町村ごとの設定に、宛名番号と納期の特例を追加（初めは空・特例なし）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "resident_tax_municipalities", "atena_number", "TEXT");
-      await addColumnIfMissing(db, "resident_tax_municipalities", "special_due", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 6,
-    description: "マイナンバーに、同じ番号かどうかを確かめる値を追加（暗号化を始めるときに入れる）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "my_numbers", "number_hash", "TEXT");
-    },
-  },
-  {
-    version: 7,
-    description: "従業員に、通勤の方法・片道の距離・定期代・有料道路・駐車場等を追加（通勤手当の非課税限度額に使う。初めは空で、電車・バスなどとして計算する）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "commute_setting", "TEXT");
-    },
-  },
-  {
-    version: 8,
-    description: "給与規定グループに欠勤控除のしかた（初めは計算期間の所定労働日数で割る）を、確定した給与に欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う）を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "absence_deduction_method", "TEXT DEFAULT 'workdays'");
-      await addColumnIfMissing(db, "salary_results", "absence_deduction", "INTEGER");
-      await addColumnIfMissing(db, "salary_results", "prescribed_work_days", "INTEGER");
-    },
-  },
-  {
-    version: 9,
-    description: "給与規定グループに決まった休憩（初めは使わない）を、従業員に決まった休憩を使うか（初めは使う）を、勤怠にその日の「休憩なし」と確定したときに引いた決まった休憩を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "fixed_break", "TEXT");
-      await addColumnIfMissing(db, "staff", "fixed_break_apply", "INTEGER DEFAULT 1");
-      await addColumnIfMissing(db, "attendance", "break_none", "INTEGER DEFAULT 0");
-      await addColumnIfMissing(db, "attendance", "auto_break", "TEXT");
-    },
-  },
-  {
-    version: 10,
-    description:
-      "勤怠の休憩を一覧にする（休憩を1日に何回でも入れる。外出は休憩にまとめ、前の休憩・外出は一覧に移す）。" +
-      "会社に時間単位の有給を使うか（いままで時間有給を入れていれば使う）、給与規定グループに遅刻・早退・中抜けの控除のしかた（初めはしない）、確定した給与にその額を追加",
-    up: async (db) => {
-      await addColumnIfMissing(db, "attendance", "breaks", "TEXT");
-      await addColumnIfMissing(db, "attendance", "csv_breaks", "TEXT");
-      const cols = (await db.select<{ name: string }[]>("PRAGMA table_info(attendance)")).map((c) => c.name);
-      const old = ["break_start", "break_end", "out_time", "return_time", "csv_break_start", "csv_break_end", "csv_out_time", "csv_return_time"];
-      if (old.every((c) => cols.includes(c))) {
-        const isTime = (v: unknown) => typeof v === "string" && /^\d{1,2}:\d{2}$/.test(v.trim());
-        const time = (v: unknown) => (isTime(v) ? String(v).trim().padStart(5, "0") : "");
-        // 手入力があればそれを使い、なければ打刻を使う（いままでの勤怠の画面と同じ見方）
-        const pick = (manual: unknown, punched: unknown) => (isTime(manual) ? time(manual) : time(punched));
-        const pairs = (...ps: [string, string][]) => ps.filter(([s, e]) => s || e).map(([start, end]) => ({ start, end }));
-        const rows = await db.select<Record<string, unknown>[]>(`SELECT id, ${old.join(", ")} FROM attendance`);
-        for (const r of rows) {
-          const punched = pairs([time(r.csv_break_start), time(r.csv_break_end)], [time(r.csv_out_time), time(r.csv_return_time)]);
-          const edited = [r.break_start, r.break_end, r.out_time, r.return_time].some(isTime);
-          const manual = edited
-            ? pairs(
-              [pick(r.break_start, r.csv_break_start), pick(r.break_end, r.csv_break_end)],
-              [pick(r.out_time, r.csv_out_time), pick(r.return_time, r.csv_return_time)],
-            )
-            : null;
-          await db.execute("UPDATE attendance SET breaks = ?, csv_breaks = ? WHERE id = ?", [
-            manual ? JSON.stringify(manual) : null,
-            punched.length > 0 ? JSON.stringify(punched) : null,
-            r.id,
-          ]);
-        }
-        for (const c of old) {
-          try {
-            await db.execute(`ALTER TABLE attendance DROP COLUMN ${c}`);
-          } catch {
-            // 列を消せない古い SQLite では残す（使わない）
-          }
-        }
-      }
-      await addColumnIfMissing(db, "company", "hourly_leave", "INTEGER DEFAULT 0");
-      if (cols.includes("paid_leave_hours")) {
-        await db.execute("UPDATE company SET hourly_leave = 1 WHERE EXISTS (SELECT 1 FROM attendance WHERE paid_leave_hours > 0)");
-      }
-      await addColumnIfMissing(db, "payroll_groups", "tardy_deduction_method", "TEXT DEFAULT 'none'");
-      await addColumnIfMissing(db, "salary_results", "tardy_deduction", "INTEGER");
-    },
-  },
-  {
-    version: 11,
-    description:
-      "会社独自の休暇（特別休暇）：勤怠に休暇の種類と有給かの列、確定した給与に無給の休暇の控除の列を足す。" +
-      "有給の付与のうち年次有給休暇ではない名前の付与（夏季休暇など）は、その名前の休暇の種類（有給・残りを数える）の付与に移す",
-    up: async (db) => {
-      // 従業員の削除を止める TRIGGER は、特別休暇の付与も見る新しいもの（keep_staff_with_records_v2。開くときに作る）に替える
-      await db.execute("DROP TRIGGER IF EXISTS keep_staff_with_records");
-      await addColumnIfMissing(db, "attendance", "leave_type_id", "INTEGER");
-      await addColumnIfMissing(db, "attendance", "leave_paid", "INTEGER");
-      await addColumnIfMissing(db, "salary_results", "unpaid_leave_deduction", "INTEGER");
-      // 前は、夏季休暇などの付与を、有給の付与（paid_leave_grants）に別の名前で入れられた（残りは数えていなかった）
-      const others = await db.select<{ id: number; staff_id: string; name: string; grant_date: string; expiry_date: string; days_granted: number }[]>(
-        `SELECT id, staff_id, TRIM(name) AS name, grant_date, expiry_date, days_granted FROM paid_leave_grants
-         WHERE TRIM(COALESCE(name, '')) NOT IN ('', '法定有給') ORDER BY id`,
-      );
-      const typeIds = new Map<string, number>();
-      const findType = async (name: string) =>
-        (await db.select<{ id: number }[]>("SELECT id FROM leave_types WHERE name = ? ORDER BY id DESC LIMIT 1", [name]))?.[0]?.id;
-      for (const g of others ?? []) {
-        let typeId = typeIds.get(g.name);
-        if (typeId === undefined) {
-          let found = await findType(g.name);
-          if (found === undefined) {
-            await db.execute(
-              "INSERT INTO leave_types (name, is_paid, track_balance, allow_half, expiry_rule, sort_order) VALUES (?, 1, 1, 0, ?, ?)",
-              [g.name, JSON.stringify({ mode: "months", months: 12 }), typeIds.size],
-            );
-            found = await findType(g.name);
-          }
-          typeId = Number(found);
-          typeIds.set(g.name, typeId);
-        }
-        await db.execute(
-          "INSERT INTO special_leave_grants (staff_id, leave_type_id, grant_date, expiry_date, days_granted) VALUES (?, ?, ?, ?, ?)",
-          [g.staff_id, typeId, g.grant_date, g.expiry_date, g.days_granted],
-        );
-        await db.execute("DELETE FROM paid_leave_grants WHERE id = ?", [g.id]);
-      }
-    },
-  },
-  {
-    version: 12,
-    description: "特別休暇を時間単位でも取れるようにする（休暇の種類に時間単位でも取れるか、勤怠に時間単位の特別休暇の時間の列を足す）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "leave_types", "allow_hourly", "INTEGER DEFAULT 0");
-      await addColumnIfMissing(db, "attendance", "special_leave_hours", "REAL DEFAULT 0");
-    },
-  },
-  {
-    version: 13,
-    description: "会社に、半日単位の有給（半休）を使うかの列を足す（初めは使う。いままでどおり半休を入れられる）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "company", "half_day_leave", "INTEGER DEFAULT 1");
-    },
-  },
-  {
-    version: 14,
-    description: "フレックスタイム制の給与：給与規定グループにフレックスタイム制の決まり、確定した給与に次の月に繰り越す不足時間の列を足す",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "flex_rule", "TEXT");
-      await addColumnIfMissing(db, "salary_results", "flex_carry_hours", "REAL");
-    },
-  },
-  {
-    version: 15,
-    description: "年次有給休暇の付与日の決まり（入社日ごとか、毎年◯月◯日にそろえるか）の列を、会社に足す（初めは入社日ごと）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "company", "annual_leave_rule", "TEXT");
-    },
-  },
-  {
-    version: 16,
-    description:
-      "健康保険組合・国保組合の保険料を計算に入れる：組合の料率は「何年何月分から」ごとの表（social_insurance_group_rates。開くときに作る）に移し、" +
-      "国保組合の定額は従業員ごとの月額（staff.kokuho_premium）に移す。確定した給与に国保組合の保険料の列を足し、使っていなかった規定の列（会社負担率・厚生年金など）を消す",
-    up: async (db) => {
-      await addColumnIfMissing(db, "staff", "kokuho_premium", "INTEGER DEFAULT 0");
-      await addColumnIfMissing(db, "salary_results", "kokuho_premium", "INTEGER DEFAULT 0");
-      const cols = (await db.select<{ name: string }[]>("PRAGMA table_info(social_insurance_groups)")).map((c) => c.name);
-      const old = [
-        "is_fixed", "health_rate", "care_rate", "pension_rate", "fixed_amount",
-        "comp_health_rate", "comp_care_rate", "comp_pension_rate", "child_allowance_rate", "comp_fixed_amount",
-      ];
-      if (!old.every((c) => cols.includes(c))) return;
-      // 前の形：健康保険組合の本人負担率（health_rate・care_rate）は、計算に使っていなかった。いつからの料率かがわからないので、
-      // Q が料率を持っているいちばん前の月（2020年3月分）からの料率として移す（会社設定の「社会保険規定」で直してもらう）
-      const groups = await db.select<{ id: number; type: string; is_fixed: number; health_rate: number; care_rate: number; fixed_amount: number }[]>(
-        "SELECT id, type, is_fixed, health_rate, care_rate, fixed_amount FROM social_insurance_groups",
-      );
-      for (const g of groups ?? []) {
-        if (g.type === "union" && Number(g.is_fixed) !== 1 && (Number(g.health_rate) > 0 || Number(g.care_rate) > 0)) {
-          await db.execute(
-            "INSERT OR IGNORE INTO social_insurance_group_rates (group_id, from_month, health_rate, care_rate, child_support_rate) VALUES (?, '2020-03', ?, ?, 0)",
-            [g.id, Number(g.health_rate) || 0, Number(g.care_rate) || 0],
-          );
-        }
-        // 国保組合の定額は、規定ではなく従業員ごと（家族の人数などで違う）にする。前の定額を、その規定の人に入れる
-        if (g.type === "kokuho" && Number(g.fixed_amount) > 0) {
-          await db.execute(
-            "UPDATE staff SET kokuho_premium = ? WHERE social_insurance_group_id = ? AND COALESCE(kokuho_premium, 0) = 0",
-            [Math.floor(Number(g.fixed_amount)), g.id],
-          );
-        }
-      }
-      for (const c of old) {
-        try {
-          await db.execute(`ALTER TABLE social_insurance_groups DROP COLUMN ${c}`);
-        } catch {
-          // 列を消せない古い SQLite では残す（使わない）
-        }
-      }
-    },
-  },
-  {
-    version: 17,
-    description: "令和6年分の定額減税を賞与からも引く：確定した賞与に、引いた定額減税額の列を足す（いままでの賞与は 0）",
-    up: async (db) => {
-      await addColumnIfMissing(db, "bonus_results", "flat_tax_reduction", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 18,
-    description:
-      "法定三帳簿：従業員に労働者名簿の項目（従事する業務の種類・履歴・退職の事由・死亡の年月日と原因）、" +
-      "確定した給与・賞与に賃金台帳の内訳（支給・控除の行と、労働日数・時間数）の列を足す（いままでに確定したものは空。確定し直すと入る）",
-    up: async (db) => {
-      for (const c of ["job_type", "career_history", "retirement_reason", "death_date", "death_cause"]) {
-        await addColumnIfMissing(db, "staff", c, "TEXT");
-      }
-      await addColumnIfMissing(db, "salary_results", "ledger", "TEXT");
-      await addColumnIfMissing(db, "bonus_results", "ledger", "TEXT");
-    },
-  },
-  {
-    version: 19,
-    description:
-      "休業・休職の日の給与：給与規定グループに「休業の月の日割り」（初めは所定労働日数で日割り）、" +
-      "確定した給与に休業の月に払った日数（算定・月変の支払基礎日数に使う。いままでの給与は空）の列を足す",
-    up: async (db) => {
-      await addColumnIfMissing(db, "payroll_groups", "leave_proration_method", "TEXT DEFAULT 'workdays'");
-      await addColumnIfMissing(db, "salary_results", "leave_paid_days", "REAL");
-    },
-  },
-  {
-    version: 20,
-    description:
-      "平均賃金：給与項目に平均賃金での扱い（初めは固定なら月で決まる賃金、変動なら日・時間で決まる賃金）、給与規定グループに休業手当の率（初めは60%）、" +
-      "従業員に試用期間の終わる日、確定した給与に賃金・報酬でない額（労災の待期の休業補償。いままでの給与は 0）の列を足す",
-    up: async (db) => {
-      await addColumnIfMissing(db, "salary_item_master", "average_wage", "TEXT");
-      await addColumnIfMissing(db, "payroll_groups", "shutdown_allowance_rate", "REAL DEFAULT 60");
-      await addColumnIfMissing(db, "staff", "probation_end", "TEXT");
-      await addColumnIfMissing(db, "salary_results", "non_remuneration", "INTEGER DEFAULT 0");
-    },
-  },
-  {
-    version: 21,
-    description:
-      "フレックスタイム制の清算期間2・3か月：確定した給与に、その月の清算の記録（実労働・週平均50時間を超えた時間など。" +
-      "清算期間の最後の月の清算に使う。いままでの給与は空）の列を足す",
-    up: async (db) => {
-      await addColumnIfMissing(db, "salary_results", "flex_month", "TEXT");
-    },
-  },
+  // v1 は 2026-11-14 の dbSchema.ts の形（上の「形式の番号」を参照）。列を足す更新は version: 2 から。
 ];
 
-/** v1（2026-11-03 の dbSchema.ts の形）の番号 */
+/** v1（2026-11-14 の dbSchema.ts の形）の番号 */
 export const BASE_DB_VERSION = 1;
 
 /** 最新のバージョン番号 */
 export const LATEST_DB_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? BASE_DB_VERSION;
 
-/** Q の会社ファイルの印（SQLite の application_id）。"QP01" の文字コード（v1 の形式。形式を戻したら "QP02" などに変える） */
-export const Q_FILE_ID = 0x51503031;
+/**
+ * Q の会社ファイルの印（SQLite の application_id）。"QP02" の文字コード
+ * （2026-11-14 に形式を v1 に戻したときに "QP01" から変えた。形式を戻したら "QP03" などに変える）
+ */
+export const Q_FILE_ID = 0x51503032;
 
 const readPragma = async (db: MigrationDb, name: "user_version" | "application_id") => {
   const rows = await db.select<Record<string, number>[]>(`PRAGMA ${name}`);

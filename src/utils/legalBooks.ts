@@ -26,7 +26,7 @@ export interface LedgerLine {
   amount: number;
   /**
    * 平均賃金での分け方（支給の行だけ。month：月で決まる / time：日・時間・出来高で決まる / none：入れない。utils/averageWage.ts）
-   * 残していない行（v20 より前に確定した給与）は、行の名前で決める
+   * 残していない行は、行の名前で決める
    */
   avg?: AverageWageKind;
 }
@@ -151,7 +151,7 @@ export const parseLedger = (value: unknown): PayLedger | null => {
 
 // ── 賃金台帳（1人の1年分。月ごとの給与と賞与を横に並べる） ─────────────────────
 
-/** 賃金台帳の列（1回の給与・賞与）。内訳がない（v18 より前に確定した）ときは ledger が null で、確定した額だけを出す */
+/** 賃金台帳の列（1回の給与・賞与）。内訳がない（読めない）ときは ledger が null で、確定した額だけを出す */
 export interface WageLedgerColumn {
   label: string;
   kind: "salary" | "bonus";

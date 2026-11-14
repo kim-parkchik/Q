@@ -285,9 +285,9 @@ export const DB_SCHEMAS = [
     fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0）
     fixed_overtime_excess INTEGER DEFAULT 0,    -- 時間外労働の割増賃金が固定残業代を超えた差額（超過分として払った額）
     non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う）
-    absence_deduction INTEGER,                  -- 欠勤控除の額（月給制。v8 より前に確定した給与は NULL）
-    tardy_deduction INTEGER,                    -- 遅刻・早退・中抜けの控除の額（月給制・日給制。v10 より前に確定した給与は NULL）
-    unpaid_leave_deduction INTEGER,             -- 無給の特別休暇の控除の額（月給制。欠勤控除と同じ計算。v11 より前に確定した給与は NULL）
+    absence_deduction INTEGER,                  -- 欠勤控除の額（月給制）
+    tardy_deduction INTEGER,                    -- 遅刻・早退・中抜けの控除の額（月給制・日給制）
+    unpaid_leave_deduction INTEGER,             -- 無給の特別休暇の控除の額（月給制。欠勤控除と同じ計算）
     flex_carry_hours REAL,                      -- フレックスタイム制で、次の清算期間に繰り越す不足時間（フレックスタイム制の人だけ。ほかは NULL）
     flex_month TEXT,                            -- フレックスタイム制の、この月の清算の記録（JSON。実労働・週平均50時間を超えた時間など。清算期間の最後の月の清算に使う。utils/flexTime.ts）
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）

@@ -336,7 +336,7 @@ export const calcAverageWage = (input: AverageWageInput): AverageWageResult => {
       }
     } else {
       month = Number(salary.totalEarnings) || 0;
-      row.notes.push('内訳を残す前に確定した給与なので、総支給額をすべて「月で決まる賃金」にしました（臨時の手当などがあれば、確定し直すか、手で入れてください）');
+      row.notes.push('内訳がない給与なので、総支給額をすべて「月で決まる賃金」にしました（臨時の手当などがあれば、確定し直すか、手で入れてください）');
     }
     // 月給を日割りしていない月の休業の日（給与規定グループの「休業の月の日割り」が「日割りしない」）：その日の分の月給を暦日数で除く
     const leaveDays = (count.maternity ?? 0) + (count.childcare ?? 0) + (count.family_care ?? 0) + (count.injury ?? 0);
