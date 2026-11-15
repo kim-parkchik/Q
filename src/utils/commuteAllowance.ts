@@ -35,9 +35,14 @@ export interface CommuteSetting {
   toll: number;
   /** 1か月当たりの駐車場等の料金相当額（勤め先・通勤に使う駅などの周辺の駐車場・駐輪場。自宅の近くは入れない） */
   parking: number;
+  /**
+   * 定期券・回数券などを現物で渡す（給与として振り込まない）。通勤手当の額は、社会保険の報酬（届書では「現物」）と雇用保険の賃金に入れ、
+   * 非課税限度額を超えた分に所得税がかかる。支給合計・差引支給額には入れない（utils/genbutsu.ts・utils/calcSalary.ts）
+   */
+  inKind: boolean;
 }
 
-export const DEFAULT_COMMUTE_SETTING: CommuteSetting = { method: "transit", distanceKm: 0, transitFare: 0, toll: 0, parking: 0 };
+export const DEFAULT_COMMUTE_SETTING: CommuteSetting = { method: "transit", distanceKm: 0, transitFare: 0, toll: 0, parking: 0, inKind: false };
 
 const nonNeg = (v: unknown) => Math.max(0, Number(v) || 0);
 const toMethod = (v: unknown): CommuteMethod => (v === "vehicle" || v === "both" ? v : "transit");
@@ -53,6 +58,7 @@ export const parseCommuteSetting = (json: unknown): CommuteSetting => {
       transitFare: Math.floor(nonNeg(v?.transitFare)),
       toll: Math.floor(nonNeg(v?.toll)),
       parking: Math.floor(nonNeg(v?.parking)),
+      inKind: v?.inKind === true,
     };
   } catch {
     return { ...DEFAULT_COMMUTE_SETTING };

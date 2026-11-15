@@ -108,6 +108,8 @@ export default function BonusManager({ db, staffList }: Props) {
     setNewItemType,
     newItemIsDefault,
     setNewItemIsDefault,
+    newItemInKind,
+    setNewItemInKind,
     // 編集・追加アクション
     editingItemId,
     startEdit,
@@ -486,6 +488,21 @@ export default function BonusManager({ db, staffList }: Props) {
                   </label>
                 </div>
               </div>
+              {/* 現物で渡す支給項目（自社製品など）：標準賞与額・雇用保険料・所得税には入れ、差引支給額には入れない */}
+              {newItemType === 'earning' && (
+                <div>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#606266", cursor: "pointer" }}>
+                    <input type="checkbox" checked={newItemInKind} onChange={e => setNewItemInKind(e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                    現物で渡す（自社製品・商品券など）
+                  </label>
+                  {newItemInKind && (
+                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, lineHeight: 1.6 }}>
+                      金額には時価（労働協約に決めがあればその価額）を入れます。標準賞与額・雇用保険料・所得税には入れ、差引支給額（振り込む額）には入れません。
+                      賞与支払届では「現物」の欄に書きます。
+                    </div>
+                  )}
+                </div>
+              )}
               {editingItemId ? (
                 <div style={{ display: "flex", gap: 8 }}>
                   <button 
@@ -545,7 +562,12 @@ export default function BonusManager({ db, staffList }: Props) {
                 </div>
                 {masterEarningItems.map(item => (
                   <div key={item.id} style={{ ...S.itemRow, borderLeft: `4px solid ${item.type === 'earning' ? "#3498db" : "#e74c3c"}` }}>
-                    <span style={{ flex: 1, fontWeight: "bold", fontSize: 13 }}>{item.name}</span>
+                    <span style={{ flex: 1, fontWeight: "bold", fontSize: 13 }}>
+                      {item.name}
+                      {Number(item.in_kind) === 1 && (
+                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: "normal", color: "#7c3aed", border: "1px solid #c4b5fd", borderRadius: 4, padding: "0 4px" }}>現物</span>
+                      )}
+                    </span>
                     
                     <div style={{ display: "flex", gap: 4 }}>
                       {/* 🆕 編集開始ボタン */}
@@ -776,6 +798,11 @@ export default function BonusManager({ db, staffList }: Props) {
                         {/* 支給合計 */}
                         <td style={{ ...S.td, textAlign: "right", fontWeight: "bold", backgroundColor: "#ebf5fb" }}>
                           ¥{calc.totalEarnings.toLocaleString()}
+                          {calc.inKind > 0 && (
+                            <div style={{ fontSize: 10, fontWeight: "normal", color: "#7c3aed" }} title="現物で渡す支給項目の額。標準賞与額・雇用保険料・所得税には入れ、差引支給額には入れません">
+                              うち現物 ¥{calc.inKind.toLocaleString()}
+                            </div>
+                          )}
                         </td>
                         {/* 自動計算控除 */}
                         <td
@@ -851,6 +878,9 @@ export default function BonusManager({ db, staffList }: Props) {
                           color: calc.netPay > 0 ? "#27ae60" : "#e74c3c" 
                         }}>
                           ¥{calc.netPay.toLocaleString()}
+                          {calc.inKind > 0 && (
+                            <div style={{ fontSize: 10, fontWeight: "normal", color: "#64748b" }}>現物を除く</div>
+                          )}
                         </td>
                       </tr>
                     );

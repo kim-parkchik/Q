@@ -3,7 +3,7 @@
  * 使い方：確かめ用の画面（vite.preview.config.ts）を動かし、http://localhost:1432/dev/shoyo.html を開く
  * 会社：株式会社健保産業（東京都。事業所整理記号 57-ケマ・事業所番号 12345。前に作ったファイルの媒体通番は 023）
  * 2026年12月10日の冬季賞与（確定）と、12月25日の決算賞与（確定。田中さんだけ）、12月28日の臨時賞与（未確定）、11月30日の寸志（確定）
- *   山田さん：ふつうの人（整理番号3・40万円）
+ *   山田さん：ふつうの人（整理番号3・40万円）。冬季賞与は、現物で渡す支給項目の自社製品3万円と合わせて43万円（㋐通貨 400,000・㋑現物 30,000）
  *   佐藤さん：育児休業中（保険料は免除だが届け出る）
  *   鈴木さん：1956年12月5日生まれ（12月4日に70歳に達したので、70歳以上被用者。基礎年金番号 1234-567890）
  *   田中さん：冬季賞与 250,500円（12月10日）と決算賞与 100,000円（12月25日）→ 合わせて 350,500円・賞与額 350,000円・初回支払日 10日
@@ -66,10 +66,10 @@ const store = {
     { id: 4, name: "臨時賞与", target_year: 2026, target_month: 12, payment_date: "2026-12-28" },
   ],
   results: [
-    [1, "1001", 400000], [1, "1002", 150000], [1, "1003", 300000], [1, "1004", 250500], [1, "1005", 280000], [1, "1006", 50000], [1, "1007", 200000],
+    [1, "1001", 430000, 30000], [1, "1002", 150000], [1, "1003", 300000], [1, "1004", 250500], [1, "1005", 280000], [1, "1006", 50000], [1, "1007", 200000],
     [2, "1004", 100000],
     [3, "1001", 30000], [3, "1008", 30000],
-  ] as [number, string, number][],
+  ] as [number, string, number, number?][],
 };
 (window as any).__shoyoStore = store;
 
@@ -88,9 +88,9 @@ const fakeDb = {
     }
     if (q.startsWith("SELECT r.bonus_setting_id AS settingId")) {
       return store.results
-        .map(([settingId, staffId, totalEarnings]) => ({ settingId, staffId, totalEarnings, b: store.bonuses.find((b) => b.id === settingId)! }))
+        .map(([settingId, staffId, totalEarnings, inKind]) => ({ settingId, staffId, totalEarnings, inKind: inKind ?? 0, b: store.bonuses.find((b) => b.id === settingId)! }))
         .filter((r) => r.b.payment_date.slice(0, String(params[0]).length) === params[0])
-        .map((r) => ({ settingId: r.settingId, name: r.b.name, paymentDate: r.b.payment_date, staffId: r.staffId, totalEarnings: r.totalEarnings }));
+        .map((r) => ({ settingId: r.settingId, name: r.b.name, paymentDate: r.b.payment_date, staffId: r.staffId, totalEarnings: r.totalEarnings, inKind: r.inKind }));
     }
     console.warn("fakeDb: 知らない SELECT", q, params);
     return [];

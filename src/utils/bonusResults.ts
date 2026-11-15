@@ -22,6 +22,8 @@ export interface BonusResultCalc {
   /** 引いた定額減税額（令和6年6月〜12月に支払う賞与。ほかは 0） */
   flatTaxReduction: number;
   customDeductions: number;
+  /** 総支給（totalEarnings）のうち、現物で渡した額（差引支給額には入れていない。賞与支払届の「現物」） */
+  inKind: number;
   netPay: number;
   isNursing: boolean;
   /** 賃金台帳の内訳（支給・控除の項目ごとの額。utils/legalBooks.ts） */
@@ -54,12 +56,12 @@ export const buildFinalizeBonusStatements = (
   { sql: "DELETE FROM bonus_results WHERE bonus_setting_id = ?", values: [settingId] },
   ...rows.map(({ staff, calc }) => ({
     sql: `INSERT INTO bonus_results (bonus_setting_id, staff_id, total_earnings, hyojun_bonus, health_insurance, nursing_insurance,
-            child_support, welfare_pension, emp_insurance, income_tax, flat_tax_reduction, custom_deductions, net_pay, is_nursing, ledger)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            child_support, welfare_pension, emp_insurance, income_tax, flat_tax_reduction, custom_deductions, net_pay, is_nursing, ledger, in_kind)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     values: [
       settingId, String(staff.id), calc.totalEarnings, calc.hyojunBonus, calc.healthInsurance, calc.nursingInsurance,
       calc.childSupport, calc.welfarePension, calc.empInsurance, calc.incomeTax, calc.flatTaxReduction, calc.customDeductions, calc.netPay,
-      calc.isNursing ? 1 : 0, JSON.stringify(calc.ledger),
+      calc.isNursing ? 1 : 0, JSON.stringify(calc.ledger), calc.inKind ?? 0,
     ],
   })),
   { sql: "UPDATE bonus_settings SET is_closed = 1 WHERE id = ?", values: [settingId] },

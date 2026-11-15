@@ -43,8 +43,13 @@ export interface PayLedger {
   overtimeHours: number;
   holidayHours: number;
   nightHours: number;
-  /** 支給の行（給与明細と同じ。足すと総支給額） */
+  /** 支給の行（給与明細と同じ。足すと総支給額。現物で払った報酬は入れない） */
   earnings: LedgerLine[];
+  /**
+   * 現物で払った報酬の行（食事・住宅・定期券などで渡した通勤手当・現物で渡した賞与の支給項目。社会保険の報酬に入れる額。
+   * 総支給額・差引支給額には入れない。utils/genbutsu.ts）。なければ省く
+   */
+  inKind?: LedgerLine[];
   /** 控除の行（足すと控除合計） */
   deductions: LedgerLine[];
   totalEarnings: number;
@@ -92,7 +97,8 @@ export const salaryLedgerOf = (
     { name: "有給休暇手当", amount: r.paidLeavePay, avg: "time" },
     { name: "特別休暇手当", amount: r.specialLeavePay, avg: "time" },
     { name: "深夜手当", amount: r.nightPay, avg: "time" },
-    { name: "通勤手当", amount: r.commutePay, avg: opts.commuteType === "daily" ? "time" : "month" },
+    // 定期券などを現物で渡した通勤手当は、現物の行（inKind）に入れる
+    { name: "通勤手当", amount: r.commuteInKind ? 0 : r.commutePay, avg: opts.commuteType === "daily" ? "time" : "month" },
     { name: (opts.allowanceName || "").trim() || "任意手当", amount: r.allowanceAmount, avg: "month" },
     ...r.customEarningLines,
     // 平均賃金を使う支給（平均賃金には入れない。休業手当は除く期間の賃金、休業補償は賃金ではない）
@@ -111,21 +117,32 @@ export const salaryLedgerOf = (
     { name: "住民税", amount: r.residentTax },
     ...r.customDeductionLines,
   ].filter((l) => l.amount !== 0);
+  // 現物で払った報酬：定期券などで渡した通勤手当は、平均賃金で通勤手当と同じに分け（労働協約で決めた現物の賃金）、
+  // 食事・住宅などは福利厚生として平均賃金に入れない
+  const inKind: LedgerLine[] = (r.inKind?.lines ?? [])
+    .filter((l) => l.amount !== 0)
+    .map((l) => ({ name: l.name, amount: l.amount, avg: l.kind === "commute" ? (opts.commuteType === "daily" ? "time" : "month") : "none" }));
   return {
     periodStart: opts.period?.start ?? null, periodEnd: opts.period?.end ?? null,
     workDays: r.workDays, workHours: r.totalWorkHours, overtimeHours: r.totalOvertimeHours, holidayHours: r.holidayWorkHours, nightHours: r.totalNightHours,
     earnings, deductions, totalEarnings: r.totalEarnings, totalDeductions: r.totalDeductions, netPay: r.netPay, yearEndSettlement: r.yearEndSettlement,
+    ...(inKind.length > 0 ? { inKind } : {}),
     ...(r.shutdownWorkedPay > 0 ? { shutdownWorkedPay: r.shutdownWorkedPay } : {}),
   };
 };
 
-/** 賞与の、賃金台帳に書く内訳（賞与の支給項目・控除項目） */
+/**
+ * 賞与の、賃金台帳に書く内訳（賞与の支給項目・控除項目）
+ * 現物で渡した支給項目（inKind）は、給与と同じく総支給額・差引支給額に入れず、現物の行にする
+ * （totalEarnings は通貨で払った支給の合計。確定した賞与の total_earnings は現物も含むので、それとは違う）
+ */
 export const bonusLedgerOf = (b: {
-  earnings: LedgerLine[]; healthInsurance: number; nursingInsurance: number; childSupport: number; welfarePension: number;
+  earnings: LedgerLine[]; inKind?: LedgerLine[]; healthInsurance: number; nursingInsurance: number; childSupport: number; welfarePension: number;
   empInsurance: number; incomeTax: number; customDeductions: LedgerLine[]; totalEarnings: number; totalDeductions: number; netPay: number;
 }): PayLedger => ({
   periodStart: null, periodEnd: null, workDays: 0, workHours: 0, overtimeHours: 0, holidayHours: 0, nightHours: 0,
   earnings: b.earnings.filter((l) => l.amount !== 0),
+  ...((b.inKind ?? []).some((l) => l.amount !== 0) ? { inKind: (b.inKind ?? []).filter((l) => l.amount !== 0).map((l) => ({ ...l, avg: "none" as const })) } : {}),
   deductions: [
     { name: "健康保険料", amount: b.healthInsurance },
     { name: "介護保険料", amount: b.nursingInsurance },
@@ -164,7 +181,7 @@ export type LedgerCell = number | string | null;
 
 export interface WageLedgerRow {
   label: string;
-  kind: "info" | "hours" | "earning" | "earningTotal" | "deduction" | "deductionTotal" | "net";
+  kind: "info" | "hours" | "earning" | "earningTotal" | "deduction" | "deductionTotal" | "net" | "inKind";
   cells: LedgerCell[];
   total: LedgerCell;
 }
@@ -213,6 +230,7 @@ export const wageLedgerRows = (columns: WageLedgerColumn[]): WageLedgerRow[] => 
     return { label, kind: "hours", cells, total: sum(cells) };
   };
   const earningNames = namesOf(ledgers.map((l) => l?.earnings ?? []));
+  const inKindNames = namesOf(ledgers.map((l) => l?.inKind ?? []));
   const deductionNames = namesOf(ledgers.map((l) => l?.deductions ?? []));
   const amount = (label: string, kind: WageLedgerRow["kind"], pick: (c: WageLedgerColumn) => number | null): WageLedgerRow => {
     const cells = columns.map(pick);
@@ -236,6 +254,8 @@ export const wageLedgerRows = (columns: WageLedgerColumn[]): WageLedgerRow[] => 
       ? [amount("年末調整の過不足", "net", (c) => (c.ledger ? c.ledger.yearEndSettlement : null))]
       : []),
     amount("差引支給額", "net", (c) => c.ledger?.netPay ?? c.fallback?.netPay ?? null),
+    // 現物で払った報酬（総支給額・差引支給額には入れていない。社会保険の報酬に入れる額）
+    ...inKindNames.map((name) => amount(`${name}（現物）`, "inKind", (c) => valueOf(c.ledger?.inKind, name))),
   ];
 };
 

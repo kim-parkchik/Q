@@ -12,7 +12,8 @@
  * ・修正平均額：途中入社で1か月分の給与が支払われていない月を除いた平均（ガイドブックのケース⑤。その月も、日数が足りれば総計には入れる）、
  *   遡って支払った昇給の差額（遡及支払額）を除いた平均（ケース⑩・月額変更届の記入例）、年間報酬の平均で申し立てるときは年間平均額
  *   （算定基礎届は備考の「年間平均」、月額変更届は備考欄に「年間平均」）。平均額と同じなら書かない
- * ・額は1千万円以上なら 9999999。現物で払った報酬は、Q ではないものとする（0円）
+ * ・額は1千万円以上なら 9999999。報酬の月額の「現物によるもの」には、確定した給与の現物で払った報酬（食事・住宅・定期券など。
+ *   utils/genbutsu.ts）を書き、「通貨によるもの」はそれを除いた額（画面で報酬を直したときも、現物の額は確定した給与のまま）
  * ・従前の標準報酬月額は千円で4文字（健保・厚年）。厚年は厚生年金の等級表の上限・下限の中にした額。
  *   健康保険組合・国民健康保険組合の人は健保を書かない（年金事務所の届書は厚生年金の分。健康保険組合には組合の形で別に届け出る）。
  *   70歳以上被用者（厚生年金の資格がない）は厚年を、75歳以上（健康保険の資格もない）は健保も書かない
@@ -179,6 +180,13 @@ const previousStandards = (
   pension: !over70 && previous > 0 ? pensionStandardOf(previous, pensionRange) : null,
 });
 
+/** 報酬（現物を含む）を、通貨によるもの・現物によるもの・合計に分ける（現物は報酬を超えない） */
+const splitAmount = (amount: number | null, inKindAmount: number | undefined) => {
+  const total = Math.max(0, Math.floor(amount ?? 0));
+  const inKind = Math.min(total, Math.max(0, Math.floor(inKindAmount ?? 0)));
+  return { currency: total - inKind, inKind, total };
+};
+
 /** 被保険者の項目の、届書の項目の番号（算定基礎届と月額変更届で同じ） */
 const PERSON_FIELDS: Record<ShahoPersonPart, number[]> = { pensionNumber: [4], kana: [5], birth: [7, 8], basic: [40, 41] };
 
@@ -278,8 +286,8 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
   const days = input.months.map((m) => Math.max(0, Math.floor(m.days ?? 0)));
   const counted = countedMonths(days, input.kind);
   const months: ReportMonth[] = input.months.map((m, i) => {
-    const currency = Math.max(0, Math.floor(m.amount ?? 0));
-    return { year, month: m.month, days: days[i], currency, inKind: 0, total: currency, counted: counted[i] };
+    const { currency, inKind, total } = splitAmount(m.amount, m.inKind);
+    return { year, month: m.month, days: days[i], currency, inKind, total, counted: counted[i] };
   });
   months.forEach((m) => { if (m.days > 31) problem(`${m.month}月の支払基礎日数が31日を超えています`); });
   const used = months.filter((m) => m.counted);
@@ -388,8 +396,8 @@ export interface GeppenReportInput {
   /** 従前の標準報酬月額（変動月から3か月目の分）と、その額を使いはじめた年月 */
   previous: number;
   previousFrom: string | null;
-  /** 変動月から3か月に支払った給与（画面の値。報酬は遡及支払額を含む支払った額） */
-  months: { year: number; month: number; days: number | null; amount: number | null }[];
+  /** 変動月から3か月に支払った給与（画面の値。報酬は遡及支払額と現物を含む支払った額。inKind はそのうち現物で払った額） */
+  months: { year: number; month: number; days: number | null; amount: number | null; inKind?: number }[];
   /** 特定適用事業所の短時間労働者 */
   short: boolean;
   /** 画面で決めた平均（遡及支払額を除いた平均） */
@@ -428,15 +436,23 @@ export const autoChangeReason = (
   wageType: string | null | undefined,
   base: { before: number | null; after: number | null },
   fixedOvertime: { before: number | null; after: number | null },
+  inKind: { before: { monthly: number; daily: number } | null; after: { monthly: number; daily: number } | null } = { before: null, after: null },
 ): string => {
   const parts: string[] = [];
   if (base.before !== null && base.after !== null) parts.push(wageType === "hourly" ? "時給" : wageType === "daily" ? "日給" : "基本給");
+  // 現物で払う報酬（社宅に入った・出た・価額の告示の改正など）：なかった → 支給、なくなった → 廃止、ほかは価額の変更
+  const none = (v: { monthly: number; daily: number }) => v.monthly === 0 && v.daily === 0;
+  const inKindText = inKind.before && inKind.after
+    ? none(inKind.before) ? "現物給与の支給" : none(inKind.after) ? "現物給与の廃止" : "現物給与の価額の変更"
+    : null;
+  const withInKind = (text: string) => (inKindText ? `${text}・${inKindText}` : text);
   if (fixedOvertime.before !== null && fixedOvertime.after !== null) {
-    if (fixedOvertime.before === 0) return parts.length > 0 ? `${parts[0]}の変更・固定残業代の支給` : "固定残業代の支給";
-    if (fixedOvertime.after === 0) return parts.length > 0 ? `${parts[0]}の変更・固定残業代の廃止` : "固定残業代の廃止";
+    if (fixedOvertime.before === 0) return withInKind(parts.length > 0 ? `${parts[0]}の変更・固定残業代の支給` : "固定残業代の支給");
+    if (fixedOvertime.after === 0) return withInKind(parts.length > 0 ? `${parts[0]}の変更・固定残業代の廃止` : "固定残業代の廃止");
     parts.push("固定残業代");
   }
-  return parts.length > 0 ? `${parts.join("・")}の変更` : "固定的賃金の変更";
+  if (parts.length === 0) return inKindText ?? "固定的賃金の変更";
+  return withInKind(`${parts.join("・")}の変更`);
 };
 
 /** 月額変更届の1人分を作る */
@@ -478,9 +494,9 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
 
   const minDays = input.short ? 11 : 17;
   const months: ReportMonth[] = input.months.map((m) => {
-    const currency = Math.max(0, Math.floor(m.amount ?? 0));
+    const { currency, inKind, total } = splitAmount(m.amount, m.inKind);
     const days = Math.max(0, Math.floor(m.days ?? 0));
-    return { year: m.year, month: m.month, days, currency, inKind: 0, total: currency, counted: true };
+    return { year: m.year, month: m.month, days, currency, inKind, total, counted: true };
   });
   if (input.months.some((m) => m.amount === null || m.days === null)) problems.push("3か月の給与のうち、確定していない月があります（確定してから作ります）");
   if (months.some((m) => m.days < minDays || m.days > 31)) {

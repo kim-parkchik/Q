@@ -15,6 +15,9 @@
  *   加藤さん：整理番号がない・フリガナにスペースがない（直すところがあるので、チェックを外すとファイルを作れる）
  *   伊藤さん：6月15日に入社（算定基礎届の対象外）／渡辺さん：7月改定の月変を登録済み（対象外）
  *   山本さん：6月に降給（9月改定の月変 → 算定基礎届ではチェックを外す）
+ *   吉田さん：社宅（東京・16畳・家賃なし）に住んでいる（4〜6月の報酬に現物 45,280円 → 算定基礎届の⑫現物）
+ *   松本さん：6月11日に社宅（同じ）に入った。7月に払う6月分は日割り（30,186円）、8月に払う7月分から1か月分（45,280円）
+ *            → 1か月分そろった8月が変動月（現物 0 → 45,280円）。8〜10月の平均 295,280円で、従前 26万円から2等級上がり、11月改定
  * 「電子申請用のファイルを保存」で保存の窓の代わりに、保存したバイトを window.__savedFile に入れる
  */
 import { useState } from "react";
@@ -74,6 +77,10 @@ const staffList: any[] = [
     standard_remuneration: 340000, standard_remuneration_history: history(["", 300000, "shutoku"], ["2025-09", 300000, "teiji"], ["2026-07", 340000, "zuiji"]) }),
   person({ id: "2011", name: "山本 降給", furigana: "ヤマモト コウキュウ", birthday: "1979-11-11", pension_num: "44", base_wage: 260000,
     standard_remuneration: 340000, standard_remuneration_history: history(["", 340000, "shutoku"], ["2025-09", 340000, "teiji"]) }),
+  person({ id: "2012", name: "吉田 社宅", furigana: "ヨシダ シャタク", birthday: "1987-07-07", pension_num: "45", base_wage: 250000,
+    standard_remuneration: 300000, standard_remuneration_history: history(["", 300000, "shutoku"], ["2025-09", 300000, "teiji"]) }),
+  person({ id: "2013", name: "松本 入居", furigana: "マツモト ニュウキョ", birthday: "1991-09-09", pension_num: "46", base_wage: 250000,
+    standard_remuneration: 260000, standard_remuneration_history: history(["", 260000, "shutoku"], ["2025-09", 260000, "teiji"]) }),
 ];
 
 /** 支給月ごとの総支給額と基本給（[総支給, 基本給]。書いていない月は、その人のいつもの額） */
@@ -93,6 +100,25 @@ const pay: Record<string, { usual: [number, number]; months?: Record<string, [nu
   "2009": { usual: [220000, 220000], from: "2026-07" },
   "2010": { usual: [350000, 340000], months: Object.fromEntries(PAY_MONTHS.filter((p) => ym(p.year, p.month) < "2026-04").map((p) => [ym(p.year, p.month), [310000, 300000]])) },
   "2011": { usual: [270000, 260000], months: Object.fromEntries(PAY_MONTHS.filter((p) => ym(p.year, p.month) < "2026-06").map((p) => [ym(p.year, p.month), [350000, 330000]])) },
+  "2012": { usual: [250000, 250000] },
+  "2013": { usual: [250000, 250000] },
+};
+/** 現物（社宅）の記録：支給月 → [現物の額, 1か月分の固定的な額, 1か月分そろっているか]（翌月払いなので、前の月の分。null は現物なし） */
+const inKindRecords: Record<string, (payMonth: string) => [number, number, boolean] | null> = {
+  "2012": () => [45280, 45280, true],
+  "2013": (k) => (k < "2026-07" ? null : k === "2026-07" ? [30186, 45280, false] : [45280, 45280, true]),
+};
+const inKindColumns = (staffId: string, year: number, month: number) => {
+  const v = inKindRecords[staffId]?.(ym(year, month));
+  if (!v) return { in_kind: 0, in_kind_detail: null };
+  const prev = month === 1 ? ym(year - 1, 12) : ym(year, month - 1);
+  return {
+    in_kind: v[0],
+    in_kind_detail: JSON.stringify({
+      month: prev, settled: v[2], fixed: { monthly: v[1], daily: 0 },
+      lines: [{ name: "社宅", kind: "housing", amount: v[0], taxable: 0, emp: 0, detail: "1畳 2,830円 × 16畳" }],
+    }),
+  };
 };
 const salaries = Object.entries(pay).flatMap(([staffId, p]) => PAY_MONTHS
   .filter((m) => !p.from || ym(m.year, m.month) >= p.from)
@@ -102,6 +128,7 @@ const salaries = Object.entries(pay).flatMap(([staffId, p]) => PAY_MONTHS
       staff_id: staffId, target_year: m.year, target_month: m.month, total_earnings: total, non_remuneration: 0,
       absence_deduction: 0, unpaid_leave_deduction: 0, prescribed_work_days: 21, leave_paid_days: null,
       applied_base_wage: base, fixed_overtime_allowance: 0, non_fixed_earnings: staffId === "2005" ? 0 : Math.max(0, total - base),
+      ...inKindColumns(staffId, m.year, m.month),
     };
   }));
 

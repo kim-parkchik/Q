@@ -46,6 +46,7 @@ export default function ShikakuReportManager({ db, staffList, currentUser }: Pro
           （資格喪失日は、退職日・死亡日の翌日です）。届書には、マイナンバーか基礎年金番号を必ず書きます（どちらもない届書は返されます）。
           マイナンバーを書かない人の資格取得届には、住所（郵便番号・フリガナ）も書きます。
           資格取得届の報酬月額は、資格取得時の決定（月給は月の額、時給・日給は同じ仕事の人の報酬などから。残業代などの見込みも入れる）の額を入れてください。
+          現物（社宅・食事・定期券など）は、従業員の画面の「現物で払う報酬」と、定期券などで渡す通勤手当から1か月分の見込みを出しています。
           健康保険組合の人は、健康保険組合にも出します（下の「健康保険組合に出すファイル」）。
           70歳以上の人は、70歳以上被用者該当届・不該当届も兼ねます（75歳以上の人と、健康保険組合・国民健康保険組合の70歳以上の人は、年金事務所には70歳以上被用者の届だけを出します）。
         </p>
@@ -96,14 +97,14 @@ export default function ShikakuReportManager({ db, staffList, currentUser }: Pro
                 <th style={th} className="no-print">届ける</th>
                 <th style={th}>氏名（フリガナ）・生年月日</th>
                 <th style={th}>資格取得日</th>
-                <th style={th}>報酬月額（通貨）</th>
+                <th style={th}>報酬月額（通貨・現物）</th>
                 <th style={th}>マイナンバー・基礎年金番号・住所</th>
                 <th style={th}>被扶養者・資格確認書・備考</th>
                 <th style={th} className="no-print">確かめること</th>
               </tr>
             </thead>
             <tbody>
-              {z.shutokuRows.map(({ edit: e, row: r, fromHistory }) => {
+              {z.shutokuRows.map(({ edit: e, row: r, fromHistory, inKind }) => {
                 const s = staffList.find((x) => String(x.id) === r.staffId);
                 return (
                   <tr key={r.staffId} style={{ opacity: e.include ? 1 : 0.5 }}>
@@ -117,7 +118,12 @@ export default function ShikakuReportManager({ db, staffList, currentUser }: Pro
                     </td>
                     <td style={td}>
                       <input type="number" className="no-print" value={e.wage ?? ""} placeholder="円" onChange={(ev) => z.updateShutoku(s, { wage: ev.target.value === "" ? null : Math.max(0, Math.trunc(Number(ev.target.value))) })} style={{ ...smallInput, width: 110 }} />
-                      <span className="print-only">{yen(r.values[22])}</span>
+                      {/* 現物（社宅・食事・定期券など）：空にすると、従業員の画面の「現物で払う報酬」からの見込みに戻る */}
+                      <div className="no-print" style={{ ...small, marginTop: 2 }}>
+                        現物 <input type="number" min={0} value={e.inKind ?? inKind} title="社宅・食事・定期券など（従業員の画面の「現物で払う報酬」と、定期券などで渡す通勤手当からの見込み。直せます。空にすると見込みに戻ります）"
+                          onChange={(ev) => z.updateShutoku(s, { inKind: ev.target.value === "" ? null : Math.max(0, Math.trunc(Number(ev.target.value))) })} style={{ ...smallInput, width: 90 }} />
+                      </div>
+                      <span className="print-only">{yen(r.values[22])}{Number(r.values[21]) > 0 && `（うち現物 ${yen(r.values[21])}）`}</span>
                     </td>
                     <td style={td}>
                       {numberText(r.values, 12, [15, 16])}

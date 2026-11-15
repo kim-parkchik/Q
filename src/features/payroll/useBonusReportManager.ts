@@ -24,10 +24,13 @@ export interface BonusSettingRow {
 }
 
 const PAYMENTS_SQL =
-  `SELECT r.bonus_setting_id AS settingId, s.name AS name, s.payment_date AS paymentDate, r.staff_id AS staffId, r.total_earnings AS totalEarnings
+  `SELECT r.bonus_setting_id AS settingId, s.name AS name, s.payment_date AS paymentDate, r.staff_id AS staffId, r.total_earnings AS totalEarnings,
+          r.in_kind AS inKind
    FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id`;
 const toPayments = (rows: BonusPayment[] | null | undefined): BonusPayment[] =>
-  (rows ?? []).map((r) => ({ ...r, staffId: String(r.staffId), totalEarnings: Number(r.totalEarnings) || 0, settingId: Number(r.settingId) }));
+  (rows ?? []).map((r) => ({
+    ...r, staffId: String(r.staffId), totalEarnings: Number(r.totalEarnings) || 0, inKind: Number(r.inKind) || 0, settingId: Number(r.settingId),
+  }));
 
 export function useBonusReportManager(db: any) {
   const dialog = useMessageDialog();

@@ -9,6 +9,7 @@ import { fetchAddressByZip } from "../../utils/addressUtils";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 import { parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod } from "../../utils/leaveExemption";
+import { parseInKind, stringifyInKind, validateInKindEntry, type InKindEntry } from "../../utils/genbutsu";
 import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
 import { countAnnualWorkDays } from "../../utils/annualWorkDays";
 import {
@@ -125,6 +126,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetDependentsFrom, setTargetDependentsFrom] = useState("");
     const [targetFlatTaxReductionPersons, setTargetFlatTaxReductionPersons] = useState(0); // 令和6年分 定額減税の人数
     const [targetLeavePeriods, setTargetLeavePeriods] = useState<LeavePeriod[]>([]); // 休業・休職の期間（産休・育休の社会保険料の免除・休業の日の給与と勤怠）
+    const [targetInKind, setTargetInKind] = useState<InKindEntry[]>([]); // 現物で払う報酬（社宅・食事・自社製品など。utils/genbutsu.ts）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄・丙欄）
     const [targetResidentTax, setTargetResidentTax] = useState(0); // 住民税の月額（以前の入れ方。年度の額を入れていない月に使う）
     const [targetResidentTaxSchedule, setTargetResidentTaxSchedule] = useState<ResidentTaxYear[]>([]); // 住民税の年度ごとの12か月（utils/residentTax.ts）
@@ -351,6 +353,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetWageHistoryPast([]); setTargetWageFrom("");
         setTargetDependentsHistoryPast([]); setTargetDependentsFrom("");
         setTargetLeavePeriods([]);
+        setTargetInKind([]);
         setTargetTaxColumn("kou");
         setTargetRemunerationHistory([{ from: "", amount: 0, reason: "shutoku" }]);
         setTargetIsEmploymentInsEligible(1);
@@ -424,6 +427,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetDependents(latestDependents.count);
         setTargetFlatTaxReductionPersons(s.flat_tax_reduction_persons || 0);
         setTargetLeavePeriods(parseLeavePeriods(s.leave_periods));
+        setTargetInKind(parseInKind(s.in_kind));
         setTargetTaxColumn(toTaxColumn(s.tax_column));
         setTargetResidentTax(s.resident_tax || 0);
         setTargetResidentTaxSchedule(residentTaxScheduleOf(s));
@@ -500,6 +504,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetDependents) !== Number(original.dependents || 0) ||
             Number(targetFlatTaxReductionPersons) !== Number(original.flat_tax_reduction_persons || 0) ||
             stringifyLeavePeriods(targetLeavePeriods) !== stringifyLeavePeriods(parseLeavePeriods(original.leave_periods)) ||
+            JSON.stringify(targetInKind) !== JSON.stringify(parseInKind(original.in_kind)) ||
             targetTaxColumn !== toTaxColumn(original.tax_column) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             stringifyResidentTaxSchedule(targetResidentTaxSchedule) !== stringifyResidentTaxSchedule(residentTaxScheduleOf(original)) ||
@@ -539,6 +544,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     // 休業・休職の期間に、開始日が空・終了日が開始日より前のものがないか
     const isLeavePeriodsValid = targetLeavePeriods.every(p => !validateLeavePeriod(p));
+    // 現物で払う報酬の行に、始めた日が空・やめた日が始めた日より前などのものがないか
+    const isInKindValid = targetInKind.every(e => !validateInKindEntry(e));
 
     // 振込先口座の入れ方の間違い（口座ごとの間違いと、残りを振り込む口座がちょうど1つか）
     const bankAccountErrors = [
@@ -549,7 +556,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     const canSave = () => {
         const hasRequiredFields = targetId.trim() !== "" && targetName.trim() !== "";
-        return hasRequiredFields && isLeavePeriodsValid && !remunerationHistoryError && !wageHistoryError && !dependentsHistoryError
+        return hasRequiredFields && isLeavePeriodsValid && isInKindValid && !remunerationHistoryError && !wageHistoryError && !dependentsHistoryError
             && bankAccountErrors.length === 0 && !isIdDuplicated() && isChanged() && !isSaving;
     };
 
@@ -607,6 +614,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetBasicPensionNumber.trim() || null, targetMultiOffice ? 1 : 0,
                 // 住所のフリガナ（資格取得届に書く）
                 targetAddressKana.trim() || null,
+                // 現物で払う報酬（社宅・食事など。社会保険の報酬に入れる）
+                stringifyInKind(targetInKind) || null,
             ];
 
             if (editingId) {
@@ -628,7 +637,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         standard_remuneration_history=?, wage_history=?, dependents_history=?,
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
-                        probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?
+                        probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?, in_kind=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -651,7 +660,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         standard_remuneration_history, wage_history, dependents_history,
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         job_type, career_history, retirement_reason, death_date, death_cause,
-                        probation_end, basic_pension_number, multi_office, address_kana,
+                        probation_end, basic_pension_number, multi_office, address_kana, in_kind,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -869,6 +878,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         targetLeavePeriods,
         setTargetLeavePeriods,
         isLeavePeriodsValid,
+        targetInKind,
+        setTargetInKind,
+        isInKindValid,
         targetTaxColumn,
         setTargetTaxColumn,
         targetResidentTax,

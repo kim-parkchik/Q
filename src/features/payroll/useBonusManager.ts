@@ -37,6 +37,8 @@ interface BonusItem {
   name: string;
   type: 'earning' | 'deduction';
   is_default_active: number; // 🆕 追加
+  /** 1なら現物で渡す支給項目（自社製品など。標準賞与額・雇用保険料・所得税に入れ、差引支給額には入れない） */
+  in_kind?: number;
 }
 
 export const useBonusManager = (db: Database | null, staffList: any[]) => { // 🆕 nullを許容
@@ -66,6 +68,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
   const [newItemName, setNewItemName] = useState('');
   const [newItemType, setNewItemType] = useState<'earning' | 'deduction'>('earning');
   const [newItemIsDefault, setNewItemIsDefault] = useState(true);
+  /** 現物で渡す支給項目（自社製品など） */
+  const [newItemInKind, setNewItemInKind] = useState(false);
   const [editingSettingId, setEditingSettingId] = useState<number | null>(null);
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
 
@@ -271,12 +275,13 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
     // 🆕 newItemIsDefault を使って保存
     await db.execute(
-      "INSERT INTO bonus_item_master (name, type, is_default_active) VALUES (?, ?, ?)", 
-      [newItemName, newItemType, newItemIsDefault ? 1 : 0]
+      "INSERT INTO bonus_item_master (name, type, is_default_active, in_kind) VALUES (?, ?, ?, ?)", 
+      [newItemName, newItemType, newItemIsDefault ? 1 : 0, newItemType === 'earning' && newItemInKind ? 1 : 0]
     );
 
     setNewItemName('');
     setNewItemIsDefault(true); // 追加後にデフォルトをONに戻しておく（お好みで）
+    setNewItemInKind(false);
     await loadItems();
   };
 
@@ -378,6 +383,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const deductionItems = currentActiveItems.filter(i => i.type === 'deduction');
 
     const totalEarnings = earningItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
+    // 現物で渡す支給項目（自社製品など）：標準賞与額・雇用保険料・所得税には入れ（支給合計に入れたまま）、差引支給額には入れない
+    // （賞与支払届の「現物」。utils/bonusReport.ts）
+    const inKindItems = earningItems.filter(item => Number(item.in_kind) === 1);
+    const inKind = inKindItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
     const hyojunBonus = Math.floor(totalEarnings / 1000) * 1000;
 
     // 健康保険料率は、拠点の都道府県（協会けんぽの支部）ごと。拠点を選んでいない人は本店（給与明細と同じ）
@@ -457,11 +466,14 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const customDeductions = deductionItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
     const totalDeductions = socialTotal + incomeTax + customDeductions;
     // 賃金台帳の内訳（賞与の支給項目・控除項目ごとの額。確定するときに残す。utils/legalBooks.ts）
+    // 現物で渡した支給項目は、給与と同じく総支給額・差引支給額に入れず、現物の行にする
+    const netPay = totalEarnings - totalDeductions - inKind;
     const ledger = bonusLedgerOf({
-      earnings: earningItems.map((item) => ({ name: item.name, amount: vals[item.id] ?? 0 })),
+      earnings: earningItems.filter(item => Number(item.in_kind) !== 1).map((item) => ({ name: item.name, amount: vals[item.id] ?? 0 })),
+      inKind: inKindItems.map((item) => ({ name: item.name, amount: vals[item.id] ?? 0 })),
       healthInsurance, nursingInsurance, childSupport, welfarePension, empInsurance, incomeTax,
       customDeductions: deductionItems.map((item) => ({ name: item.name, amount: vals[item.id] ?? 0 })),
-      totalEarnings, totalDeductions, netPay: totalEarnings - totalDeductions,
+      totalEarnings: totalEarnings - inKind, totalDeductions, netPay,
     });
 
     return {
@@ -469,7 +481,9 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       empInsurance, incomeTax, customDeductions, totalDeductions, ledger,
       /** 令和6年分の定額減税：減税前の所得税・引いた額・この賞与のあとに残る額・先に定額減税を引いて確定した、後に払う給与・賞与 */
       incomeTaxBeforeReduction, flatTaxTotal, flatTaxReduction, flatTaxRemainingAfter: flatTax.remaining - flatTaxReduction, flatTaxLaterUsed: flatTax.laterUsed,
-      netPay: totalEarnings - totalDeductions, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled,
+      /** 支給合計のうち、現物で渡した額（差引支給額には入れていない） */
+      inKind,
+      netPay, isNursing, isHealthTarget, isPensionTarget, isEmploymentInsEnrolled,
       /** この賞与より前に支払った賞与の健康保険の標準賞与額の累計と、この賞与の健康保険・厚生年金の標準賞与額（上限で切った額） */
       earlierHealthTotal: earlier.health, healthHyojun, pensionHyojun,
       prevSalaryStatus, taxByMonthlyTable,
@@ -497,6 +511,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     setNewItemName(item.name);
     setNewItemType(item.type);
     setNewItemIsDefault(item.is_default_active === 1);
+    setNewItemInKind(Number(item.in_kind) === 1);
   };
 
   // キャンセル時
@@ -505,6 +520,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     setNewItemName("");
     setNewItemType("earning");
     setNewItemIsDefault(true);
+    setNewItemInKind(false);
   };
 
   // 編集内容を保存（名前・種別・標準フラグを全て更新）
@@ -513,8 +529,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     if (!newItemName.trim()) return;
 
     await db.execute(
-      "UPDATE bonus_item_master SET name = ?, type = ?, is_default_active = ? WHERE id = ?",
-      [newItemName, newItemType, newItemIsDefault ? 1 : 0, editingItemId]
+      "UPDATE bonus_item_master SET name = ?, type = ?, is_default_active = ?, in_kind = ? WHERE id = ?",
+      [newItemName, newItemType, newItemIsDefault ? 1 : 0, newItemType === 'earning' && newItemInKind ? 1 : 0, editingItemId]
     );
 
     // 編集モードをリセット
@@ -627,6 +643,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     items,
     newItemName, setNewItemName,
     newItemType, setNewItemType,
+    newItemInKind, setNewItemInKind,
     newItemIsDefault, setNewItemIsDefault,
     editingItemId, startEdit, cancelEdit, saveEdit,
     addItem, deleteItem, updateItemName, loadItems,

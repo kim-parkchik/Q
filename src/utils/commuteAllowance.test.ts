@@ -102,8 +102,11 @@ describe("保存（従業員の commute_setting）", () => {
         expect(parseCommuteSetting("{壊れた")).toEqual(DEFAULT_COMMUTE_SETTING);
     });
     test("保存して読み直すと同じ（知らない方法は電車・バスなど、負の数は0）", () => {
-        const s: CommuteSetting = { method: "both", distanceKm: 12.5, transitFare: 9000, toll: 0, parking: 3000 };
+        const s: CommuteSetting = { method: "both", distanceKm: 12.5, transitFare: 9000, toll: 0, parking: 3000, inKind: false };
         expect(parseCommuteSetting(stringifyCommuteSetting(s))).toEqual(s);
         expect(parseCommuteSetting(JSON.stringify({ method: "taxi", distanceKm: -3 }))).toEqual(DEFAULT_COMMUTE_SETTING);
+        // 定期券などを現物で渡す印（true のときだけ）
+        expect(parseCommuteSetting(stringifyCommuteSetting({ ...s, inKind: true })).inKind).toBe(true);
+        expect(parseCommuteSetting(JSON.stringify({ inKind: "yes" })).inKind).toBe(false);
     });
 });

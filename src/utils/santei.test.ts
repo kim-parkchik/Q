@@ -153,9 +153,9 @@ describe("確定した給与と勤怠から、1人ずつの値を作る", () => 
         expect(r.exclusion).toBeNull();
         expect(r.previous).toBe(300000);
         expect(r.months).toEqual([
-            { month: 4, days: 30, amount: 300000, partialJoin: false },
-            { month: 5, days: 31, amount: 310000, partialJoin: false },
-            { month: 6, days: 30, amount: 305000, partialJoin: false },
+            { month: 4, days: 30, amount: 300000, inKind: 0, partialJoin: false },
+            { month: 5, days: 31, amount: 310000, inKind: 0, partialJoin: false },
+            { month: 6, days: 30, amount: 305000, inKind: 0, partialJoin: false },
         ]);
         expect(r.unfinalizedMonths).toEqual([]);
     });
@@ -163,6 +163,11 @@ describe("確定した給与と勤怠から、1人ずつの値を作る", () => 
         const [r] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth],
             [{ ...salary("A", 4, 318000), non_remuneration: 18000 }, salary("A", 5, 300000), salary("A", 6, 300000)], []);
         expect(r.months[0].amount).toBe(300000);
+    });
+    test("報酬には、現物で払った報酬（支給合計に入っていない社宅・食事・定期券など）を足す（届書の「現物」）", () => {
+        const [r] = buildSanteiInputs([{ ...monthly, id: "A" }], 2026, [endOfMonth],
+            [{ ...salary("A", 4, 300000), in_kind: 25280 }, { ...salary("A", 5, 300000), in_kind: 25280 }, salary("A", 6, 300000)], []);
+        expect(r.months.map((m) => [m.amount, m.inKind])).toEqual([[325280, 25280], [325280, 25280], [300000, 0]]);
     });
     test("20日締め翌月払い：5月に支払う給与の計算期間は3月21日〜4月20日（31日）", () => {
         const [r] = buildSanteiInputs([{ ...monthly, id: "A", payroll_group_id: 2 }], 2026, [endOfMonth, close20Next],

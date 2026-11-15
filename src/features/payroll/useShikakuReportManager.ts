@@ -9,10 +9,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { SHAHO_FILE_NAME } from "../../constants/shahoTodoke";
-import { checkSocialInsEnrolled } from "../../utils/calcSalary";
+import { branchPrefectureOf } from "../../utils/branchPrefecture";
+import { checkSocialInsEnrolled, prescribedWorkDays } from "../../utils/calcSalary";
 import { insurerOf, loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
 import {
-  acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedWageOf, lossOf, type ShutokuRow, type SoshitsuRow,
+  acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedInKindOf, estimatedWageOf, lossOf, type ShutokuRow, type SoshitsuRow,
 } from "../../utils/shikakuReport";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
 import { useShahoFile } from "./useShahoFile";
@@ -26,6 +27,8 @@ export interface ShutokuEdit {
   include: boolean;
   acquiredOn: string;
   wage: number | null;
+  /** 報酬月額（現物）。null は従業員の画面の「現物で払う報酬」などからの見込み */
+  inKind: number | null;
   dependents: boolean;
   certificate: boolean;
   shortTime: boolean;
@@ -54,6 +57,8 @@ export function useShikakuReportManager(db: any, staffList: any[], user: MyNumbe
   const [mode, setMode] = useState<ShikakuMode>("shutoku");
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
   const [insurers, setInsurers] = useState<Map<number, HealthInsurer>>(new Map());
+  /** 拠点（現物の価額は、勤務地の都道府県のもの） */
+  const [branches, setBranches] = useState<any[]>([]);
   const [insurerKey, setInsurerKey] = useState(0);
   const [shutokuEdits, setShutokuEdits] = useState<Record<string, ShutokuEdit>>({});
   const [soshitsuEdits, setSoshitsuEdits] = useState<Record<string, SoshitsuEdit>>({});
@@ -68,6 +73,12 @@ export function useShikakuReportManager(db: any, staffList: any[], user: MyNumbe
         if (!cancelled) setInsurers(map);
       } catch (e) {
         console.error("社会保険規定の読み込みエラー:", e);
+      }
+      try {
+        const rows = await db.select("SELECT id, name, prefecture FROM branches ORDER BY id ASC");
+        if (!cancelled) setBranches(rows ?? []);
+      } catch (e) {
+        console.error("拠点の読み込みエラー:", e);
       }
     })();
     return () => { cancelled = true; };
@@ -85,7 +96,7 @@ export function useShikakuReportManager(db: any, staffList: any[], user: MyNumbe
   }), [staffList, month]);
 
   const shutokuEditOf = useCallback((s: any): ShutokuEdit => shutokuEdits[String(s.id)] ?? {
-    include: true, acquiredOn: acquiredOnOf(s).date, wage: estimatedWageOf(s), dependents: false, certificate: false,
+    include: true, acquiredOn: acquiredOnOf(s).date, wage: estimatedWageOf(s), inKind: null, dependents: false, certificate: false,
     shortTime: false, rehired: false, remarks: "",
   }, [shutokuEdits]);
   const soshitsuEditOf = useCallback((s: any): SoshitsuEdit => soshitsuEdits[String(s.id)] ?? {
@@ -98,14 +109,19 @@ export function useShikakuReportManager(db: any, staffList: any[], user: MyNumbe
 
   const shutokuRows = useMemo(() => shutokuStaff.map((s) => {
     const e = shutokuEditOf(s);
-    return {
-      edit: e, fromHistory: acquiredOnOf(s).fromHistory,
-      row: buildShutokuRow({
-        staff: s, acquiredOn: e.acquiredOn, wage: e.wage, dependents: e.dependents, certificate: e.certificate, shortTime: e.shortTime,
-        rehired: e.rehired, remarks: e.remarks, insurer: insurerOf(insurers, s.social_insurance_group_id), myNumber: my.writes(String(s.id)), today,
-      }, file.office.values) as ShutokuRow,
-    };
-  }), [shutokuStaff, shutokuEditOf, insurers, my.writes, today, file.office]);
+    // 報酬月額（現物）の見込み：社宅・食事など（勤務地の都道府県の価額）と、定期券などで渡す通勤手当。画面で直したらその額
+    const [y, m] = (e.acquiredOn || today).split("-").map(Number);
+    const estimate = estimatedInKindOf(s, e.acquiredOn, branchPrefectureOf(branches, s.branch_id).prefecture, prescribedWorkDays(s, y, m));
+    const inKind = e.inKind ?? estimate.amount;
+    const row = buildShutokuRow({
+      staff: s, acquiredOn: e.acquiredOn, wage: e.wage, inKind, dependents: e.dependents, certificate: e.certificate, shortTime: e.shortTime,
+      rehired: e.rehired, remarks: e.remarks, insurer: insurerOf(insurers, s.social_insurance_group_id), myNumber: my.writes(String(s.id)), today,
+    }, file.office.values) as ShutokuRow;
+    if (e.inKind === null && estimate.problems.length > 0) {
+      row.notes.push(`現物の見込みを出せないものがあります（${estimate.problems.join("。")}）。現物の額を入れてください`);
+    }
+    return { edit: e, fromHistory: acquiredOnOf(s).fromHistory, inKind, row };
+  }), [shutokuStaff, shutokuEditOf, insurers, branches, my.writes, today, file.office]);
   const soshitsuRows = useMemo(() => soshitsuStaff.map((s) => {
     const e = soshitsuEditOf(s);
     const loss = lossOf(s)!;

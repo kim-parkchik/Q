@@ -45,3 +45,6 @@ local-notes/
 
 # 日本年金機構の届書作成仕様書（約16MB と大きいので上げない。出どころと SHA-256 は shaho-format/README.md）
 shaho-format/source/
+
+# 日本年金機構の全国現物給与価額一覧表と厚生労働省の改正のお知らせ（PDF 9つで約7MB なので上げない。出どころと SHA-256 は genbutsu-tables/README.md）
+genbutsu-tables/source/

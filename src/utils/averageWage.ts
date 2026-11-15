@@ -322,7 +322,8 @@ export const calcAverageWage = (input: AverageWageInput): AverageWageResult => {
     let none = 0;
     if (ledger) {
       const wt = wageTypeOfLedger(ledger, wageType);
-      for (const line of ledger.earnings) {
+      // 現物で払った報酬の行（定期券などで渡した通勤手当は通勤手当と同じに分け、食事・住宅などは入れない。残した分け方で決める）
+      for (const line of [...ledger.earnings, ...(ledger.inKind ?? [])]) {
         const kind = averageWageKindOfLine(line, wt);
         if (kind === 'month') month += line.amount;
         else if (kind === 'time') time += line.amount;

@@ -190,6 +190,26 @@ describe("算定基礎届・月額変更届の部品", () => {
     expect(autoChangeReason("monthly", { before: null, after: null }, { before: 0, after: 30000 })).toBe("固定残業代の支給");
     expect(autoChangeReason("monthly", { before: null, after: null }, { before: 30000, after: 0 })).toBe("固定残業代の廃止");
     expect(autoChangeReason("monthly", { before: null, after: null }, { before: null, after: null })).toBe("固定的賃金の変更");
+    // 現物で払う報酬（社宅・食事など）の価額の変動
+    const none = { monthly: 0, daily: 0 };
+    const nobase = { before: null, after: null };
+    expect(autoChangeReason("monthly", nobase, nobase, { before: none, after: { monthly: 45280, daily: 0 } })).toBe("現物給与の支給");
+    expect(autoChangeReason("monthly", nobase, nobase, { before: { monthly: 45280, daily: 0 }, after: none })).toBe("現物給与の廃止");
+    expect(autoChangeReason("monthly", nobase, nobase, { before: { monthly: 45280, daily: 0 }, after: { monthly: 53200, daily: 0 } })).toBe("現物給与の価額の変更");
+    expect(autoChangeReason("monthly", { before: 250000, after: 260000 }, nobase, { before: { monthly: 45280, daily: 0 }, after: { monthly: 53200, daily: 0 } }))
+      .toBe("基本給の変更・現物給与の価額の変更");
+  });
+  test("報酬月額の「通貨によるもの」「現物によるもの」「合計」：現物は確定した給与の現物で払った報酬（社宅など）", () => {
+    const withInKind = [4, 5, 6].map((month) => ({ month, days: 30, amount: 325280, inKind: 25280, partialJoin: false }));
+    const row = buildSanteiReportRow(santei({ months: withInKind, ordinaryAverage: 325280 }), office);
+    expect(row.values.slice(27, 38)).toEqual(["300000", "300000", "300000", "25280", "25280", "25280", "325280", "325280", "325280", "975840", "325280"]);
+    expect(row.months.map((m) => [m.currency, m.inKind, m.total])).toEqual([[300000, 25280, 325280], [300000, 25280, 325280], [300000, 25280, 325280]]);
+    // 月額変更届も同じ（画面で報酬を現物より少なく直したときは、現物はその額まで）
+    const g = buildGeppenReportRow(geppen({
+      months: [{ year: 2019, month: 9, days: 31, amount: 345280, inKind: 45280 }, { year: 2019, month: 10, days: 30, amount: 345280, inKind: 45280 }, { year: 2019, month: 11, days: 31, amount: 20000, inKind: 45280 }],
+      ordinaryAverage: 236853,
+    }), office);
+    expect(g.values.slice(27, 36)).toEqual(["300000", "300000", "0", "45280", "45280", "20000", "345280", "345280", "20000"]);
   });
 });
 

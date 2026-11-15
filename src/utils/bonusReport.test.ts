@@ -55,6 +55,11 @@ describe("届書の1人分（仕様書の作成例と同じになる）", () => 
     expect([union.values[4], union.values[17], union.values[20], union.problems]).toEqual(["", "1", "1", []]);
     expect(union.notes.join("")).toContain("健康保険組合・国民健康保険組合の70歳以上の人");
   });
+  test("賞与支払額の㋑現物は、現物で渡した額（確定した賞与の in_kind）。㋐通貨はそれを除いた額、賞与額は合計から切り捨て", () => {
+    const r = buildBonusReport([person({ birthday: "1990-05-27" })], [pay({ totalEarnings: 630500, inKind: 30500 })], office).rows[0];
+    expect(r.values.slice(11, 14)).toEqual(["600000", "30500", "630000"]);
+    expect([r.currency, r.inKind, r.total]).toEqual([600000, 30500, 630000]);
+  });
   test("二以上事業所勤務者は、備考の「二以上勤務」に 1", () => {
     expect(buildBonusReport([person({ birthday: "1990-05-27", multi_office: 1 })], [pay()], office).rows[0].values[18]).toBe("1");
   });

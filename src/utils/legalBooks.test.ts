@@ -108,6 +108,25 @@ describe("賃金台帳の表（1人の1年分）", () => {
     expect(rows.filter((r) => r.kind === "earning").map((r) => r.label)).toEqual(["基本給", "時間外手当(法定内)", "時間外手当(25%割増)", "役職手当", "住宅手当", "通勤手当"]);
     expect(rows.filter((r) => r.kind === "deduction").map((r) => r.label)).toEqual(["健康保険料", "介護保険料", "厚生年金保険料", "雇用保険料", "所得税", "住民税"]);
   });
+  test("現物で払った報酬（社宅・定期券・現物で渡した賞与の項目）は、差引支給額の後ろに「（現物）」の行を出す（総支給額には入れない）", () => {
+    const withInKind = salary("6月", 300000, 0, 7000);
+    withInKind.ledger!.inKind = [{ name: "社宅", amount: 25280, avg: "none" }, { name: "通勤手当（定期券など）", amount: 30000, avg: "month" }];
+    const giftBonus: WageLedgerColumn = {
+      label: "冬季賞与", kind: "bonus",
+      ledger: bonusLedgerOf({
+        earnings: [{ name: "基本賞与", amount: 400000 }], inKind: [{ name: "自社製品", amount: 30000 }],
+        healthInsurance: 21500, nursingInsurance: 0, childSupport: 0, welfarePension: 39340, empInsurance: 2150, incomeTax: 15000, customDeductions: [],
+        totalEarnings: 400000, totalDeductions: 77990, netPay: 322010,
+      }),
+    };
+    expect(giftBonus.ledger!.inKind).toEqual([{ name: "自社製品", amount: 30000, avg: "none" }]);
+    const rows = wageLedgerRows([withInKind, giftBonus]);
+    const row = (label: string) => rows.find((r) => r.label === label)!;
+    expect(rows.slice(-4).map((r) => r.label)).toEqual(["差引支給額", "社宅（現物）", "通勤手当（定期券など）（現物）", "自社製品（現物）"]);
+    expect(row("総支給額").cells).toEqual([300000, 400000]);
+    expect(row("社宅（現物）")).toMatchObject({ kind: "inKind", cells: [25280, null], total: 25280 });
+    expect(row("自社製品（現物）").cells).toEqual([null, 30000]);
+  });
   test("CSV（時間は「時:分」）", () => {
     const csv = wageLedgerCsv({ name: "山田 太郎", gender: "男", year: 2026 }, [salary("6月", 300000, 9000, 7000)]);
     const lines = csv.split("\r\n");

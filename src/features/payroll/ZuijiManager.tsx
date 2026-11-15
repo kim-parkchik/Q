@@ -186,7 +186,8 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
           </div>
           <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, lineHeight: 1.6 }}>
             ⑮平均額は3か月の合計の3分の1です（1円未満切り捨て）。遡って払った差額を除いた平均と、年間平均で申し立てるときの年間平均額は、⑯修正平均額に書きます。
-            現物で払った報酬は、Q ではないものとしています。
+            報酬には、現物で払った報酬（社宅・食事・定期券など）も入れ、⑫現物に書きます。現物の価額が変わった月（告示の改正・社宅に入った・出たなど）も
+            変動月として探します（月の途中から・までの月は比べず、変わった後の額が1か月分そろった月を変動月にします）。
           </div>
         </div>
       )}
@@ -219,6 +220,11 @@ function ZuijiTableRow({ r, z }: { r: ZuijiRow; z: ReturnType<typeof useZuijiMan
             : [
                 r.baseWageBefore !== null && `基本給 ${r.baseWageBefore.toLocaleString()} → ${r.baseWageAfter?.toLocaleString()}円`,
                 r.fixedOvertimeBefore !== null && `固定残業代 ${r.fixedOvertimeBefore.toLocaleString()} → ${r.fixedOvertimeAfter?.toLocaleString()}円`,
+                // 現物で払う報酬（社宅・食事など）の1か月分の額（出勤した日ごとの食事は1日の額）
+                r.inKindBefore !== null && r.inKindAfter !== null && r.inKindBefore.monthly !== r.inKindAfter.monthly
+                  && `現物 ${r.inKindBefore.monthly.toLocaleString()} → ${r.inKindAfter.monthly.toLocaleString()}円`,
+                r.inKindBefore !== null && r.inKindAfter !== null && r.inKindBefore.daily !== r.inKindAfter.daily
+                  && `現物（1日） ${r.inKindBefore.daily.toLocaleString()} → ${r.inKindAfter.daily.toLocaleString()}円`,
               ].filter(Boolean).map((t) => <div key={t as string}>{t}</div>)}
         </div>
         {r.note && <div style={{ fontSize: 11, color: "#b45309", marginTop: 4, whiteSpace: "normal", maxWidth: 220 }}>⚠ {r.note}</div>}

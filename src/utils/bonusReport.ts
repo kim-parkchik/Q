@@ -16,7 +16,8 @@
  * 電子申請用のファイルの項目（表4.9.1-1）：様式コード 2265700・事業所整理記号・被保険者整理番号・氏名（カナ・漢字）・
  *   生年月日（元号のコード＋和暦の年月日）・賞与支払年月日・通貨・現物・合計（1,000円未満切り捨て。1千万円以上は 9999999／9999000）・
  *   個人番号・基礎年金番号（上4けた・下6けた）・備考1〜3・70歳以上被用者届のみ提出
- * Q では、現物で払った賞与はないものとし（0円）、70歳以上被用者は基礎年金番号で届ける（個人番号でも届けられるが、まだ使わない）。
+ * 現物で払った賞与は、賞与の支給項目に「現物で渡す」の印を付けた項目の額（確定した賞与の in_kind）。通貨は総支給からそれを除いた額。
+ * 70歳以上被用者は基礎年金番号で届ける（個人番号でも届けられるが、まだ使わない）。
  * 出典：日本年金機構 https://www.nenkin.go.jp/shinsei/kounen/tekiyo/shoyo/20140821.html
  *       https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html
  *       厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」（src/constants/shahoTodoke.ts）
@@ -38,8 +39,10 @@ export interface BonusPayment {
   /** 支給日（YYYY-MM-DD） */
   paymentDate: string;
   staffId: string;
-  /** 総支給額（通貨で払った額） */
+  /** 総支給額（通貨と現物の合計） */
   totalEarnings: number;
+  /** 総支給額のうち、現物で渡した額（現物で渡す支給項目。なければ 0） */
+  inKind?: number;
 }
 
 /** 届書の1人分 */
@@ -155,8 +158,9 @@ export const buildBonusReport = (
     if (insured.length < sorted.length) {
       notes.push(`被保険者でなかった日に払った賞与（${sorted.filter((p) => !insured.includes(p)).map((p) => `${p.name} ${p.paymentDate}`).join("・")}）は入れていません`);
     }
-    const currency = insured.reduce((s, p) => s + p.totalEarnings, 0);
-    const inKind = 0;
+    // 賞与支払額：現物で渡した額（現物で渡す支給項目）と、それを除いた通貨の額
+    const inKind = insured.reduce((s, p) => s + Math.min(p.totalEarnings, Math.max(0, Number(p.inKind) || 0)), 0);
+    const currency = insured.reduce((s, p) => s + p.totalEarnings, 0) - inKind;
     const firstPaymentDay = insured.length >= 2 && first.paymentDate !== lastPaid.paymentDate ? first.paymentDate.slice(8, 10) : "";
     if (insured.length >= 2) {
       notes.push(

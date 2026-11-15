@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SHAHO_SHUTOKU_FIELDS, SHAHO_SHUTOKU_UNION_FIELDS, SHAHO_SOSHITSU_FIELDS, SHAHO_SOSHITSU_UNION_FIELDS } from "../constants/shahoTodoke";
 import type { HealthInsurer } from "./healthInsurer";
-import { acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedWageOf, lossOf, shikakuDeadline, type ShutokuInput, type SoshitsuInput } from "./shikakuReport";
+import { acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedInKindOf, estimatedWageOf, lossOf, shikakuDeadline, type ShutokuInput, type SoshitsuInput } from "./shikakuReport";
 import { MY_NUMBER_PLACEHOLDER, buildUnionShahoLines, encodeShahoFile, fillMyNumbers, shahoOfficeValues, unionOfficeValues } from "./shahoCsv";
 
 /** 仕様書の作成例の事業所（事業所整理記号 01-ケイト・事業所番号 123。東京都） */
@@ -199,6 +199,22 @@ describe("届書の画面の初めの値", () => {
     expect(estimatedWageOf({ wage_type: "monthly", base_wage: 250000, fixed_overtime_allowance: 30000, commute_type: "monthly", commute_amount: 12000 })).toBe(292000);
     expect(estimatedWageOf({ wage_type: "monthly", base_wage: 250000, commute_type: "daily", commute_amount: 500 })).toBe(250000);
     expect(estimatedWageOf({ wage_type: "hourly", base_wage: 1200 })).toBeNull();
+    // 定期券などを現物で渡す通勤手当は、通貨に入れない（現物の見込みに入れる）
+    expect(estimatedWageOf({ wage_type: "monthly", base_wage: 250000, commute_type: "monthly", commute_amount: 12000, commute_setting: JSON.stringify({ inKind: true }) })).toBe(250000);
+  });
+  test("報酬月額の現物は、資格取得日にしている「現物で払う報酬」の1か月分と、定期券などで渡す通勤手当（勤務地の都道府県の価額）", () => {
+    const staff = {
+      commute_type: "monthly", commute_amount: 12000, commute_setting: JSON.stringify({ inKind: true }),
+      in_kind: JSON.stringify([{ kind: "housing", name: "社宅", start: "2026-11-01", area: 40, selfPay: 20000 }]),
+    };
+    // 東京 1,330円 × 40平方メートル ＝ 53,200円 − 家賃 20,000円 ＝ 33,200円 ＋ 通勤手当 12,000円
+    expect(estimatedInKindOf(staff, "2026-11-16", "東京", 21)).toEqual({ amount: 45200, problems: [] });
+    expect(estimatedInKindOf(staff, "2026-11-16", null, 21).problems).toHaveLength(1);
+    expect(estimatedInKindOf({}, "2026-11-16", "東京", 21)).toEqual({ amount: 0, problems: [] });
+  });
+  test("資格取得届の報酬月額に、通貨・現物・合計を書く", () => {
+    const row = buildShutokuRow(shutoku({ wage: 198000, inKind: 33200 }), office);
+    expect(row.values.slice(20, 23)).toEqual(["198000", "33200", "231200"]);
   });
   test("喪失の原因：死亡日が退職日より前か同じなら死亡、そうでなければ退職等", () => {
     expect(lossOf({ retirement_date: "2026-03-31" })).toEqual({ cause: "退職等", date: "2026-03-31" });

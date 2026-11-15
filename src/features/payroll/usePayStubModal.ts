@@ -413,6 +413,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       alert(`フレックスタイム制の清算期間の合計で清算できないので、確定できません。\n${salary.flexMissing.map(m => `・${m}`).join("\n")}\n\n清算期間の前の月の給与を確定してから、この月を確定してください。`);
       return;
     }
+    if ((salary.inKind?.problems.length ?? 0) > 0) {
+      alert(`現物で払う報酬の価額を出せないので、確定できません。\n${salary.inKind!.problems.map(m => `・${m}`).join("\n")}`);
+      return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });
     if (result.success) {
       setIsSaved(true);

@@ -98,7 +98,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         const groups = await db.select<any[]>("SELECT * FROM payroll_groups ORDER BY id ASC");
         // 前の年の4月（1月の変動の年間平均で、前の9か月を見るため）から、次の年の2月（11・12月の変動の3か月目まで）に支払った給与
         const salaries = await db.select<SalaryRecord[]>(
-          `SELECT staff_id, target_year, target_month, total_earnings, non_remuneration, applied_base_wage, fixed_overtime_allowance, non_fixed_earnings,
+          `SELECT staff_id, target_year, target_month, total_earnings, non_remuneration, in_kind, in_kind_detail, applied_base_wage, fixed_overtime_allowance, non_fixed_earnings,
                   absence_deduction, unpaid_leave_deduction, prescribed_work_days, leave_paid_days
            FROM salary_results WHERE (target_year * 12 + target_month) BETWEEN ? AND ?`,
           [(year - 1) * 12 + 4, (year + 1) * 12 + 2]
@@ -216,7 +216,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
       return {
         key: r.key, staff: r.staff, changeYear: r.year, changeMonth: r.month, direction: r.direction, revisionFrom: r.revisionFrom,
         previous: r.previous, previousFrom: remunerationFromAt(r.staff, third.year, third.month),
-        months: r.months.map((m) => ({ year: m.year, month: m.month, days: m.days, amount: m.amount })),
+        months: r.months.map((m) => ({ year: m.year, month: m.month, days: m.days, amount: m.amount, inKind: m.inKind ?? 0 })),
         short: r.short, ordinaryAverage: r.judgement.average,
         annualAverage: r.decided.byAnnual ? r.annual.average : null,
         retro: retroIndexes.length === 1 ? { index: retroIndexes[0], amount: r.retro[retroIndexes[0]] } : null,
@@ -225,6 +225,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
           staffAsOf(r.staff, r.year, r.month).wage_type,
           { before: r.baseWageBefore, after: r.baseWageAfter },
           { before: r.fixedOvertimeBefore, after: r.fixedOvertimeAfter },
+          { before: r.inKindBefore, after: r.inKindAfter },
         ),
         remarks: o.remarks ?? null,
         insurerType: insurerOf(insurers, r.staff.social_insurance_group_id)?.type ?? "kyokai",

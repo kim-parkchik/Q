@@ -79,6 +79,13 @@ describe("平均賃金（原則と最低保障）", () => {
     expect(formatSen(r.amountSen!)).toBe("10,760円86銭");
     expect(r.error).toBeNull();
   });
+  test("現物で払った報酬の行：定期券などで渡した通勤手当は入れ（通勤手当と同じ）、社宅・食事は入れない（福利厚生）", () => {
+    const cash = monthlyLines().filter((l) => l.name !== "通勤手当");
+    const inKind: LedgerLine[] = [{ name: "通勤手当（定期券など）", amount: 10000, avg: "month" }, { name: "社宅", amount: 25280, avg: "none" }];
+    const r = calcAverageWage(input({ salaries: [9, 10, 11].map((m) => salary(2026, m, cash, {}, { inKind })) }));
+    // 現金の通勤手当と同じ（930,000円・60,000円）。社宅は入れない
+    expect([r.monthWages, r.timeWages]).toEqual([930000, 60000]);
+  });
   test("神奈川労働局の例：月で決まる賃金 21,000円 ÷ 91日 ＋ 日で決まる賃金 393,600円 ÷ 41日 × 60% ＝ 5,990円76銭", () => {
     // 4〜6月（30 ＋ 31 ＋ 30 ＝ 91日）。毎月、月額の手当 7,000円と日給の分 131,200円。働いた日は 14 ＋ 14 ＋ 13 ＝ 41日
     const lines: LedgerLine[] = [{ name: "日給", amount: 131200, avg: "time" }, { name: "皆勤手当", amount: 7000, avg: "month" }];

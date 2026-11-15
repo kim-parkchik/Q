@@ -15,6 +15,8 @@
  *    所定労働日数は、給与を確定したときに会社カレンダーから数えて残した計算期間の日数。
  *    欠勤控除をしない完全月給制なら、欠勤があっても暦日数）
  * ■ 決まった標準報酬月額は、9月分から翌年8月分まで使う
+ * ■ 報酬には、現物で払った報酬（食事・住宅・定期券など。確定した給与の in_kind。utils/genbutsu.ts）も入れる
+ *   （日本年金機構「標準報酬月額の対象となる報酬とは何ですか」：通勤定期券・食事・住宅など現物で支給されるものも報酬）
  * 出典：日本年金機構 https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20121017.html （定時決定）
  *       https://www.nenkin.go.jp/service/kounen/info/jireishokai/henreisantei.html （途中入社の月・短時間就労者・短時間労働者）
  *       https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20150515-02.html （支払基礎日数：出勤日数・暦日数）
@@ -47,8 +49,10 @@ export interface SanteiMonth {
   month: number;
   /** 支払基礎日数（その月に給与を支払っていなければ null） */
   days: number | null;
-  /** 支払った報酬（通勤手当を含む。賞与は含めない。その月に給与を支払っていなければ null） */
+  /** 支払った報酬（通勤手当と、現物で払った報酬を含む。賞与は含めない。その月に給与を支払っていなければ null） */
   amount: number | null;
+  /** 報酬のうち、現物で払った額（食事・住宅・定期券など。届書の「現物」。utils/genbutsu.ts。なければ 0） */
+  inKind?: number;
   /** 途中入社で、1か月分の給与が支払われていない月 */
   partialJoin: boolean;
 }
@@ -211,6 +215,10 @@ export interface SalaryRecord {
   leave_paid_days?: number | null;
   /** 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。報酬から除く。utils/averageWage.ts） */
   non_remuneration?: number | null;
+  /** 現物で払った報酬（社会保険の報酬に入れる額。支給合計には入っていないので、報酬に足す。utils/genbutsu.ts） */
+  in_kind?: number | null;
+  /** 現物の内訳（JSON。月変で、現物の価額の変動を見つけるのに使う。utils/genbutsu.ts の InKindRecord） */
+  in_kind_detail?: string | null;
 }
 
 /** 確定した勤怠（支払基礎日数を数えるのに使う項目） */
@@ -260,8 +268,9 @@ export const monthFigures = (
       month,
       // 給与形態は、その月の分の履歴の値（utils/staffHistory.ts）
       days: paymentBasisDays(staffAsOf(staff, year, month).wage_type, period, rows, prescribedDays, absenceDeducted, salary.leave_paid_days),
-      // 報酬：支給合計から、報酬でない額（労災の待期の休業補償）を除く
-      amount: (Number(salary.total_earnings) || 0) - (Number(salary.non_remuneration) || 0),
+      // 報酬：支給合計から、報酬でない額（労災の待期の休業補償）を除き、現物で払った報酬（支給合計に入っていない）を足す
+      amount: (Number(salary.total_earnings) || 0) - (Number(salary.non_remuneration) || 0) + (Number(salary.in_kind) || 0),
+      inKind: Number(salary.in_kind) || 0,
       // 給与の計算期間の途中で入社した月は、日割りで1か月分の給与が支払われていない
       partialJoin: !!staff.join_date && staff.join_date > period.startStr && staff.join_date <= period.endStr,
     },

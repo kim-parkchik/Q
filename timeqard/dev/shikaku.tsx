@@ -12,6 +12,8 @@
  *   江藤さん：11月5日入社・国民健康保険組合（取得区分 6）／大野さん：11月10日入社・76歳（70歳以上被用者該当届のみ）
  *   加藤さん：11月20日入社（今日より後なので、まだ届け出られない）／菊池さん：基礎年金番号も住所のフリガナもない
  *   小松さん：2025年10月に入社し、2026年11月分から加入（標準報酬月額の履歴から、資格取得日を11月1日にする）
+ *   島田さん：11月9日入社・月給25万円・社宅（東京・総面積40平方メートル・家賃2万円）と定期券（月1万2千円）を現物で渡す
+ *            → 報酬月額の現物の見込みは 53,200円 − 20,000円 ＋ 12,000円 ＝ 45,200円（通貨は25万円）
  * ■ 資格喪失届（2026年10月）
  *   佐々木さん：10月31日退職・マイナンバーあり／鈴木さん：10月20日退職・健康保険組合（被保険者等番号 45）
  *   高田さん：10月31日退職・71歳（70歳不該当）／千葉さん：10月15日に死亡
@@ -90,6 +92,9 @@ const staffList: any[] = [
   person({ id: "3008", name: "小松　加入", furigana: "コマツ カニュウ", birthday: "1988-08-08", gender: "female", join_date: "2025-10-06", wage_type: "hourly", base_wage: 1200,
     standard_remuneration: 104000, standard_remuneration_history: JSON.stringify([{ from: "", amount: 0, reason: "shutoku" }, { from: "2026-11", amount: 104000, reason: "shutoku" }]),
     basic_pension_number: "3456789012", zip_code: "150-0001", address: "東京都渋谷区神宮前１－２－３", address_kana: "トウキョウト シブヤク ジングウマエ 1-2-3" }),
+  person({ id: "3009", name: "島田　社宅", furigana: "シマダ シャタク", birthday: "1994-10-10", join_date: "2026-11-09", base_wage: 250000,
+    commute_type: "monthly", commute_amount: 12000, commute_setting: JSON.stringify({ method: "transit", inKind: true }),
+    in_kind: JSON.stringify([{ kind: "housing", name: "社宅", start: "2026-11-09", area: 40, sharers: 1, selfPay: 20000 }]) }),
   // 資格喪失届（2026年10月）
   person({ id: "3101", name: "佐々木　退職", furigana: "ササキ タイショク", birthday: "1970-02-02", join_date: "2010-04-01", retirement_date: "2026-10-31", pension_num: "5", base_wage: 320000 }),
   person({ id: "3102", name: "鈴木　組合", furigana: "スズキ クミアイ", birthday: "1980-06-06", join_date: "2015-04-01", retirement_date: "2026-10-20", pension_num: "9",
@@ -148,6 +153,7 @@ const fakeDb = {
     const q = sql.replace(/\s+/g, " ").trim();
     if (q.startsWith("SELECT * FROM company WHERE id = 1")) return [store.company];
     if (q.startsWith("SELECT prefecture FROM branches WHERE id = 1")) return [{ prefecture: "東京都" }];
+    if (q.startsWith("SELECT id, name, prefecture FROM branches")) return [{ id: 1, name: "本店", prefecture: "東京都" }];
     if (q.startsWith("SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups")) return store.groups;
     if (q.startsWith("SELECT group_id, from_month")) return [];
     if (q.startsWith("SELECT my_number_access FROM users")) return [{ my_number_access: 1 }];

@@ -123,6 +123,7 @@ import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './sp
 import { DEFAULT_FLEX_RULE, isFlexStaff, settleFlex, type FlexPeriodContext, type FlexRule, type FlexSettlement } from './flexTime';
 import { healthPremiumsOf, type HealthInsurer, type InsurerType, type UnionRate } from './healthInsurer';
 import { salaryLedgerOf } from './legalBooks';
+import { addInKindLine, commuteInKindLine, inKindMonthOf, inKindOfMonth, inKindRecordOf, parseInKind, type InKindMonth } from './genbutsu';
 import {
   averageWageAmount, formatSen, INJURY_COMPENSATION_RATE, mdJa, perDayOf, SHUTDOWN_WORK_TYPE, toAverageWageKind, toShutdownRate, waitingDatesIn, yenText,
   type AverageWageKind, type AverageWagePay,
@@ -346,10 +347,18 @@ export interface SalaryResult {
   nonFixedEarnings: number;
   /** 通勤手当のうち所得税がかからない額 */
   nonTaxableCommute: number;
+  /** 通勤手当を定期券などの現物で渡している（支給合計・差引支給額に入れず、現物の額（inKind）に入れる） */
+  commuteInKind: boolean;
+  /**
+   * 現物で払った報酬（食事・住宅・その他（自社製品など）・定期券などで渡した通勤手当。utils/genbutsu.ts）。なければ null。
+   * 支給合計・差引支給額には入れない。amount は社会保険の報酬に入れる額（算定・月変・届書の「現物」）、taxable は所得税がかかる額
+   * （課税対象額に入れた）、emp は雇用保険の賃金に入れた額。problems は価額を出せない理由（あれば確定できない）
+   */
+  inKind: InKindMonth | null;
   /** 通勤手当の非課税限度額（1か月当たり。通勤の方法・片道の距離などで決まる。utils/commuteAllowance.ts）と、その通勤の方法 */
   commuteTaxFreeLimit: number;
   commuteMethod: CommuteMethod;
-  /** 所得税の対象になる支給額（支給合計 − 非課税の通勤手当） */
+  /** 所得税の対象になる支給額（支給合計 − 非課税の通勤手当 ＋ 現物で払った報酬のうち所得税がかかる額） */
   taxableAmount: number;
   healthInsurance: number;
   nursingInsurance: number;
@@ -744,10 +753,10 @@ export const saveSalaryResult = async (
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
       fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
       absence_deduction, prescribed_work_days, leave_paid_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours, flex_month,
-      total_earnings, taxable_amount, non_remuneration,
+      total_earnings, taxable_amount, non_remuneration, in_kind, in_kind_taxable, in_kind_emp, in_kind_detail,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance, kokuho_premium,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay, ledger
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -772,6 +781,10 @@ export const saveSalaryResult = async (
       total_earnings = excluded.total_earnings,
       taxable_amount = excluded.taxable_amount,
       non_remuneration = excluded.non_remuneration,
+      in_kind = excluded.in_kind,
+      in_kind_taxable = excluded.in_kind_taxable,
+      in_kind_emp = excluded.in_kind_emp,
+      in_kind_detail = excluded.in_kind_detail,
       health_insurance = excluded.health_insurance,
       nursing_insurance = excluded.nursing_insurance,
       child_support = excluded.child_support,
@@ -806,6 +819,9 @@ export const saveSalaryResult = async (
     result.totalEarnings, result.taxableAmount, // 課税対象額（非課税の通勤手当・休業補償を除く）
     // 賃金・報酬でない額（労災の待期の休業補償。算定・月変の報酬から除く。utils/averageWage.ts）
     result.nonRemuneration,
+    // 現物で払った報酬（社会保険の報酬に入れる額・所得税がかかる額・雇用保険の賃金に入れた額と内訳。算定・月変・届書に使う。utils/genbutsu.ts）
+    result.inKind?.amount ?? 0, result.inKind?.taxable ?? 0, result.inKind?.emp ?? 0,
+    result.inKind ? JSON.stringify(inKindRecordOf(result.inKind)) : null,
     result.healthInsurance, result.nursingInsurance, result.childSupport, result.welfarePension, result.empInsurance, result.kokuhoPremium,
     (result.healthInsurance + result.nursingInsurance + result.childSupport + result.welfarePension + result.empInsurance + result.kokuhoPremium),
     result.incomeTax, result.flatTaxReduction, result.residentTax, result.yearEndSettlement, result.netPay,
@@ -1943,6 +1959,26 @@ export const calculateSalary = (
   const commutePay = staff.commute_type === 'daily'   ? (Number(staff.commute_amount) || 0) * workDays
                   : staff.commute_type === 'monthly' && !leaveFull ? (Number(staff.commute_amount) || 0) : 0;
   const allowanceAmount = Number(extras.allowanceAmount) || 0;
+  // 通勤手当は、その人の非課税限度額まで所得税がかからない（utils/commuteAllowance.ts）
+  // 電車・バスなどだけの人は月15万円まで、マイカー・自転車などの人は片道の距離の区分の額（＋駐車場等・有料道路、両方の人は＋運賃等）まで
+  // 限度額の表は、給与を支払う年月で選ぶ（令和7年4月・令和8年4月に改正）
+  const commuteSetting = parseCommuteSetting(staff.commute_setting);
+  const commuteLimit = commuteLimitOf(commuteSetting, targetYear, targetMonth);
+  const nonTaxableCommute = Math.min(commutePay, commuteLimit.limit);
+
+  // ── 現物で払った報酬（食事・住宅・その他・定期券など。utils/genbutsu.ts）──────────────────
+  // その月分（給与の計算期間の終わりの日がある月）の1日〜末日の分を、勤務地（拠点）の都道府県の価額で計算する。
+  // 支給合計・差引支給額には入れず、社会保険の報酬（算定・月変・届書）に入れ、所得税・雇用保険は種類ごとの決まりで入れる。
+  // 定期券などを現物で渡す人の通勤手当も、ここに入れる（非課税限度額を超えた分に所得税がかかり、雇用保険の賃金には入れる）
+  const commuteInKind = commuteSetting.inKind && commutePay > 0;
+  const inKindEntries = parseInKind(staff.in_kind);
+  const inKindBase = inKindEntries.length > 0 || commuteInKind
+    ? inKindOfMonth(
+      inKindEntries, inKindMonthOf(extras.period, targetYear, targetMonth), extras.prefecture,
+      attendanceData.filter(row => (Number(row.work_hours) || 0) > 0).map(row => String(row.work_date)),
+    )
+    : null;
+  const inKind = inKindBase && commuteInKind ? addInKindLine(inKindBase, commuteInKindLine(commutePay, nonTaxableCommute)) : inKindBase;
 
   // 固定（毎月同額）の支給項目は、基本給と同じく日割りする（変動の項目は、その月に入れた額のまま）
   const customEarningLines = customItems.filter(i => i.type === 'earning')
@@ -2010,7 +2046,7 @@ export const calculateSalary = (
                     + roundedPremiums
                     + Math.floor(paidLeavePay || 0)
                     + Math.floor(specialLeavePay || 0)
-                    + (commutePay || 0)
+                    + (commuteInKind ? 0 : (commutePay || 0))
                     + (allowanceAmount || 0)
                     + (customEarnings || 0)
                     + shutdownAllowance
@@ -2052,20 +2088,16 @@ export const calculateSalary = (
   const empRates = ins.LABOR_INSURANCE_RATES[empInsKey] || ins.LABOR_INSURANCE_RATES.general;
   const empInsurance = isEmploymentInsEnrolled
     // 端数：会社の設定（なければ、賃金から引くときの原則の50銭以下切り捨て・50銭1厘以上切り上げ。厚生労働省「雇用保険被保険者からの雇用保険料の控除方法」）
-    ? calcPremium(totalEarnings - nonRemuneration, empRates[0] * 100, companySettings?.round_emp_ins || 'currency_law', 1)
+    // 現物で払った報酬のうち、雇用保険の賃金に入れる額（定期券など・自社製品など。食事・住宅は入れない）も足す
+    ? calcPremium(totalEarnings - nonRemuneration + (inKind?.emp ?? 0), empRates[0] * 100, companySettings?.round_emp_ins || 'currency_law', 1)
     : 0;
 
   // ── 税金・最終計算 ──────────────────────────────────────────────
   // 国保組合の保険料も、給与から引く社会保険料として所得税の計算で引く（所得税法74条2項の社会保険料に、国民健康保険の保険料が入る）
   const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance + kokuhoPremium;
-  // 通勤手当は、その人の非課税限度額まで所得税がかからない（utils/commuteAllowance.ts）
-  // 電車・バスなどだけの人は月15万円まで、マイカー・自転車などの人は片道の距離の区分の額（＋駐車場等・有料道路、両方の人は＋運賃等）まで
-  // 限度額の表は、給与を支払う年月で選ぶ（令和7年4月・令和8年4月に改正）
-  const commuteSetting = parseCommuteSetting(staff.commute_setting);
-  const commuteLimit = commuteLimitOf(commuteSetting, targetYear, targetMonth);
-  const nonTaxableCommute = Math.min(commutePay, commuteLimit.limit);
-  // 労災の待期の休業補償は非課税（所得税法9条1項3号・所得税法施行令20条1項2号）
-  const taxableAmount = totalEarnings - nonTaxableCommute - nonRemuneration;
+  // 通勤手当は非課税限度額まで所得税がかからない（上の nonTaxableCommute）。労災の待期の休業補償は非課税（所得税法9条1項3号・所得税法施行令20条1項2号）
+  // 現物で払った報酬のうち所得税がかかる額（定期券などで渡した通勤手当は、非課税限度額を超えた分）は足す
+  const taxableAmount = totalEarnings - (commuteInKind ? 0 : nonTaxableCommute) - nonRemuneration + (inKind?.taxable ?? 0);
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
   // 扶養控除等申告書を出していない人は乙欄（扶養人数は「従たる給与についての扶養控除等申告書」の人数）
   // 日雇賃金は丙欄で、働いた日ごとに計算する（下の heiDaysOf）
@@ -2166,6 +2198,8 @@ export const calculateSalary = (
     totalEarnings,
     nonFixedEarnings,
     nonTaxableCommute,
+    commuteInKind,
+    inKind,
     commuteTaxFreeLimit: commuteLimit.limit,
     commuteMethod: commuteSetting.method,
     taxableAmount,

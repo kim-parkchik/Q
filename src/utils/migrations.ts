@@ -18,6 +18,8 @@
  *   ・v2: 会社に賞与支払予定月（bonus_plan_months）を足す
  *   ・v3: 従業員に住所のフリガナ（address_kana）、社会保険規定に健康保険組合の事業所番号（union_office_number）と
  *     組合に出すファイルの媒体通番（union_media_seq）を足す
+ *   ・v4: 従業員に現物で払う報酬（in_kind）、確定した給与に現物の額（in_kind・in_kind_taxable・in_kind_emp）と内訳（in_kind_detail）、
+ *     賞与の支給項目に現物で渡す印（bonus_item_master.in_kind）、確定した賞与に現物で渡した額（bonus_results.in_kind）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -75,6 +77,19 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "address_kana", "TEXT");
       await addColumnIfMissing(db, "social_insurance_groups", "union_office_number", "TEXT");
       await addColumnIfMissing(db, "social_insurance_groups", "union_media_seq", "INTEGER DEFAULT 0");
+    },
+  },
+  {
+    version: 4,
+    description: "現物で払う報酬（食事・住宅など）の列を、従業員・確定した給与・賞与の支給項目・確定した賞与に足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "in_kind", "TEXT");
+      await addColumnIfMissing(db, "salary_results", "in_kind", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "salary_results", "in_kind_taxable", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "salary_results", "in_kind_emp", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "salary_results", "in_kind_detail", "TEXT");
+      await addColumnIfMissing(db, "bonus_item_master", "in_kind", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "bonus_results", "in_kind", "INTEGER DEFAULT 0");
     },
   },
 ];

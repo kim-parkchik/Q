@@ -1200,6 +1200,84 @@ describe("通勤手当は非課税限度額まで所得税の対象外", () => {
     });
 });
 
+describe("現物で払った報酬（食事・住宅・定期券など。utils/genbutsu.ts）", () => {
+    // 東京の社宅（令和8年9月分までは居住用の室16畳、10月分からは総面積40平方メートル）、家賃2万円を本人が払う
+    const shataku = JSON.stringify([{ kind: "housing", name: "社宅", start: "2026-01-01", tatami: 16, area: 40, selfPay: 20000 }]);
+    test("社宅：支給合計・差引支払額は変えず、社会保険の報酬の額（inKind.amount）にする。所得税・雇用保険には入れない", () => {
+        const base = calc(monthly, []);
+        const r = calc({ ...monthly, in_kind: shataku }, []);
+        // 2026年6月分：2,830円 × 16畳 ＝ 45,280円 − 家賃 20,000円 ＝ 25,280円
+        expect(r.inKind).toMatchObject({ month: "2026-06", amount: 25280, taxable: 0, emp: 0, problems: [] });
+        expect([r.totalEarnings, r.netPay, r.taxableAmount, r.empInsurance, r.incomeTax])
+            .toEqual([base.totalEarnings, base.netPay, base.taxableAmount, base.empInsurance, base.incomeTax]);
+        expect(base.inKind).toBeNull();
+    });
+    test("社宅で所得税がかかる額を入れた人は、その額を課税対象額に足す（振り込む額は、所得税が増えた分だけ減る）", () => {
+        const base = calc(monthly, []);
+        const r = calc({ ...monthly, in_kind: JSON.stringify([{ kind: "housing", start: "2026-01-01", tatami: 16, taxable: 10000 }]) }, []);
+        expect(r.taxableAmount).toBe(base.taxableAmount + 10000);
+        const social = r.healthInsurance + r.nursingInsurance + r.childSupport + r.welfarePension + r.empInsurance;
+        expect(r.incomeTax).toBe(calcWithholdingTax(310000 - social, 0, 2026, "table"));
+        expect(r.netPay).toBe(base.netPay - (r.incomeTax - base.incomeTax));
+    });
+    test("定期券などを現物で渡す通勤手当：支給合計・差引支払額に入れず、雇用保険料に入れ、非課税限度額を超えた分に所得税がかかる", () => {
+        const staff = { ...monthly, commute_type: "monthly", commute_amount: 30000, commute_setting: JSON.stringify({ method: "transit", inKind: true }) };
+        const cash = calc({ ...staff, commute_setting: undefined }, []);
+        const r = calc(staff, []);
+        expect(r.commuteInKind).toBe(true);
+        expect([r.totalEarnings, r.taxableAmount, r.commutePay]).toEqual([300000, 300000, 30000]);
+        expect(r.inKind!.lines).toEqual([
+            { name: "通勤手当（定期券など）", kind: "commute", amount: 30000, taxable: 0, emp: 30000, detail: "通勤手当の非課税限度額の中なので、所得税はかかりません" },
+        ]);
+        // 雇用保険料は、現金で払うときと同じ（330,000円にかける）。振り込む額は、通勤手当の分だけ少ない
+        expect(r.empInsurance).toBe(cash.empInsurance);
+        expect(r.netPay).toBe(cash.netPay - 30000);
+        // マイカー片道12km（非課税 7,300円）で現物：超えた 2,700円に所得税
+        const car = calc({ ...monthly, commute_type: "monthly", commute_amount: 10000, commute_setting: JSON.stringify({ method: "vehicle", distanceKm: 12, inKind: true }) }, []);
+        expect([car.totalEarnings, car.taxableAmount, car.inKind!.taxable, car.inKind!.amount]).toEqual([300000, 302700, 2700, 10000]);
+    });
+    test("その他の現物（自社製品など）は、雇用保険料と所得税に入れる（手当で1万円払うときと同じ）", () => {
+        const allowance = calc(monthly, [], { allowanceAmount: 10000 });
+        const r = calc({ ...monthly, in_kind: JSON.stringify([{ kind: "other", name: "自社製品", start: "2026-01-01", value: 10000 }]) }, []);
+        expect([r.totalEarnings, r.inKind!.amount]).toEqual([300000, 10000]);
+        expect([r.taxableAmount, r.empInsurance, r.incomeTax]).toEqual([allowance.taxableAmount, allowance.empInsurance, allowance.incomeTax]);
+    });
+    test("その月分は、給与の計算期間の終わりの日がある月（翌月払いの給与は前の月の分。令和8年10月分からは総面積）", () => {
+        expect(calc({ ...monthly, in_kind: shataku }, [], { period: { start: "2026-09-01", end: "2026-09-30" } }).inKind)
+            .toMatchObject({ month: "2026-09", amount: 25280 });
+        const oct = calculateSalary({ ...monthly, in_kind: shataku }, [], extras({ period: { start: "2026-10-01", end: "2026-10-31" } }), 2026, 11, company);
+        // 1,330円 × 40平方メートル ＝ 53,200円 − 20,000円
+        expect(oct.inKind).toMatchObject({ month: "2026-10", amount: 33200 });
+    });
+    test("勤務地の都道府県がわからない・広さがないときは、価額を出せないことを知らせる（給与明細は確定できない）", () => {
+        expect(calc({ ...monthly, in_kind: shataku }, [], { prefecture: "" }).inKind!.problems).toHaveLength(1);
+        const noArea = JSON.stringify([{ kind: "housing", start: "2026-01-01", tatami: 16 }]);
+        expect(calculateSalary({ ...monthly, in_kind: noArea }, [], extras(), 2026, 10, company).inKind!.problems[0]).toContain("総面積");
+    });
+    test("確定した給与に、現物の額と内訳を残す（算定・月変・届書に使う）。賃金台帳の内訳では、現物の行を総支給額に入れない", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        db.exec("INSERT INTO calendar_patterns (id, name) VALUES (1, '標準')");
+        db.exec("INSERT INTO payroll_groups (id, name, closing_day, is_next_month, payment_day) VALUES (1, '全社', 99, 0, 25)");
+        db.exec("INSERT INTO social_insurance_groups (id, name, type) VALUES (1, '協会けんぽ', 'kyokai')");
+        db.exec("INSERT INTO staff (id, name, base_wage) VALUES ('S001', '山田', 300000)");
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        const staff = { ...monthly, in_kind: shataku, commute_type: "monthly", commute_amount: 30000, commute_setting: JSON.stringify({ inKind: true }) };
+        const r = calc(staff, []);
+        expect(await saveSalaryResult(asyncDb, "S001", 2026, 6, r, staff)).toEqual({ success: true });
+        const row = db.query("SELECT total_earnings, taxable_amount, in_kind, in_kind_taxable, in_kind_emp, in_kind_detail, ledger FROM salary_results").get() as any;
+        expect([row.total_earnings, row.taxable_amount, row.in_kind, row.in_kind_taxable, row.in_kind_emp]).toEqual([300000, 300000, 55280, 0, 30000]);
+        expect(JSON.parse(row.in_kind_detail)).toMatchObject({
+            month: "2026-06", settled: true, fixed: { monthly: 25280, daily: 0 },
+            lines: [{ name: "社宅", amount: 25280 }, { name: "通勤手当（定期券など）", amount: 30000 }],
+        });
+        const ledger = JSON.parse(row.ledger);
+        expect(ledger.earnings.map((l: any) => l.name)).not.toContain("通勤手当");
+        expect(ledger.totalEarnings).toBe(300000);
+        expect(ledger.inKind).toEqual([{ name: "社宅", amount: 25280, avg: "none" }, { name: "通勤手当（定期券など）", amount: 30000, avg: "month" }]);
+    });
+});
+
 describe("法定休日・所定休日の出勤", () => {
     test("月給：法定休日（日曜）に8時間働くと 1.35倍", () => {
         const r = calc(monthly, [day("07", 8, "statutory_holiday")]);

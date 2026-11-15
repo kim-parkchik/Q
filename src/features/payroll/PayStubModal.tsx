@@ -36,6 +36,9 @@ export default function PayStubModal(props: Props) {
   const staff = monthStaff;
   // フレックスタイム制の清算の内訳（勤怠の画面と同じ文。utils/flexTime.ts）
   const flexText = salary.flex ? describeFlexSettlement(salary.flex, staff.wage_type) : null;
+  // 現物で払った報酬（utils/genbutsu.ts）。価額を出せない理由があれば確定できない
+  const inKindProblems = salary.inKind?.problems ?? [];
+  const inKindMonthLabel = salary.inKind ? salary.inKind.month.replace(/^(\d+)-0?(\d+)$/, "$1年$2月分") : "";
 
   const padRows = (current: number, target: number) =>
   Array.from({ length: Math.max(0, target - current) }, (_, i) => (
@@ -80,19 +83,20 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              disabled={salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
+              disabled={salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
               title={salary.prefectureUnknown
                 ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
                 : salary.insurerRateMissing ? `${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料を計算していません。会社設定の「社会保険規定」で料率を入れてから確定してください`
                 : salary.averageWageMissing.length > 0 ? "平均賃金を出せないため、休業手当・休業補償を計算していません。メニューの「平均賃金」で確かめてから確定してください"
                 : salary.flexMissing.length > 0 ? "フレックスタイム制の清算期間の前の月の給与を確定していないため、清算期間の合計で清算できません。前の月を確定してから確定してください"
+                : inKindProblems.length > 0 ? "現物で払う報酬の価額を出せないため、確定できません。従業員の画面の「現物で払う報酬」か、拠点の都道府県を確かめてください"
                 : loadErrors.length > 0 ? `${loadErrors.join("・")}を読み込めなかったので、確定できません`
                 : loadingParts.length > 0 ? `${loadingParts.join("・")}を読み込んでいます`
                 : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
               style={{
                 ...S.printBtnS, flex: 1,
-                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
-                cursor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
+                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
+                cursor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
               }}
             >
               {loadingParts.length > 0 && loadErrors.length === 0 ? "読み込んでいます…" : isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
@@ -148,6 +152,12 @@ export default function PayStubModal(props: Props) {
               ⚠ フレックスタイム制の清算期間の最後の月ですが、清算期間の合計で清算できません（総労働時間との過不足と、法定の総枠を超えた時間を計算していません）。確定できません。
               {salary.flexMissing.map((m) => <div key={m} style={{ fontWeight: "normal" }}>・{m}</div>)}
               <div style={{ fontWeight: "normal" }}>清算期間の前の月の給与を確定してから、この月を開き直してください。</div>
+            </div>
+          )}
+          {inKindProblems.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ 現物で払う報酬の価額を出せないので、確定できません（社会保険の報酬・所得税・雇用保険料に入れていません）。
+              {inKindProblems.map((m) => <div key={m} style={{ fontWeight: "normal" }}>・{m}</div>)}
             </div>
           )}
           {salary.insurer.type === "kyokai" && !salary.prefectureUnknown && branchPrefectureProblem && (
@@ -464,7 +474,13 @@ export default function PayStubModal(props: Props) {
                   )}
 
                   <tr><td style={S.tdS}>深夜手当</td><td style={S.rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
-                  <tr><td style={S.tdS}>通勤手当</td><td style={S.rtdS}>¥{salary.commutePay.toLocaleString()}</td></tr>
+                  {salary.commuteInKind ? (
+                    <tr title="定期券などを現物で渡しているので、支給合計・差引支払額には入れていません（下の「現物で払った報酬」）">
+                      <td style={S.tdS}>通勤手当(現物)</td><td style={{ ...S.rtdS, color: "#64748b" }}>(¥{salary.commutePay.toLocaleString()})</td>
+                    </tr>
+                  ) : (
+                    <tr><td style={S.tdS}>通勤手当</td><td style={S.rtdS}>¥{salary.commutePay.toLocaleString()}</td></tr>
+                  )}
                   <tr><td style={S.tdS}>{extras.allowanceName || "任意手当"}</td><td style={S.rtdS}>¥{salary.allowanceAmount.toLocaleString()}</td></tr>
                   
                   {customEarningItems.map((item, i) => (
@@ -517,6 +533,29 @@ export default function PayStubModal(props: Props) {
               </table>
             </div>
           </div>
+
+          {/* 現物で払った報酬（食事・住宅・定期券など。支給合計・差引支払額には入れない。utils/genbutsu.ts） */}
+          {salary.inKind && salary.inKind.lines.length > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              <div style={{ fontWeight: "bold" }}>現物で払った報酬（{inKindMonthLabel}。支給合計・差引支払額には入れていません）</div>
+              <table style={{ borderCollapse: "collapse", marginTop: 4, width: "100%" }}>
+                <tbody>
+                  {salary.inKind.lines.map((l, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: "1px 8px 1px 0", whiteSpace: "nowrap", verticalAlign: "top" }}>{l.name}</td>
+                      <td style={{ padding: "1px 8px", textAlign: "right", whiteSpace: "nowrap", verticalAlign: "top" }}>¥{l.amount.toLocaleString()}</td>
+                      <td style={{ padding: "1px 0 1px 8px", color: "#666" }}>{l.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 4 }}>
+                社会保険の報酬に入れる額 ¥{salary.inKind.amount.toLocaleString()}（標準報酬月額の決め方と届書の「現物」に入れます）
+                ／ 所得税がかかる額 ¥{salary.inKind.taxable.toLocaleString()}（課税対象額に入れました）
+                ／ 雇用保険の賃金に入れた額 ¥{salary.inKind.emp.toLocaleString()}
+              </div>
+            </div>
+          )}
 
           {/* 残業代の時給：月給・手当を1年間における1か月平均所定労働時間で割った額、日給を1日の所定労働時間で割った額（時給制で手当がない人は時給そのままなので出さない） */}
           {(staff.wage_type === "monthly" || staff.wage_type === "daily" || salary.overtimeBaseAllowances > 0)

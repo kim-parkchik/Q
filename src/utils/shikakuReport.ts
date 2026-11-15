@@ -8,7 +8,8 @@
  *   ・個人番号（マイナンバー）か基礎年金番号を必ず書く（どちらもない届書は返される）。個人番号を書いた人は、住所を書かない。
  *     書かない人は、郵便番号と住所（カナは必ず。漢字は書けない字がある・37文字を超えるときは書かない）を書く
  *   ・報酬月額は、資格取得時の決定（就業規則や労働契約の内容で、月給は月の額、時給・日給は同じ仕事の人の報酬などで決める）の額を、
- *     通貨（金銭）と現物で書く。Q は現物で払った報酬はないものとし（0円）、通貨の額は届書の画面で入れてもらう
+ *     通貨（金銭）と現物で書く。通貨の額は届書の画面で入れてもらい、現物は従業員の画面の「現物で払う報酬」（社宅・食事など）と
+ *     定期券などで渡す通勤手当から、資格取得日の1か月分の見込みを初めの値にする（utils/genbutsu.ts。画面で直せる）
  *   ・70歳以上の人は、備考欄項目1（70歳以上被用者該当）に印を付ける。協会けんぽの75歳以上の人と、健康保険組合・国民健康保険組合の
  *     70歳以上の人は「70歳以上被用者届のみ提出」にして、種別・取得区分を書かない（協会けんぽの70〜74歳の人は、健康保険の資格取得と
  *     70歳以上被用者該当を1つの届書で出す）
@@ -31,6 +32,8 @@ import {
   SHAHO_SHUTOKU_UNION_FIELDS, SHAHO_SOSHITSU_FIELDS, SHAHO_SOSHITSU_FORM_CODE, SHAHO_SOSHITSU_UNION_FIELDS, type ShahoField,
 } from "../constants/shahoTodoke";
 import { PREFECTURE_MASTER } from "../constants/prefectures";
+import { parseCommuteSetting } from "./commuteAllowance";
+import { inKindEstimateOf, parseInKind } from "./genbutsu";
 import type { HealthInsurer, InsurerType } from "./healthInsurer";
 import { MY_NUMBER_PLACEHOLDER, shahoDate, toShahoKana, toShahoKanji, unusableChars, valueProblem } from "./shahoCsv";
 import { reach70Date, reach75Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
@@ -103,6 +106,8 @@ export interface ShutokuInput {
   acquiredOn: string;
   /** 報酬月額（通貨。円。入れていなければ null） */
   wage: number | null;
+  /** 報酬月額（現物。社宅・食事・定期券など。円。なければ 0） */
+  inKind?: number;
   /** 被扶養者がいる（協会けんぽの人で、健康保険被扶養者（異動）届も出す） */
   dependents: boolean;
   /** 資格確認書の発行を希望する */
@@ -180,10 +185,10 @@ export const buildShutokuRow = (input: ShutokuInput, office: string[]): ShutokuR
     add(`資格取得日（${input.acquiredOn}）になってから届け出ます（e-Gov は、資格取得日が届け出る日より後の届書を受け付けません）`, 17, 18);
   }
 
-  // 報酬月額（通貨・現物・合計）。Q は現物で払った報酬はないものとする
+  // 報酬月額（通貨・現物・合計）
   const wage = input.wage;
   if (wage === null || !(wage > 0)) add("報酬月額を入れてください（資格取得時の決定：月給は月の額、時給・日給は同じ仕事の人の報酬などから。残業代などの見込みも入れます）", 20, 22);
-  const inKind = 0;
+  const inKind = Math.max(0, Math.floor(Number(input.inKind) || 0));
   const total = (wage ?? 0) + inKind;
   if (wage !== null && wage > 0 && total < 1000) add("報酬月額の合計は1,000円以上で書きます", 22);
   if (total >= TEN_MILLION) notes.push("報酬月額が1千万円以上なので、仕様書の決まりで 9999999 と書きます");
@@ -351,7 +356,22 @@ export const acquiredOnOf = (staff: any): { date: string; fromHistory: boolean }
  */
 export const estimatedWageOf = (staff: any): number | null => {
   if (staff?.wage_type !== "monthly") return null;
-  return (Number(staff.base_wage) || 0) + (Number(staff.fixed_overtime_allowance) || 0) + (staff.commute_type === "monthly" ? Number(staff.commute_amount) || 0 : 0);
+  // 定期券などを現物で渡す通勤手当は、現物の見込み（estimatedInKindOf）に入れる
+  const commute = staff.commute_type === "monthly" && !parseCommuteSetting(staff.commute_setting).inKind ? Number(staff.commute_amount) || 0 : 0;
+  return (Number(staff.base_wage) || 0) + (Number(staff.fixed_overtime_allowance) || 0) + commute;
+};
+
+/**
+ * 報酬月額の「現物」の初めの値：資格取得日にしている「現物で払う報酬」（社宅・食事など）の1か月分の額と、
+ * 定期券などを現物で渡す通勤手当（月額）。出勤した日ごとの食事は、資格取得日の月の所定労働日数で数える（utils/genbutsu.ts）
+ * @param prefecture 勤務地（拠点）の都道府県
+ */
+export const estimatedInKindOf = (
+  staff: any, acquiredOn: string, prefecture: string | null, workDays: number,
+): { amount: number; problems: string[] } => {
+  const estimate = inKindEstimateOf(parseInKind(staff?.in_kind), acquiredOn, prefecture, workDays);
+  const commute = staff?.commute_type === "monthly" && parseCommuteSetting(staff.commute_setting).inKind ? Number(staff.commute_amount) || 0 : 0;
+  return { amount: estimate.amount + commute, problems: estimate.problems };
 };
 
 /** 資格喪失の原因と日（死亡日が退職日より前か同じなら死亡、そうでなければ退職等。どちらもなければ null） */

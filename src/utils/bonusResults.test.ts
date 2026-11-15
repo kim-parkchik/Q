@@ -31,7 +31,7 @@ const setup = () => {
 
 const calc = (total: number): BonusResultCalc => ({
     totalEarnings: total, hyojunBonus: Math.floor(total / 1000) * 1000, healthInsurance: 10000, nursingInsurance: 0, childSupport: 200,
-    welfarePension: 18300, empInsurance: 1000, incomeTax: 20000, flatTaxReduction: 0, customDeductions: 0, netPay: total - 49500, isNursing: false,
+    welfarePension: 18300, empInsurance: 1000, incomeTax: 20000, flatTaxReduction: 0, customDeductions: 0, inKind: 0, netPay: total - 49500, isNursing: false,
     ledger: {
         periodStart: null, periodEnd: null, workDays: 0, workHours: 0, overtimeHours: 0, holidayHours: 0, nightHours: 0,
         earnings: [{ name: "基本賞与", amount: total }], deductions: [], totalEarnings: total, totalDeductions: 49500, netPay: total - 49500, yearEndSettlement: 0,
@@ -64,6 +64,14 @@ describe("賞与を確定する・確定を取り消す", () => {
         // 佐藤さんの賞与をなくして確定し直す
         await executeBatch(batchDb(db), buildFinalizeBonusStatements(id, [{ staff: { id: "S001" }, calc: calc(520000) }]));
         expect(db.query("SELECT staff_id, total_earnings FROM bonus_results").all()).toEqual([{ staff_id: "S001", total_earnings: 520000 }]);
+    });
+    test("現物で渡した額（現物で渡す支給項目）も残す。総支給は現物を含み、差引支給額は現物を除いた額", async () => {
+        const db = setup();
+        const id = (await executeBatch(batchDb(db), buildAddBonusSettingStatements("夏季賞与", "2026-07-10")))[0].lastInsertId;
+        await executeBatch(batchDb(db), buildFinalizeBonusStatements(id, [
+            { staff: { id: "S001" }, calc: { ...calc(530000), inKind: 30000, netPay: 530000 - 49500 - 30000 } },
+        ]));
+        expect(db.query("SELECT total_earnings, in_kind, net_pay FROM bonus_results").get()).toEqual({ total_earnings: 530000, in_kind: 30000, net_pay: 450500 });
     });
     test("令和6年分の定額減税で引いた額も残す（所得税は引いた後の額）", async () => {
         const db = setup();

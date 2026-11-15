@@ -257,6 +257,17 @@ function CommuteSettingFields({ setting, onChange }: { setting: CommuteSetting; 
                     <NumberField label="駐車場・駐輪場の料金" value={setting.parking} unit="円/月" onChange={v => set({ parking: Math.floor(v) })} />
                 )}
             </div>
+            {/* 定期券・回数券などを現物で渡す（給与として振り込まない）。社会保険の届書では「現物」、雇用保険料には入れる（utils/genbutsu.ts） */}
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", marginTop: "8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={setting.inKind} onChange={e => set({ inKind: e.target.checked })} />
+                定期券・回数券などを現物で渡す（給与として振り込まない）
+            </label>
+            {setting.inKind && (
+                <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", lineHeight: 1.6 }}>
+                    通勤手当の額は、給与明細の支給合計・差引支払額に入れず、社会保険の報酬（届書の「現物」）と雇用保険料に入れます。
+                    6か月定期などは、1か月当たりの額を入れてください。所得税は、非課税限度額を超えた分にかかります。
+                </div>
+            )}
             <div style={{ fontSize: "11px", color: "#475569", marginTop: "6px", lineHeight: 1.6 }}>
                 所得税がかからない額（{now.getFullYear()}年{now.getMonth() + 1}月に支払う分）：{describeCommuteLimit(setting, now.getFullYear(), now.getMonth() + 1)}
                 {usesVehicle && (

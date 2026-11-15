@@ -141,6 +141,34 @@ describe("変動月の候補を探す", () => {
             expect(c.note).toContain("年金事務所");
         });
     });
+    describe("現物で払う報酬（社宅・食事など）の価額の変動も探す（事例集 問6・問12）", () => {
+        /** 確定した給与に残した現物の記録（settled が false は、月の途中から・までの行がある月） */
+        const withInKind = (m: number, inKind: number, fixed: number, settled = true, daily = 0) => ({
+            ...salary(2026, m, 300000), in_kind: inKind,
+            in_kind_detail: JSON.stringify({ month: `2026-${String(m).padStart(2, "0")}`, lines: [], fixed: { monthly: fixed, daily }, settled }),
+        });
+        test("社宅に月の途中（4月11日）から入った：変わった後の額が1か月分そろった5月を変動月にする（4月は比べない）", () => {
+            const salaries = [salary(2026, 3, 300000), withInKind(4, 30186, 45280, false), withInKind(5, 45280, 45280), withInKind(6, 45280, 45280), withInKind(7, 45280, 45280)];
+            const [c, ...rest] = findZuijiCandidates([staff], 2026, [group], salaries, []);
+            expect(rest).toHaveLength(0);
+            expect(c).toMatchObject({
+                month: 5, direction: "up", baseWageBefore: null, inKindBefore: { monthly: 0, daily: 0 }, inKindAfter: { monthly: 45280, daily: 0 }, revisionFrom: "2026-08",
+            });
+            // 3か月の報酬に現物が入る（345,280円 → 34万円。従前 30万円から2等級以上）
+            expect(c.months.map((m) => [m.amount, m.inKind])).toEqual([[345280, 45280], [345280, 45280], [345280, 45280]]);
+            expect(judgeZuiji(c.months, false, c.previous, c.direction, table).status).toBe("target");
+        });
+        test("告示の改正（令和8年10月から総面積で 45,280円 → 53,200円）も変動月にする。出た月の次の1か月分そろった月は「下がった」", () => {
+            const up = findZuijiCandidates([staff], 2026, [group], [withInKind(9, 45280, 45280), withInKind(10, 53200, 53200)], []);
+            expect(up).toMatchObject([{ month: 10, direction: "up", inKindBefore: { monthly: 45280 }, inKindAfter: { monthly: 53200 } }]);
+            const down = findZuijiCandidates([staff], 2026, [group], [withInKind(7, 45280, 45280), withInKind(8, 20000, 45280, false), withInKind(9, 0, 0)], []);
+            expect(down).toMatchObject([{ month: 9, direction: "down", inKindBefore: { monthly: 45280 }, inKindAfter: { monthly: 0 } }]);
+        });
+        test("出勤した日ごとの食事は、1日の額が変わった月だけ（出勤した日の数で額が変わっても候補にしない）", () => {
+            const days = [withInKind(4, 6000, 0, true, 300), withInKind(5, 5400, 0, true, 300), withInKind(6, 3000, 0, true, 150)];
+            expect(findZuijiCandidates([staff], 2026, [group], days, [])).toMatchObject([{ month: 6, direction: "down", inKindBefore: { daily: 300 }, inKindAfter: { daily: 150 } }]);
+        });
+    });
     test("従前は変動月から3か月目の分の値。改定の月の行がすでにあれば登録済み", () => {
         const history = JSON.stringify([{ from: "", amount: 300000, reason: "shutoku" }, { from: "2026-07", amount: 340000, reason: "zuiji" }]);
         const c = buildZuijiCandidate({ ...staff, standard_remuneration_history: history }, 2026, 4, "up", [group], [], []);

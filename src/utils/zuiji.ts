@@ -18,6 +18,10 @@
  *   （固定残業代を超えた月に払う超過分は、残業時間で変わる非固定的賃金なので、変動には数えない）
  * ・基本給と固定残業代が同じ月に変わったときは、2つの合計（固定的賃金）が上がったか下がったかで向きを決める
  * ・固定残業代がわからない（空の）給与の月とは比べない
+ * ・現物で払う報酬（食事・住宅など。utils/genbutsu.ts）の価額が変わった月（告示の改正・社宅に入った・出た・本人が払う額が変わったなど）も、
+ *   固定的賃金の変動として探す（事例集 問12：告示の改正による単価の変更は固定的賃金の変動）。比べるのは、確定した給与に残した
+ *   「その月を通して出している現物の1か月分の額」と「出勤した日ごとの食事の1日の額」。月の途中から・までの行がある月は比べず、
+ *   変わった後の額が1か月分そろった月を変動月にする（事例集 問6）。現物の記録がない給与は、現物がない（0円）ものとして比べる
  * そのほかの手当や通勤手当の変更、給与体系の変更（時給→月給など）は見つけられないので、画面で変動月を指定してもらう。
  * 等級は健康保険の等級で判定する（厚生年金の上限・下限の決まりは、健康保険の2等級の差と同じ結果になる）。
  */
@@ -28,6 +32,7 @@ import {
   type AttendanceRecord, type SalaryRecord, type SanteiMonth,
 } from './santei';
 import { getStandardRemuneration, remunerationHistoryOf } from './standardRemuneration';
+import { parseInKindRecord } from './genbutsu';
 
 /** up: 固定的賃金が上がった / down: 下がった */
 export type ZuijiDirection = 'up' | 'down';
@@ -140,6 +145,9 @@ export interface ZuijiCandidate {
   /** 確定した給与の固定残業代の変化（変わっていないときは null。なしは 0） */
   fixedOvertimeBefore: number | null;
   fixedOvertimeAfter: number | null;
+  /** 現物で払う報酬の固定的な額の変化（変わっていないときは null） */
+  inKindBefore: InKindFixed | null;
+  inKindAfter: InKindFixed | null;
   /** 判定するときの注意（基本給と固定残業代が逆に変わり、合計が変わっていないときなど） */
   note: string | null;
   /** 変動月から3か月 */
@@ -163,6 +171,7 @@ export const buildZuijiCandidate = (
   attendance: AttendanceRecord[],
   baseWages: { before: number | null; after: number | null } = { before: null, after: null },
   fixedOvertime: { before: number | null; after: number | null; note?: string | null } = { before: null, after: null },
+  inKind: { before: InKindFixed; after: InKindFixed } | null = null,
 ): ZuijiCandidate => {
   const group = groupOf(staff, groups);
   const months = [0, 1, 2].map((k) => {
@@ -177,6 +186,7 @@ export const buildZuijiCandidate = (
     staff, year, month, direction,
     baseWageBefore: baseWages.before, baseWageAfter: baseWages.after,
     fixedOvertimeBefore: fixedOvertime.before, fixedOvertimeAfter: fixedOvertime.after,
+    inKindBefore: inKind?.before ?? null, inKindAfter: inKind?.after ?? null,
     note: fixedOvertime.note ?? null,
     months,
     previous: getStandardRemuneration(staff, third.year, third.month),
@@ -185,12 +195,31 @@ export const buildZuijiCandidate = (
   };
 };
 
-/** 確定した給与の基本給（時給制は時給）・固定残業代が、前の月から変わったこと（固定的賃金の変動） */
+/** 現物で払う報酬の固定的な額（その月を通して出している行の1か月分の額と、出勤した日ごとの食事の1日の額） */
+export interface InKindFixed {
+  monthly: number;
+  daily: number;
+}
+
+/**
+ * 確定した給与に残した、現物の固定的な額（月変で比べる）。現物の記録がない給与は 0円。
+ * 月の途中から・までの行がある月は null（変わった後の額が1か月分そろっていないので、比べない）
+ */
+export const inKindFixedOf = (salary: SalaryRecord | undefined): InKindFixed | null => {
+  if (!salary) return null;
+  const record = parseInKindRecord(salary.in_kind_detail);
+  if (!record) return { monthly: 0, daily: 0 };
+  return record.settled ? record.fixed : null;
+};
+
+/** 確定した給与の基本給（時給制は時給）・固定残業代・現物の固定的な額が、前の月から変わったこと（固定的賃金の変動） */
 export interface FixedWageChange {
   direction: ZuijiDirection;
   /** 変わったときだけ前と後の値（変わっていなければ null） */
   base: { before: number; after: number } | null;
   fixedOvertime: { before: number; after: number } | null;
+  /** 現物は、その前の「1か月分そろった月」と比べる */
+  inKind: { before: InKindFixed; after: InKindFixed } | null;
   /** 判定するときの注意（基本給と固定残業代が逆に変わり、合計が変わっていないとき） */
   note: string | null;
 }
@@ -212,16 +241,34 @@ export const fixedWageChange = (staff: any, year: number, month: number, salarie
   const fixedBefore = valueOf(prev.year, prev.month, 'fixed_overtime_allowance');
   const fixedAfter = valueOf(year, month, 'fixed_overtime_allowance');
   const fixedChanged = fixedBefore !== null && fixedAfter !== null && fixedBefore !== fixedAfter;
-  if (!baseChanged && !fixedChanged) return null;
+  // 現物の固定的な額：その月が1か月分そろっていれば、その前の1か月分そろった月（給与がある月を12か月まで）と比べる
+  const salaryOf = (y: number, m: number) =>
+    salaries.find((r) => String(r.staff_id) === String(staff.id) && Number(r.target_year) === y && Number(r.target_month) === m);
+  const inKindAfter = inKindFixedOf(salaryOf(year, month));
+  let inKindBefore: InKindFixed | null = null;
+  for (let k = 1; inKindAfter && k <= 12 && !inKindBefore; k++) {
+    const ym = addMonths(year, month, -k);
+    const s = salaryOf(ym.year, ym.month);
+    if (!s) break;
+    inKindBefore = inKindFixedOf(s);
+  }
+  const inKindChanged = !!inKindBefore && !!inKindAfter
+    && (inKindBefore.monthly !== inKindAfter.monthly || inKindBefore.daily !== inKindAfter.daily);
+  if (!baseChanged && !fixedChanged && !inKindChanged) return null;
 
-  // 固定的賃金（基本給と固定残業代）の合計が上がったか下がったか。合計が同じなら基本給の向き
+  // 固定的賃金（基本給と固定残業代・現物）の合計が上がったか下がったか。合計が同じなら基本給の向き
+  // （現物は1か月分の額の差。1か月分の額が変わらず、出勤した日ごとの食事の1日の額だけが変わったときは、その差の向き）
   const baseDiff = baseChanged ? baseAfter! - baseBefore! : 0;
   const fixedDiff = fixedChanged ? fixedAfter! - fixedBefore! : 0;
-  const total = baseDiff + fixedDiff;
+  const inKindDiff = inKindChanged
+    ? (inKindAfter!.monthly !== inKindBefore!.monthly ? inKindAfter!.monthly - inKindBefore!.monthly : inKindAfter!.daily - inKindBefore!.daily)
+    : 0;
+  const total = baseDiff + fixedDiff + inKindDiff;
   return {
     direction: total !== 0 ? (total > 0 ? 'up' : 'down') : baseDiff > 0 ? 'up' : 'down',
     base: baseChanged ? { before: baseBefore!, after: baseAfter! } : null,
     fixedOvertime: fixedChanged ? { before: fixedBefore!, after: fixedAfter! } : null,
+    inKind: inKindChanged ? { before: inKindBefore!, after: inKindAfter! } : null,
     note: baseChanged && fixedChanged && total === 0
       ? '基本給と固定残業代が逆向きに同じ額だけ変わり、固定的賃金の合計は変わっていません。対象になるかは年金事務所に確かめてください（ここでは基本給の向きで判定しています）'
       : null,
@@ -229,7 +276,7 @@ export const fixedWageChange = (staff: any, year: number, month: number, salarie
 };
 
 /**
- * その年に変動月がある候補を、確定した給与の基本給（時給制は時給）と固定残業代の変化から探す
+ * その年に変動月がある候補を、確定した給与の基本給（時給制は時給）・固定残業代・現物の固定的な額の変化から探す
  * @param salaries その年の前の年の12月から、次の年の2月までに支払った給与（3か月目まで見るため）
  */
 export const findZuijiCandidates = (
@@ -249,6 +296,7 @@ export const findZuijiCandidates = (
         staff, year, month, change.direction, groups, salaries, attendance,
         change.base ?? { before: null, after: null },
         change.fixedOvertime ? { ...change.fixedOvertime, note: change.note } : { before: null, after: null, note: change.note },
+        change.inKind,
       ));
     }
   }

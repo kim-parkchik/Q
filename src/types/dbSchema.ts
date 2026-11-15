@@ -158,6 +158,7 @@ export const DB_SCHEMAS = [
     flat_tax_reduction_persons INTEGER DEFAULT 0, -- 令和6年分 定額減税の人数（本人＋同一生計配偶者＋扶養親族。0なら月次減税をしない）
     leave_periods TEXT,       -- 休業・休職の期間（産休・育休・介護休業・業務上の負傷や疾病による休業・その他の休職。JSON。社会保険料の免除は utils/leaveExemption.ts、給与・勤怠は utils/leaveOfAbsence.ts）
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
+    in_kind TEXT,             -- 現物で払う報酬（食事・住宅（社宅・寮など）・その他（自社製品など）の期間ごとの行。JSON。詳しくは utils/genbutsu.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
     FOREIGN KEY (payroll_group_id) REFERENCES payroll_groups(id),
@@ -299,6 +300,10 @@ export const DB_SCHEMAS = [
     prescribed_work_days INTEGER,               -- 計算期間の所定労働日数（会社カレンダーから数えたもの。算定・月変の支払基礎日数に使う。わからなければ NULL）
     leave_paid_days REAL,                       -- 休業の日がある月に、給与（月給）を払った日数（日割りの日数。まるごと休業の月は 0。休業の日がない・日割りしない月は NULL。算定・月変の支払基礎日数に使う）
     non_remuneration INTEGER DEFAULT 0,         -- 支給合計のうち、賃金・報酬でない額（労災の待期の休業補償。所得税・社会保険・雇用保険の対象外。算定・月変の報酬から除く。utils/averageWage.ts）
+    in_kind INTEGER DEFAULT 0,                  -- 現物で払った報酬（食事・住宅・定期券など。社会保険の報酬に入れる額。支給合計・差引支給額には入れない。算定・月変の報酬に足す。utils/genbutsu.ts）
+    in_kind_taxable INTEGER DEFAULT 0,          -- 現物で払った報酬のうち、所得税がかかる額（taxable_amount に含む）
+    in_kind_emp INTEGER DEFAULT 0,              -- 現物で払った報酬のうち、雇用保険の賃金に入れた額（定期券・自社製品など。食事・住宅は入れない）
+    in_kind_detail TEXT,                        -- 現物の内訳（JSON。何年何月分か・行ごとの額と計算・月変で比べる固定的な額。utils/genbutsu.ts の InKindRecord）
 
     total_earnings INTEGER DEFAULT 0,
     taxable_amount INTEGER DEFAULT 0,
@@ -345,7 +350,8 @@ export const DB_SCHEMAS = [
     name TEXT NOT NULL,
     type TEXT NOT NULL,              -- 'earning' (支給) or 'deduction' (控除)
     display_order INTEGER DEFAULT 0,
-    is_default_active INTEGER DEFAULT 1 -- 1なら新しい賞与作成時に自動で有効
+    is_default_active INTEGER DEFAULT 1, -- 1なら新しい賞与作成時に自動で有効
+    in_kind INTEGER DEFAULT 0        -- 1なら現物で渡す支給項目（自社製品など。標準賞与額・雇用保険料・所得税には入れ、差引支給額には入れない）
   );`,
 
   // 賞与設定と項目の紐付けテーブル
@@ -373,7 +379,7 @@ export const DB_SCHEMAS = [
   `CREATE TABLE IF NOT EXISTS bonus_results (
     bonus_setting_id INTEGER NOT NULL,
     staff_id TEXT NOT NULL,
-    total_earnings INTEGER,    -- 総支給（生データ）
+    total_earnings INTEGER,    -- 総支給（生データ。現物で渡した額（in_kind）も含む。所得税・標準賞与額・雇用保険料の元）
     hyojun_bonus INTEGER,      -- 標準賞与額（1,000円未満切り捨て後）
     health_insurance INTEGER,  -- 健保
     nursing_insurance INTEGER, -- 介護
@@ -386,6 +392,7 @@ export const DB_SCHEMAS = [
     ledger TEXT,               -- 賃金台帳の内訳（JSON。支給・控除の項目ごとの額。utils/legalBooks.ts）
     net_pay INTEGER,           -- 差引支給額
     is_nursing INTEGER,        -- 当時、介護保険対象者だったか（0 or 1）
+    in_kind INTEGER DEFAULT 0, -- 総支給のうち、現物で渡した額（現物の支給項目。賞与支払届の「現物」。差引支給額には入れない）
     processed_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     PRIMARY KEY (bonus_setting_id, staff_id),
     FOREIGN KEY (bonus_setting_id) REFERENCES bonus_settings(id) ON DELETE CASCADE,
