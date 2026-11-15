@@ -15,10 +15,14 @@
  * ・カナの項目（氏名のカナ）は半角カナで、姓と名の間に半角スペース、漢字の項目（氏名・所在地など）は全角で、姓と名の間に全角スペース
  * ・日付は和暦（元号のコード ＋ 年・月・日を2文字ずつ。令和1年7月25日 → 9・010725）
  * ・事業所整理記号は「納入告知書」の記号の上2桁を郡市区符号、残りを事業所記号に分け、都道府県コードは年金機構の一覧（東京都は 21）
+ * ・健康保険組合に出すファイル（KPFD0006.CSV）は、媒体管理レコード（事業所番号（健保組合）,媒体通番,作成年月日,健保固有項目名称×5）と
+ *   事業所情報（事業所番号（健保組合）,郵便番号,所在地,名称,事業主氏名,電話番号）が違い、データレコードのうしろに健康保険組合の項目が付く
+ * ・個人番号（マイナンバー）は、画面に出す・確かめるときは MY_NUMBER_PLACEHOLDER にしておき、ファイルを保存するときだけ番号にする
  */
 import {
   SHAHO_DATA_MARK, SHAHO_DOUBLE_BYTE_RANGES, SHAHO_MEDIA_FIELDS, SHAHO_OFFICE_COUNT, SHAHO_OFFICE_FIELDS, SHAHO_OFFICE_MARK,
-  SHAHO_PREFECTURE_CODES, SHAHO_REPRESENTATIVE_CODE, SHAHO_SINGLE_BYTE_CHARS, type ShahoField,
+  SHAHO_PREFECTURE_CODES, SHAHO_REPRESENTATIVE_CODE, SHAHO_SINGLE_BYTE_CHARS, SHAHO_UNION_MEDIA_FIELDS, SHAHO_UNION_OFFICE_FIELDS,
+  type ShahoField,
 } from "../constants/shahoTodoke";
 import { PREFECTURE_MASTER } from "../constants/prefectures";
 import { toHankakuKana, toZenkaku } from "./salaryPaymentReportCsv";
@@ -130,8 +134,10 @@ export const fieldProblem = (f: ShahoField, value: string): string | null => {
     const half = chars.filter((c) => SINGLE.has(c));
     return half.length > 0 ? `${f.name}に、半角の字があります（${[...new Set(half)].join("")}）` : null;
   }
+  // 「文字」は種別を決めていない1バイト文字（資格喪失届の70歳不該当。「1」を書く）
   const ok = (c: string) =>
-    (f.kinds.includes("数字") && isDigitChar(c)) || (f.kinds.includes("英字") && isAlphaChar(c)) || (f.kinds.includes("カナ") && isKanaChar(c));
+    (f.kinds.includes("数字") && isDigitChar(c)) || (f.kinds.includes("英字") && isAlphaChar(c)) || (f.kinds.includes("カナ") && isKanaChar(c))
+    || (f.kinds.includes("文字") && SINGLE.has(c));
   const wrong = chars.filter((c) => !ok(c));
   if (wrong.length === 0) return null;
   const kinds = f.kinds.join("・");
@@ -249,4 +255,62 @@ export const buildShahoLines = (officeValues: string[], mediaNumber: number, cre
     if (p) throw new Error(`媒体管理レコードの${p}`);
   });
   return [media.join(","), SHAHO_OFFICE_MARK, `,${SHAHO_OFFICE_COUNT}`, officeValues.join(","), SHAHO_DATA_MARK, ...dataLines];
+};
+
+// ── 個人番号（マイナンバー） ─────────────────────────────────
+
+/**
+ * 個人番号を書く項目に、画面に出す・確かめるあいだ入れておく字（ファイルを保存するときに番号にする。utils/shikakuReport.ts など）
+ * 番号は、事務取扱担当者が鍵を開けたときだけ読む（features/mynumber）
+ */
+export const MY_NUMBER_PLACEHOLDER = "［マイナンバー］";
+
+/** 項目の決まりで確かめる（個人番号の項目に MY_NUMBER_PLACEHOLDER が入っていれば、番号はあとで入れるので確かめない） */
+export const valueProblem = (f: ShahoField, value: string): string | null =>
+  value === MY_NUMBER_PLACEHOLDER ? null : fieldProblem(f, value);
+
+/**
+ * データレコードの個人番号を、本当の番号にする（保存するとき）。番号がない人・12桁でない番号があれば止める
+ * @param numbers 従業員ID → 本人の個人番号
+ */
+export const fillMyNumbers = (rows: { staffId: string; values: string[] }[], numbers: Record<string, string>): string[][] =>
+  rows.map((r) => r.values.map((v) => {
+    if (v !== MY_NUMBER_PLACEHOLDER) return v;
+    const n = String(numbers[r.staffId] ?? "").replace(/\D/g, "");
+    if (n.length !== 12) throw new Error("マイナンバーを読めない人がいます（マイナンバーの画面で登録を確かめてください）");
+    return n;
+  }));
+
+// ── 健康保険組合に出すファイル ───────────────────────────────
+
+/**
+ * 健康保険組合に出す事業所情報（事業所番号（健保組合）,郵便番号（親・子）,所在地,名称,事業主氏名,電話番号（局番1〜3））
+ * @param officeValues 年金事務所に出す事業所情報の12項目（shahoOfficeValues。郵便番号から電話番号までを使う）
+ * @param unionOfficeNumber 健康保険組合の事業所番号（会社設定の社会保険規定に入れる）
+ */
+export const unionOfficeValues = (officeValues: string[], unionOfficeNumber: string | null | undefined): { values: string[]; problems: string[] } => {
+  const number = toShahoKana(String(unionOfficeNumber ?? "").normalize("NFKC")).replace(/\s/g, "");
+  const values = [number, ...officeValues.slice(4, 12)];
+  const problems: string[] = [];
+  if (!number) problems.push("健康保険組合の事業所番号がありません（会社設定の「社会保険規定」で、その健康保険組合の事業所番号を入れてください）");
+  SHAHO_UNION_OFFICE_FIELDS.forEach((f, i) => {
+    if (i === 0 && !number) return;
+    const p = fieldProblem(f, values[i] ?? "");
+    if (p) problems.push(`健康保険組合に出す事業所の${p}`);
+  });
+  return { values, problems };
+};
+
+/**
+ * 健康保険組合に出すファイルの行（媒体管理レコード・[kanri]・事業所数情報・事業所情報・[data]・データレコード）
+ * 健保固有項目名称は書かない（組合に知らされたときに書くもの）
+ * @param unionValues 健康保険組合に出す事業所情報の9項目（unionOfficeValues）
+ */
+export const buildUnionShahoLines = (unionValues: string[], mediaNumber: number, createdOn: string, dataLines: string[]): string[] => {
+  const media = [unionValues[0], String(mediaNumber).padStart(3, "0"), createdOn.replace(/-/g, ""), "", "", "", "", ""];
+  SHAHO_UNION_MEDIA_FIELDS.forEach((f, i) => {
+    const p = fieldProblem(f, media[i] ?? "");
+    if (p) throw new Error(`媒体管理レコード（健康保険組合提出）の${p}`);
+  });
+  return [media.join(","), SHAHO_OFFICE_MARK, `,${SHAHO_OFFICE_COUNT}`, unionValues.join(","), SHAHO_DATA_MARK, ...dataLines];
 };

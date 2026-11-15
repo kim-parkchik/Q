@@ -96,8 +96,9 @@ describe("健康保険組合・国民健康保険組合の人（会社設定の�
             { from: "2025-04", health: 4.4, care: 0.8, childSupport: 0 },
             { from: "2026-04", health: 4.5, care: 0.8, childSupport: 0.115 },
         ],
+        officeNumber: "", mediaSeq: 0,
     };
-    const kokuhoInsurer = { id: 3, name: "確かめ建設国保", type: "kokuho" as const, rates: [] };
+    const kokuhoInsurer = { id: 3, name: "確かめ建設国保", type: "kokuho" as const, rates: [], officeNumber: "", mediaSeq: 0 };
     const older = { ...monthly, birthday: "1980-06-15", social_insurance_group_id: 2 }; // 46歳（介護保険の対象）
 
     test("健康保険組合：組合の本人負担の料率で計算し、都道府県は使わない。厚生年金は全国で同じ料率", () => {

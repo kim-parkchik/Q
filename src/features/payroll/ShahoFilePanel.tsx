@@ -1,14 +1,18 @@
 /**
- * 社会保険の届書の画面で使う部品（賞与支払届・算定基礎届・月額変更届・賞与不支給報告書）
+ * 社会保険の届書の画面で使う部品（賞与支払届・算定基礎届・月額変更届・賞与不支給報告書・資格取得届・資格喪失届・産休と育休の申出書）
  * ・ShahoFilePanel：電子申請用のファイル（SHFD0006.CSV）の欄（媒体通番・作成年月日・保存・印刷・中身を見る・直すところ）
+ * ・UnionFilePanel：健康保険組合に出すファイル（KPFD0006.CSV）の欄（組合ごとに、媒体通番・保存・中身を見る・直すところ）
  * ・ShahoOfficeTable：届書の事業所の欄（事業所整理記号・事業所番号・所在地・名称・事業主氏名・電話番号）
  * ・shahoPrintStyle：印刷するときに、届書の内容だけを出す
  */
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { SHAHO_SPEC_VERSION } from "../../constants/shahoTodoke";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { SHAHO_SPEC_VERSION, SHAHO_UNION_FILE_NAME } from "../../constants/shahoTodoke";
+import type { HealthInsurer } from "../../utils/healthInsurer";
+import { nextMediaNumber } from "../../utils/shahoCsv";
+import { groupByUnion, type UnionRecord } from "../../utils/unionReport";
 import type { ShahoFile } from "./useShahoFile";
 
-export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint, canPrint, children }: {
+export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint, canPrint, onSave, children }: {
   file: ShahoFile;
   /** データレコードの行（作れないときは null） */
   dataLines: string[] | null;
@@ -19,6 +23,8 @@ export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint
   count: number;
   onPrint: () => void;
   canPrint: boolean;
+  /** 保存のしかたを変えるとき（マイナンバーを入れてから保存するなど）。なければ dataLines をそのまま保存する */
+  onSave?: () => void;
   /** ボタンの左に置く欄（届書を選ぶ欄など） */
   children?: ReactNode;
 }) {
@@ -41,7 +47,7 @@ export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint
           <span style={labelStyle}>作成年月日</span>
           <input type="date" value={file.createdOn} onChange={(e) => file.setCreatedOn(e.target.value)} style={input} />
         </label>
-        <button onClick={() => dataLines && file.exportFile(dataLines, label, count)} disabled={!lines} style={button(lines ? "#16a34a" : "#94a3b8")}>
+        <button onClick={() => (onSave ? onSave() : dataLines && file.exportFile(dataLines, label, count))} disabled={!lines} style={button(lines ? "#16a34a" : "#94a3b8")}>
           電子申請用のファイルを保存（SHFD0006.CSV）
         </button>
         <button onClick={onPrint} disabled={!canPrint} style={button(canPrint ? "#2563eb" : "#94a3b8")}>印刷する</button>
@@ -63,6 +69,94 @@ export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint
       )}
       <div style={{ ...small, marginTop: 6 }}>電子申請用のファイルの形は、厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」{SHAHO_SPEC_VERSION}による。</div>
     </>
+  );
+}
+
+/**
+ * 健康保険組合に出すファイル（KPFD0006.CSV）の欄。届書の行のうち、組合に出す行（union）がある人を、組合ごとにまとめる
+ * 組合の人がいなければ何も出さない
+ */
+export function UnionFilePanel({ file, insurers, rows, label, blocked, resolve, onSaved }: {
+  file: ShahoFile;
+  insurers: Map<number, HealthInsurer>;
+  /** 届書の行（problems は年金事務所に出す行の直すところ。組合に出すファイルも、直してから作る） */
+  rows: { staffId: string; name: string; union: UnionRecord | null; problems?: string[] }[];
+  label: string;
+  /** 届書全体の、ファイルを作れない理由（年金事務所のファイルと同じもの） */
+  blocked?: string[];
+  /** 保存するときに、行の項目をファイルに書く値にする（マイナンバーを入れる。鍵を開けなかったら null） */
+  resolve?: (rows: { staffId: string; values: string[] }[]) => Promise<{ lines: string[][]; count: number } | null>;
+  /** 保存したあと（組合の媒体通番を読み直す） */
+  onSaved: (myNumbers: number) => void;
+}) {
+  const groups = groupByUnion(rows);
+  if (groups.length === 0) return null;
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px dashed #cbd5e1", paddingTop: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: "bold", marginBottom: 4 }}>健康保険組合に出すファイル（{SHAHO_UNION_FILE_NAME}）</div>
+      <div style={{ ...small, marginBottom: 8, lineHeight: 1.6 }}>
+        健康保険組合の人の届書は、年金事務所（厚生年金。上のファイル）と健康保険組合（健康保険）の両方に出します。
+        組合の電子申請・電子媒体での出し方は、組合に確かめてください（健保固有項目は書きません）。75歳以上の人は、組合には出しません。
+      </div>
+      {groups.map((g) => {
+        const insurer = insurers.get(g.insurerId);
+        return insurer ? (
+          <UnionGroup key={g.insurerId} file={file} insurer={insurer} rows={g.rows} label={label} blocked={blocked ?? []} resolve={resolve} onSaved={onSaved} />
+        ) : null;
+      })}
+    </div>
+  );
+}
+
+function UnionGroup({ file, insurer, rows, label, blocked, resolve, onSaved }: {
+  file: ShahoFile;
+  insurer: HealthInsurer;
+  rows: { staffId: string; name: string; union: UnionRecord | null; problems?: string[] }[];
+  label: string;
+  blocked: string[];
+  resolve?: (rows: { staffId: string; values: string[] }[]) => Promise<{ lines: string[][]; count: number } | null>;
+  onSaved: (myNumbers: number) => void;
+}) {
+  const [mediaNo, setMediaNo] = useState(nextMediaNumber(insurer.mediaSeq));
+  useEffect(() => { setMediaNo(nextMediaNumber(insurer.mediaSeq)); }, [insurer.mediaSeq]);
+  const [show, setShow] = useState(false);
+  const records = rows.map((r) => ({ staffId: r.staffId, values: r.union!.values }));
+  const problems = [
+    ...blocked,
+    ...file.unionProblems(insurer, mediaNo),
+    ...rows.flatMap((r) => [...(r.problems ?? []), ...r.union!.problems].map((p) => `${r.name}：${p}`)),
+  ];
+  const lines = problems.length === 0 ? file.unionLinesFor(insurer, mediaNo, records.map((r) => r.values.join(","))) : null;
+  const save = async () => {
+    const resolved = resolve ? await resolve(records) : { lines: records.map((r) => r.values), count: 0 };
+    if (!resolved) return;
+    const ok = await file.exportUnionFile(insurer, mediaNo, resolved.lines.map((v) => v.join(",")), label, rows.length,
+      resolved.count > 0 ? `マイナンバーあり ${resolved.count}人分` : "");
+    if (ok) onSaved(resolved.count);
+  };
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={controls}>
+        <div style={{ fontSize: 13, alignSelf: "center" }}>{insurer.name}（{rows.length}人）</div>
+        <label style={fieldStyle}>
+          <span style={labelStyle}>媒体通番（組合ごとに数える）</span>
+          <input type="number" min={1} max={999} value={mediaNo} onChange={(e) => setMediaNo(Number(e.target.value) || 0)} style={{ ...input, width: 90 }} />
+        </label>
+        <button onClick={save} disabled={!lines} style={button(lines ? "#16a34a" : "#94a3b8")}>組合に出すファイルを保存（{SHAHO_UNION_FILE_NAME}）</button>
+        <button onClick={() => setShow((v) => !v)} disabled={!lines} style={button(lines ? "#475569" : "#94a3b8")}>{show ? "中身を閉じる" : "中身を見る"}</button>
+      </div>
+      {show && lines && (
+        <pre style={{ fontSize: 12, backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: 10, overflowX: "auto", margin: "0 0 8px" }}>
+          {lines.join("\n")}
+        </pre>
+      )}
+      {problems.length > 0 && (
+        <div style={{ fontSize: 12, color: "#b91c1c", lineHeight: 1.6 }}>
+          <b>{insurer.name}に出すファイルを作る前に、直すところがあります：</b>
+          {[...new Set(problems)].map((b) => <div key={b}>・{b}</div>)}
+        </div>
+      )}
+    </div>
   );
 }
 

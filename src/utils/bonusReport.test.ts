@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { bonusReportDeadline, buildBonusReport, paymentsForBonus, type BonusPayment } from "./bonusReport";
 import { reach70Date, reach75Date, splitBasicPensionNumber } from "./shahoPerson";
 import { buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
+import { SHAHO_BONUS_UNION_FIELDS } from "../constants/shahoTodoke";
+import type { HealthInsurer } from "./healthInsurer";
 
 /** 仕様書の作成例の事業所（事業所整理記号 57-ケマ。東京都） */
 const office = shahoOfficeValues({
@@ -164,5 +166,23 @@ describe("選んだ賞与の届書に入れる支払い", () => {
     expect(list.map((p) => [p.staffId, p.totalEarnings])).toEqual([["S002", 250500], ["S002", 100000]]);
     const r = buildBonusReport([person({ id: "S002", birthday: "1990-01-01" })], list, office).rows[0];
     expect([r.currency, r.total, r.paymentDate, r.firstPaymentDay]).toEqual([350500, 350000, "2026-12-25", "10"]);
+  });
+});
+
+describe("健康保険組合に出す行（KPFD0006.CSV。仕様書の 4.9.2）", () => {
+  const union: HealthInsurer = { id: 2, name: "確かめ健康保険組合", type: "union", rates: [], officeNumber: "00001", mediaSeq: 0 };
+  test("組合の人は、年金事務所の行と同じ項目に、組合の項目を足す（個人番号・基礎年金番号・届のみは書かない）", () => {
+    const { rows } = buildBonusReport([person({ birthday: "1990-05-27", health_ins_num: "7" })], [pay()], office, () => "union", () => union);
+    const u = rows[0].union!;
+    expect(u.values).toHaveLength(SHAHO_BONUS_UNION_FIELDS.length);
+    expect(u.values.join(",")).toBe(`${rows[0].values.slice(0, 14).join(",")},,,,,,,,00001,7,`);
+    expect(u.problems).toEqual([]);
+  });
+  test("組合の70歳以上の人は、組合には整理番号を書く。75歳以上・協会けんぽの人は組合の行がない", () => {
+    const r = buildBonusReport([person({ birthday: "1956-12-11", basic_pension_number: "1234567890", health_ins_num: "7" })], [pay({ paymentDate: "2026-12-10" })], office, () => "union", () => union).rows[0];
+    expect([r.over70Only, r.values[4], r.union?.values[4], r.union?.values[17]]).toEqual([true, "", "1", "1"]);
+    const old = buildBonusReport([person({ birthday: "1951-12-11", basic_pension_number: "1234567890" })], [pay({ paymentDate: "2026-12-11" })], office, () => "union", () => union).rows[0];
+    expect(old.union).toBeNull();
+    expect(buildBonusReport([person()], [pay()], office).rows[0].union).toBeNull();
   });
 });

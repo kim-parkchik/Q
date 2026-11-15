@@ -1,10 +1,12 @@
 /**
- * 社会保険の届書（賞与支払届・算定基礎届・月額変更届）に書く、被保険者の項目（届書で同じ書き方のもの）
+ * 社会保険の届書（賞与支払届・算定基礎届・月額変更届・資格取得届・資格喪失届・産前産後休業と育児休業等の申出書）に書く、
+ * 被保険者の項目（届書で同じ書き方のもの）
  * ・被保険者整理番号（70歳以上被用者届のみのときは書かない）
  * ・被保険者氏名（カナは半角カナで姓と名の間に半角スペース。漢字は書けない字がある・12文字を超える・姓と名の間に
  *   スペースがないときは書かない（カナの氏名で届く））
  * ・生年月日（元号のコードと、年・月・日を2文字ずつ）
- * ・基礎年金番号（70歳以上被用者のとき。上4けたの課所符号と下6けたの一連番号。個人番号でも届けられるが、Q ではまだ使わない）
+ * ・基礎年金番号（上4けたの課所符号と下6けたの一連番号）。賞与支払届・算定基礎届・月額変更届は70歳以上被用者のとき書く
+ *   （個人番号でも届けられるが、Q ではまだ使わない）。資格取得届・資格喪失届・産休と育休の申出書は、個人番号を書かない人は必ず書く
  * 年齢：70歳に達した日（誕生日の前日）から厚生年金の資格がなく（70歳以上被用者）、75歳の誕生日から健康保険の資格もない
  * 出典：厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」（src/constants/shahoTodoke.ts の各データレコードの項目説明）
  */
@@ -45,11 +47,13 @@ export interface ShahoPersonValues {
  * @param staff 従業員（pension_num・furigana・name・birthday・basic_pension_number）
  * @param options.kanjiField 届書の「被保険者氏名(漢字)」の項目の決まり（文字数の上限に使う）
  * @param options.withoutPensionNumber 被保険者整理番号を書かない（70歳以上被用者届のみ）
- * @param options.needBasic 基礎年金番号を書く（70歳以上被用者）
+ * @param options.needBasic 基礎年金番号を書く（70歳以上被用者。個人番号を書かない人）
+ * @param options.basicReason 基礎年金番号がないときの知らせ（なければ70歳以上被用者の知らせ）
+ * @param options.birthEras 生年月日の元号のコード（届書によって違う。なければ賞与支払届などのもの）
  */
 export const shahoPersonValues = (
   staff: any,
-  options: { kanjiField: ShahoField; withoutPensionNumber: boolean; needBasic: boolean },
+  options: { kanjiField: ShahoField; withoutPensionNumber: boolean; needBasic: boolean; basicReason?: string; birthEras?: Record<string, string> },
 ): ShahoPersonValues => {
   const problems: ShahoPersonValues["problems"] = [];
   const notes: string[] = [];
@@ -71,11 +75,13 @@ export const shahoPersonValues = (
     );
     kanji = "";
   }
-  const birth = shahoDate(String(staff.birthday ?? ""), SHAHO_BIRTH_ERA_CODES);
-  if (!birth) problems.push({ message: "生年月日がありません（従業員の画面）", part: "birth" });
+  const birth = shahoDate(String(staff.birthday ?? ""), options.birthEras ?? SHAHO_BIRTH_ERA_CODES);
+  if (!birth) {
+    problems.push({ message: staff.birthday ? `生年月日（${staff.birthday}）を、この届書の元号で書けません` : "生年月日がありません（従業員の画面）", part: "birth" });
+  }
   const basic = options.needBasic ? splitBasicPensionNumber(staff.basic_pension_number) : null;
   if (options.needBasic && !basic) {
-    problems.push({ message: "70歳以上被用者なので、基礎年金番号（10けた）を従業員の画面に入れてください", part: "basic" });
+    problems.push({ message: options.basicReason ?? "70歳以上被用者なので、基礎年金番号（10けた）を従業員の画面に入れてください", part: "basic" });
   }
   return { pensionNumber, kana, kanji, birth, basic, problems, notes };
 };

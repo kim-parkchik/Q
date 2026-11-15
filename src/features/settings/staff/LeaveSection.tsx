@@ -66,6 +66,46 @@ export default function LeaveSection({ cm }: Props) {
                                         <Trash2 size={14} />
                                     </button>
                                 </div>
+                                {p.type === 'maternity' && (
+                                    // 産前産後休業取得者申出書に書く（utils/leaveReport.ts）
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginTop: "4px", fontSize: "11px", color: "#475569" }}>
+                                        <span>出産予定日</span>
+                                        <input type="date" value={p.dueDate ?? ''} onChange={e => update(i, { dueDate: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "150px" }} />
+                                        <span>出産した日</span>
+                                        <input type="date" value={p.birthDate ?? ''} onChange={e => update(i, { birthDate: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "150px" }} />
+                                        <label style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                                            <input type="checkbox" checked={p.multiple === true} onChange={e => update(i, { multiple: e.target.checked })} />多胎（2人以上）
+                                        </label>
+                                    </div>
+                                )}
+                                {p.type === 'childcare' && (
+                                    // 育児休業等取得者申出書に書く（utils/leaveReport.ts）
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginTop: "4px", fontSize: "11px", color: "#475569" }}>
+                                        <span>養育する子</span>
+                                        <input placeholder="氏名（年金　正明）" value={p.childName ?? ''} onChange={e => update(i, { childName: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "130px" }} />
+                                        <input placeholder="フリガナ（ネンキン マサアキ）" value={p.childKana ?? ''} onChange={e => update(i, { childKana: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "170px" }} />
+                                        <span>生年月日</span>
+                                        <input type="date" value={p.childBirthday ?? ''} onChange={e => update(i, { childBirthday: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "150px" }} />
+                                        <label style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                                            <input type="checkbox" checked={p.adopted === true} onChange={e => update(i, { adopted: e.target.checked })} />実子でない（養子など）
+                                        </label>
+                                        {p.adopted === true && (
+                                            <>
+                                                <span>養育を始めた日</span>
+                                                <input type="date" value={p.custodyStart ?? ''} onChange={e => update(i, { custodyStart: e.target.value })} style={{ ...inputStyle, fontSize: "12px", width: "150px" }} />
+                                            </>
+                                        )}
+                                        <label style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                                            <input type="checkbox" checked={p.papaMama === true} onChange={e => update(i, { papaMama: e.target.checked })} />パパママ育休プラス
+                                        </label>
+                                    </div>
+                                )}
+                                {(p.type === 'maternity' || p.type === 'childcare') && p.reported && (
+                                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                                        届け出た内容：{p.reported.on}に{({ apply: "申出", change: "変更", extend: "延長", end: "終了" } as Record<string, string>)[p.reported.kind]}（{p.reported.start}〜{p.reported.end}）。
+                                        期間を直したら、「産休・育休の申出書」の画面で、変更・延長・終了の届書を作ります
+                                    </div>
+                                )}
                                 {p.type === 'injury' && (
                                     // 業務上の負傷・疾病：最初の3日（待期）の休業補償の平均賃金を数える日（utils/averageWage.ts）
                                     <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "4px", fontSize: "11px", color: "#475569" }}>
@@ -92,6 +132,9 @@ export default function LeaveSection({ cm }: Props) {
                 休業・休職の日は働いていないので、その日の分の給与を払いません。計算期間がまるごと休業の月は、月給・固定の支給項目・固定残業代・通勤手当（月額）を払わず、
                 途中で始まる・終わる月は、月給と固定の支給項目を、給与規定グループの「休業の月の日割り」で日割りします（時給制・日給制は、働いた分だけ払います）。
                 勤怠の画面と出勤簿には、休業の日を「育休」などと出します。
+            </p>
+            <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
+                産前産後休業の出産予定日・出産した日、育児休業の養育する子の氏名・生年月日は、「産休・育休の申出書」の画面で作る申出書に書きます。
             </p>
             <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
                 産前産後休業・育児休業は、年金事務所（健康保険組合）に申出をした期間を入れてください。開始日がある月の分から、終了日の翌日がある月の前月分まで、

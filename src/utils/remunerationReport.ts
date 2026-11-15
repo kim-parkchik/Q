@@ -26,10 +26,11 @@
  *   算定基礎届の備考の「月額変更予定」は使わない
  */
 import {
-  SHAHO_GEPPEN_FIELDS, SHAHO_GEPPEN_FORM_CODE, SHAHO_MONTH_ERA_CODES, SHAHO_SANTEI_APPLY_MONTH, SHAHO_SANTEI_FIELDS,
-  SHAHO_SANTEI_FORM_CODE, SHAHO_SANTEI_PAY_MONTHS, type ShahoField,
+  SHAHO_GEPPEN_FIELDS, SHAHO_GEPPEN_FORM_CODE, SHAHO_GEPPEN_UNION_FIELDS, SHAHO_MONTH_ERA_CODES, SHAHO_SANTEI_APPLY_MONTH, SHAHO_SANTEI_FIELDS,
+  SHAHO_SANTEI_FORM_CODE, SHAHO_SANTEI_PAY_MONTHS, SHAHO_SANTEI_UNION_FIELDS, type ShahoField,
 } from "../constants/shahoTodoke";
-import type { InsurerType } from "./healthInsurer";
+import type { HealthInsurer, InsurerType } from "./healthInsurer";
+import { unionRecordOf, type UnionRecord } from "./unionReport";
 import { parseLeavePeriods, type LeaveType } from "./leaveExemption";
 import type { SanteiMonth, SanteiWorkerKind } from "./santei";
 import { fieldProblem, shahoDate, toShahoKanji } from "./shahoCsv";
@@ -143,6 +144,8 @@ interface ReportRowBase {
   remarks: string;
   /** 電子申請用ファイルの項目 */
   values: string[];
+  /** 健康保険組合に出す行（健康保険組合の75歳未満の人だけ。utils/unionReport.ts） */
+  union: UnionRecord | null;
   /** 直すところ（あれば電子申請用ファイルを作らない） */
   problems: string[];
   /** 知らせ */
@@ -204,6 +207,8 @@ export interface SanteiReportInput {
   /** 給与の締め日・支払日（payRuleText） */
   payRule: string;
   insurerType: InsurerType;
+  /** 健康保険の保険者（健康保険組合の人は、組合に出す行も作る） */
+  insurer?: HealthInsurer | null;
   /** 厚生年金の標準報酬月額の下限・上限（従前の8月分） */
   pensionRange: { min: number; max: number };
   /** 備考欄（画面で直した文。直していなければ null） */
@@ -341,13 +346,19 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
     over70Only ? "1" : "",
   ];
   problems.push(...checkFields(SHAHO_SANTEI_FIELDS, values, reported));
+  // 健康保険組合の人（75歳未満）は、組合にも出す（年金事務所には書かない健康保険の従前の標準報酬月額と被保険者整理番号を書く）
+  const union = input.insurer?.type === "union" && !age.over75
+    ? unionRecordOf(input.insurer, staff, values, SHAHO_SANTEI_UNION_FIELDS, {
+      4: String(staff.pension_num ?? "").normalize("NFKC").trim(), 12: input.previous > 0 ? thousandsText(input.previous) : "",
+    }, true)
+    : null;
   return {
     staffId: String(staff.id), name: String(staff.name ?? ""), pensionNumber: p.pensionNumber, kana: p.kana, kanji: p.kanji, birthday,
     previousHealth: prev.health, previousPension: prev.pension, previousFrom: input.previousFrom,
     wageChange: wage, retro, months, sum, average, modifiedAverage,
     over70: flag70 || over70Only, over70Only, multiOffice: Number(staff.multi_office) === 1,
     basicPensionNumber: p.basic ? `${p.basic[0]}-${p.basic[1]}` : "",
-    autoRemarks, remarks, values, problems: [...new Set(problems)], notes,
+    autoRemarks, remarks, values, union, problems: [...new Set(problems)], notes,
     applyFrom: `${year}-09`, kind: input.kind, over70Months, partialJoin, leave: !!leave, annual,
   };
 };
@@ -393,6 +404,8 @@ export interface GeppenReportInput {
   /** 備考欄（画面で直した文。直していなければ null） */
   remarks: string | null;
   insurerType: InsurerType;
+  /** 健康保険の保険者（健康保険組合の人は、組合に出す行も作る） */
+  insurer?: HealthInsurer | null;
   /** 厚生年金の標準報酬月額の下限・上限（従前の月の分） */
   pensionRange: { min: number; max: number };
 }
@@ -515,6 +528,11 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
   const next = months.length === 3 ? addMonths(months[2].year, months[2].month, 1) : null;
   if (!next || ymOf(next.year, next.month) !== input.revisionFrom) problems.push("給与支給月が、改定年月の前の3か月になっていません");
   problems.push(...checkFields(SHAHO_GEPPEN_FIELDS, values, reported));
+  const union = input.insurer?.type === "union" && !age.over75
+    ? unionRecordOf(input.insurer, staff, values, SHAHO_GEPPEN_UNION_FIELDS, {
+      4: String(staff.pension_num ?? "").normalize("NFKC").trim(), 12: input.previous > 0 ? thousandsText(input.previous) : "",
+    }, true)
+    : null;
   return {
     staffId: String(staff.id), name: String(staff.name ?? ""), pensionNumber: p.pensionNumber, kana: p.kana, kanji: p.kanji, birthday,
     previousHealth: prev.health, previousPension: prev.pension, previousFrom: input.previousFrom,
@@ -523,7 +541,7 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
     months, sum, average, modifiedAverage,
     over70: flag70 || over70Only, over70Only, multiOffice: Number(staff.multi_office) === 1,
     basicPensionNumber: p.basic ? `${p.basic[0]}-${p.basic[1]}` : "",
-    autoRemarks, remarks, values, problems: [...new Set(problems)], notes,
+    autoRemarks, remarks, values, union, problems: [...new Set(problems)], notes,
     key: input.key ?? String(staff.id), revisionFrom: input.revisionFrom, short: input.short, reason, autoReason, annual,
   };
 };

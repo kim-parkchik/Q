@@ -13,7 +13,7 @@ import { ANNUAL_STATUS_LABELS, ymOf, type AnnualStatus } from "../../utils/sante
 import { santeiReportPeriod } from "../../utils/remunerationReport";
 import { formatWareki } from "../../utils/wareki";
 import { RemunerationReportTable } from "./RemunerationReportTable";
-import { ShahoFilePanel, ShahoOfficeTable, shahoPrintStyle } from "./ShahoFilePanel";
+import { ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, shahoPrintStyle } from "./ShahoFilePanel";
 
 interface Props {
   db: Database;
@@ -118,12 +118,13 @@ export default function SanteiManager({ db, staffList, onDataChange }: Props) {
           上の表で「登録」にチェックを付けた人の算定基礎届を作ります。7月改定の月変の人と、8月か9月に月変の予定がある人は、電子申請では
           算定基礎届に入れないので、チェックを外してください（8月・9月の改定にならないとわかったら、その人の算定基礎届を出します）。
           電子申請（e-Gov など）では、下で保存する SHFD0006.CSV を添付します（ファイル名は変えないでください）。紙で出すときは、届いた届書に書き写すか、印刷して確かめてください。
-          年間平均で申し立てる人は、申立書と同意書（年金機構の様式）を添えます。健康保険組合の会社は、組合にも組合の形で届け出ます（Q では作りません）。
+          年間平均で申し立てる人は、申立書と同意書（年金機構の様式）を添えます。健康保険組合の人は、組合にも届け出ます（下の「健康保険組合に出すファイル」）。
         </p>
         <ShahoFilePanel
           file={s.file} dataLines={s.report.length > 0 ? s.report.map((r) => r.values.join(",")) : null} blocked={s.reportBlocked}
           label={`算定基礎届（${year}年）`} count={s.report.length} onPrint={() => window.print()} canPrint={s.report.length > 0}
         />
+        <UnionFilePanel file={s.file} insurers={s.insurers} rows={s.report} label={`算定基礎届（${year}年）`} onSaved={() => s.reloadInsurers()} />
         <div style={{ fontSize: 13, fontWeight: "bold", color: "#b45309", marginTop: 6 }}>提出期間：{formatWareki(period.from)}〜{formatWareki(period.to)}</div>
       </div>
       {s.report.length > 0 && (

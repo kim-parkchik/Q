@@ -13,8 +13,8 @@ import { DB_SCHEMAS } from "../types/dbSchema";
 
 const LAW = "currency_law";
 const rate = (from: string, health: number, care: number, childSupport: number): UnionRate => ({ from, health, care, childSupport });
-const union = (rates: UnionRate[]): HealthInsurer => ({ id: 2, name: "確かめ健康保険組合", type: "union", rates });
-const kokuho: HealthInsurer = { id: 3, name: "確かめ建設国保", type: "kokuho", rates: [] };
+const union = (rates: UnionRate[], officeNumber = "", mediaSeq = 0): HealthInsurer => ({ id: 2, name: "確かめ健康保険組合", type: "union", rates, officeNumber, mediaSeq });
+const kokuho: HealthInsurer = { id: 3, name: "確かめ建設国保", type: "kokuho", rates: [], officeNumber: "", mediaSeq: 0 };
 const base = { base: 300000, prefecture: "東京", year: 2026, month: 6, nursing: false, rounding: LAW };
 
 describe("健康保険組合の料率（何年何月分から）", () => {
@@ -74,15 +74,16 @@ describe("健康保険料・介護保険料・子ども・子育て支援金（�
 });
 
 describe("会社ファイルから読む", () => {
-  test("規定と組合の料率を、規定の番号ごとに読む。未加入・ない番号は null", async () => {
+  test("規定と組合の料率を、規定の番号ごとに読む（組合の事業所番号・組合に出すファイルの媒体通番も）。未加入・ない番号は null", async () => {
     const db = new Database(":memory:");
     for (const s of DB_SCHEMAS) db.exec(s);
-    db.exec("INSERT INTO social_insurance_groups (id, name, type) VALUES (1, '協会けんぽ', 'kyokai'), (2, '確かめ健康保険組合', 'union'), (3, '確かめ建設国保', 'kokuho')");
+    db.exec("INSERT INTO social_insurance_groups (id, name, type) VALUES (1, '協会けんぽ', 'kyokai'), (3, '確かめ建設国保', 'kokuho')");
+    db.exec("INSERT INTO social_insurance_groups (id, name, type, union_office_number, union_media_seq) VALUES (2, '確かめ健康保険組合', 'union', ' 00012 ', 4)");
     db.exec(`INSERT INTO social_insurance_group_rates (group_id, from_month, health_rate, care_rate, child_support_rate)
              VALUES (2, '2026-04', 4.5, 0.8, 0.115), (2, '2025-04', 4.4, 0.8, 0)`);
     const select = async <T,>(sql: string, params: unknown[] = []) => db.prepare(sql).all(...(params as any[])) as T;
     const insurers = await loadHealthInsurers({ select });
-    expect(insurerOf(insurers, 2)).toEqual(union([rate("2025-04", 4.4, 0.8, 0), rate("2026-04", 4.5, 0.8, 0.115)]));
+    expect(insurerOf(insurers, 2)).toEqual(union([rate("2025-04", 4.4, 0.8, 0), rate("2026-04", 4.5, 0.8, 0.115)], "00012", 4));
     expect(insurerOf(insurers, 3)).toEqual(kokuho);
     expect(insurerOf(insurers, 1)?.type).toBe("kyokai");
     expect(insurerOf(insurers, null)).toBeNull();

@@ -13,7 +13,7 @@ import { ymOf } from "../../utils/santeiAnnual";
 import { ZUIJI_ANNUAL_STATUS_LABELS, type ZuijiAnnualStatus } from "../../utils/zuijiAnnual";
 import { warekiMonth, type GeppenReportRow } from "../../utils/remunerationReport";
 import { RemunerationReportTable } from "./RemunerationReportTable";
-import { ShahoFilePanel, ShahoOfficeTable, fieldStyle, input as fieldInput, labelStyle, shahoPrintStyle } from "./ShahoFilePanel";
+import { ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, fieldStyle, input as fieldInput, labelStyle, shahoPrintStyle } from "./ShahoFilePanel";
 
 interface Props {
   db: Database;
@@ -137,7 +137,7 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
           上限・下限の1等級差の注意がある人は、従前を決めたときの報酬月額を確かめてから入れてください）。
           昇給・降給の理由は、確定した給与で変わったもの（基本給・固定残業代）から作ります。手当の変更などは、表の「4. 昇給・降給の理由」で直してください。
           電子申請（e-Gov など）では、下で保存する SHFD0006.CSV を添付します。年間平均で申し立てる人は、申立書と同意書（年金機構の様式）を添えます。
-          健康保険組合の会社は、組合にも組合の形で届け出ます（Q では作りません）。
+          健康保険組合の人は、組合にも届け出ます（下の「健康保険組合に出すファイル」）。
         </p>
         {z.reportMonths.length === 0 ? (
           <div style={{ fontSize: 12, color: "#94a3b8" }}>{z.year}年に変動月がある人で、月額変更届を出す人はいません。</div>
@@ -156,6 +156,7 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
                 </select>
               </label>
             </ShahoFilePanel>
+            <UnionFilePanel file={z.file} insurers={z.insurers} rows={z.report} label={`月額変更届（${warekiMonth(z.reportMonth)}改定）`} onSaved={() => z.reloadInsurers()} />
             <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 8 }}>
               {z.reportCandidates.map((r) => (
                 <label key={r.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>

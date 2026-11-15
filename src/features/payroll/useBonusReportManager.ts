@@ -116,9 +116,10 @@ export function useBonusReportManager(db: any) {
   // 選んだ賞与を払った人の、同じ月にその支給日までに払った賞与（前に払った分と合わせる）
   const report = useMemo(
     () => (payments && selected?.payment_date
-      ? buildBonusReport(staff, paymentsForBonus(payments, selected.id, selected.payment_date), file.office.values, insurerTypeOf)
+      ? buildBonusReport(staff, paymentsForBonus(payments, selected.id, selected.payment_date), file.office.values, insurerTypeOf,
+        (s) => insurerOf(insurers, s?.social_insurance_group_id))
       : null),
-    [staff, payments, file.office, selected, insurerTypeOf],
+    [staff, payments, file.office, selected, insurerTypeOf, insurers],
   );
   /** 同じ月にこの賞与の支給日までに払う賞与で、まだ確定していないもの（届書に入っていない） */
   const unfinalizedSameMonth = settings.filter((s) =>
@@ -160,5 +161,8 @@ export function useBonusReportManager(db: any) {
     file, settings, selected, selectedId, setSelectedId, month, report, payments, unfinalizedSameMonth, deadline,
     blocked, dataLines, label, loadError,
     planMonths, planYear, setPlanYear, planStatuses, savePlanMonths,
+    insurers,
+    /** 健康保険組合に出すファイルを保存したあと（組合の媒体通番を読み直す） */
+    reloadInsurers: async () => setInsurers(await loadHealthInsurers(db)),
   };
 }

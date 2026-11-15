@@ -184,6 +184,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
         retro: retroMonths.length === 1 ? { month: retroMonths[0], amount: r.retro[retroMonths[0]] } : null,
         periods, payRule: payRuleText(group),
         insurerType: insurerOf(data.insurers, r.staff.social_insurance_group_id)?.type ?? "kyokai",
+        insurer: insurerOf(data.insurers, r.staff.social_insurance_group_id),
         pensionRange: { min: pensionMaster.PENSION_MIN_HYOJUN, max: pensionMaster.PENSION_MAX_HYOJUN },
         remarks: r.remarks,
       };
@@ -246,5 +247,11 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
     updateRow, updateMonth, updateRetro, updateEarlierMonth, register,
     rateWarnings: ins.WARNINGS,
     file, report, reportBlocked,
+    insurers: data.insurers,
+    /** 健康保険組合に出すファイルを保存したあと（組合の媒体通番を読み直す） */
+    reloadInsurers: async () => {
+      const insurers = await loadHealthInsurers(db);
+      setData((d) => ({ ...d, insurers }));
+    },
   };
 }

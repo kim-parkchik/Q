@@ -255,10 +255,10 @@ export default function InsuranceSection({ cm }: Props) {
                         />
                     </div>
 
-                    {/* 基礎年金番号・二以上事業所勤務者（賞与支払届などの届書に書く。utils/bonusReport.ts） */}
+                    {/* 基礎年金番号・二以上事業所勤務者（資格取得届・賞与支払届などの届書に書く。utils/shahoPerson.ts） */}
                     <div>
                         <label style={{ ...labelStyle, color: targetStandardRemuneration > 0 ? "#2c3e50" : "#bdc3c7" }}>
-                            基礎年金番号（70歳以上の人の届書に書く）
+                            基礎年金番号（届書に書く。マイナンバーを書かない人は必ず）
                         </label>
                         <input
                             type="text"

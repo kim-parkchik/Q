@@ -228,6 +228,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         ),
         remarks: o.remarks ?? null,
         insurerType: insurerOf(insurers, r.staff.social_insurance_group_id)?.type ?? "kyokai",
+        insurer: insurerOf(insurers, r.staff.social_insurance_group_id),
         pensionRange: { min: master.PENSION_MIN_HYOJUN, max: master.PENSION_MAX_HYOJUN },
       };
     });
@@ -290,5 +291,8 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
     setShort, updateMonth, updateAnnualMonth, setAnnualRequested, addManual, removeManual, register,
     updateRetro, setReason, setRemarks, setInclude,
     file, reportMonths, reportMonth: currentReportMonth, setReportMonth, reportCandidates, report, reportBlocked,
+    insurers,
+    /** 健康保険組合に出すファイルを保存したあと（組合の媒体通番を読み直す） */
+    reloadInsurers: async () => setInsurers(await loadHealthInsurers(db)),
   };
 }

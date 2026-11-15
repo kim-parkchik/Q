@@ -105,6 +105,7 @@ export const DB_SCHEMAS = [
     gender TEXT DEFAULT 'unknown',
     zip_code TEXT, 
     address TEXT, 
+    address_kana TEXT,                 -- 住所のフリガナ（マイナンバーを書かない資格取得届に書く。utils/shikakuReport.ts）
     phone TEXT, 
     mobile TEXT, 
     branch_id INTEGER DEFAULT 1,
@@ -415,6 +416,8 @@ export const DB_SCHEMAS = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     type TEXT DEFAULT 'kyokai',      -- kyokai：協会けんぽ（料率は都道府県ごと）／union：健康保険組合（下の料率の表）／kokuho：国民健康保険組合（従業員ごとの月額）
+    union_office_number TEXT,        -- 健康保険組合の事業所番号（組合に出す届書のファイル KPFD0006.CSV に書く。utils/shahoCsv.ts）
+    union_media_seq INTEGER DEFAULT 0, -- 健康保険組合に出すファイルに、最後に付けた媒体通番（次は1を足す。999 の次は 1）
     is_active INTEGER DEFAULT 1
   );`,
 

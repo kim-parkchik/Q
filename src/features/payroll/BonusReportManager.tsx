@@ -12,7 +12,7 @@ import { formatWareki } from "../../utils/wareki";
 import { useBonusReportManager } from "./useBonusReportManager";
 import { BonusNonPaymentSection } from "./BonusNonPaymentSection";
 import {
-  ShahoFilePanel, ShahoOfficeTable, card, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title,
+  ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, card, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title,
 } from "./ShahoFilePanel";
 
 interface Props {
@@ -61,6 +61,7 @@ export default function BonusReportManager({ db }: Props) {
             </select>
           </label>
         </ShahoFilePanel>
+        <UnionFilePanel file={z.file} insurers={z.insurers} rows={r?.rows ?? []} label={`賞与支払届 ${z.label}`} onSaved={() => z.reloadInsurers()} />
         {z.deadline && <div style={{ fontSize: 13, fontWeight: "bold", color: "#b45309", marginTop: 6 }}>提出期限：{formatWareki(z.deadline)}（{z.deadline}。賞与を払った日から5日以内）</div>}
         {z.loadError && <div style={{ color: "#b91c1c", fontSize: 12 }}>⚠ 読み込めませんでした：{z.loadError}</div>}
         {z.unfinalizedSameMonth.length > 0 && (

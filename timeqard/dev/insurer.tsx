@@ -34,7 +34,7 @@ const store = {
     { id: 1, name: "全国健康保険協会（協会けんぽ）", type: "kyokai", is_active: 1 },
     { id: 2, name: "確かめ健康保険組合", type: "union", is_active: 1 },
     { id: 3, name: "確かめ建設国民健康保険組合", type: "kokuho", is_active: 1 },
-  ] as { id: number; name: string; type: string; is_active: number }[],
+  ] as { id: number; name: string; type: string; is_active: number; union_office_number?: string | null }[],
   rates: [
     { group_id: 2, from_month: "2025-04", health_rate: 4.4, care_rate: 0.8, child_support_rate: 0 },
     { group_id: 2, from_month: "2026-04", health_rate: 4.5, care_rate: 0.8, child_support_rate: 0.115 },
@@ -52,17 +52,17 @@ const notify = () => listeners.forEach((f) => f());
 /** executeBatch の文を、ページの中の表に当てはめる */
 const run = (sql: string, params: unknown[]) => {
   const q = sql.replace(/\s+/g, " ").trim();
-  if (q.startsWith("UPDATE social_insurance_groups SET name = ?, type = ? WHERE id = ?")) {
-    const [name, type, id] = params as [string, string, number];
-    Object.assign(store.groups.find((g) => g.id === Number(id))!, { name, type });
+  if (q.startsWith("UPDATE social_insurance_groups SET name = ?, type = ?, union_office_number = ? WHERE id = ?")) {
+    const [name, type, union_office_number, id] = params as [string, string, string | null, number];
+    Object.assign(store.groups.find((g) => g.id === Number(id))!, { name, type, union_office_number });
   } else if (q.startsWith("UPDATE social_insurance_groups SET is_active = ? WHERE id = ?")) {
     const [active, id] = params as [number, number];
     store.groups.find((g) => g.id === Number(id))!.is_active = Number(active);
   } else if (q.startsWith("DELETE FROM social_insurance_group_rates WHERE group_id = ?")) {
     store.rates = store.rates.filter((r) => r.group_id !== Number(params[0]));
-  } else if (q.startsWith("INSERT INTO social_insurance_groups (name, type, is_active)")) {
-    const [name, type] = params as [string, string];
-    store.groups.push({ id: Math.max(...store.groups.map((g) => g.id)) + 1, name, type, is_active: 1 });
+  } else if (q.startsWith("INSERT INTO social_insurance_groups (name, type, union_office_number, is_active)")) {
+    const [name, type, union_office_number] = params as [string, string, string | null];
+    store.groups.push({ id: Math.max(...store.groups.map((g) => g.id)) + 1, name, type, union_office_number, is_active: 1 });
   } else if (q.startsWith("INSERT INTO social_insurance_group_rates")) {
     const usesMax = q.includes("(SELECT MAX(id) FROM social_insurance_groups)");
     const values = [...params] as any[];
@@ -78,7 +78,9 @@ const run = (sql: string, params: unknown[]) => {
 const fakeDb = {
   async select(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
-    if (q.startsWith("SELECT id, name, type FROM social_insurance_groups")) return store.groups.map(({ id, name, type }) => ({ id, name, type }));
+    if (q.startsWith("SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups")) {
+      return store.groups.map((g) => ({ id: g.id, name: g.name, type: g.type, union_office_number: g.union_office_number ?? null, union_media_seq: 0 }));
+    }
     if (q.startsWith("SELECT id, is_active FROM social_insurance_groups")) return store.groups.map(({ id, is_active }) => ({ id, is_active }));
     if (q.startsWith("SELECT group_id, from_month")) {
       return [...store.rates].sort((a, b) => a.group_id - b.group_id || a.from_month.localeCompare(b.from_month));
@@ -124,7 +126,7 @@ const yen = (n: number) => `${n.toLocaleString()}円`;
 function Results() {
   const [insurers, setInsurers] = useState<Map<number, HealthInsurer>>(new Map());
   useEffect(() => {
-    const load = () => { loadHealthInsurers(fakeDb).then(setInsurers); };
+    const load = () => { loadHealthInsurers(fakeDb as any).then(setInsurers); };
     load();
     listeners.add(load);
     return () => { listeners.delete(load); };

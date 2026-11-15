@@ -50,7 +50,65 @@ export interface LeavePeriod {
    * 最初の3日の休業補償の平均賃金を数える日（労働基準法施行規則48条）。同じ事故の休業は、待期の3日を通算する（utils/averageWage.ts）
    */
   accident?: string;
+  /** 産前産後休業：出産予定日・多胎（2人以上）・出産した日（産前産後休業取得者申出書に書く。utils/leaveReport.ts） */
+  dueDate?: string;
+  multiple?: boolean;
+  birthDate?: string;
+  /** 育児休業等：養育する子の氏名・フリガナ・生年月日、実子でない（養子など）ときの養育を始めた日、パパママ育休プラス（育児休業等取得者申出書に書く） */
+  childName?: string;
+  childKana?: string;
+  childBirthday?: string;
+  adopted?: boolean;
+  custodyStart?: string;
+  papaMama?: boolean;
+  /** 申出書などのファイルを保存したときに届け出た内容（次に出す届書（変更・延長・終了）を決めるのに使う） */
+  reported?: LeaveReported;
 }
+
+/** 届け出た内容（kind：apply 申出／change 変更／extend 延長／end 終了。on：ファイルを保存した日） */
+export interface LeaveReported {
+  kind: 'apply' | 'change' | 'extend' | 'end';
+  on: string;
+  start: string;
+  end: string;
+  dueDate?: string;
+  multiple?: boolean;
+  birthDate?: string;
+}
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+
+/** 届書に書く項目（種類ごと）と届け出た内容だけを残す（空のものは入れない） */
+const reportFieldsOf = (p: any): Partial<LeavePeriod> => {
+  const out: Partial<LeavePeriod> = {};
+  const put = (key: keyof LeavePeriod, value: unknown) => {
+    if (value !== undefined && value !== false) (out as any)[key] = value;
+  };
+  if (p?.type === 'maternity') {
+    put('dueDate', str(p.dueDate));
+    put('multiple', p.multiple === true || undefined);
+    put('birthDate', str(p.birthDate));
+  }
+  if (p?.type === 'childcare') {
+    put('childName', str(p.childName));
+    put('childKana', str(p.childKana));
+    put('childBirthday', str(p.childBirthday));
+    put('adopted', p.adopted === true || undefined);
+    put('custodyStart', p.adopted === true ? str(p.custodyStart) : undefined);
+    put('papaMama', p.papaMama === true || undefined);
+  }
+  const r = p?.reported;
+  if ((p?.type === 'maternity' || p?.type === 'childcare') && r && ['apply', 'change', 'extend', 'end'].includes(r.kind) && str(r.start)) {
+    const reported: LeaveReported = { kind: r.kind, on: str(r.on) ?? '', start: r.start, end: str(r.end) ?? '' };
+    if (p.type === 'maternity') {
+      if (str(r.dueDate)) reported.dueDate = r.dueDate;
+      if (r.multiple === true) reported.multiple = true;
+      if (str(r.birthDate)) reported.birthDate = r.birthDate;
+    }
+    out.reported = reported;
+  }
+  return out;
+};
 
 /** 社会保険料の免除に使う休業（産前産後休業・育児休業等） */
 export interface ExemptLeavePeriod extends LeavePeriod {
@@ -71,6 +129,7 @@ export const parseLeavePeriods = (json: unknown): LeavePeriod[] => {
       .map((p) => ({
         type: p.type, start: p.start, end: typeof p.end === 'string' ? p.end : '',
         ...(p.type === 'injury' && typeof p.accident === 'string' && p.accident ? { accident: p.accident } : {}),
+        ...reportFieldsOf(p),
       }));
   } catch {
     return [];
@@ -94,7 +153,9 @@ export const exemptLeavePeriodsOf = (staff: { leave_periods?: unknown; is_execut
 /** 保存用の JSON。期間がなければ空文字 */
 export const stringifyLeavePeriods = (leaves: LeavePeriod[]): string =>
   leaves.length > 0
-    ? JSON.stringify(leaves.map(({ type, start, end, accident }) => ({ type, start, end, ...(type === 'injury' && accident ? { accident } : {}) })))
+    ? JSON.stringify(leaves.map((p) => ({
+      type: p.type, start: p.start, end: p.end, ...(p.type === 'injury' && p.accident ? { accident: p.accident } : {}), ...reportFieldsOf(p),
+    })))
     : '';
 
 /** 入力の誤り（開始日が空・終了日が開始日より前）。問題なければ null */

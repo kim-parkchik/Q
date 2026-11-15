@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-健康保険・厚生年金保険の届書の電子申請用ファイル（CSV形式届書ファイル。年金事務所提出の SHFD0006.CSV）の形を、
+健康保険・厚生年金保険の届書の電子申請用ファイル（CSV形式届書ファイル。年金事務所提出の SHFD0006.CSV と健康保険組合提出の KPFD0006.CSV）の形を、
 厚生労働省・日本年金機構の仕様書の PDF から読み取って、Q で使うデータファイル（TypeScript）を作る。
 
 使い方:
@@ -21,6 +21,11 @@
 ・4.9.1 賞与支払届・70歳以上被用者賞与支払届データレコード（年金事務所提出）の項目構成（図4.9.1-1）と
   項目説明（表4.9.1-1。様式コード・元号のコード）
 ・参考資料3 都道府県コード一覧（全国地方公共団体コードとは違う。東京都は 21）
+・3.1.2 ファイル名（健康保険組合提出の KPFD0006.CSV）、4.1.2 媒体管理レコード・4.3.2.2 事業所情報（健康保険組合提出）
+・4.5.1・4.5.2 資格取得届、4.6.1・4.6.2 資格喪失届、4.7.2 算定基礎届・4.8.2 月額変更届・4.9.2 賞与支払届（健康保険組合提出）、
+  4.12.1 産前産後休業取得者申出書、4.13.1 育児休業等取得者申出書の項目構成と項目説明（様式コード・元号・種別などのコード）。
+  多くの項目は「項番 項目名 種別 文字数」と並んでいるので図の名前で探して読み（generic_field）、字の並びが崩れている項目は項目ごとに読む。
+  読んだ項目は、年金事務所提出と健康保険組合提出・賞与支払届の同じ項目と比べ、合わなければ止まる
 
 ・PDF の文字は scripts/pdf_to_text.swift（macOS の PDFKit）で取り出す。全角は半角にし（NFKC）、空白を1つにまとめて読む。
 ・表の枠がつながっている項目（事業所整理記号・生年月日・基礎年金番号など）は、PDF から取り出した字の並びが崩れるので、
@@ -118,7 +123,7 @@ def figure_names(pages, caption):
     return names
 
 
-KIND_WORDS = ("数字", "英字", "カナ", "漢字", "-")
+KIND_WORDS = ("数字", "英字", "カナ", "漢字", "文字", "-")
 
 
 def field(name, kinds, length, alt=None):
@@ -482,6 +487,388 @@ def read_geppen_record(pages):
     return fields, form_code, birth_eras, revision_eras
 
 
+# ── 資格取得届・資格喪失届・産前産後休業・育児休業等の届書と、健康保険組合提出の届書 ──
+# 項目説明の表の多くの項目は「項番 項目名 種別 文字数」と並んでいるので、項目構成の図の名前で探して読む（generic_field）。
+# 表の枠がつながっていて字の並びが崩れている項目は、項目ごとに並びを決めて読む（overrides）。
+# 読んだ項目は、ほかの届書の同じ項目（年金事務所提出の賞与支払届・健康保険組合提出と年金事務所提出の同じ届書）と比べ、
+# 違えば止まる（check_same）。
+
+GKINDS = r"数字 英字 カナ|数字 英字|数字|英字|カナ|漢字|文字|-"
+GLEN = r"\d+~\d+|\d+(?:, ?\d+)+|\d+"
+
+
+def norm_len(s):
+    """文字数の書き方をそろえる（PDF の折り返しで入った空白を除く。「0,1, 2」→「0,1,2」・「0~3 7」→「0~37」）"""
+    return re.sub(r"\s", "", s)
+
+
+def norm_kinds(s):
+    """種別の書き方をそろえる（「数字英 字カナ」→「数字 英字 カナ」）"""
+    s = re.sub(r"[\s,]", "", s)
+    words = re.findall(r"数字|英字|カナ|漢字|文字|-", s)
+    if "".join(words) != s:
+        fail(f"種別「{s}」を読めません")
+    return " ".join(words)
+
+
+def loose_text(s):
+    """字と字のあいだに空白があってもなくても合う正規表現"""
+    s = re.sub(r"\s", "", s)
+    return r"\s?".join(re.escape(c) for c in s)
+
+
+def name_keys(name):
+    """項目説明の表での項目名（図の名前のまま・うしろの「(…)」を除いたもの）"""
+    keys = [name]
+    for base in (re.sub(r"\([^()]*\)$", "", name), re.sub(r"\(.*$", "", name)):
+        if base and base not in keys:
+            keys.append(base)
+    return keys
+
+
+def generic_field(t, no, name):
+    """「項番 項目名 種別 文字数」と並んでいる項目（漢字の項目は、続けて書いてあるカナなどで書くときの種別・文字数も）"""
+    for key in name_keys(name):
+        m = re.search(
+            rf"(?:^| ){no} (?:\d+ )?(?:[^ \d]{{1,3}} ){{0,30}}?{loose_text(key)} (?P<k>{GKINDS}) (?P<n>{GLEN})"
+            rf"(?: (?P<ak>数字 英字 カナ|カナ) (?P<an>{GLEN}))?(?= )", t)
+        if m:
+            alt = field("カナなどで書くとき", m["ak"], norm_len(m["an"])) if m["k"] == "漢字" and m["ak"] else None
+            return field(name, m["k"], norm_len(m["n"]), alt)
+    return None
+
+
+def read_table(pages, figure, table, overrides, what, special=None):
+    """
+    項目構成の図の名前と並びで、項目説明の表を読む
+    overrides：字の並びが崩れている項目を読む (項番の並び, 正規表現)。正規表現の k1・n1（種別・文字数）、ak1・an1（カナなどで
+    書くとき）を並びの1つ目の項目に使う（k2… は2つ目）。種別が離れて並ぶときは k1a・k1b・k1c をつなぐ
+    special：{項番: 関数(名前, 項目, 表の字)} ほかの項目を読んでから決める項目。それ以外は generic_field で読む
+    """
+    names = figure_names_loose(pages, figure)
+    t = " " + table_text_loose(pages, table) + " "
+    fields = [None] * len(names)
+    for nos, pattern in overrides:
+        m = search(pattern, t, f"{what}の{'・'.join(names[no - 1] for no in nos)}")
+        g = m.groupdict()
+        for j, no in enumerate(nos, 1):
+            kinds = g.get(f"k{j}") or " ".join(g[f"k{j}{x}"] for x in "abc" if g.get(f"k{j}{x}"))
+            alt = field("カナなどで書くとき", norm_kinds(g[f"ak{j}"]), norm_len(g[f"an{j}"])) if g.get(f"ak{j}") else None
+            fields[no - 1] = field(names[no - 1], norm_kinds(kinds), norm_len(g[f"n{j}"]), alt)
+    special = special or {}
+    for i, name in enumerate(names):
+        if fields[i] is None and (i + 1) not in special:
+            fields[i] = generic_field(t, i + 1, name)
+            if fields[i] is None:
+                fail(f"{what}の項番{i + 1}「{name}」を読めません（仕様書の書き方が変わったかもしれません。中身を読んでから、このスクリプトを直してください）")
+    for no, fn in special.items():
+        fields[no - 1] = fn(names, fields, t)
+    return fields, t
+
+
+def code_list(text, head, what, tail):
+    """「…に対応する数字を設定する ・名前 :「コード」 …」のコードの一覧（名前の空白は除く）"""
+    i = text.find(head)
+    if i < 0:
+        fail(f"{what}を読めません")
+    seg = text[i + len(head):]
+    j = seg.find(tail)
+    if j < 0:
+        fail(f"{what}の終わりを読めません")
+    seg = "」 " + seg[:j].strip()
+    found = re.findall(r"(?<=」 )・(.+?) ?:「(\d+)」", seg)
+    if not found:
+        fail(f"{what}のコードを読めません")
+    return {re.sub(r"\s", "", name): code for name, code in found}
+
+
+def era_lists(t, what):
+    """表の中の元号のコードの一覧（「以下の元号に対応する数字を設定する ・令和:「9」」）を、出てくる順に"""
+    out = []
+    for m in re.finditer(r"元 ?号に対応す ?る数字を設定する ((?:\S{1,2} ){0,3}(?:・\S+:「\d」 (?:\S{1,2} ){0,3})+)", t):
+        out.append({name: code for name, code in re.findall(r"・(\S+?):「(\d)」", m.group(1))})
+    if not out:
+        fail(f"{what}の元号のコードを読めません")
+    return out
+
+
+def birth_and_event_eras(t, what):
+    """生年月日の元号（1つ目）と、それ以外の日付の元号（どれも同じでなければ止まる）"""
+    lists = era_lists(t, what)
+    birth, events = lists[0], lists[1:]
+    if not events or any(e != events[0] for e in events):
+        fail(f"{what}の日付の元号のコードがそろっていません: {lists}")
+    return birth, events[0]
+
+
+def rule_of(f):
+    """項目の決まり（名前を除く。カナなどで書くときの決まりも名前を除く）"""
+    rule = {k: v for k, v in f.items() if k not in ("name", "alt")}
+    if f.get("alt"):
+        rule["alt"] = rule_of(f["alt"])
+    return rule
+
+
+def check_same(a, b, what):
+    """2つの項目の決まり（種別・文字数・カナなどで書くとき）が同じか"""
+    if rule_of(a) != rule_of(b):
+        fail(f"{what}の決まりが合いません:\n{a}\n{b}")
+
+
+def check_union(office_fields, union_fields, omitted, what, extra):
+    """健康保険組合提出の項目が、年金事務所提出の項目と同じか（omitted の項番は「省略する」）。うしろの extra 項目は健康保険組合の項目"""
+    if len(union_fields) != len(office_fields) + extra:
+        fail(f"{what}の項目の数が合いません（年金事務所提出 {len(office_fields)}・健康保険組合提出 {len(union_fields)}）")
+    for i, (a, b) in enumerate(zip(office_fields, union_fields), 1):
+        if a["name"] != b["name"]:
+            fail(f"{what}の項番{i}の名前が合いません: {a['name']} / {b['name']}")
+        if i in omitted:
+            if b["kinds"] != ["-"] or b["max"] != 0:
+                fail(f"{what}の項番{i}「{b['name']}」は省略する項目のはずです: {b}")
+        else:
+            check_same(a, b, f"{what}の項番{i}「{a['name']}」")
+
+
+def check_kinds(fields, nos, kinds, lengths, what):
+    for no in nos:
+        f = fields[no - 1]
+        if f["kinds"] != kinds or [f["min"], f["max"], f.get("only")] != lengths:
+            fail(f"{what}の項番{no}「{f['name']}」の決まりが思ったものと違います: {f}")
+
+
+def read_shutoku_record(pages, union):
+    """4.5.1・4.5.2 資格取得届・70歳以上被用者該当届データレコード（年金事務所提出・健康保険組合提出）"""
+    where = "健康保険組合提出" if union else "年金事務所提出"
+    what = f"資格取得届({where})"
+    no = "4.5.2" if union else "4.5.1"
+    office = (r"2 都道府県 コード (?P<k1>数字) イ 事 業 3 郡市区符号 所 整 " + ("4 事業所記号 理 記 号 " if union else "理 4 事業所記号 記 号 ")
+              + r"(?P<k2>数字) (?P<n1>\d+) 都道府県コードは.*? (?P<n2>\d+) ウ 外を事業所記号に分けて設定する (?P<k3>数字 英字 カナ) .*? (?P<n3>\d+~\d+) エ ")
+    overrides = [
+        ((2, 3, 4), office),
+        ((19,), r"19 資 格 取 得 年 月 日 .*? ツ 資格取得 \(該当\) 年月日 (?P<k1>数字) (?P<n1>[\d,]+) 資格取得\(70歳以上被用者該当\)年月日"),
+        ((31,), r"31 郵 便 番 号 子番号 (?P<k1>数字) 被保険者の居住する住所の郵便番号を.*? (?P<n1>[\d,]+) マ "),
+    ]
+    if union:
+        overrides += [
+            ((15,), r"15 番 号 情 報 備考欄 (?P<k1>漢字) (?P<n1>[\d~]+) 住民票住所を記載できない理由が「その他」の場合に設定 ソ する (?P<ak1>数字 英字 カナ) (?P<an1>[\d~]+) 個人番号を設定した場合は省略する"),
+            ((38,), r"健保固有項目 (?P<k1>漢字) (?P<n1>[\d~]+) 健康保険組合固有項目の内容を設定する \S+ 38 (?P<ak1>数字 英字 カナ) (?P<an1>[\d~]+) "),
+        ]
+    else:
+        overrides += [
+            ((15,), r"14 15 個 人 番 号 情 報 .*? セ 備考欄 (?P<k1>漢字) (?P<n1>[\d~]+) (?P<ak1>数字 英字 カナ) (?P<an1>[\d~]+) 住民票住所を記載できない理由が「その他」"),
+            ((17,), r"17 基 礎 年 金 番 号 一連番号 (?P<k1>数字) 個人番号を設定した場合は.*? (?P<n1>[\d,]+) チ "),
+        ]
+    fields, t = read_table(pages, f"図{no}-1 資格取得届・70歳以上被用者該当届データレコード({where})の項目構成",
+                           f"表{no}-1資格取得届・70歳以上被用者該当届データレコード({where})の項目説明", overrides, what)
+    form_code = search(r"1 様式コード 数字 7 「(\d+)」を設定する", t, f"{what}の様式コード").group(1)
+    birth, events = birth_and_event_eras(t, what)
+    kinds = code_list(t, "当該被保険者の種別(性別)に対応する数字を設定する", f"{what}の種別(性別)", " ※" if not union else " サ ")
+    categories = code_list(t, "当該被保険者の取得区分に対応する数字を設定する", f"{what}の取得区分", " ※" if not union else " シ ")
+    reasons = code_list(t, "以下の理由に対応する数字を設定する", f"{what}の住民票住所を記載できない理由", " 個人番号を設定した場合")
+    return fields, form_code, birth, events, kinds, categories, reasons
+
+
+def read_soshitsu_record(pages, union):
+    """4.6.1・4.6.2 資格喪失届・70歳以上被用者不該当届データレコード（年金事務所提出・健康保険組合提出）"""
+    where = "健康保険組合提出" if union else "年金事務所提出"
+    what = f"資格喪失届({where})"
+    no = "4.6.2" if union else "4.6.1"
+    overrides = [
+        ((2, 3, 4), r"2 都 道 府 県 コード (?P<k1>数字) イ 事 業 3 郡市区符号 所 整 4 事業所記号 理 記 号 (?P<k2>数字) (?P<k3>数字 英字 カナ) "
+                    r"(?P<n1>\d+) 都道府県コードは.*? (?P<n2>\d+) ウ .*? (?P<n3>\d+~\d+) エ "),
+        ((17,), r"17 喪 失 退 .*? 元号 (?P<k1>数字) (?P<n1>[\d,]+) 喪失\(不該当\)原因が「退職等」または「死亡」の場合 に、以下の元号"),
+        ((22, 23), r"23 22 資 格 確 認 書 回 収 添付 (?P<k1>数字) (?P<n1>[\d~]+) 返不能 (?P<k2>数字) 資格確認書を回収した枚数.*? (?P<n2>[\d~]+) ヌ "),
+    ]
+    if union:
+        overrides += [
+            ((25, 26), r"25 26 7 0 歳 不 該 当 情 報 元号 (?P<k1>-) (?P<n1>0) 省略する ノ 不 該 当 年 月 日 年月日 (?P<k2>-) (?P<n2>0) 省略する"),
+            ((30,), r"30 健保固有項目 (?P<k1>漢字) (?P<n1>[\d~]+) 健康保険組合固有項目の内容を設定する \S+ (?P<ak1>数字 英字 カナ) (?P<an1>[\d~]+) "),
+        ]
+    else:
+        overrides += [
+            ((13,), r"13 基 礎 年 金 番 号 一連番号 (?P<k1>数字) 個人番号を入力した場合は.*? (?P<n1>[\d,]+) ス "),
+            ((24,), r"24 70歳 不 該 当 (?P<k1>文字) (?P<n1>[\d,]+) 70歳以上被用者の場合に「1」"),
+            ((25, 26), r"25 26 7 0 歳 不 該 当 情 報 元号 (?P<k1>数字) (?P<n1>[\d,]+) 以下の元号.*? 年月日 (?P<k2>数字) (?P<n2>[\d,]+) 不該当年月日\(和暦\)"),
+        ]
+    fields, t = read_table(pages, f"図{no}-1 資格喪失届・70歳以上被用者不該当届データレコード({where})の項目構成",
+                           f"表{no}-1 資格喪失届・70歳以上被用者不該当届データレコード({where})の項目説明", overrides, what)
+    form_code = search(r"1 様式コード 数字 7 「(\d+)」を設定する", t, f"{what}の様式コード").group(1)
+    birth, events = birth_and_event_eras(t, what)
+    reasons = code_list(t, "以下の喪失原因に対応する数字を設定する", f"{what}の喪失(不該当)原因", " タ ")
+    return fields, form_code, birth, events, reasons
+
+
+# 算定基礎届・月額変更届・賞与支払届（健康保険組合提出）
+UNION_BIRTH = ((8, 9), r"8 元号 (?P<k1>数字) 生 年 月 9 年月日 日 (?P<n1>\d+) 以下の元号に対応する数字を設定する (?:・\S+:「\d」 )+\S+ (?P<k2>数字) (?P<n2>\d+) 生年月日\(和暦\)")
+
+
+def union_extra(no):
+    """健保固有項目（漢字。カナなどで書くときの決まりは、説明のあとに並ぶ）"""
+    return ((no,), rf"{no} 健保固有項目 (?P<k1>漢字) (?P<n1>[\d~]+) 健康保険組合固有項目の内容を設定する \S+ (?P<ak1>数字 英字 カナ) (?P<an1>[\d~]+) ")
+
+
+def read_santei_union_record(pages):
+    """4.7.2 算定基礎届・70歳以上被用者算定基礎届データレコード（健康保険組合提出）"""
+    what = "算定基礎届(健康保険組合提出)"
+
+    def money(first, words, marks):
+        return ((first, first + 1, first + 2),
+                rf"{first + 1} {first} {words} 4月 (?P<k1>数字) (?P<n1>[\d~]+) {marks[0]} 5月 (?P<k2>数字) {first + 2} 6月 (?P<k3>数字) {marks[1]}.*? (?P<n2>[\d~]+) {marks[2]} .*? (?P<n3>[\d~]+) {marks[3]} ")
+    overrides = [
+        ((2, 3, 4), r"2 都道府県 コード (?P<k1>数字) イ 事 業 所 3 郡市区符号 整 理 記 4 事業所記号 号 (?P<k2>数字) (?P<k3>数字 英字 カナ) "
+                    r"(?P<n1>\d+) 都道府県コードは.*? (?P<n2>\d+) ウ .*? (?P<n3>\d+~\d+) エ "),
+        UNION_BIRTH,
+        ((16, 17, 18), r"16 17 従 前 の 改 定 月 年 (?P<k1>数字) 月 (?P<k2>数字) 18 昇\(降\)給月 (?P<k3>数字) 文字数 (?P<n1>\d+) 現在の標準報酬月額に改定した年.*? "
+                       r"(?P<n2>\d+) 現在の標準報酬月額に改定した月.*? 昇給または降給分の支払月を設定する .*? 作成例 ソ タ チ (?P<n3>[\d,]+) ツ "),
+        ((22, 23, 24), r"23 22 給 与 支 給 月 4月 (?P<k1>数字) (?P<n1>\d+) 「\d+」を設定する ニ 5月 (?P<k2>数字) (?P<n2>\d+) 「\d+」を設定する ヌ 24 6月 (?P<k3>数字) (?P<n3>\d+) 「\d+」を設定する ネ "),
+        ((25, 26, 27), r"26 25 給 与 計 算 の 基 礎 日 数 4月 (?P<k1>数字) ノ 5月 (?P<k2>数字) 27 6月 (?P<k3>数字) (?P<n1>\d+) 給料や賃金を計算する基礎となる日数.*? (?P<n2>\d+) ハ .*? (?P<n3>\d+) ヒ "),
+        money(28, "通 貨 に よ る も の の 額", ("フ", "報酬のうち、臨時に受けるもの", "ヘ", "ホ")),
+        money(31, "現 物 に よ る も の の 額", ("マ", "報酬のうち、食事", "ミ", "ム")),
+        ((34, 35, 36), r"34 4月 (?P<k1>数字) (?P<n1>[\d~]+) メ 35 合 計 5月 (?P<k2>数字) 36 6月 (?P<k3>数字) 各給与支給月における.*? (?P<n2>[\d~]+) モ .*? (?P<n3>[\d~]+) ヤ "),
+        union_extra(56),
+    ]
+    fields, _ = read_table(pages, "図4.7.2-1 算定基礎届・70歳以上被用者算定基礎届データレコード(健康保険組合提出)の項目構成",
+                           "表4.7.2-1算定基礎届・70歳以上被用者算定基礎届データレコード(健康保険組合提出)の項目説明", overrides, what)
+    return fields
+
+
+def read_geppen_union_record(pages):
+    """4.8.2 月額変更届・70歳以上被用者月額変更届データレコード（健康保険組合提出）"""
+    what = "月額変更届(健康保険組合提出)"
+
+    def money(first, words, marks):
+        return ((first, first + 1, first + 2),
+                rf"{first} 前三ヶ月 (?P<k1>数字) (?P<n1>[\d~]+) {marks[0]} {first + 1} {first + 2} {words} 前二ヶ月 (?P<k2>数字) 前一ヶ月 (?P<k3>数字) {marks[1]}.*? (?P<n2>[\d~]+) {marks[2]} .*? (?P<n3>[\d~]+) {marks[3]} ")
+    overrides = [
+        ((2, 3, 4), r"2 都道府県 コード (?P<k1>数字) イ 事 業 3 郡市区符号 所 整 理 4 事業所記号 記 号 (?P<k2>数字) (?P<k3>数字 英字 カナ) 文字数 "
+                    r"(?P<n1>\d+) 都道府県コードは.*? (?P<n2>\d+) ウ .*? (?P<n3>\d+~\d+) エ "),
+        UNION_BIRTH,
+        ((11, 12), r"11 12 改 定 年 月 年 (?P<k1>数字) (?P<n1>\d+) .*? サ 月 (?P<k2>数字) (?P<n2>\d+) 改定後の標準報酬月額が適用される月"),
+        ((13,), r"13 従 前 の 標 準 報 酬 月 額 従前の標準 報酬月額 \(健保\) (?P<k1>数字) (?P<n1>[\d,]+) 現在の標準報酬月額\(健保\)"),
+        ((16, 17), r"16 17 従 前 の 改 定 月 年 (?P<k1>数字) (?P<n1>\d+) 現在の標準報酬月額に改定した年.*? タ 月 (?P<k2>数字) (?P<n2>\d+) 現在の標準報酬月額に改定した月"),
+        ((22, 23, 24), r"22 前三ヶ月 (?P<k1>数字) 23 24 給 与 支 給 月 前二ヶ月 (?P<k2>数字) (?P<n2>\d+) 前一ヶ月 (?P<k3>数字) (?P<n3>\d+) (?P<n1>\d+) 改定年月の月の前三ヶ月、前二ヶ月、前一ヶ月を順に"),
+        ((25, 26, 27), r"25 前三ヶ月 (?P<k1>数字) ノ 26 27 給 与 計 算 の 基 礎 日 数 前二ヶ月 (?P<k2>数字) 前一ヶ月 (?P<k3>数字) (?P<n1>\d+) 給料や賃金を計算する基礎となる日数.*? (?P<n2>\d+) ハ .*? (?P<n3>\d+) ヒ "),
+        money(28, "通 貨 に よ る も の の 額", ("フ", "報酬のうち、臨時に受けるもの", "ヘ", "ホ")),
+        money(31, "現 物 に よ る も の の 額", ("マ", "報酬のうち、食事", "ミ", "ム")),
+        ((34, 35, 36), r"34 合 計 前三ヶ月 (?P<k1>数字) (?P<n1>[\d~]+) メ 35 前二ヶ月 (?P<k2>数字) 36 前一ヶ月 (?P<k3>数字) 各給与支給月における.*? (?P<n2>[\d~]+) モ .*? (?P<n3>[\d~]+) ヤ "),
+        union_extra(52),
+    ]
+    fields, _ = read_table(pages, "図4.8.2-1 月額変更届・70歳以上被用者月額変更届データレコード(健康保険組合提出)の項目構成",
+                           "表4.8.2-1月額変更届・70歳以上被用者月額変更届データレコード(健康保険組合提出)の項目説明", overrides, what)
+    return fields
+
+
+def read_bonus_union_record(pages):
+    """4.9.2 賞与支払届・70歳以上被用者賞与支払届データレコード（健康保険組合提出）"""
+    what = "賞与支払届(健康保険組合提出)"
+    overrides = [
+        ((2, 3, 4), r"2 都 道 府 県 コード (?P<k1>数字) イ 事 3 郡市区符号 業 所 4 事業所記号 整 理 記 号 (?P<k2>数字) (?P<k3>数字 英字 カナ) "
+                    r"(?P<n1>\d+) 都道府県コードは.*? (?P<n2>\d+) ウ .*? (?P<n3>\d+~\d+) エ "),
+        UNION_BIRTH,
+        ((16, 17), r"省略する ソ 課所符号 (?P<k1>-) (?P<n1>0) 省略する タ 16 基 礎 年 金 番 号 17 一連番号 (?P<k2>-) (?P<n2>0) チ "),
+        union_extra(24),
+    ]
+    fields, _ = read_table(pages, "図4.9.2-1賞与支払届・70歳以上被用者賞与支払届データレコード(健康保険組合提出)の項目構成",
+                           "表4.9.2-1 賞与支払届・70歳以上被用者賞与支払届データレコード(健康保険組合提出)の項目説明", overrides, what)
+    return fields
+
+
+def read_sankyu_record(pages):
+    """4.12.1 産前産後休業取得者申出書/変更(終了)届データレコード（年金事務所提出）"""
+    what = "産前産後休業取得者申出書"
+    overrides = [
+        ((1, 2, 3, 4), r"1 様式コード (?P<k1>数字) 都道府県 2 事 コード (?P<k2>数字) 表」のとおり 業 3 郡市区符号 所 (?P<k3>数字) 整 理 の場合、 (?P<k4a>数字) 記 4 事業所記号 "
+                       r"(?P<k4b>英字) 号 (?P<k4c>カナ) .*?設定内容 (?P<n1>\d+) 「\d+」を設定する ア (?P<n2>\d+) 都道府県コードは.*? (?P<n3>\d+) ウ .*? (?P<n4>\d+~\d+) エ "),
+        ((5,), r"5 被保険者整理番 .*? 号 (?P<k1>数字) (?P<n1>[\d~]+) の被保険者整理番号欄"),
+        ((6,), r"6 被保険者氏名 .*? \(カナ\) (?P<k1>カナ) (?P<n1>[\d~]+) \(例\)被保険者氏名が"),
+        ((9, 10), r"10 9 被 保 険 者 の 基 礎 年 金 番 号 課所符号 (?P<k1>数字) (?P<n1>[\d,]+) 一連番号 (?P<k2>数字) .*? (?P<n2>[\d,]+) コ "),
+        ((18, 19), r"18 19 産 前 産 後 休 業 終 了 予 定 年 月 日 元号 (?P<k1>数字) (?P<n1>\d+) 以下の元号.*? 年月日 (?P<k2>数字) (?P<n2>\d+) 産前産後休業終了予定年月日\(和暦\)"),
+        ((24,), r"24 備考 (?P<k1>漢字), (?P<ak1>数字 英字 カナ) (?P<n1>[\d~]+), (?P<an1>[\d~]+) 特記事項がある場合"),
+        ((25, 26), r"25 26 変 更 変 更 後 の 出 産 \( 予 定 \) 年 月 日 元 号 (?P<k1>数字) (?P<n1>[\d,]+) 出産\(予定\)日を変更する場合に、以下の元号.*? "
+                   r"年 月 日 (?P<k2>数字) (?P<n2>[\d,]+) 出産\(予定\)日を変更する場合に、年月日"),
+        ((28, 29), r"28 29 変 更 後 の 産 前 産 後 休 業 開 始 年 月 日 元 号 (?P<k1>数字) (?P<n1>[\d,]+) 産前産後休業開始年月日を変更する場合に、以下の元号.*? "
+                   r"年 月 日 (?P<k2>数字) (?P<n2>[\d,]+) 産前産後休業開始年月日を変更する場合に、 ?年月日"),
+    ]
+
+    def changed_kind(names, fields, t):
+        # 変更後の出産種別は、表に種別が書いていない（文字数だけ）。出産種別（項番15）と同じ「0.単胎」「1.多胎」なので、項番15 の種別にする
+        m = search(r"27 変 更 後 の 出産種別 (?P<n>[\d,]+) 出産予定の子の人数が 1 人の場合は「0.単胎」", t, f"{what}の変更後の出産種別")
+        if names[14] != "出産種別" or names[26] != "変更後の出産種別":
+            fail(f"{what}の出産種別の項番が変わりました: {names[14]} / {names[26]}")
+        return field(names[26], " ".join(fields[14]["kinds"]), m["n"])
+
+    fields, t = read_table(pages, "図4.12.1-1 産前産後休業取得者申出書/変更(終了)届データレコードの項目構成", "表4.12.1-1", overrides, what, {27: changed_kind})
+    form_code = search(r"「(\d+)」を設定する ア", t, f"{what}の様式コード").group(1)
+    birth, events = birth_and_event_eras(t, what)
+    m = search(r"出産予定の子の人数が 1 人の場合は「(\d)\.(\S+?)」、 2 人\(双 子\)以上の場合は「(\d)\.(\S+?)」", t, f"{what}の出産種別のコード")
+    births = {m.group(2): m.group(1), m.group(4): m.group(3)}
+    return fields, form_code, birth, events, births
+
+
+def read_ikukyu_record(pages):
+    """4.13.1 育児休業等取得者申出書(新規・延長)/終了届データレコード（年金事務所提出）"""
+    what = "育児休業等取得者申出書"
+    days = r"\d+(?:, ?\d+)+"
+    overrides = [
+        ((2, 3, 4), r"2 都 道 府 県 コ ー ド (?P<k1>数字) イ 3 事 業 所 整 理 記 号 郡 市 区 符 号 (?P<k2>数字) 4 事 業 所 記 号 (?P<k3>数字 英字 カナ) "
+                    r"(?P<n1>\d+) 都道府県コードは.*? (?P<n2>\d+) ウ .*? (?P<n3>\d+~\d+) エ "),
+        ((10,), r"10 被 保 険 者 の 基 礎 年 金 番 号 一連番 号 (?P<k1>数字) 「年金手帳」.*? (?P<n1>[\d,]+) コ "),
+        ((16,), r"元号 (?P<k1>数字) 16 養 育 す る 子 の 生 年 月 日 (?P<n1>\d+) 以下の元号に対応する"),
+        ((23, 24), r"23 24 育 児 休 業 等 終 了 \( 予 定 \) 年 月 日 元号 (?P<k1>数字) (?P<n1>\d+) 以下の元号.*? 年月日 (?P<k2>数字) (?P<n2>\d+) 育児休業等終了\(予定\)年月日\(和暦\)"),
+        ((28,), r"28 備考 (?P<k1>漢字), (?P<ak1>数字英 ?字カナ) (?P<n1>0~3 ?7),(?P<an1>0~ ?75) 省略する"),
+        # 延長欄（元号・年月日・取得日数）：元号の種別と文字数が離れて並ぶ
+        ((29, 30, 31), rf"元 29 休 元号に対応する数字を設定する .*? 30 月 月 (?P<k2>数字) (?P<n2>[\d,]+) 日 日 \( 変 更 号 (?P<k1>数字) 延 .*? "
+                       rf"31 日 (?P<k3>数字) (?P<n3>{days}) 数 \( 変 更 (?P<n1>[\d,]+) 育児休業等取得者申出書の期間を延長する場合、育児休"),
+        # 終了欄
+        ((32, 33, 34), rf"元 32 申出していた終了予定日より早く.*? 年 33 月 (?P<k2>数字) (?P<n2>[\d,]+) 日 終 了 号 (?P<k1>数字) (?P<n1>[\d,]+) 申出していた終了予定日より早く.*? "
+                       rf"34 日 (?P<k3>数字) (?P<n3>{days}) 数 "),
+        # 育休等取得内訳1〜4（開始の元号・年月日、終了の元号・年月日、取得日数、就業予定日数（3・4はなし））
+        ((35, 36, 37, 38, 39, 40), rf"35 得する場合、以下の元号に対応する数字を設定する .*? 36 月 (?P<k2>数字) (?P<n2>[\d,]+) 1 日 元 37 .*? 号 (?P<k1>数字) (?P<n1>[\d,]+) 「育児休業等開始年月日」.*? "
+                                   rf"38 月 月 (?P<k4>数字) (?P<n4>[\d,]+) 日 設定する 日 1 号 (?P<k3>数字) (?P<n3>[\d,]+) 「育児休業等開始年月日」.*? "
+                                   rf"39 (?P<k5>数字) (?P<n5>{days}) 育休等取得内訳1における育児休業等取得日数.*? 40 定 (?P<k6>数字) (?P<n6>{days}) 育休等取得内訳1における就業予定日数"),
+        ((41, 42, 43, 44, 45, 46), rf"41 得する場合は、以下の元号に対応する数字を設定する .*? 42 月 (?P<k2>数字) (?P<n2>[\d,]+) 2 日 元 43 .*? 号 (?P<k1>数字) (?P<n1>[\d,]+) 「育児休業等開始年月日」.*? "
+                                   rf"44 日 月 (?P<k4>数字) (?P<n4>[\d,]+) 日 設定する 2 号 (?P<k3>数字) (?P<n3>[\d,]+) 「育児休業等開始年月日」.*? "
+                                   rf"45 (?P<k5>数字) (?P<n5>{days}) 育休等取得内訳2における育児休業等取得日数.*? 46 定 (?P<k6>数字) (?P<n6>{days}) 育休等取得内訳2における就業予定日数"),
+        ((47, 48, 49, 50, 51), rf"得する場合は、以下の元号に対応する数字を設定する 47 .*? 48 月 (?P<k2>数字) (?P<n2>[\d,]+) 日 育 休 元 49 .*? 号 (?P<k1>数字) (?P<n1>[\d,]+) 育休等取得内訳が3回存在しない場合は、省略する .*? "
+                               rf"50 月 (?P<k4>数字) (?P<n4>[\d,]+) 3 日 号 (?P<k3>数字) 育休等取得内訳が3回存在しない場合は、省略する .*? "
+                               rf"51 (?P<k5>数字) (?P<n5>{days}) 取 得 日 数 3 (?P<n3>[\d,]+) 「育児休業等開始年月日」"),
+        ((52, 53, 54, 55, 56), rf"得する場合は、以下の元号に対応する数字を設定する 52 .*? 53 月 (?P<k2>数字) (?P<n2>[\d,]+) 日 育 休 等 取 得 内 訳 4 元 54 .*? 号 (?P<k1>数字) (?P<n1>[\d,]+) 育休等取得内訳が4回存在しない場合は、省略する .*? "
+                               rf"55 月 (?P<k4>数字) (?P<n4>[\d,]+) 4 日 号 (?P<k3>数字) 育休等取得内訳が4回存在しない場合は、省略する .*? "
+                               rf"56 (?P<k5>数字) (?P<n5>{days}) 取 得 日 数 (?P<n3>\d+(?:, ?\d+)*) 「育児休業等開始年月日」"),
+    ]
+    fields, t = read_table(pages, "図4.13.1-1 育児休業等取得者申出書(新規・延長)/終了届データレコードの項目構成", "表4.13.1-1", overrides, what)
+    # 延長欄・終了欄・育休等取得内訳の項目は、同じ種類の項目（元号・年月日・日数）がどれも同じ決まり（省略できる）
+    check_kinds(fields, [29, 32, 35, 37, 41, 43, 47, 49, 52, 54], ["数字"], [0, 1, [0, 1]], what)
+    check_kinds(fields, [30, 33, 36, 38, 42, 44, 48, 50, 53, 55], ["数字"], [0, 6, [0, 6]], what)
+    check_kinds(fields, [25, 26, 31, 34, 39, 40, 45, 46, 51, 56], ["数字"], [0, 2, [0, 1, 2]], what)
+    form_code = search(r"1 様式コード 数字 7 「(\d+)」を設定する", t, f"{what}の様式コード").group(1)
+    birth, events = birth_and_event_eras(t, what)
+    sexes = code_list(t, "当該被保険者の種別(性別)に対応する数字を設定する", f"{what}の被保険者の性別", " ス ")
+    relations = code_list(t, "養育する子の区分を設定する", f"{what}の区分", " ツ ")
+    return fields, form_code, birth, events, sexes, relations
+
+
+def read_union_media_record(pages):
+    """4.1.2 媒体管理レコード（健康保険組合提出）"""
+    what = "媒体管理レコード(健康保険組合提出)"
+    overrides = [((2,), r"2 媒体通番 (?P<k1>数字) 識 別 情 報 (?P<n1>\d+) 媒体通番は")]
+    for no in range(4, 9):
+        overrides.append(((no,), rf"{no} 健保固有項目名 称\(.*?\) (?P<k1>漢字) (?P<n1>[\d~]+) .*? (?P<ak1>数字 英字 カナ) (?P<an1>[\d~]+) "))
+    fields, _ = read_table(pages, "図4.1.2-1 媒体管理レコード(健康保険組合提出)の項目構成", "表4.1.2-1 媒体管理レコード(健康保険組合提出)の項目説明", overrides, what)
+    return fields
+
+
+def read_union_office_record(pages):
+    """4.3.2.2 事業所情報（健康保険組合提出）"""
+    what = "事業所情報(健康保険組合提出)"
+    overrides = [
+        ((2, 3), r"2 親番号 (?P<k1>数字) (?P<n1>\d+) 事業所所在地の郵便番号を.*? イ 3 郵 便 番 号 する 子番号 (?P<k2>数字) .*? (?P<n2>\d+) ウ "),
+        ((8, 9), r"8 局番2 話 番 号 9 局番3 (?P<k1>数字) (?P<n1>[\d~]+) 事業所の電話番号\(市内局番等\)を設定する ク (?P<k2>数字) (?P<n2>[\d~]+) 事業所の電話番号\(番号\)を設定する ケ "),
+    ]
+    fields, _ = read_table(pages, "図4.3.2.2-1 事業所情報(健康保険組合提出)の項目構成", "表4.3.2.2-1事業所情報(健康保険組合提出)の項目説明", overrides, what)
+    return fields
+
+
 def read_prefectures(pages):
     no = find_page(pages, "都道府県コード一覧 No 都道府県コード 漢字都道府県名")
     rows = re.findall(r"(\d+) (\d{2}) (\S+?[都道府県])(?= |$)", pages[no])
@@ -559,6 +946,69 @@ def main():
     single = read_single_byte_chars(pages)
     double = read_double_byte_ranges(pages)
 
+    # 健康保険組合に出すファイルの名前（3.1.2）
+    no = find_page(pages, "3.1.2 健康保険組合提出")
+    union_file_name = search(r"3\.1\.2 健康保険組合提出 .*?\(2\)CSV形式届書ファイルのファイル名 (\S+?\.CSV)", pages[no], "健康保険組合に出す CSV 形式届書ファイルの名前").group(1)
+    # 資格取得届・資格喪失届（年金事務所提出・健康保険組合提出）
+    shutoku_fields, shutoku_code, shutoku_birth, event_eras, shutoku_kinds, shutoku_categories, address_reasons = read_shutoku_record(pages, False)
+    shutoku_union, shutoku_code_u, shutoku_birth_u, event_eras_u, shutoku_kinds_u, shutoku_categories_u, address_reasons_u = read_shutoku_record(pages, True)
+    soshitsu_fields, soshitsu_code, soshitsu_birth, soshitsu_events, loss_reasons = read_soshitsu_record(pages, False)
+    soshitsu_union, soshitsu_code_u, soshitsu_birth_u, soshitsu_events_u, loss_reasons_u = read_soshitsu_record(pages, True)
+    # 算定基礎届・月額変更届・賞与支払届と、媒体管理レコード・事業所情報（健康保険組合提出）
+    santei_union = read_santei_union_record(pages)
+    geppen_union = read_geppen_union_record(pages)
+    bonus_union = read_bonus_union_record(pages)
+    union_media = read_union_media_record(pages)
+    union_office = read_union_office_record(pages)
+    # 産前産後休業取得者申出書・育児休業等取得者申出書（年金事務所提出）
+    sankyu_fields, sankyu_code, leave_birth_eras, leave_eras, birth_kinds = read_sankyu_record(pages)
+    ikukyu_fields, ikukyu_code, ikukyu_birth, ikukyu_events, ikukyu_sexes, ikukyu_relations = read_ikukyu_record(pages)
+
+    # 読んだものを照らし合わせる（合わなければ、読み方か仕様書が変わったので止まる）
+    if (shutoku_code_u, soshitsu_code_u) != (shutoku_code, soshitsu_code):
+        fail(f"健康保険組合提出の様式コードが年金事務所提出と違います: {shutoku_code_u}・{soshitsu_code_u} / {shutoku_code}・{soshitsu_code}")
+    for what, a, b in [
+        ("資格取得届の生年月日の元号", shutoku_birth, birth_eras),
+        ("資格取得届(健康保険組合提出)の生年月日の元号", shutoku_birth_u, birth_eras),
+        ("資格喪失届の生年月日の元号", soshitsu_birth, birth_eras),
+        ("資格喪失届(健康保険組合提出)の生年月日の元号", soshitsu_birth_u, birth_eras),
+        ("資格取得届と資格喪失届の日付の元号", soshitsu_events, event_eras),
+        ("資格取得届(健康保険組合提出)の日付の元号", event_eras_u, event_eras),
+        ("資格喪失届(健康保険組合提出)の日付の元号", soshitsu_events_u, event_eras),
+        ("産前産後休業取得者申出書と育児休業等取得者申出書の生年月日の元号", ikukyu_birth, leave_birth_eras),
+        ("産前産後休業取得者申出書と育児休業等取得者申出書の日付の元号", ikukyu_events, leave_eras),
+        ("資格取得届の種別(性別)", shutoku_kinds_u, shutoku_kinds),
+        ("資格取得届の取得区分", shutoku_categories_u, shutoku_categories),
+        ("資格取得届の住民票住所を記載できない理由", address_reasons_u, address_reasons),
+        ("資格喪失届の喪失(不該当)原因", loss_reasons_u, loss_reasons),
+    ]:
+        if a != b:
+            fail(f"{what}が合いません: {a} / {b}")
+    check_union(shutoku_fields, shutoku_union, {16, 17, 34}, "資格取得届", 3)
+    check_union(soshitsu_fields, soshitsu_union, {12, 13, 24, 25, 26, 27}, "資格喪失届", 3)
+    check_union(santei_fields, santei_union, {40, 41, 42, 53}, "算定基礎届", 3)
+    check_union(geppen_fields, geppen_union, {40, 41, 42, 49}, "月額変更届", 3)
+    check_union(bonus_fields, bonus_union, {15, 16, 17, 21}, "賞与支払届", 3)
+    check_same(union_media[1], media_fields[3], "媒体管理レコード(健康保険組合提出)の媒体通番")
+    check_same(union_media[2], media_fields[4], "媒体管理レコード(健康保険組合提出)の作成年月日")
+    for i in range(8):
+        check_same(union_office[1 + i], office_fields[4 + i], f"事業所情報(健康保険組合提出)の{union_office[1 + i]['name']}")
+    if union_media[0] != union_office[0] or union_media[0] != santei_union[53]:
+        fail("事業所番号(健保組合)の決まりが、媒体管理レコード・事業所情報・データレコードで違います")
+    # どの届書でも同じ項目（事業所整理記号・氏名・生年月日・個人番号・基礎年金番号）は、賞与支払届の項目と同じ決まり
+    for what, fields, pairs in [
+        ("資格取得届", shutoku_fields, {2: 2, 3: 3, 4: 4, 7: 6, 8: 7, 9: 8, 10: 9, 13: 15, 16: 16, 17: 17}),
+        ("資格喪失届", soshitsu_fields, {2: 2, 3: 3, 4: 4, 5: None, 6: 5, 7: 6, 8: 7, 9: 8, 10: 9, 11: 15, 12: 16, 13: 17}),
+        ("産前産後休業取得者申出書", sankyu_fields, {2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 15, 9: 16, 10: 17, 11: 8, 12: 9}),
+        ("育児休業等取得者申出書", ikukyu_fields, {2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 15, 9: 16, 10: 17, 11: 8, 12: 9}),
+    ]:
+        for a, b in pairs.items():
+            if b is None:
+                check_same(fields[a - 1], office_fields[3], f"{what}の項番{a}「{fields[a - 1]['name']}」と事業所情報の事業所番号")
+            else:
+                check_same(fields[a - 1], bonus_fields[b - 1], f"{what}の項番{a}「{fields[a - 1]['name']}」と賞与支払届の項番{b}")
+    check_same(shutoku_fields[4], office_fields[3], "資格取得届の事業所番号と事業所情報の事業所番号")
+
     def js(value):
         return json.dumps(value, ensure_ascii=False)
 
@@ -567,7 +1017,7 @@ def main():
 
     ranges_ts = ", ".join(f"[0x{a:04X}, 0x{b:04X}]" for a, b in double)
     ts = f"""/**
- * 健康保険・厚生年金保険の届書の電子申請用ファイル（CSV形式届書ファイル。年金事務所提出）の形
+ * 健康保険・厚生年金保険の届書の電子申請用ファイル（CSV形式届書ファイル。年金事務所提出と健康保険組合提出）の形
  *
  * このファイルは scripts/import_shaho_format.py が、厚生労働省・日本年金機構の仕様書の PDF から作ったものです（手で直さない）。
  * 仕様書：「CSV形式届書作成仕様書（電子申請）・電子媒体届書作成仕様書（CD/DVD仕様書）（健康保険・厚生年金保険適用関係届書）」
@@ -635,6 +1085,66 @@ export const SHAHO_GEPPEN_FIELDS: ShahoField[] = {fields_ts(geppen_fields)};
 /** 元号のコード（算定基礎届の適用年月・月額変更届の改定年月・従前の改定月。表4.7.1-1・表4.8.1-1） */
 export const SHAHO_MONTH_ERA_CODES: Record<string, string> = {js(month_eras)};
 
+/** 資格取得届・70歳以上被用者該当届の様式コード（表4.5.1-1） */
+export const SHAHO_SHUTOKU_FORM_CODE = {js(shutoku_code)};
+/** 資格取得届・70歳以上被用者該当届データレコード（年金事務所提出。図4.5.1-1・表4.5.1-1） */
+export const SHAHO_SHUTOKU_FIELDS: ShahoField[] = {fields_ts(shutoku_fields)};
+/** 資格取得届の種別(性別)のコード（表4.5.1-1。名前の空白は除いた） */
+export const SHAHO_SHUTOKU_KINDS: Record<string, string> = {js(shutoku_kinds)};
+/** 資格取得届の取得区分のコード（表4.5.1-1） */
+export const SHAHO_SHUTOKU_CATEGORIES: Record<string, string> = {js(shutoku_categories)};
+/** 資格取得届の、個人番号も住民票住所も書けないときの理由のコード（表4.5.1-1） */
+export const SHAHO_ADDRESS_REASONS: Record<string, string> = {js(address_reasons)};
+
+/** 資格喪失届・70歳以上被用者不該当届の様式コード（表4.6.1-1） */
+export const SHAHO_SOSHITSU_FORM_CODE = {js(soshitsu_code)};
+/** 資格喪失届・70歳以上被用者不該当届データレコード（年金事務所提出。図4.6.1-1・表4.6.1-1） */
+export const SHAHO_SOSHITSU_FIELDS: ShahoField[] = {fields_ts(soshitsu_fields)};
+/** 資格喪失届の喪失(不該当)原因のコード（表4.6.1-1。名前の空白は除いた） */
+export const SHAHO_LOSS_REASONS: Record<string, string> = {js(loss_reasons)};
+
+/** 元号のコード（資格取得年月日・資格喪失年月日・退職日死亡日・不該当年月日。表4.5.1-1・表4.6.1-1） */
+export const SHAHO_EVENT_ERA_CODES: Record<string, string> = {js(event_eras)};
+
+/** 産前産後休業取得者申出書/変更(終了)届の様式コード（表4.12.1-1） */
+export const SHAHO_SANKYU_FORM_CODE = {js(sankyu_code)};
+/**
+ * 産前産後休業取得者申出書/変更(終了)届データレコード（年金事務所提出。図4.12.1-1・表4.12.1-1）
+ * 変更後の出産種別は、表に種別が書いていないので、出産種別と同じ種別にした（どちらも「0.単胎」「1.多胎」）
+ */
+export const SHAHO_SANKYU_FIELDS: ShahoField[] = {fields_ts(sankyu_fields)};
+/** 出産種別のコード（表4.12.1-1） */
+export const SHAHO_BIRTH_KINDS: Record<string, string> = {js(birth_kinds)};
+
+/** 育児休業等取得者申出書(新規・延長)/終了届の様式コード（表4.13.1-1） */
+export const SHAHO_IKUKYU_FORM_CODE = {js(ikukyu_code)};
+/** 育児休業等取得者申出書(新規・延長)/終了届データレコード（年金事務所提出。図4.13.1-1・表4.13.1-1） */
+export const SHAHO_IKUKYU_FIELDS: ShahoField[] = {fields_ts(ikukyu_fields)};
+/** 育児休業等取得者申出書の被保険者の性別・養育する子の区分のコード（表4.13.1-1） */
+export const SHAHO_IKUKYU_SEXES: Record<string, string> = {js(ikukyu_sexes)};
+export const SHAHO_CHILD_RELATIONS: Record<string, string> = {js(ikukyu_relations)};
+
+/** 元号のコード（産前産後休業・育児休業等の届書の被保険者の生年月日と、それ以外の日付。表4.12.1-1・表4.13.1-1） */
+export const SHAHO_LEAVE_BIRTH_ERA_CODES: Record<string, string> = {js(leave_birth_eras)};
+export const SHAHO_LEAVE_ERA_CODES: Record<string, string> = {js(leave_eras)};
+
+/** 健康保険組合に出す CSV 形式届書ファイルの名前（3.1.2） */
+export const SHAHO_UNION_FILE_NAME = {js(union_file_name)};
+/** 媒体管理レコード（健康保険組合提出。図4.1.2-1・表4.1.2-1） */
+export const SHAHO_UNION_MEDIA_FIELDS: ShahoField[] = {fields_ts(union_media)};
+/** 事業所情報（健康保険組合提出。図4.3.2.2-1・表4.3.2.2-1） */
+export const SHAHO_UNION_OFFICE_FIELDS: ShahoField[] = {fields_ts(union_office)};
+/** 資格取得届・70歳以上被用者該当届データレコード（健康保険組合提出。図4.5.2-1・表4.5.2-1） */
+export const SHAHO_SHUTOKU_UNION_FIELDS: ShahoField[] = {fields_ts(shutoku_union)};
+/** 資格喪失届・70歳以上被用者不該当届データレコード（健康保険組合提出。図4.6.2-1・表4.6.2-1） */
+export const SHAHO_SOSHITSU_UNION_FIELDS: ShahoField[] = {fields_ts(soshitsu_union)};
+/** 算定基礎届・70歳以上被用者算定基礎届データレコード（健康保険組合提出。図4.7.2-1・表4.7.2-1） */
+export const SHAHO_SANTEI_UNION_FIELDS: ShahoField[] = {fields_ts(santei_union)};
+/** 月額変更届・70歳以上被用者月額変更届データレコード（健康保険組合提出。図4.8.2-1・表4.8.2-1） */
+export const SHAHO_GEPPEN_UNION_FIELDS: ShahoField[] = {fields_ts(geppen_union)};
+/** 賞与支払届・70歳以上被用者賞与支払届データレコード（健康保険組合提出。図4.9.2-1・表4.9.2-1） */
+export const SHAHO_BONUS_UNION_FIELDS: ShahoField[] = {fields_ts(bonus_union)};
+
 /** 都道府県コード（参考資料3。都道府県名 → コード。全国地方公共団体コードとは違う） */
 export const SHAHO_PREFECTURE_CODES: Record<string, string> = {js(prefectures)};
 
@@ -649,7 +1159,10 @@ export const SHAHO_DOUBLE_BYTE_RANGES: [number, number][] = [{ranges_ts}];
 """
     out.write_text(ts, encoding="utf-8")
     print(f"{out} を作りました（{version}・賞与支払届 {len(bonus_fields)}項目・算定基礎届 {len(santei_fields)}項目・月額変更届 {len(geppen_fields)}項目・"
-          f"事業所情報 {len(office_fields)}項目・都道府県 {len(prefectures)}・"
+          f"資格取得届 {len(shutoku_fields)}項目・資格喪失届 {len(soshitsu_fields)}項目・産前産後休業取得者申出書 {len(sankyu_fields)}項目・"
+          f"育児休業等取得者申出書 {len(ikukyu_fields)}項目・事業所情報 {len(office_fields)}項目・"
+          f"健康保険組合提出（{union_file_name}）：資格取得届 {len(shutoku_union)}・資格喪失届 {len(soshitsu_union)}・算定基礎届 {len(santei_union)}・"
+          f"月額変更届 {len(geppen_union)}・賞与支払届 {len(bonus_union)}・事業所情報 {len(union_office)}項目・都道府県 {len(prefectures)}・"
           f"1バイト文字 {len(single)}字・2バイト文字の範囲 {len(double)}）")
 
 

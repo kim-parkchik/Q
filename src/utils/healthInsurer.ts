@@ -44,6 +44,10 @@ export interface HealthInsurer {
   type: InsurerType;
   /** 健康保険組合の料率（from の古い順） */
   rates: UnionRate[];
+  /** 健康保険組合の事業所番号（組合に出す届書のファイルに書く。1〜5けたの英数字。協会けんぽ・国保組合は空） */
+  officeNumber: string;
+  /** 健康保険組合に出すファイルに、最後に付けた媒体通番（0 はまだない） */
+  mediaSeq: number;
 }
 
 const ym = (year: number, month: number) => `${year}-${String(month).padStart(2, "0")}`;
@@ -70,12 +74,19 @@ interface SelectDb {
 
 /** 規定と、健康保険組合の料率を、規定の番号ごとに読む */
 export const loadHealthInsurers = async (db: SelectDb): Promise<Map<number, HealthInsurer>> => {
-  const groups = (await db.select<{ id: number; name: string; type: string }[]>("SELECT id, name, type FROM social_insurance_groups ORDER BY id")) ?? [];
+  const groups = (await db.select<{ id: number; name: string; type: string; union_office_number: string | null; union_media_seq: number | null }[]>(
+    "SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups ORDER BY id",
+  )) ?? [];
   const rates = (await db.select<{ group_id: number; from_month: string; health_rate: number; care_rate: number; child_support_rate: number }[]>(
     "SELECT group_id, from_month, health_rate, care_rate, child_support_rate FROM social_insurance_group_rates ORDER BY group_id, from_month",
   )) ?? [];
   const map = new Map<number, HealthInsurer>();
-  for (const g of groups) map.set(Number(g.id), { id: Number(g.id), name: String(g.name ?? ""), type: toInsurerType(g.type), rates: [] });
+  for (const g of groups) {
+    map.set(Number(g.id), {
+      id: Number(g.id), name: String(g.name ?? ""), type: toInsurerType(g.type), rates: [],
+      officeNumber: String(g.union_office_number ?? "").trim(), mediaSeq: Number(g.union_media_seq) || 0,
+    });
+  }
   for (const r of rates) {
     map.get(Number(r.group_id))?.rates.push({
       from: String(r.from_month),

@@ -4,7 +4,8 @@ import {
   leaveRemark, payRuleText, pensionStandardOf, shahoMonth, thousandsText, type GeppenReportInput, type SanteiReportInput,
 } from "./remunerationReport";
 import { buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
-import { SHAHO_GEPPEN_FIELDS, SHAHO_SANTEI_FIELDS } from "../constants/shahoTodoke";
+import { SHAHO_GEPPEN_FIELDS, SHAHO_GEPPEN_UNION_FIELDS, SHAHO_SANTEI_FIELDS, SHAHO_SANTEI_UNION_FIELDS } from "../constants/shahoTodoke";
+import type { HealthInsurer } from "./healthInsurer";
 
 /** 仕様書の作成例の事業所（事業所整理記号 57-ケマ。東京都） */
 const office = shahoOfficeValues({
@@ -266,5 +267,35 @@ describe("月額変更届（仕様書の作成例・記入例と同じになる�
     const text = new TextDecoder("shift_jis").decode(bytes);
     expect(text.split("\r\n")[5]).toBe(rows[0].values.join(","));
     expect(buildSanteiReport([santei()], office)[0].values[0]).toBe("2225700");
+  });
+});
+
+describe("健康保険組合に出す行（KPFD0006.CSV。仕様書の 4.7.2・4.8.2）", () => {
+  const union: HealthInsurer = { id: 2, name: "確かめ健康保険組合", type: "union", rates: [], officeNumber: "00001", mediaSeq: 0 };
+  test("算定基礎届：組合の行には健保の従前の標準報酬月額を書き、個人番号・基礎年金番号・届のみは書かない。うしろに組合の項目", () => {
+    const row = buildSanteiReportRow(santei({ insurerType: "union", insurer: union, staff: staff({ health_ins_num: "123" }) }), office);
+    expect(row.values[12]).toBe("");
+    expect(row.union?.values).toHaveLength(SHAHO_SANTEI_UNION_FIELDS.length);
+    expect(row.union?.values[12]).toBe("0300");
+    expect(row.union?.values.slice(0, 12)).toEqual(row.values.slice(0, 12));
+    expect(row.union?.values.slice(13, 39)).toEqual(row.values.slice(13, 39));
+    expect(row.union?.values.slice(39, 42)).toEqual(["", "", ""]);
+    expect(row.union?.values.slice(52)).toEqual(["", "00001", "123", ""]);
+    expect(row.union?.problems).toEqual([]);
+  });
+  test("算定基礎届：組合の70歳以上の人は、年金事務所には届のみ（整理番号なし）、組合には整理番号と健保を書く。75歳以上は組合の行がない", () => {
+    const row = buildSanteiReportRow(santei({ insurerType: "union", insurer: union, staff: staff({ birthday: "1954-05-27", basic_pension_number: "1234567890", health_ins_num: "45" }) }), office);
+    expect([row.over70Only, row.values[4], row.values[12], row.values[13]]).toEqual([true, "", "", ""]);
+    expect([row.union?.values[4], row.union?.values[12], row.union?.values[13], row.union?.values[42]]).toEqual(["1", "0300", "", "1"]);
+    const old = buildSanteiReportRow(santei({ insurerType: "union", insurer: union, staff: staff({ birthday: "1949-05-27", basic_pension_number: "1234567890" }) }), office);
+    expect(old.union).toBeNull();
+    expect(buildSanteiReportRow(santei(), office).union).toBeNull();
+  });
+  test("月額変更届も同じ（被保険者等番号がなければ直すところ）", () => {
+    const row = buildGeppenReportRow(geppen({ insurerType: "union", insurer: union }), office);
+    expect(row.union?.values).toHaveLength(SHAHO_GEPPEN_UNION_FIELDS.length);
+    expect([row.values[12], row.union?.values[12]]).toEqual(["", "0260"]);
+    expect(row.union?.values.slice(48)).toEqual(["", "00001", "", ""]);
+    expect(row.union?.problems).toEqual(["確かめ健康保険組合の被保険者等番号がありません（従業員の画面の「健康保険 被保険者番号」に、組合の被保険者証の番号を入れてください）"]);
   });
 });

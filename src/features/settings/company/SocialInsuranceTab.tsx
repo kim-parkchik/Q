@@ -44,6 +44,8 @@ interface FormState {
   name: string;
   type: InsurerType;
   rates: RateRow[];
+  /** 健康保険組合の事業所番号（組合に出す届書のファイルに書く） */
+  officeNumber: string;
 }
 
 /** 本人負担の料率の上限（%。健康保険組合の一般保険料率は全体で13%まで。入れ間違いを止める目安） */
@@ -65,7 +67,7 @@ const defaultChildSupport = (from: string): string => {
 let rowKey = 0;
 const toRow = (r: UnionRate): RateRow => ({ key: ++rowKey, from: r.from, health: String(r.health), care: String(r.care), childSupport: String(r.childSupport) });
 
-const EMPTY_FORM: FormState = { name: "", type: "union", rates: [] };
+const EMPTY_FORM: FormState = { name: "", type: "union", rates: [], officeNumber: "" };
 
 export default function SocialInsuranceTab({ db }: Props) {
   const toast = useToast();
@@ -104,7 +106,7 @@ export default function SocialInsuranceTab({ db }: Props) {
 
   const startEdit = (g: Group) => {
     setEditingId(g.id);
-    setForm({ name: g.name, type: g.type, rates: g.rates.map(toRow) });
+    setForm({ name: g.name, type: g.type, rates: g.rates.map(toRow), officeNumber: g.officeNumber });
   };
 
   const addRate = () => setForm((f) => {
@@ -145,6 +147,9 @@ export default function SocialInsuranceTab({ db }: Props) {
     const type: InsurerType = isKyokai ? "kyokai" : form.type;
     const rates = type === "union" ? parseRates(form.rates) : [];
     if (typeof rates === "string") return dialog.warning(rates);
+    // 組合の事業所番号は英数字5けたまで（仕様書の「事業所番号（健保組合）」。全角は半角に）
+    const officeNumber = type === "union" ? form.officeNumber.normalize("NFKC").replace(/\s/g, "") : "";
+    if (officeNumber && !/^[0-9A-Za-z]{1,5}$/.test(officeNumber)) return dialog.warning("健康保険組合の事業所番号は、英数字5けたまでで入れてください（組合から知らされた番号）。");
     if (busy) return;
     setBusy(true);
     try {
@@ -152,10 +157,10 @@ export default function SocialInsuranceTab({ db }: Props) {
       // 新しい規定の番号は、同じまとまりの中で足した規定の番号（いちばん大きい番号）
       const groupIdSql = editingId !== null ? "?" : "(SELECT MAX(id) FROM social_insurance_groups)";
       if (editingId !== null) {
-        statements.push({ sql: "UPDATE social_insurance_groups SET name = ?, type = ? WHERE id = ?", values: [name, type, editingId] });
+        statements.push({ sql: "UPDATE social_insurance_groups SET name = ?, type = ?, union_office_number = ? WHERE id = ?", values: [name, type, officeNumber || null, editingId] });
         statements.push({ sql: "DELETE FROM social_insurance_group_rates WHERE group_id = ?", values: [editingId] });
       } else {
-        statements.push({ sql: "INSERT INTO social_insurance_groups (name, type, is_active) VALUES (?, ?, 1)", values: [name, type] });
+        statements.push({ sql: "INSERT INTO social_insurance_groups (name, type, union_office_number, is_active) VALUES (?, ?, ?, 1)", values: [name, type, officeNumber || null] });
       }
       for (const r of rates) {
         statements.push({
@@ -225,6 +230,9 @@ export default function SocialInsuranceTab({ db }: Props) {
       <span>
         {current ? describeUnionRate(current) : <span style={{ color: "#c53030" }}>今月の分の料率がありません（{monthLabel(g.rates[0].from)}から入っています）</span>}
         {g.rates.length > 1 && <span style={{ color: "#94a3b8" }}>（ほかに {g.rates.length - 1}件の料率）</span>}
+        <span style={{ color: g.officeNumber ? "#64748b" : "#b45309" }}>
+          {g.officeNumber ? `・事業所番号 ${g.officeNumber}` : "・事業所番号なし（組合に出す届書のファイルに要ります）"}
+        </span>
       </span>
     );
   };
@@ -318,6 +326,18 @@ export default function SocialInsuranceTab({ db }: Props) {
           )}
 
           {editingKyokai && <div style={note}>協会けんぽの料率は Q が持っているので、ここでは名前だけ直せます。</div>}
+
+          {!editingKyokai && form.type === "union" && (
+            <div style={{ marginBottom: "12px" }}>
+              <label style={miniLabelStyle}>健康保険組合の事業所番号（組合に出す届書のファイルに書く。英数字5けたまで）</label>
+              <input
+                value={form.officeNumber}
+                onChange={(e) => setForm((f) => ({ ...f, officeNumber: e.target.value }))}
+                style={inputStyle}
+                placeholder="例：00001"
+              />
+            </div>
+          )}
 
           {!editingKyokai && form.type === "union" && (
             <div style={{ marginBottom: "12px" }}>

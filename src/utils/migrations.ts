@@ -16,6 +16,8 @@
  *     それより前の開発中のQで作った会社ファイル（印 "QP01" のもの・印のないもの）は開けないので、作り直す。
  *     （2026-11-03 にも、それまでの更新 v1〜v13 をまとめて v1（印 "QP01"）にしている）
  *   ・v2: 会社に賞与支払予定月（bonus_plan_months）を足す
+ *   ・v3: 従業員に住所のフリガナ（address_kana）、社会保険規定に健康保険組合の事業所番号（union_office_number）と
+ *     組合に出すファイルの媒体通番（union_media_seq）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -64,6 +66,15 @@ export const MIGRATIONS: Migration[] = [
     description: "会社に、年金機構に登録している賞与支払予定月（賞与不支給報告書に使う）の列を足す",
     up: async (db) => {
       await addColumnIfMissing(db, "company", "bonus_plan_months", "TEXT");
+    },
+  },
+  {
+    version: 3,
+    description: "従業員に住所のフリガナ（資格取得届に使う）、社会保険規定に健康保険組合の事業所番号と、組合に出すファイルの媒体通番の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "address_kana", "TEXT");
+      await addColumnIfMissing(db, "social_insurance_groups", "union_office_number", "TEXT");
+      await addColumnIfMissing(db, "social_insurance_groups", "union_media_seq", "INTEGER DEFAULT 0");
     },
   },
 ];

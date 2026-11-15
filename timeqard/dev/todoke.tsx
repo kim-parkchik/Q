@@ -9,7 +9,8 @@
  *   田中さん：4月に昇給し、4月の給与に3月分の差額2万円が入っている（「うち遡及分」に2万円を入れると、算定基礎届の遡及支払額と修正平均額。
  *            月変の画面でも入れると、2等級差が1等級差になる）
  *   髙橋さん：時給のパート（16・15・16日 → 区分を「短時間就労者（パート）」にすると15日以上の月で平均）・二以上事業所勤務者
- *   小林さん：健康保険組合の人（健保の従前の標準報酬月額を書かない）
+ *   小林さん：健康保険組合の人（年金事務所の届書には健保の従前の標準報酬月額を書かない。組合に出すファイル（KPFD0006.CSV）には書く。
+ *            見本健康保険組合の事業所番号 00001・被保険者等番号 26・前の媒体通番 004）
  *   中村さん：76歳（70歳以上被用者算定基礎届のみ。整理番号なし・基礎年金番号 0123-012345）
  *   加藤さん：整理番号がない・フリガナにスペースがない（直すところがあるので、チェックを外すとファイルを作れる）
  *   伊藤さん：6月15日に入社（算定基礎届の対象外）／渡辺さん：7月改定の月変を登録済み（対象外）
@@ -61,7 +62,7 @@ const staffList: any[] = [
     standard_remuneration: 240000, standard_remuneration_history: history(["", 240000, "shutoku"], ["2025-09", 240000, "teiji"]) }),
   person({ id: "2005", name: "髙橋 三郎", furigana: "タカハシ サブロウ", birthday: "1980-06-30", pension_num: "15", wage_type: "hourly", base_wage: 1300, multi_office: 1,
     standard_remuneration: 118000, standard_remuneration_history: history(["", 118000, "shutoku"], ["2025-09", 118000, "teiji"]) }),
-  person({ id: "2006", name: "小林 健康", furigana: "コバヤシ ケンコウ", birthday: "1988-02-02", pension_num: "30", social_insurance_group_id: 2, base_wage: 265000,
+  person({ id: "2006", name: "小林 健康", furigana: "コバヤシ ケンコウ", birthday: "1988-02-02", pension_num: "30", social_insurance_group_id: 2, health_ins_num: "26", base_wage: 265000,
     standard_remuneration: 260000, standard_remuneration_history: history(["", 260000, "shutoku"], ["2025-09", 260000, "teiji"]) }),
   person({ id: "2007", name: "中村 長寿", furigana: "ナカムラ チョウジュ", birthday: "1950-03-01", pension_num: "", basic_pension_number: "0123-012345", base_wage: 200000,
     standard_remuneration: 200000, standard_remuneration_history: history(["", 200000, "shutoku"], ["2025-09", 200000, "teiji"]) }),
@@ -115,6 +116,8 @@ const store = {
     id: 1, name: "株式会社健保産業", zip_code: "168-8505", address: "東京都杉並区高井戸3-5-24", phone: "03-2345-6789",
     representative: "健保 良一", shaho_office_symbol: "57-ケマ", shaho_office_number: "12345", shaho_media_seq: 23,
   },
+  /** 見本健康保険組合の事業所番号と、組合に出すファイルの前の媒体通番 */
+  union: { office: "00001", seq: 4 },
 };
 (window as any).__todokeStore = { store, staffList, salaries };
 
@@ -124,7 +127,9 @@ const fakeDb = {
     if (q.startsWith("SELECT * FROM company WHERE id = 1")) return [store.company];
     if (q.startsWith("SELECT prefecture FROM branches WHERE id = 1")) return [{ prefecture: "東京都" }];
     if (q.startsWith("SELECT * FROM payroll_groups")) return [{ id: 1, name: "本社", closing_day: 99, is_next_month: 1, payment_day: 25 }];
-    if (q.startsWith("SELECT id, name, type FROM social_insurance_groups")) return [{ id: 1, name: "協会けんぽ", type: "kyokai" }, { id: 2, name: "見本健康保険組合", type: "union" }];
+    if (q.startsWith("SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups")) {
+      return [{ id: 1, name: "協会けんぽ", type: "kyokai" }, { id: 2, name: "見本健康保険組合", type: "union", union_office_number: store.union.office, union_media_seq: store.union.seq }];
+    }
     if (q.startsWith("SELECT group_id, from_month")) return [];
     if (q.includes("FROM salary_results WHERE (target_year = ? AND target_month >= 7) OR (target_year = ? AND target_month <= 6)")) {
       return salaries.filter((s) => (s.target_year === params[0] && s.target_month >= 7) || (s.target_year === params[1] && s.target_month <= 6));
@@ -141,6 +146,7 @@ const fakeDb = {
   async execute(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
     if (q.startsWith("UPDATE company SET shaho_media_seq")) store.company.shaho_media_seq = Number(params[0]);
+    else if (q.startsWith("UPDATE social_insurance_groups SET union_media_seq = ? WHERE id = ?")) store.union.seq = Number(params[0]);
     else if (q.startsWith("UPDATE staff SET standard_remuneration_history")) {
       const s = staffList.find((x) => x.id === params[2]);
       if (s) Object.assign(s, { standard_remuneration_history: params[0], standard_remuneration: params[1] });

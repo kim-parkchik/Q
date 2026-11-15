@@ -27,6 +27,8 @@ export default function BasicInfoSection({ cm }: Props) {
         targetZip,
         setTargetZip,
         targetAddress,
+        targetAddressKana,
+        setTargetAddressKana,
         setTargetAddress,
         targetPhone,
         setTargetPhone,
@@ -175,6 +177,18 @@ export default function BasicInfoSection({ cm }: Props) {
                     onChange={e => setTargetAddress(e.target.value)} 
                     style={{ ...inputStyle, height: "80px", resize: "none", marginTop: "4px" }} 
                 />
+            </div>
+            <div>
+                <label style={labelStyle}>住所（フリガナ）</label>
+                <input
+                    placeholder="トウキョウト スギナミク タカイド 3-2-5"
+                    value={targetAddressKana}
+                    onChange={e => setTargetAddressKana(e.target.value)}
+                    style={{ ...inputStyle, marginTop: "4px" }}
+                />
+                <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                    社会保険の資格取得届に、マイナンバーを書かないときに書きます（都道府県から。番地は数字とハイフンで）
+                </div>
             </div>
             <div style={{ display: "flex", gap: "10px" }}>
                 <div style={{ flex: 1 }}>

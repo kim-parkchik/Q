@@ -22,9 +22,10 @@
  *       厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」（src/constants/shahoTodoke.ts）
  */
 import dayjs from "dayjs";
-import { SHAHO_BONUS_FIELDS, SHAHO_BONUS_FORM_CODE, SHAHO_PAY_ERA_CODES } from "../constants/shahoTodoke";
+import { SHAHO_BONUS_FIELDS, SHAHO_BONUS_FORM_CODE, SHAHO_BONUS_UNION_FIELDS, SHAHO_PAY_ERA_CODES } from "../constants/shahoTodoke";
 import { checkInsuredMonth, checkSocialInsEnrolled } from "./calcSalary";
-import type { InsurerType } from "./healthInsurer";
+import type { HealthInsurer, InsurerType } from "./healthInsurer";
+import { unionRecordOf, type UnionRecord } from "./unionReport";
 import { checkLeaveExemptBonus, exemptLeavePeriodsOf } from "./leaveExemption";
 import { fieldProblem, shahoDate } from "./shahoCsv";
 import { reach70Date, reach75Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
@@ -66,6 +67,8 @@ export interface BonusReportRow {
   multiOffice: boolean;
   /** 電子申請用ファイルの21項目 */
   values: string[];
+  /** 健康保険組合に出す行（健康保険組合の75歳未満の人だけ。utils/unionReport.ts） */
+  union: UnionRecord | null;
   /** 直すところ（あれば電子申請用ファイルを作らない） */
   problems: string[];
   /** 知らせ（保険料はかからないが届け出る、など） */
@@ -103,6 +106,7 @@ export const buildBonusReport = (
   payments: BonusPayment[],
   office: string[],
   insurerTypeOf: (staff: any) => InsurerType = () => "kyokai",
+  insurerOf: (staff: any) => HealthInsurer | null = () => null,
 ): { rows: BonusReportRow[]; skipped: BonusReportSkipped[] } => {
   const rows: BonusReportRow[] = [];
   const skipped: BonusReportSkipped[] = [];
@@ -204,10 +208,15 @@ export const buildBonusReport = (
       const p = fieldProblem(f, values[i]);
       if (p) problems.push(p);
     });
+    // 健康保険組合の人（75歳未満）は、組合にも出す（年金事務所に70歳以上被用者届のみを出す人も、組合には健康保険の賞与を届ける）
+    const insurer = insurerOf(staff);
+    const union = insurer?.type === "union" && !over75
+      ? unionRecordOf(insurer, staff, values, SHAHO_BONUS_UNION_FIELDS, { 4: String(staff.pension_num ?? "").normalize("NFKC").trim() }, true)
+      : null;
     rows.push({
       staffId, name, pensionNumber, kana, kanji, birthday, paymentDate: lastPaid.paymentDate, firstPaymentDay,
       bonusNames: insured.map((p) => p.name), currency, inKind, total, over70, over70Only, multiOffice,
-      values, problems: [...new Set(problems)], notes,
+      values, union, problems: [...new Set(problems)], notes,
     });
   }
   // 届書は被保険者整理番号の順にそろえる（70歳以上被用者届のみの人は後ろ）

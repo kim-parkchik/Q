@@ -79,7 +79,7 @@ const fakeDb = {
     if (q.startsWith("SELECT * FROM company WHERE id = 1")) return [store.company];
     if (q.startsWith("SELECT prefecture FROM branches WHERE id = 1")) return [{ prefecture: "東京都" }];
     if (q.startsWith("SELECT * FROM staff")) return store.staff;
-    if (q.startsWith("SELECT id, name, type FROM social_insurance_groups")) return [{ id: 1, name: "協会けんぽ", type: "kyokai" }];
+    if (q.startsWith("SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups")) return [{ id: 1, name: "協会けんぽ", type: "kyokai" }];
     if (q.startsWith("SELECT group_id, from_month")) return [];
     if (q.startsWith("SELECT s.id, s.name, s.target_year")) {
       return [...store.bonuses]

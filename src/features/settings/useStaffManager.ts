@@ -67,6 +67,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     // --- 連絡先・住所 ---
     const [targetZip, setTargetZip] = useState("");
     const [targetAddress, setTargetAddress] = useState("");
+    const [targetAddressKana, setTargetAddressKana] = useState(""); // 住所のフリガナ（マイナンバーを書かない資格取得届に書く）
     const [targetPhone, setTargetPhone] = useState("");
     const [targetMobile, setTargetMobile] = useState("");
 
@@ -337,7 +338,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetRetirementDate("");
         setTargetStatus("active");
         setTargetIsExecutive(0);
-        setTargetZip(""); setTargetAddress(""); setTargetPhone(""); setTargetMobile("");
+        setTargetZip(""); setTargetAddress(""); setTargetAddressKana(""); setTargetPhone(""); setTargetMobile("");
         setTargetBranchId(1); setTargetPayrollGroupId(1); setTargetPatternId(1);
         setTargetWorkDays({ mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false });
         setTargetScheduledIn(""); setTargetHours(8); setTargetMinutes(0);
@@ -390,6 +391,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetStatus(s.status || "active"); // 🆕
         setTargetZip(s.zip_code || "");
         setTargetAddress(s.address || "");
+        setTargetAddressKana(s.address_kana || "");
         setTargetPhone(s.phone || ""); // 👈 追加
         setTargetMobile(s.mobile || ""); // 👈 追加
         // 基本給は、いちばん新しい履歴を入力欄に、それより前を履歴の一覧に出す
@@ -487,6 +489,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             String(targetJoinDate) !== String(original.join_date || "") ||
             String(targetZip) !== String(original.zip_code || "") ||
             String(targetAddress) !== String(original.address || "") ||
+            String(targetAddressKana) !== String(original.address_kana || "") ||
             String(targetPhone) !== String(original.phone || "") ||
             String(targetMobile) !== String(original.mobile || "") ||
             String(targetCommuteType) !== String(original.commute_type) ||
@@ -602,6 +605,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetProbationEnd || null,
                 // 基礎年金番号・二以上事業所勤務者（届書に書く）
                 targetBasicPensionNumber.trim() || null, targetMultiOffice ? 1 : 0,
+                // 住所のフリガナ（資格取得届に書く）
+                targetAddressKana.trim() || null,
             ];
 
             if (editingId) {
@@ -623,7 +628,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         standard_remuneration_history=?, wage_history=?, dependents_history=?,
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
-                        probation_end=?, basic_pension_number=?, multi_office=?
+                        probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -646,7 +651,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         standard_remuneration_history, wage_history, dependents_history,
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         job_type, career_history, retirement_reason, death_date, death_cause,
-                        probation_end, basic_pension_number, multi_office,
+                        probation_end, basic_pension_number, multi_office, address_kana,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -801,6 +806,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetZip,
         targetAddress,
         setTargetAddress,
+        targetAddressKana,
+        setTargetAddressKana,
         targetPhone,
         setTargetPhone,
         targetMobile,
