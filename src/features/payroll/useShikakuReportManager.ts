@@ -131,7 +131,7 @@ export function useShikakuReportManager(db: any, staffList: any[], user: MyNumbe
       dialog.warning(blocked.join("\n"));
       return;
     }
-    const resolved = await my.resolve(included.map((r) => ({ staffId: r.staffId, values: r.values })));
+    const resolved = await my.resolve(included.map((r) => ({ staffId: r.staffId, name: r.name, values: r.values })));
     if (!resolved) return;
     const ok = await file.exportFile(resolved.lines.map((v) => v.join(",")), label, included.length, resolved.count > 0 ? `マイナンバーあり ${resolved.count}人分` : "");
     if (ok && resolved.count > 0) await my.logWritten(label, resolved.count, SHAHO_FILE_NAME);

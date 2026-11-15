@@ -269,15 +269,30 @@ export const MY_NUMBER_PLACEHOLDER = "［マイナンバー］";
 export const valueProblem = (f: ShahoField, value: string): string | null =>
   value === MY_NUMBER_PLACEHOLDER ? null : fieldProblem(f, value);
 
+/** 読んだ番号を、届書に書く12桁の数字にする（12桁でなければ空） */
+const myNumberDigits = (number: string | undefined): string => {
+  const n = String(number ?? "").replace(/\D/g, "");
+  return n.length === 12 ? n : "";
+};
+
+/**
+ * マイナンバーを書く行（個人番号の項目が MY_NUMBER_PLACEHOLDER の行）の人のうち、読んだ番号がない・12桁でない人の従業員ID
+ * （届書の画面を開いたあとで、マイナンバーの画面で番号を消したときなど。保存する前に確かめて、名前を知らせる）
+ * @param numbers 従業員ID → 本人の個人番号
+ */
+export const missingMyNumbers = (rows: { staffId: string; values: string[] }[], numbers: Record<string, string>): string[] =>
+  [...new Set(rows.filter((r) => r.values.includes(MY_NUMBER_PLACEHOLDER)).map((r) => r.staffId))].filter((id) => !myNumberDigits(numbers[id]));
+
 /**
  * データレコードの個人番号を、本当の番号にする（保存するとき）。番号がない人・12桁でない番号があれば止める
+ * （先に missingMyNumbers で確かめて知らせる）
  * @param numbers 従業員ID → 本人の個人番号
  */
 export const fillMyNumbers = (rows: { staffId: string; values: string[] }[], numbers: Record<string, string>): string[][] =>
   rows.map((r) => r.values.map((v) => {
     if (v !== MY_NUMBER_PLACEHOLDER) return v;
-    const n = String(numbers[r.staffId] ?? "").replace(/\D/g, "");
-    if (n.length !== 12) throw new Error("マイナンバーを読めない人がいます（マイナンバーの画面で登録を確かめてください）");
+    const n = myNumberDigits(numbers[r.staffId]);
+    if (!n) throw new Error("マイナンバーを読めない人がいます（マイナンバーの画面で登録を確かめてください）");
     return n;
   }));
 

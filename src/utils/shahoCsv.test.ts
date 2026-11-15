@@ -4,8 +4,8 @@ import {
   SHAHO_PREFECTURE_CODES, SHAHO_REPRESENTATIVE_CODE,
 } from "../constants/shahoTodoke";
 import {
-  buildShahoLines, encodeShahoFile, fieldProblem, hasNameSpace, isShahoChar, nextMediaNumber, shahoDate, shahoOfficeValues,
-  shahoPrefectureCode, splitOfficeSymbol, toShahoKana, toShahoKanji, unusableChars,
+  MY_NUMBER_PLACEHOLDER, buildShahoLines, encodeShahoFile, fieldProblem, fillMyNumbers, hasNameSpace, isShahoChar, missingMyNumbers,
+  nextMediaNumber, shahoDate, shahoOfficeValues, shahoPrefectureCode, splitOfficeSymbol, toShahoKana, toShahoKanji, unusableChars,
 } from "./shahoCsv";
 
 /** 仕様書の作成例の事業所（表4.3.2.1-2） */
@@ -109,5 +109,29 @@ describe("事業所と、ファイルの形", () => {
   });
   test("媒体通番は、前の番号の次（初めは001、999 の次は 001）", () => {
     expect([nextMediaNumber(0), nextMediaNumber(null), nextMediaNumber(23), nextMediaNumber(999)]).toEqual([1, 1, 24, 1]);
+  });
+});
+
+describe("届書に書くマイナンバー", () => {
+  // 見本の行（2列目が個人番号の項目）。1 と 2 は番号を書く人（2 は2行）、3 は書かない人
+  const rows = [
+    { staffId: "1", values: ["a", MY_NUMBER_PLACEHOLDER] },
+    { staffId: "2", values: ["b", MY_NUMBER_PLACEHOLDER] },
+    { staffId: "2", values: ["c", MY_NUMBER_PLACEHOLDER] },
+    { staffId: "3", values: ["d", ""] },
+  ];
+  test("保存する前に、番号を読めない人（ない・12桁でない）を見つける。番号を書かない人は見ない", () => {
+    expect(missingMyNumbers(rows, { "1": "123456789018", "2": "234567890123" })).toEqual([]);
+    // 番号を消した人（読んだ番号にない）は、同じ人の行が2つあっても1回だけ
+    expect(missingMyNumbers(rows, { "1": "123456789018" })).toEqual(["2"]);
+    // 12桁でない番号（区切りの字は除いて数える）
+    expect(missingMyNumbers(rows, { "1": "1234 5678 9018", "2": "23456789012" })).toEqual(["2"]);
+    expect(missingMyNumbers(rows, {})).toEqual(["1", "2"]);
+    expect(missingMyNumbers([{ staffId: "3", values: ["d", ""] }], {})).toEqual([]);
+  });
+  test("読めた番号を個人番号の項目に入れる。読めない人がいれば止める", () => {
+    expect(fillMyNumbers(rows, { "1": "123456789018", "2": "234567890123" }).map((v) => v[1]))
+      .toEqual(["123456789018", "234567890123", "234567890123", ""]);
+    expect(() => fillMyNumbers(rows, { "1": "123456789018" })).toThrow("マイナンバーを読めない人がいます");
   });
 });

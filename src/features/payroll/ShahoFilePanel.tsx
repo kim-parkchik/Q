@@ -84,8 +84,8 @@ export function UnionFilePanel({ file, insurers, rows, label, blocked, resolve, 
   label: string;
   /** 届書全体の、ファイルを作れない理由（年金事務所のファイルと同じもの） */
   blocked?: string[];
-  /** 保存するときに、行の項目をファイルに書く値にする（マイナンバーを入れる。鍵を開けなかったら null） */
-  resolve?: (rows: { staffId: string; values: string[] }[]) => Promise<{ lines: string[][]; count: number } | null>;
+  /** 保存するときに、行の項目をファイルに書く値にする（マイナンバーを入れる。鍵を開けなかった・番号を読めなかったら null） */
+  resolve?: (rows: { staffId: string; name?: string; values: string[] }[]) => Promise<{ lines: string[][]; count: number } | null>;
   /** 保存したあと（組合の媒体通番を読み直す） */
   onSaved: (myNumbers: number) => void;
 }) {
@@ -114,13 +114,13 @@ function UnionGroup({ file, insurer, rows, label, blocked, resolve, onSaved }: {
   rows: { staffId: string; name: string; union: UnionRecord | null; problems?: string[] }[];
   label: string;
   blocked: string[];
-  resolve?: (rows: { staffId: string; values: string[] }[]) => Promise<{ lines: string[][]; count: number } | null>;
+  resolve?: (rows: { staffId: string; name?: string; values: string[] }[]) => Promise<{ lines: string[][]; count: number } | null>;
   onSaved: (myNumbers: number) => void;
 }) {
   const [mediaNo, setMediaNo] = useState(nextMediaNumber(insurer.mediaSeq));
   useEffect(() => { setMediaNo(nextMediaNumber(insurer.mediaSeq)); }, [insurer.mediaSeq]);
   const [show, setShow] = useState(false);
-  const records = rows.map((r) => ({ staffId: r.staffId, values: r.union!.values }));
+  const records = rows.map((r) => ({ staffId: r.staffId, name: r.name, values: r.union!.values }));
   const problems = [
     ...blocked,
     ...file.unionProblems(insurer, mediaNo),
