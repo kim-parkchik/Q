@@ -18,11 +18,13 @@ import {
 } from "../../utils/zuijiAnnual";
 import { latestStandardRemuneration, remunerationFromAt, remunerationHistoryOf, stringifyRemunerationHistory } from "../../utils/standardRemuneration";
 import { insurerOf, loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
-import { autoChangeReason, buildGeppenReport, type GeppenReportInput } from "../../utils/remunerationReport";
+import { autoChangeReason, buildGeppenReport, warekiMonth, type GeppenReportInput } from "../../utils/remunerationReport";
 import { staffAsOf } from "../../utils/staffHistory";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { useShahoFile } from "./useShahoFile";
+import { useShahoMyNumbers } from "./useShahoMyNumbers";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 
 /** 画面で変動月を指定した候補 */
 interface ManualEntry {
@@ -76,7 +78,7 @@ export interface ZuijiRow extends ZuijiCandidate {
 
 const keyOf = (staffId: string, year: number, month: number) => `${staffId}-${year}-${month}`;
 
-export function useZuijiManager(db: Database, staffList: any[], onDataChange: () => void) {
+export function useZuijiManager(db: Database, staffList: any[], onDataChange: () => void, user: MyNumberUser | null = null) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const [year, setYear] = useState(new Date().getFullYear());
@@ -89,6 +91,8 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
   /** 月額変更届を作る改定年月（YYYY-MM） */
   const [reportMonth, setReportMonth] = useState("");
   const file = useShahoFile(db);
+  /** 70歳以上被用者の個人番号（事務取扱担当者が「マイナンバーを書く」にしたとき。保存するときだけ番号を読む） */
+  const my = useShahoMyNumbers(db, user);
 
   useEffect(() => {
     const load = async () => {
@@ -231,6 +235,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         insurerType: insurerOf(insurers, r.staff.social_insurance_group_id)?.type ?? "kyokai",
         insurer: insurerOf(insurers, r.staff.social_insurance_group_id),
         pensionRange: { min: master.PENSION_MIN_HYOJUN, max: master.PENSION_MAX_HYOJUN },
+        myNumber: my.writes(String(r.staff.id)),
       };
     });
     const built = buildGeppenReport(inputs, file.office.values);
@@ -243,7 +248,11 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
     }
     return built;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, currentReportMonth, overrides, insurers, file.office]);
+  }, [rows, currentReportMonth, overrides, insurers, file.office, my.writes]);
+
+  /** 月額変更届の電子申請用ファイルを保存する（70歳以上被用者のマイナンバーを書くときは、鍵を開けて番号を入れる） */
+  const saveReport = () =>
+    my.saveFile(file, report.map((r) => ({ staffId: r.staffId, name: r.name, values: r.values })), `月額変更届（${warekiMonth(currentReportMonth)}改定）`, report.length);
   /** 月額変更届の電子申請用ファイルを作れない理由 */
   const reportBlocked: string[] = [
     ...(report.length === 0 ? ["月額変更届に入れる人がいません"] : []),
@@ -291,7 +300,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
     year, setYear, isLoading, savingKey, rows,
     setShort, updateMonth, updateAnnualMonth, setAnnualRequested, addManual, removeManual, register,
     updateRetro, setReason, setRemarks, setInclude,
-    file, reportMonths, reportMonth: currentReportMonth, setReportMonth, reportCandidates, report, reportBlocked,
+    file, reportMonths, reportMonth: currentReportMonth, setReportMonth, reportCandidates, report, reportBlocked, my, saveReport,
     insurers,
     /** 健康保険組合に出すファイルを保存したあと（組合の媒体通番を読み直す） */
     reloadInsurers: async () => setInsurers(await loadHealthInsurers(db)),

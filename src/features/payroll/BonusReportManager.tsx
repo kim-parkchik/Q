@@ -9,22 +9,24 @@ import { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { formatWareki } from "../../utils/wareki";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 import { useBonusReportManager } from "./useBonusReportManager";
 import { BonusNonPaymentSection } from "./BonusNonPaymentSection";
 import {
-  ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, card, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title,
+  MyNumberToggle, ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, card, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title,
 } from "./ShahoFilePanel";
 
 interface Props {
   db: Database;
+  currentUser?: MyNumberUser | null;
 }
 
 const yen = (n: number) => `${n.toLocaleString()}円`;
 const BONUS_PRINT = "bonus-report-print";
 const NON_PAYMENT_PRINT = "fushikyu-report-print";
 
-export default function BonusReportManager({ db }: Props) {
-  const z = useBonusReportManager(db);
+export default function BonusReportManager({ db, currentUser = null }: Props) {
+  const z = useBonusReportManager(db, currentUser);
   const r = z.report;
   // 印刷するのは、賞与支払届か賞与不支給報告書のどちらか（印刷のときだけ、その部分を出す）
   const [printTarget, setPrintTarget] = useState(BONUS_PRINT);
@@ -47,7 +49,7 @@ export default function BonusReportManager({ db }: Props) {
         </p>
         <ShahoFilePanel
           file={z.file} dataLines={z.dataLines} blocked={z.selected ? z.blocked : []} label={`賞与支払届 ${z.label}`}
-          count={r?.rows.length ?? 0} onPrint={() => printIt(BONUS_PRINT)} canPrint={!!r && r.rows.length > 0}
+          count={r?.rows.length ?? 0} onPrint={() => printIt(BONUS_PRINT)} canPrint={!!r && r.rows.length > 0} onSave={z.save}
         >
           <label style={fieldStyle}>
             <span style={labelStyle}>賞与</span>
@@ -60,7 +62,9 @@ export default function BonusReportManager({ db }: Props) {
               ))}
             </select>
           </label>
+          {z.my.access && <MyNumberToggle my={z.my} who="70歳以上被用者" />}
         </ShahoFilePanel>
+        {!z.my.access && <MyNumberToggle my={z.my} />}
         <UnionFilePanel file={z.file} insurers={z.insurers} rows={r?.rows ?? []} label={`賞与支払届 ${z.label}`} onSaved={() => z.reloadInsurers()} />
         {z.deadline && <div style={{ fontSize: 13, fontWeight: "bold", color: "#b45309", marginTop: 6 }}>提出期限：{formatWareki(z.deadline)}（{z.deadline}。賞与を払った日から5日以内）</div>}
         {z.loadError && <div style={{ color: "#b91c1c", fontSize: 12 }}>⚠ 読み込めませんでした：{z.loadError}</div>}
@@ -91,7 +95,7 @@ export default function BonusReportManager({ db }: Props) {
                   <th style={th}>④賞与支払年月日</th>
                   <th style={th}>⑤賞与支払額<br />㋐通貨・㋑現物</th>
                   <th style={th}>⑥賞与額<br />（千円未満切り捨て）</th>
-                  <th style={th}>⑦基礎年金番号<br />（70歳以上被用者）</th>
+                  <th style={th}>⑦個人番号・基礎年金番号<br />（70歳以上被用者）</th>
                   <th style={th}>⑧備考</th>
                   <th style={th} className="no-print">確かめること</th>
                 </tr>
@@ -105,7 +109,7 @@ export default function BonusReportManager({ db }: Props) {
                     <td style={td}>{formatWareki(row.paymentDate)}</td>
                     <td style={{ ...td, textAlign: "right" }}>㋐ {yen(row.currency)}<br />㋑ {yen(row.inKind)}</td>
                     <td style={{ ...td, textAlign: "right", fontWeight: "bold" }}>{(row.total / 1000).toLocaleString()},000円</td>
-                    <td style={td}>{row.values[15] ? `${row.values[15]}-${row.values[16]}` : ""}</td>
+                    <td style={td}>{row.myNumber ? "マイナンバー" : row.values[15] ? `${row.values[15]}-${row.values[16]}` : ""}</td>
                     <td style={td}>
                       {[
                         row.over70 ? "1. 70歳以上被用者" : "",

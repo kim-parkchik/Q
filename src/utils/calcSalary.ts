@@ -523,6 +523,7 @@ const monthReachingAge = (birthday: string, age: number) =>
  * 年齢で決まる、その月の分の社会保険料がかかるかどうか（給与・賞与の両方で使う）
  * 資格を失った月の分の保険料はかからず、その月に支払った賞与にもかからない。
  * ・健康保険（子ども・子育て支援金も）：75歳の誕生日当日に後期高齢者医療制度へ移って資格を失う → 誕生日がある月の前月分まで
+ *   （65歳から74歳で広域連合の障害認定を受けた人は、その日（koukiDate）に資格を失う → その日がある月の前月分まで）
  * ・介護保険：40歳に達した日がある月の分から、65歳に達した日がある月の前月分まで
  * ・厚生年金：70歳に達した日（誕生日の前日）に資格を失う → その日がある月の前月分まで（その後は70歳以上被用者）
  * 年齢に達するのは誕生日の前日なので、1日生まれの人は誕生月の前月が区切りになる
@@ -531,11 +532,14 @@ const monthReachingAge = (birthday: string, age: number) =>
  *      （「厚生年金保険は70歳（70歳の誕生日前日が属する月の前月まで）、健康保険は75歳まで（75歳誕生日当日が属する月の前月まで）」）
  *       賞与：https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html （資格喪失月に支払われた賞与は保険料賦課の対象とならない）
  */
-export const getInsuranceByAge = (birthday: string, year: number, month: number) => {
-  if (!birthday) return { health: true, nursing: false, pension: true };
+export const getInsuranceByAge = (birthday: string, year: number, month: number, koukiDate?: string | null) => {
   const target = dayjs(new Date(year, month - 1, 1));
+  // 後期高齢者医療の障害認定を受けた日がある月の分からは、健康保険料がかからない（資格を失う月）
+  const kouki = koukiDate && /^\d{4}-\d{2}-\d{2}$/.test(koukiDate) ? dayjs(koukiDate).startOf('month') : null;
+  const beforeKouki = !kouki || target.isBefore(kouki);
+  if (!birthday) return { health: beforeKouki, nursing: false, pension: true };
   return {
-    health: target.isBefore(birthdayAt(birthday, Master.INSURANCE_2026.HEALTH_INS_END_AGE).startOf('month')),
+    health: beforeKouki && target.isBefore(birthdayAt(birthday, Master.INSURANCE_2026.HEALTH_INS_END_AGE).startOf('month')),
     nursing: target.isSameOrAfter(monthReachingAge(birthday, Master.INSURANCE_2026.NURSING_CARE_START_AGE))
       && target.isBefore(monthReachingAge(birthday, Master.INSURANCE_2026.NURSING_CARE_END_AGE)),
     pension: target.isBefore(monthReachingAge(birthday, Master.INSURANCE_2026.PENSION_END_AGE)),
@@ -899,7 +903,7 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
 
   // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
   // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
-  const byAge = getInsuranceByAge(staff.birthday || '', year, month);
+  const byAge = getInsuranceByAge(staff.birthday || '', year, month, staff.kouki_date);
   // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
   const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
   // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）

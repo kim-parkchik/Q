@@ -22,7 +22,10 @@
  *     予定より早く終わったときは終了届（終了年月日）
  *   ・終了（予定）日は、子が3歳に達する日より前。女性の実子の育児休業は、ふつう産後休業（出産の日後56日）のあとから
  *   ・役員（労働者に当たらない人）は、育児・介護休業法の育児休業等を取れないので、申出できない
- *   ・同じ月に2回以上取ったときの内訳（育休等取得内訳1〜4）は、まだ書けない（1つの期間ずつ届ける）
+ *   ・同じ月のうちに始まって終わる育休を2回以上取ったときは、1つの申出書にまとめる（その月の最後の育休の届出のときにまとめて出せる）。
+ *     開始日に初めの日、終了（予定）日に最後の日、取得日数と就業予定日数に合計を書き、育休等取得内訳（4回まで。1・2回目は就業予定日数も）に
+ *     1回ずつ書く（記入例・e-Gov の入力例。sameMonthChildcareGroups）
+ *   ・健康保険組合の人は、組合にも申出書を出す（仕様書に組合に出すファイルの形がないので、組合の様式で。画面に内容を出す）
  * 項目の並び・種別・文字数・コードは src/constants/shahoTodoke.ts（仕様書の PDF から作ったもの）
  */
 import dayjs from "dayjs";
@@ -80,6 +83,8 @@ export interface LeaveReportRow {
   notes: string[];
   /** ファイルを保存したら期間に残す、届け出た内容 */
   reported: LeaveReported;
+  /** 同じ月の育児休業等をまとめた届書のとき、期間ごとに残す届け出た内容（staff.leave_periods の何番目か） */
+  group?: { leaveIndex: number; reported: LeaveReported }[];
 }
 
 /** 項目の決まりで確かめる（事業所整理記号は事業所の情報で、ほかで知らせた項目は除く） */
@@ -260,12 +265,47 @@ export interface IkukyuInput {
   reported: ChildcareReported | null;
   /** 就業予定日数（開始日と終了予定日の翌日が同じ月のとき。産後パパ育休で働く予定の日数） */
   workDays: number;
-  /** この期間の開始日と同じ月に始まる、同じ人の育児休業等の数（2つ以上なら、内訳を書けないことを知らせる） */
-  sameMonthLeaves?: number;
+  /**
+   * 同じ月のうちに始まって終わる、同じ人の育児休業等（2つ以上。開始日の順。leave も入れる）と、それぞれの就業予定日数。
+   * あれば1つの届書にまとめ、育休等取得内訳（4回まで）に書く（sameMonthChildcareGroups）
+   */
+  group?: { leave: LeavePeriod; leaveIndex: number; workDays: number }[];
   remarks: string;
   myNumber: boolean;
   today: string;
 }
+
+/**
+ * 同じ月のうちに始まって終わる育児休業等（開始日と終了日の翌日が同じ月）が2つ以上ある月ごとに、期間の番号を開始日の順にまとめる
+ * （育児休業等取得者申出書は、その月の育休をまとめて1つの届書にし、育休等取得内訳に1回ずつ書く。日本年金機構の記入例・入力例）
+ */
+export const sameMonthChildcareGroups = (leaves: LeavePeriod[]): number[][] => {
+  const byMonth = new Map<string, number[]>();
+  leaves.forEach((l, i) => {
+    if (l.type !== "childcare" || !l.start || !l.end || !withinOneMonth(l.start, l.end)) return;
+    const month = l.start.slice(0, 7);
+    byMonth.set(month, [...(byMonth.get(month) ?? []), i]);
+  });
+  return [...byMonth.values()].filter((g) => g.length >= 2).map((g) => g.sort((a, b) => leaves[a].start.localeCompare(leaves[b].start)));
+};
+
+/**
+ * 同じ月の育児休業等をまとめた届書で、次に出すもの（届け出ていない期間があれば申出、最後の期間の終了日を延ばしたら延長、
+ * 早めたら終了。届けた内容のままなら null）
+ */
+export const suggestIkukyuGroupKind = (leaves: LeavePeriod[]): IkukyuKind | null => {
+  if (leaves.some((l) => !l.reported)) return "apply";
+  if (leaves.every((l) => l.reported!.start === l.start && l.reported!.end === l.end)) return null;
+  const end = leaves[leaves.length - 1].end;
+  const reportedEnd = leaves.map((l) => l.reported!.end).sort().reverse()[0];
+  return end > reportedEnd ? "extend" : "end";
+};
+
+/** 同じ月の育児休業等をまとめた届書の、申出のときに届けた内容（初めの期間の開始日と、最後の期間の終了予定日） */
+export const childcareGroupReportedOf = (leaves: LeavePeriod[]): ChildcareReported => {
+  const src = leaves.map((l) => l.reported ?? { start: l.start, end: l.end });
+  return { start: src.map((x) => x.start).sort()[0], end: src.map((x) => x.end).sort().reverse()[0] };
+};
 
 /** 次に出す届書（届け出ていなければ申出、終了日を延ばしたら延長、早く終わったら終了。届けた内容のままなら null） */
 export const suggestIkukyuKind = (leave: LeavePeriod): IkukyuKind | null => {
@@ -316,45 +356,74 @@ export const buildIkukyuRow = (input: IkukyuInput, office: string[]): LeaveRepor
   const custody = adopted ? leaveDate(leave.custodyStart) : { era: "", ymd: "" };
   if (adopted && !leave.custodyStart) add("養子など実子でない子は、養育を始めた日を従業員の画面に入れてください", 18, 19);
 
-  const common: ChildcareReported = kind === "apply" ? { start: leave.start, end: leave.end } : input.reported ?? childcareReportedOf(leave);
+  // 同じ月の育児休業等をまとめた届書：開始日は初めの期間の開始日、終了（予定）日は最後の期間の終了（予定）日
+  const parts = input.group && input.group.length >= 2 ? input.group : null;
+  const currentEnd = parts ? parts[parts.length - 1].leave.end : leave.end;
+  const common: ChildcareReported = kind === "apply"
+    ? { start: parts ? parts[0].leave.start : leave.start, end: currentEnd }
+    : input.reported ?? (parts ? childcareGroupReportedOf(parts.map((p) => p.leave)) : childcareReportedOf(leave));
   if (!common.end) add(kind === "apply" ? "終了日（予定）を従業員の画面に入れてください（育児休業等終了予定年月日を書きます）" : "申出のときに届けた終了予定日を入れてください", 22, 23);
   if (common.start > input.today) add(`育児休業等の開始日（${common.start}）になってから届け出ます（e-Gov は、開始日が届け出る日より後の申出書を受け付けません）`, 20, 21);
   if (common.end && common.end < common.start) add("終了予定日が開始日より前です", 22, 23);
   if (adopted && leave.custodyStart && leave.custodyStart > common.start) add("養育を始めた日が、育児休業等の開始日より後です", 18, 19);
   const limit = childBirthday ? dayjs(childBirthday).add(3, "year").format("YYYY-MM-DD") : "";
-  const latestEnd = kind === "end" ? common.end : leave.end;
+  const latestEnd = kind === "end" ? common.end : currentEnd;
   if (limit && latestEnd && latestEnd >= limit) add(`終了（予定）日は、子が3歳に達する日（${dayjs(limit).subtract(1, "day").format("YYYY-MM-DD")}）より前にします`, 22, 23, 28, 29);
   if (gender === "female" && !adopted && childBirthday && common.start && common.start <= maternityEndOf(childBirthday)) {
     notes.push(`出産の日後56日（${maternityEndOf(childBirthday)}）までは産後休業なので、女性の育児休業は、ふつうその翌日から始まります`);
   }
 
-  // 開始日と終了（予定）日の翌日が同じ月：育児休業等取得日数（14日以上）と就業予定日数
-  const workDays = Math.max(0, Math.trunc(input.workDays || 0));
+  // 同じ月の育児休業等の1回ずつ（申出のときは今の期間、延長・終了のときは届けた期間）
+  const pieces = parts?.map((p) => {
+    const src = kind === "apply" ? p.leave : p.leave.reported ?? p.leave;
+    return { start: src.start, end: src.end, days: daysOf(src.start, src.end), work: Math.max(0, Math.trunc(p.workDays || 0)) };
+  }) ?? null;
+  // 開始日と終了（予定）日の翌日が同じ月：育児休業等取得日数（14日以上）と就業予定日数（同じ月に2回以上取るときは、その合計）
+  const workDays = pieces ? pieces.reduce((sum, x) => sum + x.work, 0) : Math.max(0, Math.trunc(input.workDays || 0));
   let daysText = ["", ""];
   if (withinOneMonth(common.start, common.end)) {
-    const days = daysOf(common.start, common.end);
-    if (days < 14 && kind === "apply") add(`同じ月のうちに始まって終わる育児休業等が${days}日で、14日に足りないので、保険料は免除されません（申出書は出せません）`, 24);
+    const days = pieces ? pieces.reduce((sum, x) => sum + x.days, 0) : daysOf(common.start, common.end);
+    if (days < 14 && kind === "apply") {
+      add(`同じ月のうちに始まって終わる育児休業等が${pieces ? "合わせて" : ""}${days}日で、14日に足りないので、保険料は免除されません（申出書は出せません）`, 24);
+    }
     if (workDays > 16) add("就業予定日数は16日までです", 25);
     daysText = [String(days), String(workDays)];
-    notes.push(`開始日と終了日の翌日が同じ月なので、育児休業等取得日数（${days}日）と就業予定日数（${workDays}日）を書きます`);
+    notes.push(pieces
+      ? `同じ月に${pieces.length}回の育児休業等を取るので、開始日に初めの日、終了予定日に最後の日、育児休業等取得日数（${days}日）と就業予定日数（${workDays}日）に合計を書き、育休等取得内訳に1回ずつ書きます`
+      : `開始日と終了日の翌日が同じ月なので、育児休業等取得日数（${days}日）と就業予定日数（${workDays}日）を書きます`);
   }
-  if ((input.sameMonthLeaves ?? 0) > 1) notes.push("同じ月に2回以上の育児休業等を取っています。月ごとの内訳（育休等取得内訳）は、まだ書けません");
+  // 育休等取得内訳（1・2回目は開始日・終了日・取得日数・就業予定日数、3・4回目は開始日・終了日・取得日数）
+  const breakdown: string[] = Array(SHAHO_IKUKYU_FIELDS.length - 34).fill("");
+  if (pieces) {
+    if (pieces.length > 4) add(`同じ月の育児休業等の内訳は4回まで書けます（いまは${pieces.length}回）。年金事務所に確かめてください`, 34);
+    pieces.slice(0, 4).forEach((x, i) => {
+      const at = [0, 6, 12, 17][i];
+      const s0 = leaveDate(x.start);
+      const e0 = leaveDate(x.end);
+      breakdown.splice(at, i < 2 ? 6 : 5, s0.era, s0.ymd, e0.era, e0.ymd, String(x.days), ...(i < 2 ? [String(x.work)] : []));
+      if (i >= 2 && x.work > 0) notes.push(`${i + 1}回目の育児休業等の就業予定日数（${x.work}日）は、内訳に書く欄がありません（合計には入れます）`);
+    });
+  }
 
   let extend = ["", "", ""];
   let ended = ["", "", ""];
+  // 延長・終了の、変更後の育児休業等取得日数（同じ月の育休をまとめた届書は、今の期間の合計）
+  const changedDays = (end: string) => (parts
+    ? parts.reduce((sum, p) => sum + (p.leave.end ? daysOf(p.leave.start, p.leave.end) : 0), 0)
+    : daysOf(common.start, end));
   if (kind === "extend") {
-    const ne = leaveDate(leave.end);
-    if (!leave.end || (common.end && leave.end <= common.end)) add(`延長するときは、従業員の画面の終了日を、届けた終了予定日（${common.end}）より後にしてください`, 28, 29);
-    const sameMonth = withinOneMonth(common.start, leave.end);
-    extend = [ne.era, ne.ymd, sameMonth ? String(daysOf(common.start, leave.end)) : ""];
+    const ne = leaveDate(currentEnd);
+    if (!currentEnd || (common.end && currentEnd <= common.end)) add(`延長するときは、従業員の画面の終了日を、届けた終了予定日（${common.end}）より後にしてください`, 28, 29);
+    const sameMonth = withinOneMonth(common.start, currentEnd);
+    extend = [ne.era, ne.ymd, sameMonth ? String(changedDays(currentEnd)) : ""];
   }
   if (kind === "end") {
-    const done = leaveDate(leave.end);
-    if (!leave.end) add("終了日を従業員の画面に入れてください（予定より早く終わった日）", 31, 32);
-    else if (common.end && leave.end >= common.end) add(`終了日（${leave.end}）が、届けた終了予定日（${common.end}）より前ではありません（予定より早く終わったときに出します）`, 31, 32);
-    else if (leave.end < common.start) add("終了日が開始日より前です", 31, 32);
-    const sameMonth = withinOneMonth(common.start, leave.end);
-    ended = [done.era, done.ymd, sameMonth ? String(daysOf(common.start, leave.end)) : ""];
+    const done = leaveDate(currentEnd);
+    if (!currentEnd) add("終了日を従業員の画面に入れてください（予定より早く終わった日）", 31, 32);
+    else if (common.end && currentEnd >= common.end) add(`終了日（${currentEnd}）が、届けた終了予定日（${common.end}）より前ではありません（予定より早く終わったときに出します）`, 31, 32);
+    else if (currentEnd < common.start) add("終了日が開始日より前です", 31, 32);
+    const sameMonth = withinOneMonth(common.start, currentEnd);
+    ended = [done.era, done.ymd, sameMonth ? String(changedDays(currentEnd)) : ""];
   }
 
   const s = leaveDate(common.start);
@@ -365,13 +434,14 @@ export const buildIkukyuRow = (input: IkukyuInput, office: string[]): LeaveRepor
     childKana, childKanji, cb.era, cb.ymd, relation, custody.era, custody.ymd,
     s.era, s.ymd, e.era, e.ymd, ...daysText, leave.papaMama === true ? "1" : "", toShahoKanji(input.remarks),
     ...extend, ...ended,
-    ...Array(SHAHO_IKUKYU_FIELDS.length - 34).fill(""),
+    ...breakdown,
   ];
   problems.push(...checkFields(SHAHO_IKUKYU_FIELDS, values, skip));
-  const end = leave.end;
+  const end = currentEnd;
   return {
     staffId: String(staff.id), name: String(staff.name ?? ""), kana: person[1], leaveIndex: input.leaveIndex, kind, myNumber: input.myNumber,
     start: common.start, end, deadline: leaveReportDeadline(end), values, problems: [...new Set(problems)], notes,
     reported: { kind, on: input.today, start: common.start, end },
+    group: parts?.map((p) => ({ leaveIndex: p.leaveIndex, reported: { kind, on: input.today, start: p.leave.start, end: p.leave.end } })),
   };
 };

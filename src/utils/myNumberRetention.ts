@@ -21,6 +21,7 @@
  * 一般的な給与ソフトと同じく、保存期間が過ぎた番号を知らせ、確かめてから消す（よく使われている給与ソフトでは、退職者の番号を「要削除」と出し、
  * 1人ずつ・まとめて消せる。そのソフトは「退職日から7年」で知らせるが、Q は申告書の保存期間の終わりで知らせる）
  */
+import dayjs from "dayjs";
 import { SELF_KEY, type MyNumberEntry, type MyNumberStaffRow } from "./myNumber";
 
 export interface MyNumberRetention {
@@ -92,6 +93,17 @@ export const retentionsOfRow = (
   const latest = declarationYears.length > 0 ? Math.max(...declarationYears) : null;
   for (const e of row.entries) {
     if (e.key === SELF_KEY) continue;
+    // 健康保険の被扶養者のあいだは、被扶養者（異動）届などに使うので保管する。でなくなったら、その日から2年
+    // （健康保険の届書などの保存期間。健康保険法施行規則34条）か、申告書の保存期間の遅い方まで
+    if (e.health && !e.health.until && !retired) {
+      result[e.key] = keep("健康保険の被扶養者なので保管します（被扶養者（異動）届に書きます）");
+      continue;
+    }
+    const healthUntil = e.health?.until ? dayjs(e.health.until).add(2, "year").format("YYYY-MM-DD") : null;
+    if (healthUntil && e.years.length === 0 && !(retired && selfRetention.keepUntil && selfRetention.keepUntil > healthUntil)) {
+      result[e.key] = until(healthUntil, `健康保険の被扶養者でなくなった日（${e.health!.until}）から2年（健康保険の届書の保存期間。健康保険法施行規則34条）まで保管します`);
+      continue;
+    }
     if (e.years.length > 0) {
       const last = Math.max(...e.years);
       result[e.key] = !retired && latest !== null && last >= latest

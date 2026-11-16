@@ -121,5 +121,5 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
     }
   };
 
-  return { year, setYear, isLoading, savingKey, rows, setKind, updateMonth, register };
+  return { year, setYear, isLoading, savingKey, rows, setKind, updateMonth, register, groups: data.groups };
 }

@@ -20,6 +20,7 @@
  *     組合に出すファイルの媒体通番（union_media_seq）を足す
  *   ・v4: 従業員に現物で払う報酬（in_kind）、確定した給与に現物の額（in_kind・in_kind_taxable・in_kind_emp）と内訳（in_kind_detail）、
  *     賞与の支給項目に現物で渡す印（bonus_item_master.in_kind）、確定した賞与に現物で渡した額（bonus_results.in_kind）を足す
+ *   ・v5: 従業員に後期高齢者医療の障害認定の日（kouki_date）と、健康保険の被扶養者（health_dependents）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -90,6 +91,14 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "salary_results", "in_kind_detail", "TEXT");
       await addColumnIfMissing(db, "bonus_item_master", "in_kind", "INTEGER DEFAULT 0");
       await addColumnIfMissing(db, "bonus_results", "in_kind", "INTEGER DEFAULT 0");
+    },
+  },
+  {
+    version: 5,
+    description: "後期高齢者医療の障害認定の日と、健康保険の被扶養者の列を、従業員に足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "kouki_date", "TEXT");
+      await addColumnIfMissing(db, "staff", "health_dependents", "TEXT");
     },
   },
 ];

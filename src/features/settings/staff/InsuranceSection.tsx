@@ -38,6 +38,8 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetBasicPensionNumber,
         targetMultiOffice,
         setTargetMultiOffice,
+        targetKoukiDate,
+        setTargetKoukiDate,
         targetEmploymentInsNum,
         setTargetEmploymentInsNum,
         targetSocialInsGroupId,
@@ -283,6 +285,19 @@ export default function InsuranceSection({ cm }: Props) {
                             />
                             2つ以上の会社（適用事業所）で社会保険に入っている（二以上事業所勤務者）
                         </label>
+                    </div>
+                    {/* 後期高齢者医療の障害認定（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts） */}
+                    <div style={{ gridColumn: "span 2" }}>
+                        <label style={{ ...labelStyle, color: targetStandardRemuneration > 0 ? "#2c3e50" : "#bdc3c7" }}>
+                            後期高齢者医療の障害認定を受けた日（65歳から74歳の人だけ。この日に健康保険の資格を失い、その月の分から健康保険料がかかりません。資格喪失届を出します）
+                        </label>
+                        <input
+                            type="date"
+                            value={targetStandardRemuneration > 0 ? targetKoukiDate : ""}
+                            onChange={e => setTargetKoukiDate(e.target.value)}
+                            disabled={targetStandardRemuneration === 0}
+                            style={{ ...inputStyle, maxWidth: "180px", backgroundColor: targetStandardRemuneration > 0 ? "#fff" : "#f1f5f9" }}
+                        />
                     </div>
 
                     {/* 雇用保険（こちらは既存の targetIsEmploymentInsEligible で制御） */}

@@ -17,7 +17,8 @@
  * ・従前の標準報酬月額は千円で4文字（健保・厚年）。厚年は厚生年金の等級表の上限・下限の中にした額。
  *   健康保険組合・国民健康保険組合の人は健保を書かない（年金事務所の届書は厚生年金の分。健康保険組合には組合の形で別に届け出る）。
  *   70歳以上被用者（厚生年金の資格がない）は厚年を、75歳以上（健康保険の資格もない）は健保も書かない
- * ・70歳以上被用者：備考欄項目1に「1」を付け、基礎年金番号を書く（個人番号でもよいが、Q ではまだ使わない）。
+ * ・70歳以上被用者：備考欄項目1に「1」を付け、個人番号（マイナンバー）か基礎年金番号を書く（個人番号は、事務取扱担当者が
+ *   「マイナンバーを書く」にしたとき、保存するときだけ入れる。features/payroll/useShahoMyNumbers.ts）。
  *   算定基礎届は、70歳到達年の6月に70歳以上被用者になった人には付けない。算定の期間の途中で70歳になった人は、70歳に達した日以後の
  *   期間の1か月分の給与を払った月を「70歳算定基礎月」に書き、備考欄に給与の締め日と支払日を書く（ガイドブックのケース⑥）。
  *   月額変更届は、改定年月の前3か月の間に70歳以上被用者になった人には付けない
@@ -34,8 +35,8 @@ import type { HealthInsurer, InsurerType } from "./healthInsurer";
 import { unionRecordOf, type UnionRecord } from "./unionReport";
 import { parseLeavePeriods, type LeaveType } from "./leaveExemption";
 import type { SanteiMonth, SanteiWorkerKind } from "./santei";
-import { fieldProblem, shahoDate, toShahoKanji } from "./shahoCsv";
-import { reach70Date, reach75Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
+import { MY_NUMBER_PLACEHOLDER, shahoDate, toShahoKanji, valueProblem } from "./shahoCsv";
+import { noHealthOn, reach70Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
 import { formatWareki, toWareki } from "./wareki";
 import { addMonths, type ZuijiDirection } from "./zuiji";
 
@@ -140,6 +141,8 @@ interface ReportRowBase {
   multiOffice: boolean;
   /** 基礎年金番号（課所符号-一連番号。書かないときは空） */
   basicPensionNumber: string;
+  /** 個人番号（マイナンバー）を書く（70歳以上被用者で、書くと選んだ人。値は保存するときに入れる） */
+  myNumber: boolean;
   /** 備考欄（自動で作った文と、届書に書く文） */
   autoRemarks: string;
   remarks: string;
@@ -158,18 +161,21 @@ const checkFields = (fields: ShahoField[], values: string[], skip: Set<number>):
   const problems: string[] = [];
   fields.forEach((f, i) => {
     if ((i >= 1 && i <= 3) || skip.has(i)) return;
-    const p = fieldProblem(f, values[i] ?? "");
+    const p = valueProblem(f, values[i] ?? "");
     if (p) problems.push(p);
   });
   if (values.length !== fields.length) problems.push(`届書の項目の数が合いません（${values.length}／${fields.length}）`);
   return problems;
 };
 
-/** 年齢による届け方（日付 on の時点。70歳以上被用者・75歳以上・70歳に達した日） */
-const ageOn = (birthday: string, on: string) => {
+/**
+ * 年齢による届け方（日付 on の時点。70歳以上被用者・70歳に達した日・健康保険の資格がない（75歳以上か、後期高齢者医療の障害認定を
+ * 受けた人。over75））
+ */
+const ageOn = (staff: any, on: string) => {
+  const birthday = String(staff?.birthday ?? "");
   const reach70 = birthday ? reach70Date(birthday) : null;
-  const reach75 = birthday ? reach75Date(birthday) : null;
-  return { reach70, over70: !!reach70 && reach70 <= on, over75: !!reach75 && reach75 <= on };
+  return { reach70, over70: !!reach70 && reach70 <= on, over75: noHealthOn(staff, on) };
 };
 
 /** 従前の標準報酬月額の健保・厚年 */
@@ -221,6 +227,8 @@ export interface SanteiReportInput {
   pensionRange: { min: number; max: number };
   /** 備考欄（画面で直した文。直していなければ null） */
   remarks: string | null;
+  /** 個人番号（マイナンバー）を書く（登録してあって、書くと選んだ人。70歳以上被用者だけに書く） */
+  myNumber?: boolean;
 }
 
 export interface SanteiReportRow extends ReportRowBase {
@@ -254,7 +262,7 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
   const birthday = String(staff.birthday ?? "");
   // 年齢は、算定基礎届を出す7月1日で見る
   const julyFirst = `${year}-07-01`;
-  const age = ageOn(birthday, julyFirst);
+  const age = ageOn(staff, julyFirst);
   // 70歳到達年の6月（または7月1日）に70歳以上被用者になった人は、備考欄項目1を付けない
   const reachedInJune = age.over70 && age.reach70! >= `${year}-06-01`;
   const flag70 = age.over70 && !reachedInJune;
@@ -262,13 +270,16 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
   if (over70Only && !flag70) {
     problem("6月か7月1日に70歳になった人なので、70歳以上被用者算定基礎届は出せません（年金事務所に確かめてください）", 42, 52);
   }
-  const person = shahoPersonValues(staff, { kanjiField: SHAHO_SANTEI_FIELDS[6], withoutPensionNumber: over70Only, needBasic: flag70 || over70Only });
+  // 70歳以上被用者は、個人番号（マイナンバー）か基礎年金番号を書く
+  const writeMy = (flag70 || over70Only) && input.myNumber === true;
+  const person = shahoPersonValues(staff, { kanjiField: SHAHO_SANTEI_FIELDS[6], withoutPensionNumber: over70Only, needBasic: (flag70 || over70Only) && !writeMy });
   person.problems.forEach((p) => problem(p.message, ...PERSON_FIELDS[p.part]));
   notes.push(...person.notes);
 
-  if (age.over75) notes.push("75歳以上（健康保険の資格もない）なので、「70歳以上被用者算定基礎届」だけを出します（被保険者整理番号と、健保の従前の標準報酬月額は書きません）");
+  if (age.over75 && age.over70) notes.push("健康保険の資格もない人（75歳以上・後期高齢者医療の障害認定）なので、「70歳以上被用者算定基礎届」だけを出します（被保険者整理番号と、健保の従前の標準報酬月額は書きません）");
+  else if (age.over75) notes.push("後期高齢者医療の障害認定を受けて健康保険の資格がない人なので、健保の従前の標準報酬月額は書きません（厚生年金の分だけ届け出ます）");
   else if (over70Only) notes.push("健康保険組合・国民健康保険組合の70歳以上の人なので、年金事務所には「70歳以上被用者算定基礎届」だけを出します（被保険者整理番号は書きません）");
-  else if (flag70) notes.push("70歳以上被用者なので、備考の「70歳以上被用者算定」に印を付け、基礎年金番号を書きます（厚年の従前の標準報酬月額は書きません）");
+  else if (flag70) notes.push(`70歳以上被用者なので、備考の「70歳以上被用者算定」に印を付け、${writeMy ? "マイナンバー" : "基礎年金番号"}を書きます（厚年の従前の標準報酬月額は書きません）`);
   if (reachedInJune && !over70Only) notes.push("6月に70歳以上被用者になった人なので、備考の「70歳以上被用者算定」には印を付けません（仕様書の決まり）");
   if (!over70Only && input.insurerType !== "kyokai") {
     notes.push("健康保険組合・国民健康保険組合の人なので、健保の従前の標準報酬月額は書きません（健康保険組合には、組合の決まった形で別に届け出ます）");
@@ -346,7 +357,7 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
     ...months.map((m) => amountText(m.inKind)),
     ...months.map((m) => amountText(m.total)),
     amountText(sum), amountText(average), modifiedAverage !== null ? amountText(modifiedAverage) : "",
-    "", p.basic?.[0] ?? "", p.basic?.[1] ?? "",
+    writeMy ? MY_NUMBER_PLACEHOLDER : "", p.basic?.[0] ?? "", p.basic?.[1] ?? "",
     flag70 || over70Only ? "1" : "", over70Months.map(mm).join(""),
     Number(staff.multi_office) === 1 ? "1" : "", "", partialJoin ? "1" : "", leave ? "1" : "",
     input.kind === "short" ? "1" : "", input.kind === "part" ? "1" : "", annual ? "1" : "",
@@ -365,7 +376,7 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
     previousHealth: prev.health, previousPension: prev.pension, previousFrom: input.previousFrom,
     wageChange: wage, retro, months, sum, average, modifiedAverage,
     over70: flag70 || over70Only, over70Only, multiOffice: Number(staff.multi_office) === 1,
-    basicPensionNumber: p.basic ? `${p.basic[0]}-${p.basic[1]}` : "",
+    basicPensionNumber: p.basic ? `${p.basic[0]}-${p.basic[1]}` : "", myNumber: writeMy,
     autoRemarks, remarks, values, union, problems: [...new Set(problems)], notes,
     applyFrom: `${year}-09`, kind: input.kind, over70Months, partialJoin, leave: !!leave, annual,
   };
@@ -416,6 +427,8 @@ export interface GeppenReportInput {
   insurer?: HealthInsurer | null;
   /** 厚生年金の標準報酬月額の下限・上限（従前の月の分） */
   pensionRange: { min: number; max: number };
+  /** 個人番号（マイナンバー）を書く（登録してあって、書くと選んだ人。70歳以上被用者だけに書く） */
+  myNumber?: boolean;
 }
 
 export interface GeppenReportRow extends ReportRowBase {
@@ -467,19 +480,21 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
   };
   const birthday = String(staff.birthday ?? "");
   // 年齢は、改定年月の初めの日で見る。改定年月の前3か月（変動月から）の間に70歳以上被用者になった人は、備考欄項目1を付けない
-  const age = ageOn(birthday, `${input.revisionFrom}-01`);
+  const age = ageOn(staff, `${input.revisionFrom}-01`);
   const changeFirst = `${ymOf(input.changeYear, input.changeMonth)}-01`;
   const flag70 = age.over70 && age.reach70! < changeFirst;
   const over70Only = age.over70 && (age.over75 || input.insurerType !== "kyokai");
   if (over70Only && !flag70) {
     problem("改定年月の前3か月の間に70歳になった人なので、70歳以上被用者月額変更届は出せません（年金事務所に確かめてください）", 42, 48);
   }
-  const person = shahoPersonValues(staff, { kanjiField: SHAHO_GEPPEN_FIELDS[6], withoutPensionNumber: over70Only, needBasic: flag70 || over70Only });
+  const writeMy = (flag70 || over70Only) && input.myNumber === true;
+  const person = shahoPersonValues(staff, { kanjiField: SHAHO_GEPPEN_FIELDS[6], withoutPensionNumber: over70Only, needBasic: (flag70 || over70Only) && !writeMy });
   person.problems.forEach((p) => problem(p.message, ...PERSON_FIELDS[p.part]));
   notes.push(...person.notes);
-  if (age.over75) notes.push("75歳以上（健康保険の資格もない）なので、「70歳以上被用者月額変更届」だけを出します（被保険者整理番号と、健保の従前の標準報酬月額は書きません）");
+  if (age.over75 && age.over70) notes.push("健康保険の資格もない人（75歳以上・後期高齢者医療の障害認定）なので、「70歳以上被用者月額変更届」だけを出します（被保険者整理番号と、健保の従前の標準報酬月額は書きません）");
+  else if (age.over75) notes.push("後期高齢者医療の障害認定を受けて健康保険の資格がない人なので、健保の従前の標準報酬月額は書きません（厚生年金の分だけ届け出ます）");
   else if (over70Only) notes.push("健康保険組合・国民健康保険組合の70歳以上の人なので、年金事務所には「70歳以上被用者月額変更届」だけを出します（被保険者整理番号は書きません）");
-  else if (flag70) notes.push("70歳以上被用者なので、備考の「70歳以上被用者月額変更」に印を付け、基礎年金番号を書きます（厚年の従前の標準報酬月額は書きません）");
+  else if (flag70) notes.push(`70歳以上被用者なので、備考の「70歳以上被用者月額変更」に印を付け、${writeMy ? "マイナンバー" : "基礎年金番号"}を書きます（厚年の従前の標準報酬月額は書きません）`);
   else if (age.over70) notes.push("改定年月の前3か月の間に70歳以上被用者になった人なので、備考の「70歳以上被用者月額変更」には印を付けません（仕様書の決まり）");
   if (!over70Only && input.insurerType !== "kyokai") {
     notes.push("健康保険組合・国民健康保険組合の人なので、健保の従前の標準報酬月額は書きません（健康保険組合には、組合の決まった形で別に届け出ます）");
@@ -533,7 +548,7 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
     ...months.map((m) => amountText(m.inKind)),
     ...months.map((m) => amountText(m.total)),
     amountText(sum), amountText(average), modifiedAverage !== null ? amountText(modifiedAverage) : "",
-    "", p.basic?.[0] ?? "", p.basic?.[1] ?? "",
+    writeMy ? MY_NUMBER_PLACEHOLDER : "", p.basic?.[0] ?? "", p.basic?.[1] ?? "",
     flag70 || over70Only ? "1" : "", Number(staff.multi_office) === 1 ? "1" : "", input.short ? "1" : "",
     reason,
     "",
@@ -556,7 +571,7 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
     retro: retro ? { month: months[retro.index].month, amount: retro.amount } : null,
     months, sum, average, modifiedAverage,
     over70: flag70 || over70Only, over70Only, multiOffice: Number(staff.multi_office) === 1,
-    basicPensionNumber: p.basic ? `${p.basic[0]}-${p.basic[1]}` : "",
+    basicPensionNumber: p.basic ? `${p.basic[0]}-${p.basic[1]}` : "", myNumber: writeMy,
     autoRemarks, remarks, values, union, problems: [...new Set(problems)], notes,
     key: input.key ?? String(staff.id), revisionFrom: input.revisionFrom, short: input.short, reason, autoReason, annual,
   };

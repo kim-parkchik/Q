@@ -3,7 +3,7 @@ import {
   autoChangeReason, buildGeppenReport, buildGeppenReportRow, buildSanteiReport, buildSanteiReportRow, countedMonths,
   leaveRemark, payRuleText, pensionStandardOf, shahoMonth, thousandsText, type GeppenReportInput, type SanteiReportInput,
 } from "./remunerationReport";
-import { buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
+import { MY_NUMBER_PLACEHOLDER, buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
 import { SHAHO_GEPPEN_FIELDS, SHAHO_GEPPEN_UNION_FIELDS, SHAHO_SANTEI_FIELDS, SHAHO_SANTEI_UNION_FIELDS } from "../constants/shahoTodoke";
 import type { HealthInsurer } from "./healthInsurer";
 
@@ -137,6 +137,14 @@ describe("算定基礎届（仕様書の作成例・ガイドブックの例と�
     expect(row.problems.join("\n")).toContain("基礎年金番号");
     expect(row.problems.join("\n")).toContain("従前の改定月");
     expect(row.problems.join("\n")).toContain("5・6月の給与が確定していません");
+  });
+
+  test("マイナンバーを書く70歳以上被用者は、個人番号の項目に書き、基礎年金番号は要らない。70歳未満の人には書かない", () => {
+    const row = buildSanteiReportRow(santei({ staff: staff({ birthday: "1954-01-01" }), myNumber: true }), office);
+    expect([row.myNumber, row.values[39], row.values[40], row.values[41], row.values[42], row.problems]).toEqual([true, MY_NUMBER_PLACEHOLDER, "", "", "1", []]);
+    expect(row.notes.join("")).toContain("マイナンバーを書きます");
+    const young = buildSanteiReportRow(santei({ myNumber: true }), office);
+    expect([young.myNumber, young.values[39]]).toEqual([false, ""]);
   });
 
   test("6月に70歳になった人は、備考の70歳以上被用者算定に印を付けない（厚年も書かない）", () => {
@@ -277,6 +285,11 @@ describe("月額変更届（仕様書の作成例・記入例と同じになる�
     const within = buildGeppenReportRow(geppen({ staff: staff({ birthday: "1949-10-20", pension_num: "17" }) }), office);
     expect([within.values[13], within.values[42]]).toEqual(["", ""]);
     expect(within.notes.join("")).toContain("前3か月の間に70歳以上被用者になった");
+    // マイナンバーを書く人は、基礎年金番号は要らない（改定年月の前3か月の間に70歳になった人には書かない）
+    const my = buildGeppenReportRow(geppen({ staff: staff({ birthday: "1949-01-15", pension_num: "17" }), myNumber: true }), office);
+    expect([my.myNumber, my.values[39], my.values[40], my.values[41], my.problems]).toEqual([true, MY_NUMBER_PLACEHOLDER, "", "", []]);
+    const myWithin = buildGeppenReportRow(geppen({ staff: staff({ birthday: "1949-10-20", pension_num: "17" }), myNumber: true }), office);
+    expect([myWithin.myNumber, myWithin.values[39]]).toEqual([false, ""]);
   });
 
   test("届書のファイル：算定基礎届と月額変更届の行も、賞与支払届と同じ形のファイルに書ける（シフトJIS・CR LF）", () => {

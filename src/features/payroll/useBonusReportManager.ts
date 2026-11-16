@@ -12,6 +12,8 @@ import { buildBonusReport, bonusReportDeadline, paymentsForBonus, type BonusPaym
 import { parseBonusPlanMonths, planMonthStatuses, stringifyBonusPlanMonths } from "../../utils/bonusNonPayment";
 import { insurerOf, loadHealthInsurers, type HealthInsurer, type InsurerType } from "../../utils/healthInsurer";
 import { useShahoFile } from "./useShahoFile";
+import { useShahoMyNumbers } from "./useShahoMyNumbers";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 
 /** 賞与（賞与の画面で作ったもの。finalized：確定した人数） */
 export interface BonusSettingRow {
@@ -32,10 +34,12 @@ const toPayments = (rows: BonusPayment[] | null | undefined): BonusPayment[] =>
     ...r, staffId: String(r.staffId), totalEarnings: Number(r.totalEarnings) || 0, inKind: Number(r.inKind) || 0, settingId: Number(r.settingId),
   }));
 
-export function useBonusReportManager(db: any) {
+export function useBonusReportManager(db: any, user: MyNumberUser | null = null) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const file = useShahoFile(db);
+  /** 70歳以上被用者の個人番号（事務取扱担当者が「マイナンバーを書く」にしたとき。保存するときだけ番号を読む） */
+  const my = useShahoMyNumbers(db, user);
   const [settings, setSettings] = useState<BonusSettingRow[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [staff, setStaff] = useState<any[]>([]);
@@ -120,9 +124,9 @@ export function useBonusReportManager(db: any) {
   const report = useMemo(
     () => (payments && selected?.payment_date
       ? buildBonusReport(staff, paymentsForBonus(payments, selected.id, selected.payment_date), file.office.values, insurerTypeOf,
-        (s) => insurerOf(insurers, s?.social_insurance_group_id))
+        (s) => insurerOf(insurers, s?.social_insurance_group_id), my.writes)
       : null),
-    [staff, payments, file.office, selected, insurerTypeOf, insurers],
+    [staff, payments, file.office, selected, insurerTypeOf, insurers, my.writes],
   );
   /** 同じ月にこの賞与の支給日までに払う賞与で、まだ確定していないもの（届書に入っていない） */
   const unfinalizedSameMonth = settings.filter((s) =>
@@ -160,7 +164,14 @@ export function useBonusReportManager(db: any) {
     }
   }, [db, toast, dialog, file]);
 
+  /** 年金事務所に出すファイルを保存する（70歳以上被用者のマイナンバーを書くときは、鍵を開けて番号を入れる） */
+  const save = useCallback(async () => {
+    if (!report || !dataLines) return;
+    await my.saveFile(file, report.rows.map((r) => ({ staffId: r.staffId, name: r.name, values: r.values })), `賞与支払届 ${label}`, report.rows.length);
+  }, [report, dataLines, my, file, label]);
+
   return {
+    my, save,
     file, settings, selected, selectedId, setSelectedId, month, report, payments, unfinalizedSameMonth, deadline,
     blocked, dataLines, label, loadError,
     planMonths, planYear, setPlanYear, planStatuses, savePlanMonths,

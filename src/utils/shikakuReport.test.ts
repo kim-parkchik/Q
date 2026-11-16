@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { SHAHO_SHUTOKU_FIELDS, SHAHO_SHUTOKU_UNION_FIELDS, SHAHO_SOSHITSU_FIELDS, SHAHO_SOSHITSU_UNION_FIELDS } from "../constants/shahoTodoke";
 import type { HealthInsurer } from "./healthInsurer";
-import { acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedInKindOf, estimatedWageOf, lossOf, shikakuDeadline, type ShutokuInput, type SoshitsuInput } from "./shikakuReport";
+import { acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedInKindOf, estimatedWageOf, lossEventsOf, lossOf, shikakuDeadline, type ShutokuInput, type SoshitsuInput } from "./shikakuReport";
+import { healthLossOf, noHealthOn } from "./shahoPerson";
+import { getInsuranceByAge } from "./calcSalary";
 import { MY_NUMBER_PLACEHOLDER, buildUnionShahoLines, encodeShahoFile, fillMyNumbers, shahoOfficeValues, unionOfficeValues } from "./shahoCsv";
 
 /** 仕様書の作成例の事業所（事業所整理記号 01-ケイト・事業所番号 123。東京都） */
@@ -161,6 +163,59 @@ describe("資格喪失届（仕様書の作成例・電子申請の自動チェ�
     expect(row.union?.values.slice(21, 23)).toEqual(["2", "1"]);
     expect(row.union?.values.slice(27)).toEqual(["00001", "", ""]);
     expect(row.union?.problems).toEqual(["確かめ健康保険組合の被保険者等番号がありません（従業員の画面の「健康保険 被保険者番号」に、組合の被保険者証の番号を入れてください）"]);
+  });
+});
+
+describe("健康保険だけの資格喪失（75歳到達・障害認定）", () => {
+  test("協会けんぽの75歳到達：75歳の誕生日に喪失（原因 7）。退職日・70歳不該当・届のみは書かず、整理番号と資格確認書の回収を書く", () => {
+    const row = buildSoshitsuRow(soshitsu({ cause: "75歳到達", eventDate: "2026-12-11", today: "2026-12-14", returned: 1 }, { birthday: "1951-12-11" }), office);
+    expect(row.problems).toEqual([]);
+    expect([row.toOffice, row.lostOn, row.deadline, row.over70, row.over70Only]).toEqual([true, "2026-12-11", "2026-12-16", true, false]);
+    expect(row.values[5]).toBe("6");
+    expect(row.values.slice(13, 18)).toEqual(["9", "081211", "7", "", ""]);
+    expect(row.values.slice(19, 27)).toEqual(["", "", "1", "", "", "", "", ""]);
+    expect(row.notes.join("")).toContain("後期高齢者医療制度に移ります");
+    expect(row.union).toBeNull();
+  });
+
+  test("75歳の誕生日より前は、まだ届け出られない（e-Gov は資格喪失日が届け出る日より後の届書を受け付けない）", () => {
+    const row = buildSoshitsuRow(soshitsu({ cause: "75歳到達", eventDate: "2026-12-11", today: "2026-12-10" }, { birthday: "1951-12-11" }), office);
+    expect(row.problems.join("")).toContain("75歳の誕生日（2026-12-11）になってから届け出ます");
+  });
+
+  test("健康保険組合の人の75歳到達は、組合にだけ出す（年金事務所の行はなく、組合の行に原因 7 と資格喪失年月日）", () => {
+    const row = buildSoshitsuRow(soshitsu({ cause: "75歳到達", eventDate: "2026-12-11", today: "2026-12-14", insurer: union, returned: 1 }, { birthday: "1951-12-11", health_ins_num: "123" }), office);
+    expect(row.toOffice).toBe(false);
+    expect(row.problems).toEqual([]);
+    expect(row.union?.values.slice(13, 18)).toEqual(["9", "081211", "7", "", ""]);
+    expect(row.union?.values.slice(21, 23)).toEqual(["1", ""]);
+    expect(row.union?.problems).toEqual([]);
+  });
+
+  test("障害認定：65〜74歳で後期高齢者医療の障害認定を受けた日に喪失（原因 9）", () => {
+    const staff = { birthday: "1959-04-20", kouki_date: "2026-10-05" };
+    expect(healthLossOf(staff)).toEqual({ date: "2026-10-05", cause: "障害認定" });
+    expect([noHealthOn(staff, "2026-10-04"), noHealthOn(staff, "2026-10-05")]).toEqual([false, true]);
+    const row = buildSoshitsuRow(soshitsu({ cause: "障害認定", eventDate: "2026-10-05", today: "2026-10-07" }, staff), office);
+    expect(row.problems).toEqual([]);
+    expect([row.over70, row.lostOn]).toEqual([false, "2026-10-05"]);
+    expect(row.values.slice(13, 18)).toEqual(["9", "081005", "9", "", ""]);
+  });
+
+  test("できごと：75歳になって退職したら2つ。75歳になる前に退職・75歳を過ぎて入社なら、健康保険の喪失はない", () => {
+    expect(lossEventsOf({ birthday: "1951-12-11", join_date: "2010-04-01", retirement_date: "2027-03-31" })).toEqual([
+      { date: "2026-12-11", cause: "75歳到達" }, { cause: "退職等", date: "2027-03-31" },
+    ]);
+    expect(lossEventsOf({ birthday: "1951-12-11", join_date: "2010-04-01", retirement_date: "2026-11-30" })).toEqual([{ cause: "退職等", date: "2026-11-30" }]);
+    expect(lossEventsOf({ birthday: "1950-01-01", join_date: "2026-04-01" })).toEqual([]);
+    expect(lossEventsOf({ birthday: "1951-12-11", join_date: "2010-04-01", retirement_date: "2026-12-10" })).toEqual([{ cause: "退職等", date: "2026-12-10" }]);
+  });
+
+  test("保険料：障害認定の日がある月の分から、健康保険料がかからない（75歳の誕生月より前でも）", () => {
+    expect(getInsuranceByAge("1959-04-20", 2026, 9, "2026-10-05").health).toBe(true);
+    expect(getInsuranceByAge("1959-04-20", 2026, 10, "2026-10-05").health).toBe(false);
+    expect(getInsuranceByAge("1959-04-20", 2026, 10, "2026-10-05").pension).toBe(true);
+    expect(getInsuranceByAge("1959-04-20", 2026, 10, null).health).toBe(true);
   });
 });
 

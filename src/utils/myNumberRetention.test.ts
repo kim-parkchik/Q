@@ -110,3 +110,20 @@ describe("保存期間が過ぎた番号の一覧", () => {
     expect(byStaff["2"][childKey].expired).toBe(true); // 期間は過ぎているが、登録していないので一覧には出ない
   });
 });
+
+describe("健康保険の被扶養者（従業員の画面に入れた家族）", () => {
+  const staff = (dependents: unknown[], o: Record<string, unknown> = {}) => ({
+    id: "1", name: "年金 正明", status: "active", retirement_date: null, health_dependents: JSON.stringify(dependents), ...o,
+  });
+  const kumiKey = familyKey("年金　久美", "1981-03-26");
+  test("一覧に出す（申告書にいなくても）。被扶養者のあいだは保管し、でなくなったら2年（健康保険法施行規則34条）", () => {
+    const now = buildMyNumberList([staff([{ spouse: true, name: "年金　久美", birthday: "1981-03-26" }])], [], [{ staffId: "1", person: kumiKey }]);
+    const entry = now[0].entries.find((e) => e.key === kumiKey)!;
+    expect([entry.relation, entry.registered, entry.health]).toEqual(["配偶者", true, { until: "" }]);
+    expect(retentionsOfRow(now[0], { status: "active" }, 2026, [], TODAY)[kumiKey].keepUntil).toBeNull();
+    const ended = buildMyNumberList([staff([{ spouse: true, name: "年金　久美", birthday: "1981-03-26", until: "2026-10-01" }])], [], [{ staffId: "1", person: kumiKey }]);
+    const r = retentionsOfRow(ended[0], { status: "active" }, 2026, [], TODAY)[kumiKey];
+    expect([r.keepUntil, r.unknown]).toEqual(["2028-10-01", false]);
+    expect(r.basis).toContain("健康保険法施行規則34条");
+  });
+});

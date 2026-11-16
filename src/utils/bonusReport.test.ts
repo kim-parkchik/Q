@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { bonusReportDeadline, buildBonusReport, paymentsForBonus, type BonusPayment } from "./bonusReport";
-import { reach70Date, reach75Date, splitBasicPensionNumber } from "./shahoPerson";
-import { buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
+import { OVER70_BASIC_REASON, reach70Date, reach75Date, splitBasicPensionNumber } from "./shahoPerson";
+import { MY_NUMBER_PLACEHOLDER, buildShahoLines, encodeShahoFile, shahoOfficeValues } from "./shahoCsv";
 import { SHAHO_BONUS_UNION_FIELDS } from "../constants/shahoTodoke";
 import type { HealthInsurer } from "./healthInsurer";
 
@@ -80,7 +80,20 @@ describe("70歳以上被用者", () => {
   });
   test("基礎年金番号がなければ、直してもらう", () => {
     const r = buildBonusReport([person({ birthday: "1950-01-01" })], [pay({ paymentDate: "2026-12-10" })], office).rows[0];
-    expect(r.problems).toEqual(["70歳以上被用者なので、基礎年金番号（10けた）を従業員の画面に入れてください"]);
+    expect(r.problems).toEqual([OVER70_BASIC_REASON]);
+  });
+  test("マイナンバーを書く70歳以上被用者は、個人番号の項目に書き（保存するときに番号を入れる）、基礎年金番号は書かない。70歳未満の人には書かない", () => {
+    const staff = [person({ id: "S001", birthday: "1953-01-01" }), person({ id: "S002", name: "若手 二郎", furigana: "ワカテ ジロウ", birthday: "1990-01-01", pension_num: "2" })];
+    const { rows } = buildBonusReport(staff, ["S001", "S002"].map((staffId) => pay({ staffId, paymentDate: "2026-12-10" })), office, undefined, undefined, () => true);
+    const [old, young] = rows;
+    expect([old.myNumber, old.values[14], old.values[15], old.values[16], old.values[17]]).toEqual([true, MY_NUMBER_PLACEHOLDER, "", "", "1"]);
+    expect(old.problems).toEqual([]);
+    expect(old.notes.join("")).toContain("マイナンバーを書きます");
+    expect([young.myNumber, young.values[14]]).toEqual([false, ""]);
+    // 健康保険組合に出す行には、個人番号を書かない（組合提出では「省略する」項目）
+    const union: HealthInsurer = { id: 2, name: "見本健康保険組合", type: "union", rates: [], officeNumber: "12345", mediaSeq: 0 };
+    const u = buildBonusReport([person({ birthday: "1952-01-01", health_ins_num: "77" })], [pay({ paymentDate: "2026-12-10" })], office, () => "union", () => union, () => true).rows[0];
+    expect(u.union?.values.includes(MY_NUMBER_PLACEHOLDER)).toBe(false);
   });
   test("75歳以上（健康保険の資格もない）は「70歳以上被用者届のみ提出」に 1、被保険者整理番号は書かない", () => {
     const r = buildBonusReport([person({ birthday: "1951-12-11", basic_pension_number: "1234567890", pension_num: "" })], [pay({ paymentDate: "2026-12-11" })], office).rows[0];

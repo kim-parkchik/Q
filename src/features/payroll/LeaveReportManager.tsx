@@ -95,12 +95,13 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
               </tr>
             </thead>
             <tbody>
-              {z.rows.map(({ staff, leave, index, suggest, edit: e, row: r }) => {
-                const set = (patch: Parameters<typeof z.update>[4]) => z.update(String(staff.id), index, leave, suggest, patch);
+              {z.rows.map((item) => {
+                const { key, staff, leave, group, suggest, edit: e, row: r } = item;
+                const set = (patch: Parameters<typeof z.update>[1]) => z.update(item, patch);
                 const rep = e.reported as MaternityReported & ChildcareReported;
                 const setRep = (patch: Partial<MaternityReported>) => set({ reported: { ...e.reported, ...patch } });
                 return (
-                  <tr key={`${r.staffId}#${index}`} style={{ opacity: e.include ? 1 : 0.5 }}>
+                  <tr key={key} style={{ opacity: e.include ? 1 : 0.5 }}>
                     <td style={td} className="no-print"><input type="checkbox" checked={e.include} onChange={(ev) => set({ include: ev.target.checked })} /></td>
                     <td style={td}>{r.values[4] || "—"}　{r.name}<br /><span style={small}>{w(staff.birthday)}</span></td>
                     <td style={td}>
@@ -109,7 +110,8 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
                       </select>
                       <span className="print-only">{z.kindLabels[e.kind]}</span>
                       <div style={small}>
-                        {leave.reported ? `届けた日 ${w(leave.reported.on)}（${z.kindLabels[leave.reported.kind] ?? leave.reported.kind}）` : "まだ届けていない"}
+                        {(group ? group.every((g) => g.leave.reported) : leave.reported)
+                          ? `届けた日 ${w(leave.reported?.on)}（${z.kindLabels[leave.reported?.kind ?? ""] ?? leave.reported?.kind}）` : "まだ届けていない"}
                         {suggest === null && "・届けた内容のまま"}
                       </div>
                       <div style={small}>期限 {r.deadline ? w(r.deadline) : "—"}</div>
@@ -120,6 +122,26 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
                           出産予定日 {w(leave.dueDate)}{leave.multiple ? "（多胎）" : ""}<br />
                           出産日 {w(leave.birthDate)}<br />
                           {w(leave.start)} 〜 {w(r.end)}
+                        </>
+                      ) : group ? (
+                        <>
+                          {leave.childName || leave.childKana || "（子の氏名なし）"}（{w(leave.childBirthday)}生{leave.adopted ? "・実子以外" : ""}）<br />
+                          <span style={small}>同じ月に{group.length}回（育休等取得内訳）</span>
+                          {group.map((g, i) => (
+                            <div key={g.index} style={{ fontSize: 12 }}>
+                              {i + 1}回目 {w(g.leave.start)} 〜 {w(g.leave.end)}
+                              {i < 2 && (
+                                <>
+                                  ・就業予定日数
+                                  <input type="number" min={0} max={16} className="no-print" value={e.groupWorkDays[i] ?? 0}
+                                    onChange={(ev) => set({ groupWorkDays: group.map((_, j) => (j === i ? Math.max(0, Math.trunc(Number(ev.target.value) || 0)) : e.groupWorkDays[j] ?? 0)) })}
+                                    style={{ ...smallInput, width: 50, marginLeft: 4 }} />
+                                  <span className="print-only">{e.groupWorkDays[i] ?? 0}</span>日
+                                </>
+                              )}
+                            </div>
+                          ))}
+                          {r.values[24] && <div style={{ fontSize: 12 }}>取得日数 合計 {r.values[24]}日・就業予定日数 合計 {r.values[25]}日</div>}
                         </>
                       ) : (
                         <>
@@ -166,6 +188,27 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
               })}
             </tbody>
           </table>
+        )}
+        {z.rows.some((r) => r.union && r.edit.include) && (
+          <>
+            <h4 style={{ ...title, fontSize: 14, marginTop: 16 }}>健康保険組合に出す申出書（組合の様式で。健康保険の保険料の免除）</h4>
+            <table style={table}>
+              <thead>
+                <tr><th style={th}>組合（事業所番号）</th><th style={th}>氏名・被保険者等番号</th><th style={th}>届書</th><th style={th}>期間</th><th style={th}>{maternity ? "出産予定日・出産日" : "養育する子"}</th></tr>
+              </thead>
+              <tbody>
+                {z.rows.filter((r) => r.union && r.edit.include).map(({ key, staff, leave, group, edit: e, row: r, union }) => (
+                  <tr key={`union-${key}`}>
+                    <td style={td}>{union!.name}（{union!.officeNumber || "事業所番号なし"}）</td>
+                    <td style={td}>{r.name}<div style={small}>被保険者等番号 {staff.health_ins_num || "（従業員の画面に入れてください）"}</div></td>
+                    <td style={td}>{z.label}・{z.kindLabels[e.kind]}</td>
+                    <td style={td}>{w(r.start)} 〜 {w(r.end)}{group ? `（同じ月に${group.length}回）` : ""}</td>
+                    <td style={td}>{maternity ? `${w(leave.dueDate)}・${w(leave.birthDate)}` : `${leave.childName || leave.childKana || ""}（${w(leave.childBirthday)}生）`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
     </div>

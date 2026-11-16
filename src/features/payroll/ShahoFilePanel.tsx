@@ -3,6 +3,7 @@
  * ・ShahoFilePanel：電子申請用のファイル（SHFD0006.CSV）の欄（媒体通番・作成年月日・保存・印刷・中身を見る・直すところ）
  * ・UnionFilePanel：健康保険組合に出すファイル（KPFD0006.CSV）の欄（組合ごとに、媒体通番・保存・中身を見る・直すところ）
  * ・ShahoOfficeTable：届書の事業所の欄（事業所整理記号・事業所番号・所在地・名称・事業主氏名・電話番号）
+ * ・MyNumberToggle：届書にマイナンバーを書くか（事務取扱担当者だけ。useShahoMyNumbers）
  * ・shahoPrintStyle：印刷するときに、届書の内容だけを出す
  */
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
@@ -11,6 +12,7 @@ import type { HealthInsurer } from "../../utils/healthInsurer";
 import { nextMediaNumber } from "../../utils/shahoCsv";
 import { groupByUnion, type UnionRecord } from "../../utils/unionReport";
 import type { ShahoFile } from "./useShahoFile";
+import type { ShahoMyNumbers } from "./useShahoMyNumbers";
 
 export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint, canPrint, onSave, children }: {
   file: ShahoFile;
@@ -69,6 +71,22 @@ export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint
       )}
       <div style={{ ...small, marginTop: 6 }}>電子申請用のファイルの形は、厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」{SHAHO_SPEC_VERSION}による。</div>
     </>
+  );
+}
+
+/**
+ * 届書にマイナンバー（個人番号）を書くかの欄。事務取扱担当者だけが選べ、ほかの人には基礎年金番号で届けることを出す
+ * @param who 書く人（「70歳以上被用者」など。なければ、登録してある人）
+ */
+export function MyNumberToggle({ my, who }: { my: ShahoMyNumbers; who?: string }) {
+  if (!my.access) {
+    return <div style={{ ...small, marginTop: 4 }}>マイナンバーは、事務取扱担当者だけが届書に書けます。いまは基礎年金番号で届けます。</div>;
+  }
+  return (
+    <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
+      <input type="checkbox" checked={my.use} onChange={(e) => my.setUse(e.target.checked)} />
+      マイナンバーを書く（{who ? `${who}で、` : ""}登録してある人。保存するときだけ番号を読みます）
+    </label>
   );
 }
 

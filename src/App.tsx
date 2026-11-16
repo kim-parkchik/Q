@@ -31,6 +31,8 @@ import {
   Scale,
   FileCheck,
   UserPlus,
+  UsersRound,
+  MapPin,
   FileHeart,
 } from 'lucide-react';
 import * as S from "./App.styles";
@@ -57,6 +59,8 @@ import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
 import BonusReportManager from "./features/payroll/BonusReportManager";
 import ShikakuReportManager from "./features/payroll/ShikakuReportManager";
+import FuyouReportManager from "./features/payroll/FuyouReportManager";
+import HenkoReportManager from "./features/payroll/HenkoReportManager";
 import LeaveReportManager from "./features/payroll/LeaveReportManager";
 import LeaveEndRevisionManager from "./features/payroll/LeaveEndRevisionManager";
 import YouikuTokureiManager from "./features/payroll/YouikuTokureiManager";
@@ -92,6 +96,8 @@ const TAB_NAMES: Record<string, string> = {
   zuiji: "月変（随時改定）",
   shoyotodoke: "賞与支払届",
   shikaku: "資格取得・喪失届",
+  fuyou: "被扶養者（異動）届",
+  henko: "住所・氏名の変更届",
   menjo: "産休・育休の申出書",
   kyugyo: "休業終了時改定",
   youiku: "養育期間の特例",
@@ -123,6 +129,8 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   zuiji: <TrendingUp size={18} />,
   shoyotodoke: <FileCheck size={18} />,
   shikaku: <UserPlus size={18} />,
+  fuyou: <UsersRound size={18} />,
+  henko: <MapPin size={18} />,
   menjo: <FileHeart size={18} />,
   kyugyo: <Baby size={18} />,
   youiku: <HeartHandshake size={18} />,
@@ -301,6 +309,8 @@ function App() {
             "zuiji",
             "shoyotodoke",
             "shikaku",
+            "fuyou",
+            "henko",
             "menjo",
             "kyugyo",
             "youiku",
@@ -316,7 +326,7 @@ function App() {
             "choubo"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "menjo", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -432,16 +442,22 @@ function App() {
                 <BonusManager db={db} staffList={staffList} />
               )}
               {activeTab === "santei" && db && (
-                <SanteiManager db={db} staffList={staffList} onDataChange={refreshData} />
+                <SanteiManager db={db} staffList={staffList} onDataChange={refreshData} currentUser={currentUser} />
               )}
               {activeTab === "zuiji" && db && (
-                <ZuijiManager db={db} staffList={staffList} onDataChange={refreshData} />
+                <ZuijiManager db={db} staffList={staffList} onDataChange={refreshData} currentUser={currentUser} />
               )}
               {activeTab === "shoyotodoke" && db && (
-                <BonusReportManager db={db} />
+                <BonusReportManager db={db} currentUser={currentUser} />
               )}
               {activeTab === "shikaku" && db && (
                 <ShikakuReportManager db={db} staffList={staffList} currentUser={currentUser} />
+              )}
+              {activeTab === "fuyou" && db && (
+                <FuyouReportManager db={db} staffList={staffList} currentUser={currentUser} onDataChange={refreshData} />
+              )}
+              {activeTab === "henko" && db && (
+                <HenkoReportManager db={db} staffList={staffList} />
               )}
               {activeTab === "menjo" && db && (
                 <LeaveReportManager db={db} staffList={staffList} currentUser={currentUser} onDataChange={refreshData} />

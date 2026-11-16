@@ -3,9 +3,18 @@
  * 産休・育休が終わった後3か月の給与で、標準報酬月額が1等級以上変わる人を探し、4か月目の分から履歴に登録する。
  * 判定のきまりは utils/leaveEndRevision.ts
  */
+import { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
+import dayjs from "dayjs";
+import * as Master from "../../constants";
 import { useLeaveEndRevisionManager, type LeaveEndRow } from "./useLeaveEndRevisionManager";
+import { groupOf } from "../../utils/santei";
+import { payRuleText } from "../../utils/remunerationReport";
+import { leaveEndForm } from "../../utils/printForms";
+import { useShahoFile } from "./useShahoFile";
+import { PrintFormSheet } from "./PrintFormSheet";
+import { shahoPrintStyle } from "./ShahoFilePanel";
 import { LEAVE_END_STATUS_LABELS, LEAVE_TYPE_LABELS } from "../../utils/leaveEndRevision";
 import { SANTEI_WORKER_KIND_LABELS, type SanteiWorkerKind } from "../../utils/santei";
 
@@ -28,14 +37,54 @@ const STATUS_COLORS: Record<string, string> = {
   target: "#2563eb", same: "#64748b", days: "#64748b", followed: "#64748b", pending: "#b45309", not_enrolled: "#94a3b8",
 };
 
+/** 届書の内容を出す行で、画面で入れるもの（申出日・提出日・子の氏名と生年月日） */
+interface ReportEdit {
+  appliedOn: string;
+  submittedOn: string;
+  childName: string;
+  childBirthday: string;
+}
+const PRINT_ID = "leave-end-report-print";
+
 export default function LeaveEndRevisionManager({ db, staffList, onDataChange }: Props) {
   const z = useLeaveEndRevisionManager(db, staffList, onDataChange);
+  const file = useShahoFile(db);
+  // 届書の内容を出す行（本人から申出があった人）
+  const [reports, setReports] = useState<Record<string, ReportEdit>>({});
+  const [printRequest, setPrintRequest] = useState(0);
+  useEffect(() => { if (printRequest > 0) window.print(); }, [printRequest]);
+  const today = dayjs().format("YYYY-MM-DD");
+  const startReport = (r: LeaveEndRow) => setReports((prev) => ({
+    ...prev,
+    [r.key]: prev[r.key] ?? {
+      appliedOn: today, submittedOn: today,
+      childName: r.leave.type === "childcare" ? r.leave.childName ?? "" : "",
+      childBirthday: r.leave.type === "childcare" ? r.leave.childBirthday ?? "" : r.leave.birthDate ?? "",
+    },
+  }));
+  const reportRows = z.rows.filter((r) => reports[r.key]);
+  const forms = reportRows.map((r) => {
+    const e = reports[r.key];
+    const [ry, rm] = r.revisionFrom.split("-").map(Number);
+    const master = Master.getInsuranceMaster(ry, rm);
+    return {
+      row: r,
+      form: leaveEndForm({
+        staff: r.staff, type: r.leave.type, leaveEnd: r.leave.end, childName: e.childName, childBirthday: e.childBirthday,
+        months: r.months, usedIndexes: r.judgement.usedIndexes, average: r.judgement.average, previous: r.previous,
+        pensionRange: { min: master.PENSION_MIN_HYOJUN, max: master.PENSION_MAX_HYOJUN }, gradeDiff: r.judgement.gradeDiff,
+        revisionFrom: r.revisionFrom, payRule: payRuleText(groupOf(r.staff, z.groups)), short: r.kind === "short", part: r.kind === "part",
+        submittedOn: e.submittedOn, appliedOn: e.appliedOn, myNumber: false,
+      }),
+    };
+  });
   const thisYear = new Date().getFullYear();
   const years = Array.from({ length: thisYear - 2020 + 2 }, (_, i) => 2020 + i);
 
   return (
     <div style={{ maxWidth: 1250, margin: "0 auto" }}>
-      <div style={card}>
+      <style>{shahoPrintStyle(PRINT_ID, false)}</style>
+      <div style={card} className="no-print">
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <select value={z.year} onChange={(e) => z.setYear(Number(e.target.value))} style={select}>
             {years.map((y) => <option key={y} value={y}>{y}年に産休・育休が終わった人</option>)}
@@ -70,16 +119,44 @@ export default function LeaveEndRevisionManager({ db, staffList, onDataChange }:
               {z.rows.length === 0 && !z.isLoading && (
                 <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={7}>{z.year}年に産休・育休が終わった人はいません（従業員画面の「休業・休職」に、産前産後休業・育児休業の終了日を入れた人が出ます）</td></tr>
               )}
-              {z.rows.map((r) => <LeaveEndTableRow key={r.key} r={r} z={z} />)}
+              {z.rows.map((r) => <LeaveEndTableRow key={r.key} r={r} z={z} onReport={reports[r.key] ? undefined : () => startReport(r)} />)}
             </tbody>
           </table>
         </div>
       </div>
+
+      {forms.length > 0 && (
+        <div style={card} id={PRINT_ID}>
+          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <b style={{ fontSize: 14 }}>届書の内容（産前産後休業・育児休業等終了時報酬月額変更届）</b>
+            <button onClick={() => setPrintRequest((n) => n + 1)} style={{ padding: "6px 12px", border: "none", borderRadius: 6, color: "white", fontWeight: "bold", fontSize: 12, backgroundColor: "#2563eb", cursor: "pointer" }}>印刷する</button>
+          </div>
+          <p className="no-print" style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px", lineHeight: 1.7 }}>
+            この届書は電子申請用のファイルの形がないので、紙の届書に書き写すか、e-Gov の画面で入れます。マイナンバーを書くときは、届書に手で書きます（印刷しません）。
+          </p>
+          {forms.map(({ row: r, form }) => {
+            const e = reports[r.key];
+            const set = (patch: Partial<ReportEdit>) => setReports((prev) => ({ ...prev, [r.key]: { ...prev[r.key], ...patch } }));
+            return (
+              <div key={r.key}>
+                <div className="no-print" style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, marginBottom: 6, alignItems: "center" }}>
+                  <label>申出日 <input type="date" value={e.appliedOn} onChange={(ev) => set({ appliedOn: ev.target.value })} style={select} /></label>
+                  <label>提出日 <input type="date" value={e.submittedOn} onChange={(ev) => set({ submittedOn: ev.target.value })} style={select} /></label>
+                  <label>子の氏名 <input value={e.childName} onChange={(ev) => set({ childName: ev.target.value })} style={select} /></label>
+                  <label>子の生年月日 <input type="date" value={e.childBirthday} onChange={(ev) => set({ childBirthday: ev.target.value })} style={select} /></label>
+                  <button onClick={() => setReports((prev) => { const next = { ...prev }; delete next[r.key]; return next; })} style={{ fontSize: 12, cursor: "pointer" }}>閉じる</button>
+                </div>
+                <PrintFormSheet form={form} office={file.office.values} />
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-function LeaveEndTableRow({ r, z }: { r: LeaveEndRow; z: ReturnType<typeof useLeaveEndRevisionManager> }) {
+function LeaveEndTableRow({ r, z, onReport }: { r: LeaveEndRow; z: ReturnType<typeof useLeaveEndRevisionManager>; onReport?: () => void }) {
   const j = r.judgement;
   const [ry, rm] = r.revisionFrom.split("-").map(Number);
   const canRegister = j.status === "target" && j.standard !== null;
@@ -142,6 +219,11 @@ function LeaveEndTableRow({ r, z }: { r: LeaveEndRow; z: ReturnType<typeof useLe
             style={{ padding: "6px 10px", border: "none", borderRadius: 6, color: "white", fontWeight: "bold", fontSize: 12, backgroundColor: "#2563eb", cursor: "pointer", whiteSpace: "nowrap" }}
           >
             {ry}年{rm}月分から登録
+          </button>
+        )}
+        {canRegister && onReport && (
+          <button onClick={onReport} style={{ display: "block", marginTop: 6, padding: "5px 8px", border: "1px solid #2563eb", borderRadius: 6, color: "#2563eb", backgroundColor: "white", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}>
+            届書の内容を出す
           </button>
         )}
       </td>

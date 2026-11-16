@@ -85,7 +85,7 @@ export function RemunerationReportTable({ rows, rowKey, onRemarks, onReason }: {
           <th style={th}>⑫現物</th>
           <th style={th}>⑬合計</th>
           <th style={th}>⑭総計・⑮平均額・<br />⑯修正平均額</th>
-          <th style={th}>⑰基礎年金番号<br />（70歳以上被用者）</th>
+          <th style={th}>⑰個人番号・基礎年金番号<br />（70歳以上被用者）</th>
           <th style={{ ...th, minWidth: 180 }}>⑱備考</th>
           <th style={{ ...th, minWidth: 200 }} className="no-print">確かめること</th>
         </tr>
@@ -124,7 +124,7 @@ export function RemunerationReportTable({ rows, rowKey, onRemarks, onReason }: {
               </td>
               {i === 0 && (
                 <>
-                  <td style={td} {...span}>{r.basicPensionNumber}</td>
+                  <td style={td} {...span}>{r.myNumber ? "マイナンバー" : r.basicPensionNumber}</td>
                   <td style={td} {...span}>
                     {(isGeppen(r) ? geppenFlags(r) : santeiFlags(r)).map((t) => <div key={t}>{t}</div>)}
                     {isGeppen(r) && (

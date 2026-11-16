@@ -17,6 +17,7 @@
  */
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import { MyNumberUnlockProvider } from "../../src/features/mynumber/MyNumberUnlock";
 import { ToastProvider } from "../../src/components/Toast";
 import { MessageDialogProvider } from "../../src/components/MessageDialog";
 import BonusReportManager from "../../src/features/payroll/BonusReportManager";
@@ -129,7 +130,9 @@ function Page() {
 createRoot(document.getElementById("root")!).render(
   <ToastProvider>
     <MessageDialogProvider>
-      <Page />
+      <MyNumberUnlockProvider>
+        <Page />
+      </MyNumberUnlockProvider>
     </MessageDialogProvider>
   </ToastProvider>,
 );

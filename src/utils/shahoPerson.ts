@@ -5,9 +5,11 @@
  * ・被保険者氏名（カナは半角カナで姓と名の間に半角スペース。漢字は書けない字がある・12文字を超える・姓と名の間に
  *   スペースがないときは書かない（カナの氏名で届く））
  * ・生年月日（元号のコードと、年・月・日を2文字ずつ）
- * ・基礎年金番号（上4けたの課所符号と下6けたの一連番号）。賞与支払届・算定基礎届・月額変更届は70歳以上被用者のとき書く
- *   （個人番号でも届けられるが、Q ではまだ使わない）。資格取得届・資格喪失届・産休と育休の申出書は、個人番号を書かない人は必ず書く
+ * ・基礎年金番号（上4けたの課所符号と下6けたの一連番号）。賞与支払届・算定基礎届・月額変更届は70歳以上被用者のとき、
+ *   個人番号（マイナンバー）か基礎年金番号を書く。どの届書も、個人番号を書かない人は基礎年金番号を必ず書く
  * 年齢：70歳に達した日（誕生日の前日）から厚生年金の資格がなく（70歳以上被用者）、75歳の誕生日から健康保険の資格もない
+ *   （65歳から74歳で、広域連合の障害認定を受けて後期高齢者医療の被保険者になった人は、その日から健康保険の資格がない。
+ *   従業員の画面の「後期高齢者医療の障害認定」の日。日本年金機構「資格喪失届」の喪失原因「障害認定（健康保険のみ喪失）」）
  * 出典：厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」（src/constants/shahoTodoke.ts の各データレコードの項目説明）
  */
 import { SHAHO_BIRTH_ERA_CODES, type ShahoField } from "../constants/shahoTodoke";
@@ -19,11 +21,42 @@ export const reach70Date = (birthday: string): string => birthdayAt(birthday, 70
 /** 75歳の誕生日。この日から健康保険の資格がない（後期高齢者医療） */
 export const reach75Date = (birthday: string): string => birthdayAt(birthday, 75).format("YYYY-MM-DD");
 
+/** 後期高齢者医療の障害認定を受けた日（従業員の画面に入れた日。なければ null） */
+export const koukiDisabilityDate = (staff: any): string | null => {
+  const d = String(staff?.kouki_date ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+};
+
+/** 健康保険だけ資格を失う理由（資格喪失届の喪失原因「75歳到達（健康保険のみ喪失）」「障害認定（健康保険のみ喪失）」） */
+export type HealthLossCause = "75歳到達" | "障害認定";
+
+/**
+ * 健康保険の資格を失う日と理由：75歳の誕生日か、それより前に後期高齢者医療の障害認定を受けた日（どちらもその日に資格を失う）
+ * 生年月日も障害認定の日もなければ null
+ */
+export const healthLossOf = (staff: any): { date: string; cause: HealthLossCause } | null => {
+  const birthday = String(staff?.birthday ?? "");
+  const r75 = birthday ? reach75Date(birthday) : null;
+  const kouki = koukiDisabilityDate(staff);
+  if (kouki && (!r75 || kouki < r75)) return { date: kouki, cause: "障害認定" };
+  return r75 ? { date: r75, cause: "75歳到達" } : null;
+};
+
+/** 日付 on の時点で、健康保険の資格がないか（75歳の誕生日・障害認定の日から） */
+export const noHealthOn = (staff: any, on: string): boolean => {
+  const loss = healthLossOf(staff);
+  return !!loss && loss.date <= on;
+};
+
 /** 基礎年金番号（10けた）を、上4けた（課所符号）と下6けた（一連番号）に分ける。10けたでなければ null */
 export const splitBasicPensionNumber = (value: string | null | undefined): [string, string] | null => {
   const digits = String(value ?? "").normalize("NFKC").replace(/[^0-9]/g, "");
   return digits.length === 10 ? [digits.slice(0, 4), digits.slice(4)] : null;
 };
+
+/** 70歳以上被用者の基礎年金番号がないときの知らせ（賞与支払届・算定基礎届・月額変更届） */
+export const OVER70_BASIC_REASON =
+  "70歳以上被用者なので、マイナンバーか基礎年金番号を書きます。基礎年金番号（10けた）を従業員の画面に入れるか、マイナンバーを登録して「マイナンバーを書く」にしてください";
 
 /** 直すところが、どの項目のことか（届書ごとの項目の番号に読み替えて、項目の決まりで同じことを2回知らせないようにする） */
 export type ShahoPersonPart = "pensionNumber" | "kana" | "birth" | "basic";
@@ -47,7 +80,7 @@ export interface ShahoPersonValues {
  * @param staff 従業員（pension_num・furigana・name・birthday・basic_pension_number）
  * @param options.kanjiField 届書の「被保険者氏名(漢字)」の項目の決まり（文字数の上限に使う）
  * @param options.withoutPensionNumber 被保険者整理番号を書かない（70歳以上被用者届のみ）
- * @param options.needBasic 基礎年金番号を書く（70歳以上被用者。個人番号を書かない人）
+ * @param options.needBasic 基礎年金番号を書く（個人番号を書かない人。賞与支払届などは70歳以上被用者だけ）
  * @param options.basicReason 基礎年金番号がないときの知らせ（なければ70歳以上被用者の知らせ）
  * @param options.birthEras 生年月日の元号のコード（届書によって違う。なければ賞与支払届などのもの）
  */
@@ -81,7 +114,7 @@ export const shahoPersonValues = (
   }
   const basic = options.needBasic ? splitBasicPensionNumber(staff.basic_pension_number) : null;
   if (options.needBasic && !basic) {
-    problems.push({ message: options.basicReason ?? "70歳以上被用者なので、基礎年金番号（10けた）を従業員の画面に入れてください", part: "basic" });
+    problems.push({ message: options.basicReason ?? OVER70_BASIC_REASON, part: "basic" });
   }
   return { pensionNumber, kana, kanji, birth, basic, problems, notes };
 };

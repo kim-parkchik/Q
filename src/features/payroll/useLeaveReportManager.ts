@@ -1,20 +1,23 @@
 /**
  * 産休・育休の申出書の画面の状態
  * ・産前産後休業取得者申出書／変更（終了）届、育児休業等取得者申出書（新規・延長）／終了届
- * ・従業員の画面の「休業・休職」に入れた期間ごとに1行。ファイルを保存したら、届け出た内容を期間に残し（staff.leave_periods の reported）、
+ * ・従業員の画面の「休業・休職」に入れた期間ごとに1行（同じ月のうちに始まって終わる育休が2つ以上ある月は、まとめて1行にし、
+ *   育休等取得内訳に書く。utils/leaveReport.ts の sameMonthChildcareGroups）。ファイルを保存したら、届け出た内容を期間に残し（staff.leave_periods の reported）、
  *   あとで期間を直したら、出す届書（変更・延長・終了）を出す（utils/leaveReport.ts の suggestSankyuKind・suggestIkukyuKind）
  * ファイルは useShahoFile（年金事務所に出す SHFD0006.CSV。産休・育休の申出書は健康保険組合に出すファイルの形がないので、
  * 健康保険組合の人は、組合の決まりで別に出す）、マイナンバーは useShahoMyNumbers
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { insurerOf, loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
 import dayjs from "dayjs";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { SHAHO_FILE_NAME } from "../../constants/shahoTodoke";
 import { writeLog } from "../../utils/logUtils";
 import { parseLeavePeriods, stringifyLeavePeriods, type LeavePeriod } from "../../utils/leaveExemption";
 import {
-  IKUKYU_KIND_LABELS, SANKYU_KIND_LABELS, buildIkukyuRow, buildSankyuRow, childcareReportedOf, maternityReportedOf, suggestIkukyuKind,
-  suggestSankyuKind, type ChildcareReported, type IkukyuKind, type LeaveReportRow, type MaternityReported, type SankyuKind,
+  IKUKYU_KIND_LABELS, SANKYU_KIND_LABELS, buildIkukyuRow, buildSankyuRow, childcareGroupReportedOf, childcareReportedOf, maternityReportedOf,
+  sameMonthChildcareGroups, suggestIkukyuGroupKind, suggestIkukyuKind, suggestSankyuKind,
+  type ChildcareReported, type IkukyuKind, type LeaveReportRow, type MaternityReported, type SankyuKind,
 } from "../../utils/leaveReport";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
 import { useShahoFile } from "./useShahoFile";
@@ -33,7 +36,21 @@ export interface LeaveEdit {
   /** 申出のときに届けた内容（変更・延長・終了の共通記載欄。直さなければ期間に残したもの） */
   reported: MaternityReported | ChildcareReported;
   workDays: number;
+  /** 同じ月の育休をまとめた行の、期間ごとの就業予定日数 */
+  groupWorkDays: number[];
   remarks: string;
+}
+
+/** 画面の1行の元（期間か、同じ月の育休をまとめたもの） */
+export interface LeaveItem {
+  key: string;
+  staff: any;
+  /** 期間（まとめた行は、初めの期間） */
+  leave: LeavePeriod;
+  index: number;
+  /** 同じ月のうちに始まって終わる育休をまとめた行の、期間（開始日の順） */
+  group: { leave: LeavePeriod; index: number }[] | null;
+  suggest: string | null;
 }
 
 /** 期間を見分ける印 */
@@ -47,28 +64,58 @@ export function useLeaveReportManager(db: any, staffList: any[], user: MyNumberU
   /** 届け出るものだけ出す（届けた内容のままの期間は出さない） */
   const [onlyPending, setOnlyPending] = useState(true);
   const [edits, setEdits] = useState<Record<string, LeaveEdit>>({});
+  /** 健康保険の保険者（健康保険組合の人は、組合にも申出書を出す。仕様書に組合に出すファイルの形がないので、組合の様式で） */
+  const [insurers, setInsurers] = useState<Map<number, HealthInsurer>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!db) return;
+      try {
+        const map = await loadHealthInsurers(db);
+        if (!cancelled) setInsurers(map);
+      } catch (e) {
+        console.error("社会保険規定の読み込みエラー:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [db]);
   const today = dayjs().format("YYYY-MM-DD");
   const type = mode === "sankyu" ? "maternity" : "childcare";
 
-  // 休業の期間（新しい順）と、次に出す届書
-  const periods = useMemo(() => staffList.flatMap((s) => parseLeavePeriods(s.leave_periods).map((leave, index) => ({ staff: s, leave, index })))
-    .filter((p) => p.leave.type === type)
-    .map((p) => ({ ...p, suggest: type === "maternity" ? suggestSankyuKind(p.leave) : suggestIkukyuKind(p.leave) }))
-    .sort((a, b) => b.leave.start.localeCompare(a.leave.start)), [staffList, type]);
+  // 休業の期間（新しい順）と、次に出す届書。同じ月のうちに始まって終わる育休が2つ以上あれば、まとめて1行
+  const periods = useMemo((): LeaveItem[] => staffList.flatMap((s) => {
+    const leaves = parseLeavePeriods(s.leave_periods);
+    const groups = type === "childcare" ? sameMonthChildcareGroups(leaves) : [];
+    const grouped = new Set(groups.flat());
+    const singles: LeaveItem[] = leaves.map((leave, index) => ({ leave, index }))
+      .filter((p) => p.leave.type === type && !grouped.has(p.index))
+      .map((p) => ({
+        key: keyOf(String(s.id), p.index), staff: s, leave: p.leave, index: p.index, group: null,
+        suggest: type === "maternity" ? suggestSankyuKind(p.leave) : suggestIkukyuKind(p.leave),
+      }));
+    const merged: LeaveItem[] = groups.map((g) => ({
+      key: `${s.id}#g${g.join(",")}`, staff: s, leave: leaves[g[0]], index: g[0],
+      group: g.map((i) => ({ leave: leaves[i], index: i })), suggest: suggestIkukyuGroupKind(g.map((i) => leaves[i])),
+    }));
+    return [...singles, ...merged];
+  }).sort((a, b) => b.leave.start.localeCompare(a.leave.start)), [staffList, type]);
   const shown = useMemo(() => (onlyPending ? periods.filter((p) => p.suggest !== null) : periods), [periods, onlyPending]);
 
-  const editOf = useCallback((staffId: string, index: number, leave: LeavePeriod, suggest: string | null): LeaveEdit => edits[keyOf(staffId, index)] ?? {
-    include: suggest !== null,
-    kind: suggest ?? (leave.type === "maternity" ? "change" : "extend"),
-    reported: leave.type === "maternity" ? maternityReportedOf(leave) : childcareReportedOf(leave),
+  const editOf = useCallback((item: LeaveItem): LeaveEdit => edits[item.key] ?? {
+    include: item.suggest !== null,
+    kind: item.suggest ?? (item.leave.type === "maternity" ? "change" : "extend"),
+    reported: item.leave.type === "maternity" ? maternityReportedOf(item.leave)
+      : item.group ? childcareGroupReportedOf(item.group.map((g) => g.leave)) : childcareReportedOf(item.leave),
     workDays: 0,
+    groupWorkDays: item.group?.map(() => 0) ?? [],
     remarks: "",
   }, [edits]);
-  const update = (staffId: string, index: number, leave: LeavePeriod, suggest: string | null, patch: Partial<LeaveEdit>) =>
-    setEdits((prev) => ({ ...prev, [keyOf(staffId, index)]: { ...editOf(staffId, index, leave, suggest), ...patch } }));
+  const update = (item: LeaveItem, patch: Partial<LeaveEdit>) =>
+    setEdits((prev) => ({ ...prev, [item.key]: { ...editOf(item), ...patch } }));
 
-  const rows = useMemo(() => shown.map(({ staff, leave, index, suggest }) => {
-    const e = editOf(String(staff.id), index, leave, suggest);
+  const rows = useMemo(() => shown.map((item) => {
+    const { staff, leave, index } = item;
+    const e = editOf(item);
     const myNumber = my.writes(String(staff.id));
     const row: LeaveReportRow = leave.type === "maternity"
       ? buildSankyuRow({
@@ -78,10 +125,14 @@ export function useLeaveReportManager(db: any, staffList: any[], user: MyNumberU
       : buildIkukyuRow({
         staff, leaveIndex: index, leave, kind: e.kind as IkukyuKind, reported: e.kind === "apply" ? null : e.reported as ChildcareReported,
         workDays: e.workDays, remarks: e.remarks, myNumber, today,
-        sameMonthLeaves: parseLeavePeriods(staff.leave_periods).filter((p) => p.type === "childcare" && p.start.slice(0, 7) === leave.start.slice(0, 7)).length,
+        group: item.group?.map((g, i) => ({ leave: g.leave, leaveIndex: g.index, workDays: e.groupWorkDays[i] ?? 0 })),
       }, file.office.values);
-    return { staff, leave, index, suggest, edit: e, row };
-  }), [shown, editOf, my.writes, today, file.office]);
+    const insurer = insurerOf(insurers, staff.social_insurance_group_id);
+    if (insurer?.type === "union") {
+      row.notes.push(`健康保険組合（${insurer.name}）にも、組合の様式で申出書を出します（下の「健康保険組合に出す申出書」。電子申請用のファイルの形が仕様書にないので、内容を印刷します）`);
+    }
+    return { ...item, edit: e, row, union: insurer?.type === "union" ? insurer : null };
+  }), [shown, editOf, my.writes, today, file.office, insurers]);
 
   const included = rows.filter((r) => r.edit.include).map((r) => r.row);
   const blocked = [...new Set(included.flatMap((r) => r.problems.map((p) => `${r.name}：${p}`)))];
@@ -106,7 +157,10 @@ export function useLeaveReportManager(db: any, staffList: any[], user: MyNumberU
         const staff = staffList.find((s) => String(s.id) === staffId);
         const leaves = parseLeavePeriods(staff?.leave_periods);
         for (const r of included.filter((x) => x.staffId === staffId)) {
-          if (leaves[r.leaveIndex]) leaves[r.leaveIndex] = { ...leaves[r.leaveIndex], reported: r.reported };
+          // 同じ月の育休をまとめた届書は、期間ごとに届け出た内容を残す
+          for (const { leaveIndex, reported } of r.group ?? [{ leaveIndex: r.leaveIndex, reported: r.reported }]) {
+            if (leaves[leaveIndex]) leaves[leaveIndex] = { ...leaves[leaveIndex], reported };
+          }
         }
         await db.execute("UPDATE staff SET leave_periods = ? WHERE id = ?", [stringifyLeavePeriods(leaves) || null, staffId]);
       }

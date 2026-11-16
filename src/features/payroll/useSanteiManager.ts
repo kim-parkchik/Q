@@ -24,6 +24,8 @@ import { buildSanteiReport, payRuleText, type SanteiReportInput } from "../../ut
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { useShahoFile } from "./useShahoFile";
+import { useShahoMyNumbers } from "./useShahoMyNumbers";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 
 /**
  * 画面で選ぶ値（区分・登録するか・年間平均で申し立てるか・遡って支払った差額・届書の備考）と、
@@ -61,10 +63,12 @@ const defaultYear = () => {
 const withoutRetro = (months: SanteiMonth[], retro: Record<number, number>): SanteiMonth[] =>
   months.map((m) => (retro[m.month] && m.amount !== null ? { ...m, amount: Math.max(0, m.amount - retro[m.month]) } : m));
 
-export function useSanteiManager(db: Database, staffList: any[], onDataChange: () => void) {
+export function useSanteiManager(db: Database, staffList: any[], onDataChange: () => void, user: MyNumberUser | null = null) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const file = useShahoFile(db);
+  /** 70歳以上被用者の個人番号（事務取扱担当者が「マイナンバーを書く」にしたとき。保存するときだけ番号を読む） */
+  const my = useShahoMyNumbers(db, user);
   const [year, setYear] = useState(defaultYear());
   const [inputs, setInputs] = useState<RowInput[]>([]);
   const [data, setData] = useState<{ groups: any[]; salaries: SalaryRecord[]; insurers: Map<number, HealthInsurer> }>({ groups: [], salaries: [], insurers: new Map() });
@@ -187,6 +191,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
         insurer: insurerOf(data.insurers, r.staff.social_insurance_group_id),
         pensionRange: { min: pensionMaster.PENSION_MIN_HYOJUN, max: pensionMaster.PENSION_MAX_HYOJUN },
         remarks: r.remarks,
+        myNumber: my.writes(String(r.staff.id)),
       };
     });
     const built = buildSanteiReport(inputsForReport, file.office.values);
@@ -199,7 +204,11 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
     }
     return built;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, data, file.office, year, pensionMaster.PENSION_MIN_HYOJUN, pensionMaster.PENSION_MAX_HYOJUN]);
+  }, [rows, data, file.office, year, pensionMaster.PENSION_MIN_HYOJUN, pensionMaster.PENSION_MAX_HYOJUN, my.writes]);
+
+  /** 算定基礎届の電子申請用ファイルを保存する（70歳以上被用者のマイナンバーを書くときは、鍵を開けて番号を入れる） */
+  const saveReport = () =>
+    my.saveFile(file, report.map((r) => ({ staffId: r.staffId, name: r.name, values: r.values })), `算定基礎届（${year}年）`, report.length);
 
   /** 算定基礎届の電子申請用ファイルを作れない理由 */
   const reportBlocked: string[] = [
@@ -246,7 +255,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
     targets, excluded, selectedRows,
     updateRow, updateMonth, updateRetro, updateEarlierMonth, register,
     rateWarnings: ins.WARNINGS,
-    file, report, reportBlocked,
+    file, report, reportBlocked, my, saveReport,
     insurers: data.insurers,
     /** 健康保険組合に出すファイルを保存したあと（組合の媒体通番を読み直す） */
     reloadInsurers: async () => {

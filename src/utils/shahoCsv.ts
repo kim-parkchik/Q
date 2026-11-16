@@ -276,22 +276,57 @@ const myNumberDigits = (number: string | undefined): string => {
 };
 
 /**
- * マイナンバーを書く行（個人番号の項目が MY_NUMBER_PLACEHOLDER の行）の人のうち、読んだ番号がない・12桁でない人の従業員ID
- * （届書の画面を開いたあとで、マイナンバーの画面で番号を消したときなど。保存する前に確かめて、名前を知らせる）
- * @param numbers 従業員ID → 本人の個人番号
+ * 届書の行（個人番号の項目に MY_NUMBER_PLACEHOLDER を入れた行）
+ * persons：その項目が誰の番号か（項目の番号（0から）→ 本人は "self"・家族は utils/myNumber.ts の familyKey）。
+ * 書いていない項目は本人の番号（被扶養者（異動）届は、本人と配偶者・子などの番号を1つの行に書く）
  */
-export const missingMyNumbers = (rows: { staffId: string; values: string[] }[], numbers: Record<string, string>): string[] =>
-  [...new Set(rows.filter((r) => r.values.includes(MY_NUMBER_PLACEHOLDER)).map((r) => r.staffId))].filter((id) => !myNumberDigits(numbers[id]));
+export interface MyNumberRow {
+  staffId: string;
+  values: string[];
+  persons?: Record<number, string>;
+}
+
+/** 番号の表：従業員ID → 本人の番号（字）か、人（"self"・familyKey）→ 番号 */
+export type MyNumberTable = Record<string, string | Record<string, string>>;
+
+const SELF = "self";
+const numberOf = (numbers: MyNumberTable, staffId: string, person: string): string | undefined => {
+  const v = numbers[staffId];
+  return typeof v === "string" ? (person === SELF ? v : undefined) : v?.[person];
+};
+
+/** 行の、番号を書く人（従業員ID と人）。同じ人は1回だけ */
+export const myNumberPeople = (rows: MyNumberRow[]): { staffId: string; person: string }[] => {
+  const seen = new Map<string, { staffId: string; person: string }>();
+  for (const r of rows) {
+    r.values.forEach((v, i) => {
+      if (v !== MY_NUMBER_PLACEHOLDER) return;
+      const person = r.persons?.[i] ?? SELF;
+      seen.set(`${r.staffId}\u0000${person}`, { staffId: r.staffId, person });
+    });
+  }
+  return [...seen.values()];
+};
+
+/**
+ * マイナンバーを書く人のうち、読んだ番号がない・12桁でない人（従業員ID と人）
+ * （届書の画面を開いたあとで、マイナンバーの画面で番号を消したときなど。保存する前に確かめて、名前を知らせる）
+ */
+export const missingMyNumberPeople = (rows: MyNumberRow[], numbers: MyNumberTable): { staffId: string; person: string }[] =>
+  myNumberPeople(rows).filter((p) => !myNumberDigits(numberOf(numbers, p.staffId, p.person)));
+
+/** 番号を読めない人がいる行の従業員ID（本人か家族の番号がない人） */
+export const missingMyNumbers = (rows: MyNumberRow[], numbers: MyNumberTable): string[] =>
+  [...new Set(missingMyNumberPeople(rows, numbers).map((p) => p.staffId))];
 
 /**
  * データレコードの個人番号を、本当の番号にする（保存するとき）。番号がない人・12桁でない番号があれば止める
  * （先に missingMyNumbers で確かめて知らせる）
- * @param numbers 従業員ID → 本人の個人番号
  */
-export const fillMyNumbers = (rows: { staffId: string; values: string[] }[], numbers: Record<string, string>): string[][] =>
-  rows.map((r) => r.values.map((v) => {
+export const fillMyNumbers = (rows: MyNumberRow[], numbers: MyNumberTable): string[][] =>
+  rows.map((r) => r.values.map((v, i) => {
     if (v !== MY_NUMBER_PLACEHOLDER) return v;
-    const n = myNumberDigits(numbers[r.staffId]);
+    const n = myNumberDigits(numberOf(numbers, r.staffId, r.persons?.[i] ?? SELF));
     if (!n) throw new Error("マイナンバーを読めない人がいます（マイナンバーの画面で登録を確かめてください）");
     return n;
   }));

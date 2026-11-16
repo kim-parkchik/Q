@@ -3,9 +3,14 @@
  * 3歳未満の子を養育する人の申出を登録し、どの月の標準報酬月額が、年金額の計算で従前標準報酬月額とみなされるかを出す。
  * 判定のきまりは utils/youikuTokurei.ts
  */
+import { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import dayjs from "dayjs";
+import { youikuForm } from "../../utils/printForms";
+import { useShahoFile } from "./useShahoFile";
+import { PrintFormSheet } from "./PrintFormSheet";
+import { shahoPrintStyle } from "./ShahoFilePanel";
 import { Plus, Trash2 } from "lucide-react";
 import { useYouikuTokureiManager } from "./useYouikuTokureiManager";
 import { YOUIKU_END_REASON_LABELS, type YouikuEntry, type YouikuJudgement, type YouikuMonth } from "../../utils/youikuTokurei";
@@ -33,11 +38,41 @@ const yen = (n: number | null) => (n === null ? "—" : `${n.toLocaleString()}�
 const ymLabel = (m: { year: number; month: number } | null) => (m ? `${m.year}年${m.month}月` : "—");
 const dateLabel = (date: string) => { const [y, m, d] = date.split("-").map(Number); return `${y}年${m}月${d}日`; };
 
+/** 申出書・終了届の内容を出すときに入れるもの（子のフリガナ・養育開始年月日・初めての申出か・事業所の確認など） */
+interface ReportState {
+  index: number;
+  kind: "申出" | "終了";
+  childKana: string;
+  careStart: string;
+  first: boolean;
+  sameOffice: boolean;
+  previousOffice: string;
+  submittedOn: string;
+}
+const PRINT_ID = "youiku-report-print";
+
 export default function YouikuTokureiManager({ db, staffList, onDataChange }: Props) {
   const z = useYouikuTokureiManager(db, staffList, onDataChange);
+  const file = useShahoFile(db);
+  const [report, setReport] = useState<ReportState | null>(null);
+  const [printRequest, setPrintRequest] = useState(0);
+  useEffect(() => { if (printRequest > 0) window.print(); }, [printRequest]);
+  useEffect(() => { setReport(null); }, [z.selectedId]);
+  const reportJ = report ? z.judgements.find((j) => j.index === report.index) : undefined;
+  const startReport = (j: YouikuJudgement, kind: "申出" | "終了") => setReport({
+    index: j.index, kind, childKana: "", careStart: j.entry.childBirthday, first: true,
+    // 基準月がこの会社に入る前（入社前の会社の額を入れた）なら、養育し始めた月の前月の事業所は別
+    sameOffice: j.entry.basisOverride === null, previousOffice: "", submittedOn: z.today,
+  });
+  const form = report && reportJ && z.selectedStaff ? youikuForm({
+    staff: z.selectedStaff, kind: report.kind, childName: reportJ.entry.childName, childKana: report.childKana, childBirthday: reportJ.entry.childBirthday,
+    careStart: report.careStart, start: reportJ.entry.start, end: reportJ.entry.endDate, first: report.first, sameOffice: report.sameOffice,
+    previousOffice: report.previousOffice, submittedOn: report.submittedOn, appliedOn: reportJ.entry.appliedOn || report.submittedOn, myNumber: false,
+  }) : null;
 
   return (
     <div style={{ maxWidth: 1250, margin: "0 auto" }}>
+      <style>{shahoPrintStyle(PRINT_ID, false)}</style>
       <div style={card}>
         <p style={{ ...note, marginTop: 0, color: "#334155" }}>
           3歳未満の子を養育する人の標準報酬月額が、短時間勤務などで養育を始める前より下がったとき、本人が申し出れば、
@@ -162,14 +197,40 @@ export default function YouikuTokureiManager({ db, staffList, onDataChange }: Pr
           <p style={note}>まだ登録していません。「子を追加」から、申出書の内容を入れてください。</p>
         )}
         {z.selectedStaff && z.judgements.map((j) => (
-          <EntryEditor key={j.index} staff={z.selectedStaff} j={j} z={z} />
+          <EntryEditor key={j.index} staff={z.selectedStaff} j={j} z={z} onReport={(kind) => startReport(j, kind)} />
         ))}
       </div>
+
+      {report && form && (
+        <div style={card} id={PRINT_ID}>
+          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8, fontSize: 12 }}>
+            <b style={{ fontSize: 14 }}>{form.title}の内容</b>
+            <button onClick={() => setPrintRequest((n) => n + 1)} style={primaryButton}>印刷する</button>
+            <button onClick={() => setReport(null)} style={smallButton}>閉じる</button>
+          </div>
+          <div className="no-print" style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, marginBottom: 8, alignItems: "center" }}>
+            <label>提出日 <input type="date" value={report.submittedOn} onChange={(ev) => setReport({ ...report, submittedOn: ev.target.value })} style={select} /></label>
+            <label>子のフリガナ <input value={report.childKana} onChange={(ev) => setReport({ ...report, childKana: ev.target.value })} style={select} /></label>
+            {report.kind === "申出" && (
+              <>
+                <label>養育開始年月日 <input type="date" value={report.careStart} onChange={(ev) => setReport({ ...report, careStart: ev.target.value })} style={select} /></label>
+                <label><input type="checkbox" checked={report.first} onChange={(ev) => setReport({ ...report, first: ev.target.checked })} /> この子について初めての申出</label>
+                <label><input type="checkbox" checked={report.sameOffice} onChange={(ev) => setReport({ ...report, sameOffice: ev.target.checked })} /> 養育し始めた月の前月も、この会社に勤めていた</label>
+                {!report.sameOffice && <label>その月に勤めていた事業所 <input value={report.previousOffice} placeholder="所在地・名称" onChange={(ev) => setReport({ ...report, previousOffice: ev.target.value })} style={{ ...select, width: 260 }} /></label>}
+              </>
+            )}
+          </div>
+          <p className="no-print" style={{ ...note, marginTop: 0 }}>
+            この届書は電子申請用のファイルの形がないので、紙の届書に書き写すか、e-Gov の画面で入れます。本人と子のマイナンバーを書くときは、届書に手で書きます（印刷しません）。
+          </p>
+          <PrintFormSheet form={form} office={file.office.values} />
+        </div>
+      )}
     </div>
   );
 }
 
-function EntryEditor({ staff, j, z }: { staff: any; j: YouikuJudgement; z: ReturnType<typeof useYouikuTokureiManager> }) {
+function EntryEditor({ staff, j, z, onReport }: { staff: any; j: YouikuJudgement; z: ReturnType<typeof useYouikuTokureiManager>; onReport: (kind: "申出" | "終了") => void }) {
   const e = j.entry;
   const set = (patch: Partial<YouikuEntry>) => z.updateEntry(j.index, patch);
   // 養育特例開始年月日の候補：子の生年月日・入社日・保険料が免除される休業の終了日の翌日
@@ -197,6 +258,10 @@ function EntryEditor({ staff, j, z }: { staff: any; j: YouikuJudgement; z: Retur
             <Trash2 size={14} />
           </button>
         </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <button style={smallButton} onClick={() => onReport("申出")}>申出書の内容を出す（印刷）</button>
+        {(e.endDate || j.needsEndReport) && <button style={smallButton} onClick={() => onReport("終了")}>終了届の内容を出す（印刷）</button>}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, fontSize: 11, color: "#64748b", alignItems: "center" }}>
         養育特例開始年月日を：

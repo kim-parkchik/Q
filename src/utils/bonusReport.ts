@@ -10,14 +10,16 @@
  *   （健康保険の年度累計573万円・厚生年金の1か月150万円の上限は、年金機構が決める。届書には切り捨てた合計を書く）
  * ・同じ月に2回以上払ったときは、その月に払った額を合わせて届け出る。賞与支払年月日はその月の最後に払った日、備考の
  *   「同一月内の賞与合算」に初めに払った日を書く（すでに届け出た月に追加で払ったときも、合わせて届け出る）
- * ・70歳以上の人（厚生年金の資格を失った「70歳以上被用者」）は、備考の「70歳以上被用者」に印を付け、個人番号か基礎年金番号を書く。
+ * ・70歳以上の人（厚生年金の資格を失った「70歳以上被用者」）は、備考の「70歳以上被用者」に印を付け、個人番号（マイナンバー）か
+ *   基礎年金番号を書く（個人番号を書いたら、基礎年金番号は書かなくてよい）。
  *   75歳以上の人（健康保険の資格もない）は「70歳以上被用者届のみ提出」にし、被保険者整理番号は書かない
  * ・2つ以上の適用事業所で働いている人は、備考の「二以上勤務」に印を付ける
  * 電子申請用のファイルの項目（表4.9.1-1）：様式コード 2265700・事業所整理記号・被保険者整理番号・氏名（カナ・漢字）・
  *   生年月日（元号のコード＋和暦の年月日）・賞与支払年月日・通貨・現物・合計（1,000円未満切り捨て。1千万円以上は 9999999／9999000）・
  *   個人番号・基礎年金番号（上4けた・下6けた）・備考1〜3・70歳以上被用者届のみ提出
  * 現物で払った賞与は、賞与の支給項目に「現物で渡す」の印を付けた項目の額（確定した賞与の in_kind）。通貨は総支給からそれを除いた額。
- * 70歳以上被用者は基礎年金番号で届ける（個人番号でも届けられるが、まだ使わない）。
+ * 70歳以上被用者の個人番号は、事務取扱担当者が「マイナンバーを書く」にしたとき書く（画面・印刷には出さず、保存するときだけ入れる。
+ * features/payroll/useShahoMyNumbers.ts）。書かない人は基礎年金番号を書く。
  * 出典：日本年金機構 https://www.nenkin.go.jp/shinsei/kounen/tekiyo/shoyo/20140821.html
  *       https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html
  *       厚生労働省・日本年金機構「CSV形式届書作成仕様書（電子申請）」（src/constants/shahoTodoke.ts）
@@ -28,8 +30,8 @@ import { checkInsuredMonth, checkSocialInsEnrolled } from "./calcSalary";
 import type { HealthInsurer, InsurerType } from "./healthInsurer";
 import { unionRecordOf, type UnionRecord } from "./unionReport";
 import { checkLeaveExemptBonus, exemptLeavePeriodsOf } from "./leaveExemption";
-import { fieldProblem, shahoDate } from "./shahoCsv";
-import { reach70Date, reach75Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
+import { MY_NUMBER_PLACEHOLDER, shahoDate, valueProblem } from "./shahoCsv";
+import { noHealthOn, reach70Date, shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
 
 /** 1回の賞与の、1人に払った額（確定した賞与） */
 export interface BonusPayment {
@@ -66,6 +68,8 @@ export interface BonusReportRow {
   total: number;
   /** 70歳以上被用者・70歳以上被用者届のみ（75歳以上）・二以上勤務 */
   over70: boolean;
+  /** 個人番号（マイナンバー）を書く（70歳以上被用者で、書くと選んだ人。値は保存するときに入れる） */
+  myNumber: boolean;
   over70Only: boolean;
   multiOffice: boolean;
   /** 電子申請用ファイルの21項目 */
@@ -103,6 +107,7 @@ const insuredOn = (staff: any, date: string): boolean =>
  * @param payments その月（賞与を払った月）に払った、確定した賞与（1人1回ずつ）
  * @param office 事業所情報の12項目（utils/shahoCsv.ts の shahoOfficeValues。頭の3つが都道府県コード・郡市区符号・事業所記号）
  * @param insurerTypeOf 従業員の健康保険の保険者（健康保険組合・国民健康保険組合の70歳以上の人は、70歳以上被用者賞与支払届だけを出す）
+ * @param myNumberOf 個人番号（マイナンバー）を書く人か（登録してあって、事務取扱担当者が書くと選んだ人。70歳以上被用者だけに書く）
  */
 export const buildBonusReport = (
   staffList: any[],
@@ -110,6 +115,7 @@ export const buildBonusReport = (
   office: string[],
   insurerTypeOf: (staff: any) => InsurerType = () => "kyokai",
   insurerOf: (staff: any) => HealthInsurer | null = () => null,
+  myNumberOf: (staffId: string) => boolean = () => false,
 ): { rows: BonusReportRow[]; skipped: BonusReportSkipped[] } => {
   const rows: BonusReportRow[] = [];
   const skipped: BonusReportSkipped[] = [];
@@ -169,9 +175,11 @@ export const buildBonusReport = (
       );
     }
     // 年齢（支払った日で数える）：70歳に達した日から厚生年金の資格がなく（70歳以上被用者）、75歳の誕生日から健康保険の資格もない
+    // （後期高齢者医療の障害認定を受けた人は、その日から健康保険の資格がない）
     const birthday = String(staff.birthday ?? "");
     const over70 = !!birthday && lastPaid.paymentDate >= reach70Date(birthday);
-    const over75 = over70 && lastPaid.paymentDate >= reach75Date(birthday);
+    const noHealth = noHealthOn(staff, lastPaid.paymentDate);
+    const over75 = over70 && noHealth;
     // 75歳以上と、健康保険組合・国民健康保険組合の70歳以上の人は、年金事務所には70歳以上被用者の分だけを出す
     const over70Only = over70 && (over75 || insurerTypeOf(staff) !== "kyokai");
     const multiOffice = Number(staff.multi_office) === 1;
@@ -182,11 +190,13 @@ export const buildBonusReport = (
     if (checkLeaveExemptBonus(exemptLeavePeriodsOf(staff), lastPaid.paymentDate)) {
       notes.push("産前産後休業・育児休業等で保険料が免除される期間の賞与ですが、届け出ます（標準賞与額は年度の累計に入ります）");
     }
-    if (over75) notes.push("75歳以上（健康保険の資格もない）なので、「70歳以上被用者賞与支払届」だけを出します（被保険者整理番号は書きません）");
+    if (over75) notes.push("健康保険の資格もない人（75歳以上・後期高齢者医療の障害認定）なので、「70歳以上被用者賞与支払届」だけを出します（被保険者整理番号は書きません）");
     else if (over70Only) notes.push("健康保険組合・国民健康保険組合の70歳以上の人なので、年金事務所には「70歳以上被用者賞与支払届」だけを出します（被保険者整理番号は書きません）");
-    else if (over70) notes.push("70歳以上被用者なので、備考の「70歳以上被用者」に印を付け、基礎年金番号を書きます");
+    // 70歳以上被用者は、個人番号（マイナンバー）か基礎年金番号を書く
+    const myNumber = over70 && myNumberOf(staffId);
+    if (over70 && !over70Only) notes.push(`70歳以上被用者なので、備考の「70歳以上被用者」に印を付け、${myNumber ? "マイナンバー" : "基礎年金番号"}を書きます`);
 
-    const person = shahoPersonValues(staff, { kanjiField: SHAHO_BONUS_FIELDS[6], withoutPensionNumber: over70Only, needBasic: over70 });
+    const person = shahoPersonValues(staff, { kanjiField: SHAHO_BONUS_FIELDS[6], withoutPensionNumber: over70Only, needBasic: over70 && !myNumber });
     const { pensionNumber, kana, kanji, birth, basic } = person;
     person.problems.forEach((p) => problem(p.message, ...PERSON_FIELDS[p.part]));
     notes.push(...person.notes);
@@ -204,22 +214,22 @@ export const buildBonusReport = (
       pensionNumber, kana, kanji,
       birth?.era ?? "", birth?.ymd ?? "", pay?.era ?? "", pay?.ymd ?? "",
       currencyText, inKindText, totalText,
-      "", basic?.[0] ?? "", basic?.[1] ?? "",
+      myNumber ? MY_NUMBER_PLACEHOLDER : "", basic?.[0] ?? "", basic?.[1] ?? "",
       over70 ? "1" : "", multiOffice ? "1" : "", firstPaymentDay, over70Only ? "1" : "",
     ];
     SHAHO_BONUS_FIELDS.forEach((f, i) => {
       if ((i >= 1 && i <= 3) || reported.has(i)) return; // 事業所整理記号は、事業所の情報で確かめる
-      const p = fieldProblem(f, values[i]);
+      const p = valueProblem(f, values[i]);
       if (p) problems.push(p);
     });
     // 健康保険組合の人（75歳未満）は、組合にも出す（年金事務所に70歳以上被用者届のみを出す人も、組合には健康保険の賞与を届ける）
     const insurer = insurerOf(staff);
-    const union = insurer?.type === "union" && !over75
+    const union = insurer?.type === "union" && !noHealth
       ? unionRecordOf(insurer, staff, values, SHAHO_BONUS_UNION_FIELDS, { 4: String(staff.pension_num ?? "").normalize("NFKC").trim() }, true)
       : null;
     rows.push({
       staffId, name, pensionNumber, kana, kanji, birthday, paymentDate: lastPaid.paymentDate, firstPaymentDay,
-      bonusNames: insured.map((p) => p.name), currency, inKind, total, over70, over70Only, multiOffice,
+      bonusNames: insured.map((p) => p.name), currency, inKind, total, over70, myNumber, over70Only, multiOffice,
       values, union, problems: [...new Set(problems)], notes,
     });
   }

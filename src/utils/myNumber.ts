@@ -15,6 +15,8 @@
  *   ・要らなくなり、保存期間を過ぎたら、できるだけ早く消し、消した記録を残す（物理的安全管理措置 d）
  * ■ 番号は my_numbers の表に置く（従業員の一覧 staff.* に入って、どの画面にも読み込まれないように）。
  *   本人は "self"、家族は氏名と生年月日で結び付ける（年末調整の申告書は毎年入れ直すので、年をまたいで同じ人に使う）
+ * ■ 家族は、年末調整の申告書の配偶者・扶養親族と、従業員の画面の「健康保険の被扶養者」（被扶養者（異動）届に書く。
+ *   utils/healthDependents.ts）を合わせて出す
  */
 
 import type { NenchoDeclaration } from "./nenchoDeclaration";
@@ -70,7 +72,24 @@ export interface MyNumberEntry {
   orphan: boolean;
   /** 申告書に出てくる年（家族だけ） */
   years: number[];
+  /** 健康保険の被扶養者（従業員の画面に入れた人）か。被扶養者でなくなった日（でなくなっていなければ空） */
+  health?: { until: string };
 }
+
+/** 健康保険の被扶養者（staff.health_dependents の JSON の、番号に使う項目だけ読む） */
+const healthDependentsOf = (json: string | null | undefined): { name: string; birthday: string; relation: string; until: string }[] => {
+  if (!json) return [];
+  try {
+    const list = JSON.parse(json);
+    if (!Array.isArray(list)) return [];
+    return list.filter((d) => d && typeof d.name === "string" && typeof d.birthday === "string").map((d) => ({
+      name: d.name.trim(), birthday: d.birthday, relation: d.spouse === true ? "配偶者" : (typeof d.relation === "string" ? d.relation : "被扶養者"),
+      until: typeof d.until === "string" ? d.until : "",
+    }));
+  } catch {
+    return [];
+  }
+};
 
 export interface MyNumberStaffRow {
   staffId: string;
@@ -84,7 +103,7 @@ export interface MyNumberStaffRow {
  * 家族は氏名と生年月日で1人にまとめ、いちばん新しい年の申告書の氏名・続柄を出す
  */
 export const buildMyNumberList = (
-  staff: { id: string | number; name?: string | null; retirement_date?: string | null }[],
+  staff: { id: string | number; name?: string | null; retirement_date?: string | null; health_dependents?: string | null }[],
   declarations: { staffId: string; year: number; declaration: NenchoDeclaration }[],
   registered: { staffId: string; person: string; name?: string | null; relation?: string | null }[],
 ): MyNumberStaffRow[] =>
@@ -107,6 +126,15 @@ export const buildMyNumberList = (
           years: [...(before?.years ?? []), d.year].filter((y, i, a) => a.indexOf(y) === i),
         });
       }
+    }
+    // 健康保険の被扶養者（申告書にいない家族も出す。申告書にいれば、被扶養者の印を付ける）
+    for (const d of healthDependentsOf(s.health_dependents)) {
+      if (!d.name || !d.birthday) continue;
+      const key = familyKey(d.name, d.birthday);
+      const before = family.get(key);
+      family.set(key, before
+        ? { ...before, health: { until: d.until } }
+        : { key, name: d.name, relation: d.relation, birthday: d.birthday, registered: mine.has(key), orphan: false, years: [], health: { until: d.until } });
     }
     for (const [key, r] of mine) {
       if (key === SELF_KEY || family.has(key)) continue;

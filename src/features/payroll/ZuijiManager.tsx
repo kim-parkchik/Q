@@ -13,12 +13,14 @@ import { ymOf } from "../../utils/santeiAnnual";
 import { ZUIJI_ANNUAL_STATUS_LABELS, type ZuijiAnnualStatus } from "../../utils/zuijiAnnual";
 import { warekiMonth, type GeppenReportRow } from "../../utils/remunerationReport";
 import { RemunerationReportTable } from "./RemunerationReportTable";
-import { ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, fieldStyle, input as fieldInput, labelStyle, shahoPrintStyle } from "./ShahoFilePanel";
+import { MyNumberToggle, ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, fieldStyle, input as fieldInput, labelStyle, shahoPrintStyle } from "./ShahoFilePanel";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 
 interface Props {
   db: Database;
   staffList: any[];
   onDataChange: () => void;
+  currentUser?: MyNumberUser | null;
 }
 
 const card: React.CSSProperties = { backgroundColor: "white", padding: 20, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", marginBottom: 16 };
@@ -48,8 +50,8 @@ const STATUS_COLORS: Record<string, string> = {
   target: "#2563eb", small: "#64748b", direction: "#64748b", days: "#64748b", pending: "#b45309", not_enrolled: "#94a3b8",
 };
 
-export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
-  const z = useZuijiManager(db, staffList, onDataChange);
+export default function ZuijiManager({ db, staffList, onDataChange, currentUser = null }: Props) {
+  const z = useZuijiManager(db, staffList, onDataChange, currentUser);
   const thisYear = new Date().getFullYear();
   const years = Array.from({ length: thisYear - 2020 + 2 }, (_, i) => 2020 + i);
 
@@ -146,6 +148,7 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
             <ShahoFilePanel
               file={z.file} dataLines={z.report.length > 0 ? z.report.map((r) => r.values.join(",")) : null} blocked={z.reportBlocked}
               label={`月額変更届（${warekiMonth(z.reportMonth)}改定）`} count={z.report.length} onPrint={() => window.print()} canPrint={z.report.length > 0}
+              onSave={z.saveReport}
             >
               <label style={fieldStyle}>
                 <span style={labelStyle}>改定年月</span>
@@ -155,7 +158,9 @@ export default function ZuijiManager({ db, staffList, onDataChange }: Props) {
                   ))}
                 </select>
               </label>
+              {z.my.access && <MyNumberToggle my={z.my} who="70歳以上被用者" />}
             </ShahoFilePanel>
+            {!z.my.access && <MyNumberToggle my={z.my} />}
             <UnionFilePanel file={z.file} insurers={z.insurers} rows={z.report} label={`月額変更届（${warekiMonth(z.reportMonth)}改定）`} onSaved={() => z.reloadInsurers()} />
             <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 8 }}>
               {z.reportCandidates.map((r) => (

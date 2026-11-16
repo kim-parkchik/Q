@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { SHAHO_IKUKYU_FIELDS, SHAHO_SANKYU_FIELDS } from "../constants/shahoTodoke";
 import type { LeavePeriod } from "./leaveExemption";
 import {
-  buildIkukyuRow, buildSankyuRow, leaveReportDeadline, maternityReportedOf, suggestIkukyuKind, suggestSankyuKind,
-  type IkukyuInput, type SankyuInput,
+  buildIkukyuRow, buildSankyuRow, leaveReportDeadline, maternityReportedOf, sameMonthChildcareGroups, suggestIkukyuGroupKind, suggestIkukyuKind,
+  suggestSankyuKind, type IkukyuInput, type SankyuInput,
 } from "./leaveReport";
 import { fillMyNumbers, shahoOfficeValues } from "./shahoCsv";
 
@@ -113,6 +113,44 @@ describe("育児休業等取得者申出書（新規・延長）／終了届", (
     expect(row.values.slice(20, 27)).toEqual(["9", "041010", "9", "041027", "18", "2", ""]);
     const short = buildIkukyuRow(ikukyu({ start: "2022-10-10", end: "2022-10-20" }, { staff: papa, today: "2022-10-28" }), office);
     expect(short.problems).toEqual(["同じ月のうちに始まって終わる育児休業等が11日で、14日に足りないので、保険料は免除されません（申出書は出せません）"]);
+  });
+
+  test("同じ月に2回以上取った育休は、1つの届書にまとめ、開始日に初めの日・終了予定日に最後の日、日数は合計、育休等取得内訳に1回ずつ書く", () => {
+    const papa = { ...masako, id: "2002", name: "年金　正男", furigana: "ネンキン マサオ", gender: "male" };
+    const child = { childName: "年金　正明", childKana: "ネンキン マサアキ", childBirthday: "2026-09-25" };
+    const leaves: LeavePeriod[] = [
+      { type: "childcare", start: "2026-10-01", end: "2026-10-07", ...child },
+      { type: "maternity", start: "2026-08-01", end: "2026-11-20" },
+      { type: "childcare", start: "2026-10-15", end: "2026-10-21", ...child },
+      { type: "childcare", start: "2026-12-01", end: "2027-03-31", ...child },
+    ];
+    // 同じ月のうちに始まって終わる育休が2つある10月だけ、まとめる（12月からの育休は月をまたぐので入れない）
+    expect(sameMonthChildcareGroups(leaves)).toEqual([[0, 2]]);
+    expect(suggestIkukyuGroupKind([leaves[0], leaves[2]])).toBe("apply");
+    const row = buildIkukyuRow(ikukyu(leaves[0], {
+      staff: papa, leaveIndex: 0, today: "2026-10-22",
+      group: [{ leave: leaves[0], leaveIndex: 0, workDays: 1 }, { leave: leaves[2], leaveIndex: 2, workDays: 2 }],
+    }), office);
+    expect(row.problems).toEqual([]);
+    // 開始日 10月1日・終了予定日 10月21日・取得日数 7＋7＝14日・就業予定日数 1＋2＝3日
+    expect(row.values.slice(20, 26)).toEqual(["9", "081001", "9", "081021", "14", "3"]);
+    // 内訳①（10月1日〜7日・7日・1日）・内訳②（10月15日〜21日・7日・2日）・③④は空
+    expect(row.values.slice(34, 46)).toEqual(["9", "081001", "9", "081007", "7", "1", "9", "081015", "9", "081021", "7", "2"]);
+    expect(row.values.slice(46)).toEqual(Array(10).fill(""));
+    expect(row.values).toHaveLength(SHAHO_IKUKYU_FIELDS.length);
+    expect(row.notes.join("")).toContain("育休等取得内訳に1回ずつ書きます");
+    // 期間ごとに、届け出た内容を残す
+    expect(row.group?.map((g) => [g.leaveIndex, g.reported.start, g.reported.end])).toEqual([[0, "2026-10-01", "2026-10-07"], [2, "2026-10-15", "2026-10-21"]]);
+    // 1回ずつでは14日に足りなくても、合わせて14日以上なら申出できる。合わせても足りなければ申出できない
+    const short = buildIkukyuRow(ikukyu(leaves[0], {
+      staff: papa, leaveIndex: 0, today: "2026-10-22",
+      group: [{ leave: leaves[0], leaveIndex: 0, workDays: 0 }, { leave: { ...leaves[2], end: "2026-10-18" }, leaveIndex: 2, workDays: 0 }],
+    }), office);
+    expect(short.problems).toEqual(["同じ月のうちに始まって終わる育児休業等が合わせて11日で、14日に足りないので、保険料は免除されません（申出書は出せません）"]);
+    // 届けたあとで、最後の期間を早く終えたら終了届
+    const reported = (l: LeavePeriod) => ({ ...l, reported: { kind: "apply", on: "2026-10-22", start: l.start, end: l.end } });
+    expect(suggestIkukyuGroupKind([reported(leaves[0]), reported(leaves[2])])).toBeNull();
+    expect(suggestIkukyuGroupKind([reported(leaves[0]), { ...reported(leaves[2]), end: "2026-10-19" }])).toBe("end");
   });
 
   test("延長：終了日を延ばしたら延長（共通記載欄は申出のときの開始日・終了予定日）", () => {

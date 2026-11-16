@@ -13,12 +13,14 @@ import { ANNUAL_STATUS_LABELS, ymOf, type AnnualStatus } from "../../utils/sante
 import { santeiReportPeriod } from "../../utils/remunerationReport";
 import { formatWareki } from "../../utils/wareki";
 import { RemunerationReportTable } from "./RemunerationReportTable";
-import { ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, shahoPrintStyle } from "./ShahoFilePanel";
+import { MyNumberToggle, ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, shahoPrintStyle } from "./ShahoFilePanel";
+import type { MyNumberUser } from "../mynumber/myNumberStore";
 
 interface Props {
   db: Database;
   staffList: any[];
   onDataChange: () => void;
+  currentUser?: MyNumberUser | null;
 }
 
 const card: React.CSSProperties = { backgroundColor: "white", padding: 20, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", marginBottom: 16 };
@@ -42,8 +44,8 @@ const ANNUAL_SHORT_LABELS: Record<AnnualStatus, string> = {
 /** 空欄は null（その月は給与を支払っていない扱い） */
 const toNumberOrNull = (v: string) => (v.trim() === "" ? null : Math.max(0, Math.floor(Number(v) || 0)));
 
-export default function SanteiManager({ db, staffList, onDataChange }: Props) {
-  const s = useSanteiManager(db, staffList, onDataChange);
+export default function SanteiManager({ db, staffList, onDataChange, currentUser = null }: Props) {
+  const s = useSanteiManager(db, staffList, onDataChange, currentUser);
   const { year, setYear, isLoading, isSaving, targets, excluded, selectedRows, updateRow, updateMonth, updateRetro, updateEarlierMonth, register, rateWarnings } = s;
   const period = santeiReportPeriod(year);
 
@@ -123,7 +125,11 @@ export default function SanteiManager({ db, staffList, onDataChange }: Props) {
         <ShahoFilePanel
           file={s.file} dataLines={s.report.length > 0 ? s.report.map((r) => r.values.join(",")) : null} blocked={s.reportBlocked}
           label={`算定基礎届（${year}年）`} count={s.report.length} onPrint={() => window.print()} canPrint={s.report.length > 0}
-        />
+          onSave={s.saveReport}
+        >
+          {s.my.access && <MyNumberToggle my={s.my} who="70歳以上被用者" />}
+        </ShahoFilePanel>
+        {!s.my.access && <MyNumberToggle my={s.my} />}
         <UnionFilePanel file={s.file} insurers={s.insurers} rows={s.report} label={`算定基礎届（${year}年）`} onSaved={() => s.reloadInsurers()} />
         <div style={{ fontSize: 13, fontWeight: "bold", color: "#b45309", marginTop: 6 }}>提出期間：{formatWareki(period.from)}〜{formatWareki(period.to)}</div>
       </div>

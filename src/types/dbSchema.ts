@@ -159,6 +159,8 @@ export const DB_SCHEMAS = [
     leave_periods TEXT,       -- 休業・休職の期間（産休・育休・介護休業・業務上の負傷や疾病による休業・その他の休職。JSON。社会保険料の免除は utils/leaveExemption.ts、給与・勤怠は utils/leaveOfAbsence.ts）
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
     in_kind TEXT,             -- 現物で払う報酬（食事・住宅（社宅・寮など）・その他（自社製品など）の期間ごとの行。JSON。詳しくは utils/genbutsu.ts）
+    kouki_date TEXT,          -- 後期高齢者医療の被保険者になった日（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts）
+    health_dependents TEXT,   -- 健康保険の被扶養者（配偶者・子など。被扶養者（異動）届・国民年金第3号被保険者関係届に書く。JSON。詳しくは utils/healthDependents.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
     FOREIGN KEY (payroll_group_id) REFERENCES payroll_groups(id),

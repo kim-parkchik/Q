@@ -26,6 +26,9 @@
   4.12.1 産前産後休業取得者申出書、4.13.1 育児休業等取得者申出書の項目構成と項目説明（様式コード・元号・種別などのコード）。
   多くの項目は「項番 項目名 種別 文字数」と並んでいるので図の名前で探して読み（generic_field）、字の並びが崩れている項目は項目ごとに読む。
   読んだ項目は、年金事務所提出と健康保険組合提出・賞与支払届の同じ項目と比べ、合わなければ止まる
+・4.10.1 被扶養者(異動)届・国民年金第3号被保険者関係届、4.11.1 国民年金第3号被保険者関係届の項目構成と項目説明（様式コード・
+  異動の別・続柄・理由・職業・海外特例などのコードと、表4.10.1-2 都道府県コード一覧）。この2つの表は枠がつながっていて
+  字の並びでは列がわからないので、字のまとまりの位置（scripts/pdf_to_chars.swift）で項番・種別・文字数の列に分けて読む（layout_table）
 
 ・PDF の文字は scripts/pdf_to_text.swift（macOS の PDFKit）で取り出す。全角は半角にし（NFKC）、空白を1つにまとめて読む。
 ・表の枠がつながっている項目（事業所整理記号・生年月日・基礎年金番号など）は、PDF から取り出した字の並びが崩れるので、
@@ -127,7 +130,7 @@ KIND_WORDS = ("数字", "英字", "カナ", "漢字", "文字", "-")
 
 
 def field(name, kinds, length, alt=None):
-    """種別（「数字」「数字 英字 カナ」）と文字数（「7」「1~4」「0~6」「0,12」）から、項目の決まりを作る"""
+    """種別（「数字」「数字 英字 カナ」）と文字数（「7」「1~4」「0~6」「0,12」「0,2~5」）から、項目の決まりを作る"""
     ks = kinds.split()
     if not ks or any(k not in KIND_WORDS for k in ks):
         fail(f"{name}の種別「{kinds}」を読めません")
@@ -137,8 +140,12 @@ def field(name, kinds, length, alt=None):
     elif re.fullmatch(r"\d+~\d+", length):
         a, b = map(int, length.split("~"))
         lengths = {"min": a, "max": b}
-    elif re.fullmatch(r"\d+(?:,\d+)+", length):
-        only = [int(x) for x in length.split(",")]
+    elif re.fullmatch(r"\d+(?:~\d+)?(?:,\d+(?:~\d+)?)+", length):
+        # 「0,12」は 0 文字か 12 文字、「0,2~5」は 0 文字か 2〜5 文字
+        only = []
+        for part in length.split(","):
+            a, _, b = part.partition("~")
+            only += list(range(int(a), int(b or a) + 1))
         lengths = {"min": min(only), "max": max(only), "only": only}
     else:
         fail(f"{name}の文字数「{length}」を読めません")
@@ -920,6 +927,296 @@ def read_double_byte_ranges(pages):
     return ranges
 
 
+# ── 被扶養者(異動)届・国民年金第3号被保険者関係届（4.10.1）と、国民年金第3号被保険者関係届（4.11.1） ──
+# この2つの表は、表の枠がつながっていて、字の並び（pdf_to_text.swift）では項番・種別・文字数の列がわからない。
+# そこで、字のまとまり（行）の位置（pdf_to_chars.swift）を読み、表の見出しの「種別」「文字数」の位置で列に分ける。
+# ページごとに、項番の列の番号（昇順）と、種別の列のまとまり（上から順。「数字 英字 カナ」は縦に並んで1つ。「漢字」のすぐ下の
+# 「数字 英字 カナ」は、カナなどで書くときの種別）と、文字数の列の値（上から順。折り返した「0,2~」「5」はつなぐ）を、
+# 上から順に結び付ける（数が合わなければ止まる）。
+
+LEN_HEAD = re.compile(r"^(\d+(?:~\d+)?(?:,\d+(?:~\d+)?)*[,~]?)(?:\s|$)")
+
+
+def read_positions(pdf, first, last):
+    """ページ first〜last の字のまとまりと位置（全角は半角にし（NFKC）、空白を1つにまとめる）"""
+    out = subprocess.run(["swift", str(SCRIPT_DIR / "pdf_to_chars.swift"), str(pdf), str(first), str(last)],
+                         check=True, capture_output=True, text=True).stdout
+    pages = {}
+    cur = None
+    for raw in out.splitlines():
+        m = re.match(r"=== page (\d+) ===$", raw)
+        if m:
+            cur = int(m.group(1))
+            pages[cur] = []
+            continue
+        x, y, w, h, text = raw.split("\t", 4)
+        pages[cur].append((float(x), float(y), float(w), float(h), re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).strip()))
+    return pages
+
+
+def layout_rows(lines, last_columns):
+    """1ページの表の、項番（昇順）・種別のまとまり（上から順）・文字数（上から順）。見出しのないページは前のページの列で読む"""
+    tops = {}
+    for x, y, w, h, t in lines:
+        if t in ("種別", "文字数") and (t not in tops or y > tops[t][1]):
+            tops[t] = (x, y)
+    if "種別" in tops and "文字数" in tops:
+        kx, top = tops["種別"]
+        lx = tops["文字数"][0]
+        # 項番の見出し（「項番」。「項」と「番 項目名」に分かれていることもある）の左の位置
+        heads = [x for x, y, w, h, t in lines if abs(y - top) < 20 and re.match(r"^(項番|項$|番)", t)]
+        if not heads:
+            fail(f"表の項番の見出しが見つかりません（{[t for x, y, w, h, t in lines if abs(y - top) < 20]}）")
+        nx = min(heads)
+    elif last_columns:
+        nx, kx, lx = last_columns
+        top = float("inf")
+    else:
+        return None, None
+    nums, kinds, lens, singles = [], [], [], []
+    for x, y, w, h, t in lines:
+        if y >= top - 1:
+            continue
+        t = t.replace("－", "-")
+        words = t.split(" ")
+        m = re.match(r"^(\d{1,3})(?:\s|$)", t)
+        if abs(x - nx) < 12 and m:
+            nums.append(int(m.group(1)))
+        if kx - 8 <= x < lx - 2:
+            if len(t) == 1:
+                singles.append((x, y, t))
+            kinds += [(y, wd) for wd in words if wd in KIND_WORDS]
+            if words[0] in KIND_WORDS and len(words) > 1:
+                m2 = LEN_HEAD.match(" ".join(words[1:]))
+                if m2:
+                    lens.append((y, m2.group(1)))
+        elif x < kx - 8 and x + w > kx + 4 and words[-1] in KIND_WORDS:
+            kinds.append((y, words[-1]))  # 項目名と種別がつながった行（「性別(続柄) 数字」）
+        if lx - 10 <= x < lx + 30:
+            m2 = LEN_HEAD.match(t)
+            if m2:
+                lens.append((y, m2.group(1)))
+    # 縦に並んだ1字（「数」「字」）を1つにする
+    singles.sort(key=lambda v: -v[1])
+    used = set()
+    for i, (x, y, t) in enumerate(singles):
+        for j in range(i + 1, len(singles)):
+            x2, y2, t2 = singles[j]
+            if i not in used and j not in used and abs(x2 - x) < 2 and 5 < y - y2 < 14 and t + t2 in KIND_WORDS:
+                kinds.append(((y + y2) / 2, t + t2))
+                used.update({i, j})
+    kinds.sort(key=lambda v: -v[0])
+    lens.sort(key=lambda v: -v[0])
+    joined = []
+    for y, v in lens:
+        if joined and joined[-1][1].endswith(("~", ",")) and 0 < joined[-1][0] - y < 16:
+            joined[-1] = (joined[-1][0], joined[-1][1] + v)
+        else:
+            joined.append((y, v))
+    groups = []
+    i = 0
+    while i < len(kinds):
+        y, k = kinds[i]
+        g = {"kinds": [k], "alt": None}
+        j = i + 1
+        nxt = [kd for _, kd in kinds[j:j + 3]]
+        if k == "数字" and nxt[:2] == ["英字", "カナ"] and y - kinds[j + 1][0] < 40:
+            g["kinds"] = ["数字", "英字", "カナ"]
+            j += 2
+        elif k == "漢字" and nxt == ["数字", "英字", "カナ"] and kinds[j][0] - kinds[j + 2][0] < 40:
+            g["alt"] = ["数字", "英字", "カナ"]
+            j += 3
+        groups.append(g)
+        i = j
+    return (nx, kx, lx), (sorted(nums), groups, [v for _, v in joined])
+
+
+def layout_table(pages, positions, caption, stop, names, what):
+    """
+    項目説明の表（見出し caption のページから、stop（正規表現。表のあとの見出し）まで）を、字の位置で読む
+    names：項目構成の図の名前（並びどおり）
+    """
+    pattern = re.compile(loose(caption))
+    nos = [no for no in sorted(pages) if pattern.search(pages[no]) and "・・・" not in pages[no]]
+    if not nos:
+        fail(f"「{caption}」の表が見つかりません")
+    end = next((no for no in sorted(pages) if no >= nos[0] and re.search(stop, pages[no]) and "・・・" not in pages[no]), None)
+    if end is None:
+        fail(f"{what}の表の終わり（{stop}）が見つかりません")
+    found = {}
+    columns = None
+    for no in range(nos[0], end + 1):
+        lines = positions.get(no, [])
+        if no == end:
+            stop_y = max((y for x, y, w, h, t in lines if re.search(stop, t)), default=None)
+            if stop_y is None:
+                fail(f"{what}の表の終わり（{stop}）の位置がわかりません")
+            lines = [ln for ln in lines if ln[1] > stop_y + 1]
+        columns, rows = layout_rows(lines, columns)
+        if not rows:
+            continue
+        nums, groups, lens = rows
+        if not nums and not groups:
+            continue
+        need = sum(2 if g["alt"] else 1 for g in groups)
+        if len(nums) != len(groups) or len(lens) != need:
+            fail(f"{what}の表の{no}ページを読めません（項番 {nums} / 種別 {[g['kinds'] + (g['alt'] or []) for g in groups]} / 文字数 {lens}）")
+        it = iter(lens)
+        for n, g in zip(nums, groups):
+            if n in found:
+                fail(f"{what}の項番{n}が2回あります")
+            length = next(it)
+            alt = field("カナなどで書くとき", " ".join(g["alt"]), next(it)) if g["alt"] else None
+            found[n] = (" ".join(g["kinds"]), length, alt)
+    if sorted(found) != list(range(1, len(names) + 1)):
+        fail(f"{what}の項番が、項目構成の図の{len(names)}項目とそろいません（読めた項番 {sorted(found)}）")
+    return [field(names[n - 1], *found[n]) for n in range(1, len(names) + 1)]
+
+
+def check_rules(fields, rules, what):
+    """項目の決まりが思ったものと同じか（項番 → (種別, min, max, only)）"""
+    for no, (kinds, lo, hi, only) in rules.items():
+        f = fields[no - 1]
+        if f["kinds"] != kinds.split() or [f["min"], f["max"], f.get("only")] != [lo, hi, only]:
+            fail(f"{what}の項番{no}「{f['name']}」の決まりが思ったものと違います: {f}")
+
+
+def example_line(positions, pages, heading, what):
+    """作成例の図（heading の見出しのページ）の CSV の行を、字の位置で読んでつなぐ（「↓」まで）"""
+    no = find_page(pages, heading)
+    lines = sorted([ln for ln in positions.get(no, []) if "," in ln[4] and ln[0] < 120], key=lambda ln: -ln[1])
+    text = "".join(ln[4] for ln in lines)
+    if "↓" not in text:
+        fail(f"{what}の作成例を読めません")
+    return text[:text.index("↓")].split(",")
+
+
+def check_example(fields, values, what):
+    """作成例の値が、読んだ項目の決まり（数字の項目は数字だけ・文字数）に合うか"""
+    if len(values) != len(fields):
+        fail(f"{what}の作成例の項目の数（{len(values)}）が、項目の数（{len(fields)}）と合いません")
+    for f, v in zip(fields, values):
+        v = v.strip()
+        n = len(v)
+        ok_len = (n in f["only"]) if f.get("only") else f["min"] <= n <= f["max"]
+        alt = f.get("alt")
+        if not ok_len and alt:
+            ok_len = alt["min"] <= n <= alt["max"]
+        if not ok_len or (f["kinds"] == ["数字"] and v and not v.isdigit()):
+            fail(f"{what}の作成例の「{f['name']}」の値「{v}」が、項目の決まりに合いません: {f}")
+
+
+def read_fuyou_record(pages, positions):
+    """4.10.1 被扶養者(異動)届・国民年金第3号被保険者関係届データレコード（年金事務所提出）"""
+    what = "被扶養者(異動)届"
+    figure = figure_names_loose(pages, "図4.10.1-1 被扶養者(異動)届・国民年金第3号被保険者関係届データレコード(年金事務所提出)の項目構成")
+    # 図は「その他の被扶養者1」の項目を1回だけ書き、そのあとに「その他の被扶養者2」が同じ並びで続く（図の「その他の被扶養者1|2」）
+    first = figure.index("被扶養者番号(その他の被扶養者1)")
+    last = figure.index("届出意思確認済")
+    other1 = figure[first:last]
+    if any("被扶養者1" not in n and "海外特例要件" not in n for n in other1):
+        fail(f"{what}のその他の被扶養者1の項目の名前を読めません: {other1}")
+    names = figure[:last] + [n.replace("被扶養者1", "被扶養者2") for n in other1] + figure[last:]
+    fields = layout_table(pages, positions, "表4.10.1-1 被扶養者(異動)届・国民年金第3号被保険者関係届データレコードの項目説明",
+                          r"表 ?4\.10\.1-2 都道府県コード一覧(?!を参照)", names, what)
+    # 収入の項目は、表の文字数が「0,7」だが、説明は「円単位で7文字で設定する」で、作成例は「0」（1文字）、e-Gov の自動チェックも
+    # 「7バイト以内」なので、0〜7文字にする（作成例が項目の決まりに合うかは、下の check_example で確かめる）
+    for f in fields:
+        if "収入" in f["name"] and f.get("only") == [0, 7]:
+            del f["only"]
+    # その他の被扶養者2は、その他の被扶養者1と同じ決まり（被扶養者番号は、どちらも書かない（0文字））
+    for i in range(len(other1)):
+        a, b = fields[first + i], fields[last + i]
+        if i == 0:
+            if a["max"] != 0 or b["max"] != 0:
+                fail(f"{what}の被扶養者番号は書かない項目のはずです: {a} / {b}")
+            continue
+        check_same(a, b, f"{what}の「{b['name']}」と、その他の被扶養者1の同じ項目")
+    # 表のページ（見出しのないページも入れる。表4.10.1-2 都道府県コード一覧の前まで）
+    first_page = find_page(pages, "表4.10.1-1 被扶養者(異動)届")
+    last_page = next(no for no in sorted(pages) if no >= first_page and re.search(r"表 ?4\.10\.1-2 都道府県コード一覧(?!を参照)", pages[no]))
+    t_all = " " + " ".join(pages[no] for no in range(first_page, last_page + 1)) + " "
+    t = t_all
+    form_code = search(r"1 様式コード 数字 7 「(\d+)」を設定する", t, f"{what}の様式コード").group(1)
+    def codes_at(pattern, what_code, tail):
+        """pattern（正規表現。一覧の頭の「…を設定する」まで）のすぐあとのコードの一覧（同じ頭の一覧があるので、続く名前で見分ける）"""
+        m = re.search(pattern, t_all)
+        if not m:
+            fail(f"{what}の{what_code}を読めません")
+        return code_list(t_all[m.start():], t_all[m.start():m.end()], f"{what}の{what_code}", tail)
+
+    reason = r"以下の理由に対応する値を設定する (?=・{})"
+    codes = {
+        "change": code_list(t_all, "以下の異動の別に対応する数字を設定する", f"{what}の異動の別", " ナ "),
+        "spouseRelation": codes_at(r"以下の続柄に対応する数字を設定する (?=・夫)", "配偶者の性別(続柄)", " なお、配偶者である被扶養者"),
+        "spouseReason": codes_at(reason.format("配偶者の就職"), "配偶者が被扶養者になった理由", " A "),
+        "spouseJob": codes_at(r"以下の職業に対応する値を設定する (?=・無職 :「1」 ・パート :「2」 ・年金受給者 :「3」 ・その他)", "配偶者の職業", " C "),
+        "spouseEndReason": codes_at(reason.format("死亡 :「1」 ・離婚"), "配偶者が被扶養者でなくなった理由", " G "),
+        "otherRelation": codes_at(r"以下の続柄に対応する数字を設定する (?=・実子)", "その他の被扶養者の続柄コード", " なお、その他の被扶養者1"),
+        "otherJob": codes_at(r"以下の職業に対応する値を設定する (?=・無職 :「1」 ・パート :「2」 ・年金受給者 :「3」 ・小)", "その他の被扶養者の職業", " u "),
+        "otherReason": codes_at(reason.format("出生"), "その他の被扶養者になった理由", " x "),
+        "otherEndReason": codes_at(reason.format("死亡 :「1」 ・就職"), "その他の被扶養者でなくなった理由", " II "),
+        "living": code_list(t_all, "被保険者との生活状況について対応する数字を設定する", f"{what}の同居・別居の別", " 「異動の別」"),
+        "overseas": code_list(t_all, "以下の海外特例に対応する数字を設定する", f"{what}の海外特例", " なお、"),
+        "overseasReason": codes_at(reason.format("留学"), "海外特例要件に該当した理由", " なお、"),
+        "overseasEndReason": codes_at(reason.format("国内転入"), "海外特例要件に非該当となった理由", " なお、"),
+        "phone": code_list(t_all, "以下の種別に対応する数字を設定する", f"{what}の電話番号の種別", " リ "),
+    }
+    # 「・その他」の名前のあとの字（「・その他 :「5」 なお…」）は code_list の終わりで切る。種類の数を確かめる
+    expect = {"change": 3, "spouseRelation": 4, "spouseReason": 5, "spouseJob": 4, "spouseEndReason": 6, "otherRelation": 10, "otherJob": 6,
+              "otherReason": 5, "otherEndReason": 6, "living": 2, "overseas": 2, "overseasReason": 5, "overseasEndReason": 2, "phone": 4}
+    for key, n in expect.items():
+        if len(codes[key]) != n:
+            fail(f"{what}のコード（{key}）を読めません: {codes[key]}")
+    eras = era_lists(t_all, what)
+    birth = next((e for e in eras if "昭和" in e), None)
+    event = next((e for e in eras if "平成" in e and "昭和" not in e), None)
+    overseas = next((e for e in eras if list(e) == ["令和"]), None)
+    if not birth or not event or not overseas or any(e not in (birth, event, overseas) for e in eras):
+        fail(f"{what}の元号のコードを読めません: {eras}")
+    # 住所地（後期高齢者医療の被保険者になって被扶養者でなくなったとき）の都道府県コード（表4.10.1-2。全国地方公共団体コードと同じ並び）
+    no = find_page(pages, "都道府県コード 漢字都道府県名 01 北海道")
+    rows = re.findall(r"(\d{2}) (\S+?[都道府県])(?= |$)", pages[no])
+    prefectures = {name: code for code, name in rows}
+    if len(rows) != 47 or [int(c) for c, _ in rows] != list(range(1, 48)):
+        fail(f"{what}の都道府県コード一覧（表4.10.1-2）を読めません（{len(rows)}件）")
+    check_example(fields, example_line(positions, pages, "(3)被扶養者(異動)届・国民年金第3号被保険者関係届データレコードの作成例", what), what)
+    return fields, form_code, codes, birth, event, overseas, prefectures
+
+
+def read_sango_record(pages, positions):
+    """4.11.1 国民年金第3号被保険者関係届データレコード（年金事務所提出。健康保険組合などの被保険者の配偶者）"""
+    what = "国民年金第3号被保険者関係届"
+    names = figure_names_loose(pages, "図4.11.1-1 国民年金第3号被保険者関係届データレコードの項目構成")
+    fields = layout_table(pages, positions, "表4.11.1-1 国民年金第3号被保険者関係届データレコードの項目説明",
+                          r"\(3\) ?国民年金第3号被保険者関係届データレコードの作成例", names, what)
+    first = find_page(pages, "表4.11.1-1 国民年金第3号被保険者関係届データレコードの項目説明")
+    last = find_page(pages, "(3)国民年金第3号被保険者関係届データレコードの作成例")
+    t = " " + " ".join(pages[no] for no in range(first, last + 1)) + " "
+    form_code = search(r"1 様式コード 数字 7 「(\d+)」を設定する", t, f"{what}の様式コード").group(1)
+    def codes_at(pattern, what_code, tail):
+        m = re.search(pattern, t)
+        if not m:
+            fail(f"{what}の{what_code}を読めません")
+        return code_list(t[m.start():], t[m.start():m.end()], f"{what}の{what_code}", tail)
+
+    codes = {
+        "change": code_list(t, "3号該当に対応する数字を設定する", f"{what}の異動の別", " ラ "),
+        "relation": code_list(t, "以下の続柄に対応する数字を設定する", f"{what}の性別(続柄)", " ネ "),
+        "reason": codes_at(r"以下の理由に対応する値を設定する (?=・配偶者の就職)", "3号被保険者になった理由", " レ "),
+        "system": code_list(t, "以下の加入制度に対応する数字を設定する", f"{what}の配偶者の加入制度", " 「異動の別"),
+        "endReason": codes_at(r"以下の理由に対応する値を設定する (?=・死亡)", "3号被保険者でなくなった理由", " 海外居住中"),
+        "living": codes_at(r"3号被保険者との生活状況について対応する数字を設 ?定する (?=・同居)", "同居区分", " 「異動の別"),
+        "phone": code_list(t, "以下の種別に対応する数字を設定する", f"{what}の電話番号の種別", " モ "),
+    }
+    expect = {"change": 3, "relation": 4, "reason": 5, "system": 1, "endReason": 4, "living": 2, "phone": 4}
+    for key, n in expect.items():
+        if len(codes[key]) != n:
+            fail(f"{what}のコード（{key}）を読めません: {codes[key]}")
+    check_example(fields, example_line(positions, pages, "(3)国民年金第3号被保険者関係届データレコードの作成例", what), what)
+    return fields, form_code, codes
+
+
 def main():
     if len(sys.argv) != 3:
         fail("使い方: python3 -I scripts/import_shaho_format.py <仕様書の PDF> <出力の TypeScript>")
@@ -963,6 +1260,10 @@ def main():
     # 産前産後休業取得者申出書・育児休業等取得者申出書（年金事務所提出）
     sankyu_fields, sankyu_code, leave_birth_eras, leave_eras, birth_kinds = read_sankyu_record(pages)
     ikukyu_fields, ikukyu_code, ikukyu_birth, ikukyu_events, ikukyu_sexes, ikukyu_relations = read_ikukyu_record(pages)
+    # 被扶養者(異動)届・国民年金第3号被保険者関係届と、国民年金第3号被保険者関係届（字の位置で読む）
+    positions = read_positions(pdf, find_page(pages, "表4.10.1-1 被扶養者(異動)届"), find_page(pages, "(3)国民年金第3号被保険者関係届データレコードの作成例"))
+    fuyou_fields, fuyou_code, fuyou_codes, fuyou_birth, fuyou_events, fuyou_overseas, fuyou_prefectures = read_fuyou_record(pages, positions)
+    sango_fields, sango_code, sango_codes = read_sango_record(pages, positions)
 
     # 読んだものを照らし合わせる（合わなければ、読み方か仕様書が変わったので止まる）
     if (shutoku_code_u, soshitsu_code_u) != (shutoku_code, soshitsu_code):
@@ -1008,6 +1309,18 @@ def main():
             else:
                 check_same(fields[a - 1], bonus_fields[b - 1], f"{what}の項番{a}「{fields[a - 1]['name']}」と賞与支払届の項番{b}")
     check_same(shutoku_fields[4], office_fields[3], "資格取得届の事業所番号と事業所情報の事業所番号")
+    # 被扶養者(異動)届・3号関係届：被保険者の項目は賞与支払届と同じ決まり。配偶者の続柄などのコードは2つの届書で同じ
+    for what, fields, pairs in [
+        ("被扶養者(異動)届", fuyou_fields, {2: 2, 3: 3, 4: 4, 8: 5, 9: 6, 10: 7, 14: 15, 15: 16, 16: 17}),
+        ("国民年金第3号被保険者関係届", sango_fields, {2: 2, 3: 3, 4: 4, 12: 15, 13: 16, 14: 17, 25: 15, 26: 16, 27: 17}),
+    ]:
+        for a, b in pairs.items():
+            check_same(fields[a - 1], bonus_fields[b - 1], f"{what}の項番{a}「{fields[a - 1]['name']}」と賞与支払届の項番{b}")
+    for key, key3 in [("spouseRelation", "relation"), ("spouseReason", "reason"), ("living", "living"), ("phone", "phone"), ("change", "change")]:
+        if fuyou_codes[key] != sango_codes[key3]:
+            fail(f"被扶養者(異動)届と3号関係届のコード（{key}）が違います: {fuyou_codes[key]} / {sango_codes[key3]}")
+    if fuyou_events != pay_eras:
+        fail(f"被扶養者(異動)届の日付の元号のコードが、賞与支払届と違います: {fuyou_events} / {pay_eras}")
 
     def js(value):
         return json.dumps(value, ensure_ascii=False)
@@ -1128,6 +1441,39 @@ export const SHAHO_CHILD_RELATIONS: Record<string, string> = {js(ikukyu_relation
 export const SHAHO_LEAVE_BIRTH_ERA_CODES: Record<string, string> = {js(leave_birth_eras)};
 export const SHAHO_LEAVE_ERA_CODES: Record<string, string> = {js(leave_eras)};
 
+/** 被扶養者(異動)届・国民年金第3号被保険者関係届の様式コード（表4.10.1-1） */
+export const SHAHO_FUYOU_FORM_CODE = {js(fuyou_code)};
+/**
+ * 被扶養者(異動)届・国民年金第3号被保険者関係届データレコード（年金事務所提出。協会けんぽの被保険者。図4.10.1-1・表4.10.1-1）
+ * 1つのレコードに、配偶者である被扶養者と、その他の被扶養者2人までを書く（その他の被扶養者2は、図ではその他の被扶養者1と同じ並び）
+ */
+export const SHAHO_FUYOU_FIELDS: ShahoField[] = {fields_ts(fuyou_fields)};
+/**
+ * 被扶養者(異動)届のコード（表4.10.1-1。名前の空白は除いた）
+ * change：異動の別／spouseRelation：配偶者の性別(続柄)／spouseReason・spouseEndReason：配偶者が被扶養者になった・でなくなった理由／
+ * spouseJob：配偶者の職業／otherRelation：その他の被扶養者の続柄コード／otherJob・otherReason・otherEndReason：その他の被扶養者の
+ * 職業・なった理由・でなくなった理由／living：同居・別居の別／overseas：海外特例（該当・非該当）／overseasReason・overseasEndReason：
+ * 海外特例要件に該当した・非該当となった理由／phone：電話番号の種別
+ */
+export const SHAHO_FUYOU_CODES = {js(fuyou_codes)} as const;
+/** 被扶養者(異動)届の元号のコード（生年月日・届出日などの日付・海外特例要件に該当した日など。表4.10.1-1） */
+export const SHAHO_FUYOU_BIRTH_ERA_CODES: Record<string, string> = {js(fuyou_birth)};
+export const SHAHO_FUYOU_EVENT_ERA_CODES: Record<string, string> = {js(fuyou_events)};
+export const SHAHO_FUYOU_OVERSEAS_ERA_CODES: Record<string, string> = {js(fuyou_overseas)};
+/** 被扶養者(異動)届の住所地の都道府県コード（表4.10.1-2。後期高齢者医療の被保険者になって被扶養者でなくなるとき。参考資料3 とは違う） */
+export const SHAHO_FUYOU_PREFECTURE_CODES: Record<string, string> = {js(fuyou_prefectures)};
+
+/** 国民年金第3号被保険者関係届の様式コード（表4.11.1-1） */
+export const SHAHO_SANGO_FORM_CODE = {js(sango_code)};
+/** 国民年金第3号被保険者関係届データレコード（年金事務所提出。健康保険組合などの被保険者の配偶者。図4.11.1-1・表4.11.1-1） */
+export const SHAHO_SANGO_FIELDS: ShahoField[] = {fields_ts(sango_fields)};
+/**
+ * 国民年金第3号被保険者関係届のコード（表4.11.1-1）
+ * change：異動の別(3号該当)／relation：性別(続柄)／reason・endReason：3号被保険者になった・でなくなった理由／
+ * system：配偶者の加入制度／living：同居区分／phone：電話番号の種別
+ */
+export const SHAHO_SANGO_CODES = {js(sango_codes)} as const;
+
 /** 健康保険組合に出す CSV 形式届書ファイルの名前（3.1.2） */
 export const SHAHO_UNION_FILE_NAME = {js(union_file_name)};
 /** 媒体管理レコード（健康保険組合提出。図4.1.2-1・表4.1.2-1） */
@@ -1160,7 +1506,8 @@ export const SHAHO_DOUBLE_BYTE_RANGES: [number, number][] = [{ranges_ts}];
     out.write_text(ts, encoding="utf-8")
     print(f"{out} を作りました（{version}・賞与支払届 {len(bonus_fields)}項目・算定基礎届 {len(santei_fields)}項目・月額変更届 {len(geppen_fields)}項目・"
           f"資格取得届 {len(shutoku_fields)}項目・資格喪失届 {len(soshitsu_fields)}項目・産前産後休業取得者申出書 {len(sankyu_fields)}項目・"
-          f"育児休業等取得者申出書 {len(ikukyu_fields)}項目・事業所情報 {len(office_fields)}項目・"
+          f"育児休業等取得者申出書 {len(ikukyu_fields)}項目・被扶養者(異動)届 {len(fuyou_fields)}項目・3号関係届 {len(sango_fields)}項目・"
+          f"事業所情報 {len(office_fields)}項目・"
           f"健康保険組合提出（{union_file_name}）：資格取得届 {len(shutoku_union)}・資格喪失届 {len(soshitsu_union)}・算定基礎届 {len(santei_union)}・"
           f"月額変更届 {len(geppen_union)}・賞与支払届 {len(bonus_union)}・事業所情報 {len(union_office)}項目・都道府県 {len(prefectures)}・"
           f"1バイト文字 {len(single)}字・2バイト文字の範囲 {len(double)}）")
