@@ -54,3 +54,6 @@ koyo-format/source/
 
 # 労働保険の年度更新申告書の書き方と労災保険率の改定の資料（PDF で大きいので上げない。出どころと SHA-256 は nendo-koshin/README.md）
 nendo-koshin/source/
+
+# 退職所得の源泉徴収税額の速算表と法定調書の手引（国税庁の PDF なので上げない。出どころと SHA-256 は taishoku-tables/README.md）
+taishoku-tables/source/

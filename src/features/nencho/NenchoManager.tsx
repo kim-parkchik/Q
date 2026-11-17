@@ -7,6 +7,9 @@ import Database from "@tauri-apps/plugin-sql";
 import { NENCHO_SCREEN_YEARS, NENCHO_YEARS, settleOptions, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
 import NenchoDeclarationForm from "./NenchoDeclarationForm";
 import NenchoResultPanel from "./NenchoResultPanel";
+import NenchoListView from "./NenchoListView";
+import FuyouDraftView from "./FuyouDraftView";
+import { useState } from "react";
 import { toTaxColumn } from "../../utils/incomeTax";
 
 interface Props {
@@ -19,6 +22,8 @@ const yen = (n: number) => `${n.toLocaleString()}円`;
 
 export default function NenchoManager({ db, staffList }: Props) {
   const z = useNenchoManager(db, staffList);
+  const [showList, setShowList] = useState(false);
+  const [showDraft, setShowDraft] = useState(false);
 
   return (
     <div style={{ maxWidth: 1300, margin: "0 auto" }}>
@@ -30,6 +35,13 @@ export default function NenchoManager({ db, staffList }: Props) {
             ))}
           </select>
           {z.isLoading && <span style={{ fontSize: 12, color: "#64748b" }}>読み込み中…</span>}
+          <span style={{ flex: 1 }} />
+          <button onClick={() => { setShowList(!showList); setShowDraft(false); }} style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #cbd5e1", backgroundColor: showList ? "#eff6ff" : "white", color: "#1d4ed8", fontWeight: "bold", fontSize: 13, cursor: "pointer" }}>
+            {showList ? "一覧表を閉じる" : "年末調整一覧表（全員）"}
+          </button>
+          <button onClick={() => { setShowDraft(!showDraft); setShowList(false); }} style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #cbd5e1", backgroundColor: showDraft ? "#eff6ff" : "white", color: "#1d4ed8", fontWeight: "bold", fontSize: 13, cursor: "pointer" }}>
+            {showDraft ? "下書きを閉じる" : `${z.year + 1}年分の扶養控除等申告書の下書き`}
+          </button>
         </div>
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0 0", lineHeight: 1.7 }}>
           従業員から提出された申告書の内容を入れると、その年に確定した給与・賞与の合計から年税額を計算し、源泉徴収した税額との過不足を出します。
@@ -48,7 +60,10 @@ export default function NenchoManager({ db, staffList }: Props) {
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
+      {showList && <NenchoListView year={z.year} rows={z.rows} statusLabel={statusLabel} />}
+      {showDraft && <FuyouDraftView db={db} year={z.year} rows={z.rows} />}
+
+      <div className="no-print" style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
         {/* 従業員の一覧 */}
         <div style={{ ...card, padding: 8 }}>
           {z.rows.length === 0 && <div style={{ fontSize: 12, color: "#94a3b8", padding: 8 }}>{z.year}年に在籍した人がいません</div>}

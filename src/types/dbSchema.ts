@@ -50,6 +50,7 @@ export const DB_SCHEMAS = [
     rousai_rate REAL,                    -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ。NULL なら表の率）
     nendo_koshin TEXT,                   -- 年度更新で入れたもの（JSON。年度・労働保険番号ごとの申告済概算保険料・延納・充当意思など）
     gensen_nofu TEXT,                    -- 源泉所得税の納付書（所得税徴収高計算書）の設定と手で入れた額（JSON。納期の特例・退職手当等・税理士等の報酬。utils/withholdingPayment.ts）
+    journal_settings TEXT,               -- 給与・賞与の仕訳データの勘定科目などの設定（JSON。utils/payJournal.ts）
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
     round_emp_ins TEXT DEFAULT 'currency_law', -- 雇用保険料（本人負担分）の端数：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ（厚生労働省）。特約があれば round など
@@ -173,6 +174,7 @@ export const DB_SCHEMAS = [
     kouki_date TEXT,          -- 後期高齢者医療の被保険者になった日（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts）
     koyo_info TEXT,           -- 雇用保険の届書に書くこと（職種・雇用形態・就職経路・外国人の在留資格・離職の理由・転勤など。JSON。詳しくは utils/koyoInfo.ts）
     resident_tax_idou TEXT,   -- 住民税の給与所得者異動届出書に書くこと（異動の日ごとの徴収方法・新しい勤務先・届け出た日。JSON。utils/residentTaxIdou.ts）
+    department TEXT,          -- 部門（「営業部」など。支給控除一覧表・仕訳を部門ごとにまとめる。なくてもよい）
     health_dependents TEXT,   -- 健康保険の被扶養者（配偶者・子など。被扶養者（異動）届・国民年金第3号被保険者関係届に書く。JSON。詳しくは utils/healthDependents.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
@@ -508,6 +510,9 @@ export const DB_SCHEMAS = [
     designation_number TEXT,       -- 指定番号（市区町村が会社に付けた番号。特別徴収税額の決定通知書に書いてある）
     atena_number TEXT,             -- 宛名番号（市区町村が会社に付けた番号。特別徴収税額通知の CSV に書いてある）
     special_due INTEGER DEFAULT 0, -- 納期の特例の承認を受けた（1）：6月〜11月分は12月10日、12月〜翌年5月分は6月10日までに納める（地方税法321条の5の2）
+    mail_zip TEXT,                 -- 給与支払報告書などを送る宛先の郵便番号（送付ラベルに使う）
+    mail_address TEXT,             -- 同じく住所
+    mail_name TEXT,                -- 同じく宛名（「〇〇市役所 市民税課」など）
     updated_at TEXT DEFAULT (DATETIME('now', 'localtime'))
   );`,
 
@@ -593,6 +598,23 @@ export const DB_SCHEMAS = [
     note TEXT,                         -- なぜ手で入れたか
     created_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     PRIMARY KEY (staff_id, event_date),
+    FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
+  );`,
+
+  // 退職手当等（退職金）と、源泉徴収した所得税・特別徴収した住民税（1回ごと。退職所得の源泉徴収票・所得税の納付書・住民税の納入に使う。utils/retirementIncome.ts）
+  `CREATE TABLE IF NOT EXISTS retirement_allowances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id TEXT NOT NULL,
+    pay_date TEXT NOT NULL,            -- 支払う日（YYYY-MM-DD。所得税の納付書・住民税の納入の月）
+    fixed_date TEXT NOT NULL,          -- 支払が確定した日（年分。初めは退職日）
+    amount INTEGER NOT NULL,           -- 支払金額
+    income_tax INTEGER NOT NULL DEFAULT 0, -- 源泉徴収税額（所得税及び復興特別所得税）
+    city_tax INTEGER NOT NULL DEFAULT 0,   -- 特別徴収税額（市町村民税）
+    pref_tax INTEGER NOT NULL DEFAULT 0,   -- 特別徴収税額（道府県民税）
+    municipality TEXT,                 -- 住民税の納入先（その年の1月1日の住所の市区町村の団体コード）
+    detail TEXT,                       -- 計算に使ったこと（勤続期間・区分・申告書・障害者・他の退職手当等など。JSON。utils/retirementIncome.ts）
+    created_at TEXT DEFAULT (DATETIME('now', 'localtime')),
+    updated_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     FOREIGN KEY(staff_id) REFERENCES staff(id) ON DELETE CASCADE
   );`,
 

@@ -40,6 +40,9 @@ import {
   Printer,
   Receipt,
   UserMinus,
+  PiggyBank,
+  DoorOpen,
+  Stethoscope,
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -64,6 +67,9 @@ import BonusManager from "./features/payroll/BonusManager";
 import PayReportManager from "./features/payroll/PayReportManager";
 import WithholdingPaymentManager from "./features/payroll/WithholdingPaymentManager";
 import ResidentTaxIdouManager from "./features/payroll/ResidentTaxIdouManager";
+import PremiumSummaryManager from "./features/payroll/PremiumSummaryManager";
+import RetirementManager from "./features/payroll/RetirementManager";
+import KenpoBenefitCertManager from "./features/payroll/KenpoBenefitCertManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
 import BonusReportManager from "./features/payroll/BonusReportManager";
@@ -113,12 +119,15 @@ const TAB_NAMES: Record<string, string> = {
   menjo: "産休・育休の申出書",
   kyugyo: "休業終了時改定",
   youiku: "養育期間の特例",
+  kenpokyufu: "傷病手当金・出産手当金の証明",
   koyo: "雇用保険の届書",
   koyokyufu: "雇用保険の給付の書類",
   nendo: "労働保険の年度更新",
+  hokenryo: "保険料の集計表",
   nencho: "年末調整",
   gensen: "源泉徴収票",
   gensenbo: "源泉徴収簿",
+  taishoku: "退職金（退職所得）",
   gensennofu: "所得税の納付書",
   kyuho: "給与支払報告書",
   juminzei: "住民税の取り込み",
@@ -152,12 +161,15 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   menjo: <FileHeart size={18} />,
   kyugyo: <Baby size={18} />,
   youiku: <HeartHandshake size={18} />,
+  kenpokyufu: <Stethoscope size={18} />,
   koyo: <Briefcase size={18} />,
   koyokyufu: <HandCoins size={18} />,
   nendo: <ScrollText size={18} />,
+  hokenryo: <PiggyBank size={18} />,
   nencho: <Calculator size={18} />,
   gensen: <FileSpreadsheet size={18} />,
   gensenbo: <BookOpen size={18} />,
+  taishoku: <DoorOpen size={18} />,
   gensennofu: <Receipt size={18} />,
   kyuho: <Landmark size={18} />,
   juminzei: <FileDown size={18} />,
@@ -338,12 +350,15 @@ function App() {
             "menjo",
             "kyugyo",
             "youiku",
+            "kenpokyufu",
             "koyo",
             "koyokyufu",
             "nendo",
+            "hokenryo",
             "nencho",
             "gensen",
             "gensenbo",
+            "taishoku",
             "gensennofu",
             "kyuho",
             "juminzei",
@@ -356,7 +371,7 @@ function App() {
             "choubo"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "koyo", "koyokyufu", "nendo", "nencho", "gensen", "gensenbo", "gensennofu", "kyuho", "juminzei", "nonyu", "idou", "mynumber", "payslip", "meisai", "furikomi", "choubo"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "kenpokyufu", "koyo", "koyokyufu", "nendo", "hokenryo", "nencho", "gensen", "gensenbo", "taishoku", "gensennofu", "kyuho", "juminzei", "nonyu", "idou", "mynumber", "payslip", "meisai", "furikomi", "choubo"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -531,8 +546,17 @@ function App() {
               {activeTab === "gensennofu" && db && (
                 <WithholdingPaymentManager db={db} />
               )}
+              {activeTab === "kenpokyufu" && db && (
+                <KenpoBenefitCertManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "taishoku" && db && (
+                <RetirementManager db={db} staffList={staffList} currentUser={currentUser} />
+              )}
+              {activeTab === "hokenryo" && db && (
+                <PremiumSummaryManager db={db} staffList={staffList} />
+              )}
               {activeTab === "meisai" && db && (
-                <PayReportManager db={db} />
+                <PayReportManager db={db} staffList={staffList} />
               )}
               {activeTab === "mynumber" && db && (
                 <MyNumberManager db={db} staffList={staffList} currentUser={currentUser} companyPath={dbPath} onNumbersChanged={() => setMyNumberCheck((n) => n + 1)} />

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PayLedger } from "./legalBooks";
-import { hoursLabel, payListCell, payListColumns, payListCsv, payListRows, type PayDocPerson } from "./payReports";
+import { hoursLabel, payChanges, payListCell, payListColumns, payListCsv, payListRows, payTrendRows, type PayDocPerson } from "./payReports";
 
 const ledger = (o: Partial<PayLedger>): PayLedger => ({
   periodStart: "2026-10-01", periodEnd: "2026-10-31", workDays: 20, workHours: 160, overtimeHours: 10.5, holidayHours: 0, nightHours: 0,
@@ -68,5 +68,41 @@ describe("支給控除一覧表", () => {
   });
   test("明細書の時間の書き方", () => {
     expect([hoursLabel(160), hoursLabel(10.5), hoursLabel(0.25)]).toEqual(["160:00", "10:30", "0:15"]);
+  });
+});
+
+describe("部門ごとの集計・月ごとの推移表・前の月と変わった人", () => {
+  const withDept: PayDocPerson[] = [
+    { ...people[0], department: "営業部" },
+    { ...people[1], department: "総務部" },
+    { ...people[2], department: "営業部" },
+  ];
+  test("部門ごとの小計（部門の名前の順。部門がない人は後ろ）", () => {
+    const rows = payListRows([...withDept, { ...people[0], staffId: "1009", name: "部門　なし" }], "department");
+    expect(rows.map((r) => [r.kind, r.label, r.count])).toEqual([
+      ["person", "山田　太郎", 1], ["person", "古い　確定", 1], ["subtotal", "営業部 小計", 2],
+      ["person", "時給　花子", 1], ["subtotal", "総務部 小計", 1],
+      ["person", "部門　なし", 1], ["subtotal", "部門なし 小計", 1],
+      ["total", "合計", 4],
+    ]);
+    expect(payListRows(withDept, "none").filter((r) => r.kind === "subtotal")).toEqual([]);
+  });
+  test("月ごとの推移表：項目ごと・支給した月ごとの合計と人数", () => {
+    const { rows, persons } = payTrendRows([{ month: 10, people: [people[0]] }, { month: 11, people: [people[0], people[1]] }]);
+    const net = rows.find((r) => r.column.key === "s:net")!;
+    expect([net.months[9], net.months[10], net.months[0], net.total]).toEqual([266890, 266890 + 125373, 0, 266890 * 2 + 125373]);
+    expect(rows.find((r) => r.column.key === "w:hours")!.months.slice(9, 11)).toEqual([160, 250]);
+    expect(persons.slice(9, 11)).toEqual([1, 2]);
+  });
+  test("前の月と変わった人：額が変わった項目と、どちらかの月にしかいない人", () => {
+    const changed: PayDocPerson = { ...people[0], ledger: { ...people[0].ledger!, earnings: [{ name: "基本給", amount: 310000 }, { name: "時間外手当(25%割増)", amount: 25000 }, { name: "通勤手当", amount: 10000 }], totalEarnings: 345000, netPay: 276890 } };
+    const list = payChanges([people[0], people[2]], [changed, people[1]]);
+    expect(list.map((c) => [c.staffId, c.label, c.before, c.after, c.diff])).toEqual([
+      ["1001", "基本給", 300000, 310000, 10000],
+      ["1001", "支給合計", 335000, 345000, 10000],
+      ["1001", "差引支給額", 266890, 276890, 10000],
+      ["1002", "差引支給額（前の月はなし）", null, 125373, 125373],
+      ["1003", "差引支給額（この月はなし）", 170000, null, -170000],
+    ]);
   });
 });

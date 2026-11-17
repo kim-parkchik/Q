@@ -6,6 +6,7 @@
  * ・振込先は、従業員の画面の「振込先口座」（固定額の口座と残りの口座に分ける）。口座がない人は現金で払うので入れない
  * ・確定した給与・賞与だけを入れる（差引支給額は確定した結果から読む）
  * 計算は utils/zengin.ts（レコードの形は constants/zengin.ts。銀行の仕様書からスクリプトで作ったもの）
+ * ・振込一覧表（振込先・振込額・件数・合計）を印刷できる。口座がない（現金で払う）人の金種表（お札と硬貨の枚数。utils/kinshu.ts）も出す
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 // @ts-ignore
@@ -16,6 +17,8 @@ import { writeLog } from "../../utils/logUtils";
 import { saveBinaryFile } from "../../utils/fileSaveUtils";
 import { loadSourceAccounts, loadStaffBankAccounts, type SourceAccountRow } from "../../utils/bankAccounts";
 import { salaryPayDate } from "../../utils/flatTaxReduction";
+import { KINSHU, kinshuLabel, kinshuOf, kinshuTotal } from "../../utils/kinshu";
+import { printStyle } from "./reportStyles";
 import {
   ACCOUNT_TYPE_LABELS, bankAccountProblems, buildZenginRecords, encodeZengin, sourceAccountProblems, splitTransfer,
   type StaffAccount, type TransferLine,
@@ -56,6 +59,7 @@ export default function TransferDataManager({ db, staffList }: Props) {
   const [transferDate, setTransferDate] = useState("");
   const [newline, setNewline] = useState(false);
   const [showText, setShowText] = useState(false);
+  const [printTarget, setPrintTarget] = useState<"list" | "kinshu" | null>(null);
 
   const [sources, setSources] = useState<SourceAccountRow[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -171,6 +175,19 @@ export default function TransferDataManager({ db, staffList }: Props) {
     ...(withProblems.length > 0 ? [`口座を直す人がいます（${withProblems.map((r) => r.name).join("・")}）`] : []),
   ];
 
+  // 印刷する部分を決めてから印刷し、終わったら戻す
+  useEffect(() => {
+    if (!printTarget) return;
+    const done = () => { setPrintTarget(null); window.removeEventListener("afterprint", done); };
+    window.addEventListener("afterprint", done);
+    const t = setTimeout(() => window.print(), 50);
+    return () => { clearTimeout(t); window.removeEventListener("afterprint", done); };
+  }, [printTarget]);
+
+  /** 口座がない（現金で払う）人と、その金種 */
+  const cashRows = rows.filter((r) => r.skip === "口座がない（現金で払う）");
+  const cashTotal = kinshuTotal(cashRows.map((r) => r.netPay));
+
   const targetLabel = kind === "salary" ? `${payYear}年${payMonth}月支給の給与（${group?.name ?? ""}）` : bonus ? `${bonus.name}（${bonus.payment_date ?? ""}）` : "";
 
   const exportFile = async () => {
@@ -263,10 +280,19 @@ export default function TransferDataManager({ db, staffList }: Props) {
         )}
       </div>
 
+      {printTarget && <style>{printStyle(printTarget === "kinshu" ? "transfer-kinshu-print" : "transfer-list-print", false)}</style>}
       <div style={card}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+        <div id="transfer-list-print">
+        {printTarget === "list" && <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>振込一覧表</h2>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
           <b style={{ fontSize: 14 }}>{targetLabel}</b>
           <span style={{ fontSize: 13, color: "#475569" }}>振込 {transferLines.length}件・合計 {total.toLocaleString()}円</span>
+          {transferDate && <span style={{ fontSize: 13, color: "#475569" }}>振込日 {transferDate}</span>}
+          {source && (
+            <span style={{ fontSize: 12, color: "#64748b" }}>
+              振込元 {source.bankCode} {source.bankName}　{source.branchCode} {source.branchName}　{ACCOUNT_TYPE_LABELS[source.accountType]} {source.accountNumber}
+            </span>
+          )}
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -300,6 +326,7 @@ export default function TransferDataManager({ db, staffList }: Props) {
             ))}
           </tbody>
         </table>
+        </div>
 
         {blocked.length > 0 && (
           <div style={{ ...warn, color: "#b91c1c" }}>{blocked.map((b) => <div key={b}>⚠ {b}</div>)}</div>
@@ -308,6 +335,10 @@ export default function TransferDataManager({ db, staffList }: Props) {
           <button onClick={exportFile} disabled={blocked.length > 0}
             style={{ ...button, backgroundColor: blocked.length > 0 ? "#cbd5e1" : "#16a085", cursor: blocked.length > 0 ? "not-allowed" : "pointer" }}>
             振込データを書き出す
+          </button>
+          <button onClick={() => setPrintTarget("list")} disabled={rows.length === 0}
+            style={{ ...button, backgroundColor: rows.length === 0 ? "#cbd5e1" : "#2563eb", cursor: rows.length === 0 ? "not-allowed" : "pointer" }}>
+            振込一覧表を印刷
           </button>
           {records && (
             <button onClick={() => setShowText(!showText)} style={{ ...button, backgroundColor: "white", color: "#475569", border: "1px solid #cbd5e1" }}>
@@ -321,6 +352,47 @@ export default function TransferDataManager({ db, staffList }: Props) {
           </pre>
         )}
       </div>
+
+      {cashRows.length > 0 && (
+        <div style={card}>
+          <div id="transfer-kinshu-print">
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+              <b style={{ fontSize: 14 }}>金種表（現金で払う人）</b>
+              <span style={{ fontSize: 13, color: "#475569" }}>{targetLabel}　{cashRows.length}人・合計 {cashRows.reduce((t, r) => t + r.netPay, 0).toLocaleString()}円</span>
+            </div>
+            <div style={{ fontSize: 12, color: "#475569", marginBottom: 6 }}>
+              振込先口座がない人の差引支給額を、お札と硬貨の枚数に分けます（大きいお金から順に。2千円札は使いません）。合計の枚数は、銀行で両替するときに使います。
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ backgroundColor: "#f8fafc" }}>
+                    {["社員番号", "名前", "支給額", ...KINSHU.map(kinshuLabel)].map((h) => <th key={h} style={{ ...th, whiteSpace: "nowrap" }}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cashRows.map((r) => (
+                    <tr key={r.staffId}>
+                      <td style={td}>{r.staffId}</td>
+                      <td style={td}>{r.name}</td>
+                      <td style={{ ...td, textAlign: "right" }}>{r.netPay.toLocaleString()}円</td>
+                      {kinshuOf(r.netPay).map((n, i) => <td key={i} style={{ ...td, textAlign: "right" }}>{n || ""}</td>)}
+                    </tr>
+                  ))}
+                  <tr style={{ fontWeight: "bold", backgroundColor: "#f8fafc" }}>
+                    <td style={td} colSpan={2}>合計</td>
+                    <td style={{ ...td, textAlign: "right" }}>{cashRows.reduce((t, r) => t + r.netPay, 0).toLocaleString()}円</td>
+                    {cashTotal.map((n, i) => <td key={i} style={{ ...td, textAlign: "right" }}>{n || ""}</td>)}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <button onClick={() => setPrintTarget("kinshu")} style={{ ...button, backgroundColor: "#2563eb" }}>金種表を印刷</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

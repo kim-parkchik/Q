@@ -189,6 +189,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetKokuhoPremium, setTargetKokuhoPremium] = useState(0); // 国保組合の保険料（月額。社保規定が国保組合の人だけ）
     // 労働者名簿の項目（労働基準法107条・施行規則53条。utils/legalBooks.ts）
     const [targetJobType, setTargetJobType] = useState("");             // 従事する業務の種類
+    const [targetDepartment, setTargetDepartment] = useState("");       // 部門（支給控除一覧表・仕訳を部門ごとにまとめる）
     const [targetCareerHistory, setTargetCareerHistory] = useState(""); // 履歴
     const [targetRetirementReason, setTargetRetirementReason] = useState(""); // 退職の事由（解雇はその理由も）
     const [targetDeathDate, setTargetDeathDate] = useState("");         // 死亡の年月日
@@ -370,7 +371,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetKokuhoPremium(0);
         setTargetBankAccounts([]);
         setSavedBankAccounts("[]");
-        setTargetJobType(""); setTargetCareerHistory(""); setTargetRetirementReason(""); setTargetDeathDate(""); setTargetDeathCause("");
+        setTargetJobType(""); setTargetDepartment(""); setTargetCareerHistory(""); setTargetRetirementReason(""); setTargetDeathDate(""); setTargetDeathCause("");
         setTargetProbationEnd("");
         setTargetBasicPensionNumber(""); setTargetMultiOffice(false);
         setTargetEmpInsType("");
@@ -448,6 +449,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetSocialInsGroupId(s.social_insurance_group_id ?? 0);
         setTargetKokuhoPremium(Number(s.kokuho_premium) || 0);
         setTargetJobType(s.job_type || "");
+        setTargetDepartment(s.department || "");
         setTargetCareerHistory(s.career_history || "");
         setTargetRetirementReason(s.retirement_reason || "");
         setTargetDeathDate(s.death_date || "");
@@ -538,6 +540,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetKokuhoPremium) !== Number(original.kokuho_premium || 0) ||
             JSON.stringify(targetBankAccounts) !== savedBankAccounts ||
             String(targetJobType) !== String(original.job_type || "") ||
+            String(targetDepartment) !== String(original.department || "") ||
             String(targetCareerHistory) !== String(original.career_history || "") ||
             String(targetRetirementReason) !== String(original.retirement_reason || "") ||
             String(targetDeathDate) !== String(original.death_date || "") ||
@@ -636,6 +639,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 stringifyHealthDependents(targetHealthDependents) || null, targetKoukiDate || null,
                 // 雇用保険の届書に書くこと（職種・雇用形態・外国人の在留資格・離職の理由・転勤など）
                 stringifyKoyoInfo(targetKoyoInfo),
+                // 部門（支給控除一覧表・仕訳を部門ごとにまとめる）
+                targetDepartment.trim() || null,
             ];
 
             if (editingId) {
@@ -658,7 +663,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
                         probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?, in_kind=?,
-                        health_dependents=?, kouki_date=?, koyo_info=?
+                        health_dependents=?, kouki_date=?, koyo_info=?, department=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -682,7 +687,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         job_type, career_history, retirement_reason, death_date, death_cause,
                         probation_end, basic_pension_number, multi_office, address_kana, in_kind,
-                        health_dependents, kouki_date, koyo_info,
+                        health_dependents, kouki_date, koyo_info, department,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -938,6 +943,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetBankAccounts,
         bankAccountErrors,
         targetJobType, setTargetJobType,
+        targetDepartment, setTargetDepartment,
         targetCareerHistory, setTargetCareerHistory,
         targetRetirementReason, setTargetRetirementReason,
         targetDeathDate, setTargetDeathDate,

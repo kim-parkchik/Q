@@ -1,6 +1,7 @@
 /**
  * 「所得税の納付書」の画面：給与所得・退職所得等の所得税徴収高計算書（源泉所得税の納付書）に書き写す中身を、
  * 確定した給与・賞与から出す（作り方は utils/withholdingPayment.ts）
+ * ・退職手当等は、退職金の画面で保存したもの（retirement_allowances）を入れる
  * ・納期の特例の承認を受けているか（会社ごと）と、Q で計算しない退職手当等・税理士等の報酬（期間ごと）は、会社の gensen_nofu（JSON）に残す
  * ・納付書は税務署から届いた用紙に書く（用紙の代わりに印刷したものは使えない）。e-Tax で納めるときも、この中身を入れる
  */
@@ -10,8 +11,9 @@ import Database from "@tauri-apps/plugin-sql";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { parseLedger } from "../../utils/legalBooks";
 import { payDateOf } from "../../utils/koyoBenefits";
+import { parseRetirementInput } from "../../utils/retirementIncome";
 import {
-  buildNofuSlips, payDateCode, type NofuBonusInput, type NofuExtra, type NofuExtras, type NofuLine, type NofuSalaryInput, type NofuSlip,
+  buildNofuSlips, payDateCode, type NofuBonusInput, type NofuExtra, type NofuExtras, type NofuLine, type NofuRetirementInput, type NofuSalaryInput, type NofuSlip,
 } from "../../utils/withholdingPayment";
 import * as S from "./reportStyles";
 
@@ -46,6 +48,7 @@ export default function WithholdingPaymentManager({ db }: Props) {
   const [settings, setSettings] = useState<NofuSettings>({});
   const [salaries, setSalaries] = useState<NofuSalaryInput[] | null>(null);
   const [bonuses, setBonuses] = useState<NofuBonusInput[]>([]);
+  const [retirements, setRetirements] = useState<NofuRetirementInput[]>([]);
   const [holidays, setHolidays] = useState<Set<string>>(new Set());
   const [showEmpty, setShowEmpty] = useState(false);
 
@@ -80,7 +83,15 @@ export default function WithholdingPaymentManager({ db }: Props) {
            WHERE b.target_year IN (?, ?)`,
           [year - 1, year],
         );
+        // 退職金の画面で保存した退職手当等（死亡退職は源泉徴収しないので除く）
+        const rets = await db.select<any[]>(
+          "SELECT staff_id, pay_date, amount, income_tax, detail FROM retirement_allowances WHERE pay_date BETWEEN ? AND ?",
+          [`${year - 1}-01-01`, `${year}-12-31`],
+        );
         if (cancelled) return;
+        setRetirements((rets ?? []).filter((r) => !parseRetirementInput(r.detail).death).map((r) => ({
+          staffId: String(r.staff_id), payDate: String(r.pay_date), amount: Number(r.amount) || 0, tax: Number(r.income_tax) || 0,
+        })));
         setSalaries((rows ?? []).map((r): NofuSalaryInput => {
           const group = groups?.find((g) => g.id === Number(r.payroll_group_id)) ?? groups?.[0] ?? { payment_day: 25 };
           return {
@@ -105,8 +116,8 @@ export default function WithholdingPaymentManager({ db }: Props) {
 
   const mode = settings.specialDue ? "special" : "general";
   const slips = useMemo(
-    () => salaries === null ? [] : buildNofuSlips({ year, mode, salaries, bonuses, extras: settings.extras, isHoliday: (d) => holidays.has(d) }),
-    [year, mode, salaries, bonuses, settings.extras, holidays],
+    () => salaries === null ? [] : buildNofuSlips({ year, mode, salaries, bonuses, retirements, extras: settings.extras, isHoliday: (d) => holidays.has(d) }),
+    [year, mode, salaries, bonuses, retirements, settings.extras, holidays],
   );
   const shown = slips.filter((s) => showEmpty || !s.empty);
 
@@ -140,6 +151,7 @@ export default function WithholdingPaymentManager({ db }: Props) {
           確定した給与・賞与から、源泉所得税の納付書（給与所得・退職所得等の所得税徴収高計算書）に書き写す中身を出します。
           納付書は、税務署から届いた用紙に書きます（用紙の代わりに印刷したものは使えません。e-Tax で納めるときも、この中身を入れます）。
           書き方は、国税庁「所得税徴収高計算書（納付書）の記載のしかた」によります。支給額は、所得税がかかる額（非課税の通勤手当を除く。源泉徴収簿の総支給金額と同じ）です。
+          退職手当等の欄は、退職金の画面で保存した退職金です（Q で計算しない退職手当等があれば「手で入れる」で足します）。
           納期限：納期の特例を受けていなければ支払った月の翌月10日、受けていれば1月〜6月分は7月10日・7月〜12月分は翌年1月20日（土日祝日なら次の日）。
         </div>
         <div style={S.controls}>
@@ -167,7 +179,7 @@ export default function WithholdingPaymentManager({ db }: Props) {
       {salaries === null ? (
         <div className="no-print" style={{ ...S.card, color: "#94a3b8" }}>読み込んでいます…</div>
       ) : shown.length === 0 ? (
-        <div className="no-print" style={{ ...S.card, color: "#94a3b8" }}>{year}年に支払った、確定した給与・賞与がありません。</div>
+        <div className="no-print" style={{ ...S.card, color: "#94a3b8" }}>{year}年に支払った、確定した給与・賞与・退職金がありません。</div>
       ) : (
         <div id={PRINT_ID}>
           {shown.map((s) => <SlipCard key={s.key} slip={s} onExtra={(which, v) => saveExtra(s.key, which, v)} extras={settings.extras?.[s.key] ?? {}} />)}
@@ -200,7 +212,7 @@ function SlipCard({ slip, extras, onExtra }: { slip: NofuSlip; extras: NofuExtra
         <div style={{ fontSize: 13 }}>納期限 <b>{dateLabel(slip.dueDate)}</b></div>
       </div>
       {slip.empty ? (
-        <div style={{ ...S.small, marginTop: 8 }}>この期間に支払った給与・賞与はありません（納付書は要りません）。</div>
+        <div style={{ ...S.small, marginTop: 8 }}>この期間に支払った給与・賞与・退職金はありません（納付書は要りません）。</div>
       ) : (
         <>
           <table style={{ ...S.table, marginTop: 8, maxWidth: 520 }}>
@@ -248,7 +260,7 @@ function SlipCard({ slip, extras, onExtra }: { slip: NofuSlip; extras: NofuExtra
   );
 }
 
-/** 退職手当等・税理士等の報酬（Q で計算しないので、手で入れる） */
+/** 退職手当等（Q で計算しない分）・税理士等の報酬（Q で計算しないので、手で入れる） */
 function ExtraInput({ value, onChange }: { value: NofuExtra | null; onChange: (v: NofuExtra | null) => void }) {
   const [draft, setDraft] = useState<NofuExtra>(value ?? { payDate: "", persons: 0, amount: 0, tax: 0 });
   useEffect(() => { setDraft(value ?? { payDate: "", persons: 0, amount: 0, tax: 0 }); }, [value]);

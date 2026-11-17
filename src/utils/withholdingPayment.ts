@@ -19,7 +19,9 @@
  *   役員（従業員の画面の「役員」）に払った賞与は「役員賞与」の欄（同上の支払確定年月日は、Q ではわからないので手で書く）。
  *   使用人兼務役員の使用人分の賞与は「賞与」の欄に書くが、Q では分けられないので、役員の賞与はすべて役員賞与の欄にして知らせる
  * ■ 日雇労務者の賃金：日額表の丙欄で源泉徴収した賃金（Q の丙欄の人の給与）。人員は延べ人員（働いた日の人数の合計）
- * ■ 退職手当等・税理士等の報酬：Q では計算しないので、画面で入れた額を書く
+ * ■ 退職手当等：退職金の画面で保存した退職手当等（支払う日がその月（期間）のもの。死亡退職は所得税がかからないので入れない）。
+ *   人員は実人員（納期の特例は月ごとの実人員の合計数）。Q で計算しない退職手当等があれば、画面で入れた額を足す
+ * ■ 税理士等の報酬：Q では計算しないので、画面で入れた額を書く
  * ■ 年末調整による不足税額・超過税額：その月に、年末調整の不足額を徴収した額・超過額を還付した額（Q は12月か翌年1月の給与で精算する）。
  *   超過額（還付）は、その月の税額から差し引いて還付し、引ききれないときは、その後に納付する税額から順に差し引く
  *   （国税庁 タックスアンサー No.2675。2か月を経過しても還付しきれないと見込まれるときは「年末調整過納額還付請求書兼残存過納額明細書」で
@@ -55,6 +57,14 @@ export interface NofuSalaryInput {
 export interface NofuBonusInput {
   staffId: string;
   executive: boolean;
+  payDate: string;
+  amount: number;
+  tax: number;
+}
+
+/** 退職金の画面で保存した退職手当等 */
+export interface NofuRetirementInput {
+  staffId: string;
   payDate: string;
   amount: number;
   tax: number;
@@ -216,6 +226,8 @@ export interface NofuOptions {
   mode: NofuMode;
   salaries: NofuSalaryInput[];
   bonuses: NofuBonusInput[];
+  /** 退職金の画面で保存した退職手当等 */
+  retirements?: NofuRetirementInput[];
   /** 期間の印（key）ごとの、手で入れた欄 */
   extras?: Record<string, NofuExtras>;
   isHoliday?: (date: string) => boolean;
@@ -242,7 +254,14 @@ export const buildNofuSlips = (opts: NofuOptions): NofuSlip[] => {
     dailyLine.persons = daily.reduce((n, s) => n + Math.max(0, Math.floor(Number(s.workDays) || 0)), 0);
     const bonus = lineOf(bons.filter((b) => !b.executive).map((b) => ({ ...b })));
     const officerBonus = lineOf(bons.filter((b) => b.executive).map((b) => ({ ...b })));
-    const retirement = extraLine(extras.retirement);
+    const retirement = lineOf((opts.retirements ?? []).filter((r) => inPeriod(r.payDate)));
+    const manualRetirement = extraLine(extras.retirement);
+    if (manualRetirement.persons > 0 || manualRetirement.amount > 0 || manualRetirement.tax > 0) {
+      addDate(retirement, manualRetirement.first);
+      retirement.persons += manualRetirement.persons;
+      retirement.amount += manualRetirement.amount;
+      retirement.tax += manualRetirement.tax;
+    }
     const professional = extraLine(extras.professional);
 
     const shortage = sals.reduce((s, x) => s + Math.max(0, -Math.trunc(Number(x.yearEnd) || 0)), 0);

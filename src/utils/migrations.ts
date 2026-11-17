@@ -24,6 +24,7 @@
  *   ・v6: 会社に雇用保険の届書・年度更新の列（koyo_office_number・koyo_hello_work・koyo_media_seq・rousai_business・rousai_rate・nendo_koshin）、
  *     拠点に koyo_office_number・koyo_hello_work・rousai_business・rousai_rate、従業員に雇用保険の届書に書くこと（koyo_info）を足す
  *   ・v7: 会社に源泉所得税の納付書の設定と手で入れた額（gensen_nofu）、従業員に住民税の給与所得者異動届出書に書くこと（resident_tax_idou）を足す
+ *   ・v8: 従業員に部門（department）、会社に仕訳データの設定（journal_settings）、住民税の市区町村に送付先（mail_zip・mail_address・mail_name）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -124,6 +125,15 @@ export const MIGRATIONS: Migration[] = [
     up: async (db) => {
       await addColumnIfMissing(db, "company", "gensen_nofu", "TEXT");
       await addColumnIfMissing(db, "staff", "resident_tax_idou", "TEXT");
+    },
+  },
+  {
+    version: 8,
+    description: "従業員の部門、仕訳データの設定、住民税の市区町村の送付先の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "department", "TEXT");
+      await addColumnIfMissing(db, "company", "journal_settings", "TEXT");
+      for (const column of ["mail_zip", "mail_address", "mail_name"]) await addColumnIfMissing(db, "resident_tax_municipalities", column, "TEXT");
     },
   },
 ];

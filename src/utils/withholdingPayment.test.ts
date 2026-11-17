@@ -80,6 +80,25 @@ describe("納付書の中身", () => {
     expect([nov.professional.persons, nov.professional.amount, nov.professional.tax]).toEqual([1, 50000, 5105]);
     expect(nov.principal).toBe(6000 + 5105);
   });
+  test("退職金の画面で保存した退職手当等：支払う日の月（期間）の退職手当等の欄に入り、手で入れた額も足す", () => {
+    const retirements = [
+      { staffId: "1", payDate: "2026-11-30", amount: 8000000, tax: 91890 },
+      { staffId: "2", payDate: "2026-11-10", amount: 10000000, tax: 51050 },
+      { staffId: "3", payDate: "2026-12-10", amount: 3000000, tax: 0 },
+    ];
+    const slips = buildNofuSlips({
+      year: 2026, mode: "general", salaries: [sal({ staffId: "1", payDate: "2026-11-25" })], bonuses: [], retirements,
+      extras: { "2026-12": { retirement: { payDate: "2026-12-20", persons: 1, amount: 500000, tax: 102100 } } },
+    });
+    const nov = slips.find((s) => s.key === "2026-11")!;
+    expect([nov.retirement.persons, nov.retirement.amount, nov.retirement.tax, payDateCode(nov.retirement, "general")]).toEqual([2, 18000000, 142940, "508 11 30"]);
+    expect(nov.principal).toBe(6000 + 142940);
+    const dec = slips.find((s) => s.key === "2026-12")!;
+    expect([dec.empty, dec.retirement.persons, dec.retirement.amount, dec.retirement.tax, payDateCode(dec.retirement, "general")]).toEqual([false, 2, 3500000, 102100, "508 12 20"]);
+    // 納期の特例：7月〜12月の分をまとめる（人員は月ごとの実人員の合計）
+    const [, h2] = buildNofuSlips({ year: 2026, mode: "special", salaries: [], bonuses: [], retirements });
+    expect([h2.retirement.persons, h2.retirement.amount, h2.retirement.tax, payDateCode(h2.retirement, "special")]).toEqual([3, 21000000, 142940, "508 11 10 ～ 12 10"]);
+  });
   test("年末調整：不足額は不足税額に、還付は超過税額に。差し引ききれない還付は次の納付に回す（タックスアンサー No.2675）", () => {
     const salaries = [
       // 12月：税額 6,000 + 5,000、還付 30,000（Aさん）・徴収 2,000（Bさん）

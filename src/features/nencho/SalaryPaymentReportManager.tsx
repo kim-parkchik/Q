@@ -11,6 +11,7 @@ import { ORDINARY_REASONS, type MunicipalityGroup } from "../../utils/salaryPaym
 import { localGovLabel } from "../../utils/localGov";
 import { REPORT_YEARS, reportRemarksOf, useSalaryPaymentReportManager, type PaperSettings, type ReportRow } from "./useSalaryPaymentReportManager";
 import SalaryReportSummaryView from "./SalaryReportSummaryView";
+import MailLabelCard from "./MailLabelCard";
 import WithholdingSlipView from "./WithholdingSlipView";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
 
@@ -382,6 +383,11 @@ export default function SalaryPaymentReportManager({ db, staffList, currentUser,
           </div>
           <CsvCard z={z} />
           <PaperCard z={z} printNumbers={printNumbers} setPrintNumbers={setPrintNumbers} />
+          <MailLabelCard
+            db={db}
+            targets={z.groups.filter((g) => g.municipality && g.people.some((r) => r.submit)).map((g) => ({ code: g.code, municipality: g.municipality!, count: g.people.filter((r) => r.submit).length }))}
+            company={{ name: String(z.company.name ?? ""), zip: String(z.company.zip ?? ""), address: String(z.company.address ?? "") }}
+          />
           {z.groups.map((g) => <GroupCard key={g.code || "unset"} group={g} z={z} printNumbers={printNumbers} />)}
         </>
       )}

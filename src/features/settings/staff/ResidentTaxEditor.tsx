@@ -20,7 +20,7 @@ const button = {
 };
 
 /** 都道府県と市区町村を選ぶ2つの欄 */
-function LocalGovSelect({ code, setCode }: { code: string; setCode: (code: string) => void }) {
+export function LocalGovSelect({ code, setCode }: { code: string; setCode: (code: string) => void }) {
     const current = localGovByCode(code);
     const [chosenPref, setChosenPref] = useState("");
     const pref = current ? current.prefecture : chosenPref;

@@ -16,6 +16,8 @@ export default function EmploymentSection({ cm }: Props) {
     const {
         targetBranchId,
         setTargetBranchId,
+        targetDepartment,
+        setTargetDepartment,
         targetStatus,
         setTargetStatus,
         targetJoinDate,
@@ -75,6 +77,18 @@ export default function EmploymentSection({ cm }: Props) {
                     </option>
                 ))}
                 </select>
+            </div>
+
+            {/* 部門（支給控除一覧表・仕訳を部門ごとにまとめる。なくてもよい） */}
+            <div style={{ flex: 1.2 }}>
+                <label style={labelStyle}>部門</label>
+                <input
+                type="text"
+                value={targetDepartment}
+                onChange={e => setTargetDepartment(e.target.value)}
+                placeholder="例：営業部（なくてもよい）"
+                style={inputStyle}
+                />
             </div>
 
             {/* 給与規定 */}
