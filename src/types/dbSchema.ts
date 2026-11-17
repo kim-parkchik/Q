@@ -43,6 +43,12 @@ export const DB_SCHEMAS = [
     shaho_media_seq INTEGER DEFAULT 0,   -- 届書の電子申請用ファイルに、最後に付けた媒体通番（次は1を足す。999 の次は 1）
     bonus_plan_months TEXT,              -- 年金機構に登録している賞与支払予定月（「7,12」のように月をカンマで。4つまで。賞与不支給報告書に使う。utils/bonusNonPayment.ts）
     labor_ins_num TEXT,
+    koyo_office_number TEXT,             -- 雇用保険適用事業所番号（「1301-123456-7」。雇用保険の届書のファイルに書く。utils/koyoCsv.ts）
+    koyo_hello_work TEXT,                -- 雇用保険の届書を出すハローワーク（安定所の名前。「飯田橋」。届書の「あて先」）
+    koyo_media_seq INTEGER DEFAULT 0,    -- 雇用保険の届書の電子申請用ファイルに、最後に付けたＦＤ通番（次は1を足す。999 の次は 1）
+    rousai_business TEXT,                -- 労災保険率表の事業の種類の番号（「98」など。年度更新の労災保険率。utils/nendoKoshin.ts）
+    rousai_rate REAL,                    -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ。NULL なら表の率）
+    nendo_koshin TEXT,                   -- 年度更新で入れたもの（JSON。年度・労働保険番号ごとの申告済概算保険料・延納・充当意思など）
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
     round_emp_ins TEXT DEFAULT 'currency_law', -- 雇用保険料（本人負担分）の端数：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ（厚生労働省）。特約があれば round など
@@ -69,7 +75,11 @@ export const DB_SCHEMAS = [
     address TEXT,
     phone TEXT,
     health_ins_num TEXT,
-    labor_ins_num TEXT
+    labor_ins_num TEXT,
+    koyo_office_number TEXT,  -- 雇用保険適用事業所番号（この拠点が別の適用事業所のときだけ。空なら会社の番号）
+    koyo_hello_work TEXT,     -- 雇用保険の届書を出すハローワーク（別の適用事業所のときだけ。空なら会社の設定）
+    rousai_business TEXT,     -- 労災保険率表の事業の種類の番号（別の労働保険番号のときだけ。空なら会社の設定）
+    rousai_rate REAL          -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ）
   );`,
 
   // 3. カレンダーパターン
@@ -160,6 +170,7 @@ export const DB_SCHEMAS = [
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
     in_kind TEXT,             -- 現物で払う報酬（食事・住宅（社宅・寮など）・その他（自社製品など）の期間ごとの行。JSON。詳しくは utils/genbutsu.ts）
     kouki_date TEXT,          -- 後期高齢者医療の被保険者になった日（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts）
+    koyo_info TEXT,           -- 雇用保険の届書に書くこと（職種・雇用形態・就職経路・外国人の在留資格・離職の理由・転勤など。JSON。詳しくは utils/koyoInfo.ts）
     health_dependents TEXT,   -- 健康保険の被扶養者（配偶者・子など。被扶養者（異動）届・国民年金第3号被保険者関係届に書く。JSON。詳しくは utils/healthDependents.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),

@@ -48,3 +48,9 @@ shaho-format/source/
 
 # 日本年金機構の全国現物給与価額一覧表と厚生労働省の改正のお知らせ（PDF 9つで約7MB なので上げない。出どころと SHA-256 は genbutsu-tables/README.md）
 genbutsu-tables/source/
+
+# 雇用保険の届書作成仕様書（公共職業安定所への提出用）と雇用保険事務手続きの手引き（PDF で大きいので上げない。出どころと SHA-256 は koyo-format/README.md）
+koyo-format/source/
+
+# 労働保険の年度更新申告書の書き方と労災保険率の改定の資料（PDF で大きいので上げない。出どころと SHA-256 は nendo-koshin/README.md）
+nendo-koshin/source/

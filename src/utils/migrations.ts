@@ -101,6 +101,20 @@ export const MIGRATIONS: Migration[] = [
       await addColumnIfMissing(db, "staff", "health_dependents", "TEXT");
     },
   },
+  {
+    version: 6,
+    description: "雇用保険の届書（雇用保険適用事業所番号・ハローワーク・ＦＤ通番・従業員の雇用保険の情報）と、年度更新（労災保険の事業の種類と率・入れたもの）の列を足す",
+    up: async (db) => {
+      for (const [column, definition] of [
+        ["koyo_office_number", "TEXT"], ["koyo_hello_work", "TEXT"], ["koyo_media_seq", "INTEGER DEFAULT 0"],
+        ["rousai_business", "TEXT"], ["rousai_rate", "REAL"], ["nendo_koshin", "TEXT"],
+      ]) await addColumnIfMissing(db, "company", column, definition);
+      for (const [column, definition] of [
+        ["koyo_office_number", "TEXT"], ["koyo_hello_work", "TEXT"], ["rousai_business", "TEXT"], ["rousai_rate", "REAL"],
+      ]) await addColumnIfMissing(db, "branches", column, definition);
+      await addColumnIfMissing(db, "staff", "koyo_info", "TEXT");
+    },
+  },
 ];
 
 /** v1（2026-11-14 の dbSchema.ts の形）の番号 */

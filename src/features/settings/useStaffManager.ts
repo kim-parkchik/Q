@@ -11,6 +11,7 @@ import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 import { parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod } from "../../utils/leaveExemption";
 import { parseInKind, stringifyInKind, validateInKindEntry, type InKindEntry } from "../../utils/genbutsu";
 import { dependentProblems, parseHealthDependents, stringifyHealthDependents, type HealthDependent } from "../../utils/healthDependents";
+import { emptyKoyoInfo, parseKoyoInfo, stringifyKoyoInfo, type KoyoInfo } from "../../utils/koyoInfo";
 import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
 import { countAnnualWorkDays } from "../../utils/annualWorkDays";
 import {
@@ -130,6 +131,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetInKind, setTargetInKind] = useState<InKindEntry[]>([]); // 現物で払う報酬（社宅・食事・自社製品など。utils/genbutsu.ts）
     const [targetHealthDependents, setTargetHealthDependents] = useState<HealthDependent[]>([]); // 健康保険の被扶養者（utils/healthDependents.ts）
     const [targetKoukiDate, setTargetKoukiDate] = useState(""); // 後期高齢者医療の障害認定を受けた日（この日に健康保険の資格を失う）
+    const [targetKoyoInfo, setTargetKoyoInfo] = useState<KoyoInfo>(emptyKoyoInfo()); // 雇用保険の届書に書くこと（utils/koyoInfo.ts）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄・丙欄）
     const [targetResidentTax, setTargetResidentTax] = useState(0); // 住民税の月額（以前の入れ方。年度の額を入れていない月に使う）
     const [targetResidentTaxSchedule, setTargetResidentTaxSchedule] = useState<ResidentTaxYear[]>([]); // 住民税の年度ごとの12か月（utils/residentTax.ts）
@@ -359,6 +361,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetInKind([]);
         setTargetHealthDependents([]);
         setTargetKoukiDate("");
+        setTargetKoyoInfo(emptyKoyoInfo());
         setTargetTaxColumn("kou");
         setTargetRemunerationHistory([{ from: "", amount: 0, reason: "shutoku" }]);
         setTargetIsEmploymentInsEligible(1);
@@ -435,6 +438,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetInKind(parseInKind(s.in_kind));
         setTargetHealthDependents(parseHealthDependents(s.health_dependents));
         setTargetKoukiDate(s.kouki_date || "");
+        setTargetKoyoInfo(parseKoyoInfo(s.koyo_info));
         setTargetTaxColumn(toTaxColumn(s.tax_column));
         setTargetResidentTax(s.resident_tax || 0);
         setTargetResidentTaxSchedule(residentTaxScheduleOf(s));
@@ -514,6 +518,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             JSON.stringify(targetInKind) !== JSON.stringify(parseInKind(original.in_kind)) ||
             stringifyHealthDependents(targetHealthDependents) !== stringifyHealthDependents(parseHealthDependents(original.health_dependents)) ||
             String(targetKoukiDate) !== String(original.kouki_date || "") ||
+            stringifyKoyoInfo(targetKoyoInfo) !== stringifyKoyoInfo(parseKoyoInfo(original.koyo_info)) ||
             targetTaxColumn !== toTaxColumn(original.tax_column) ||
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             stringifyResidentTaxSchedule(targetResidentTaxSchedule) !== stringifyResidentTaxSchedule(residentTaxScheduleOf(original)) ||
@@ -629,6 +634,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 stringifyInKind(targetInKind) || null,
                 // 健康保険の被扶養者（被扶養者（異動）届に書く）と、後期高齢者医療の障害認定を受けた日
                 stringifyHealthDependents(targetHealthDependents) || null, targetKoukiDate || null,
+                // 雇用保険の届書に書くこと（職種・雇用形態・外国人の在留資格・離職の理由・転勤など）
+                stringifyKoyoInfo(targetKoyoInfo),
             ];
 
             if (editingId) {
@@ -651,7 +658,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
                         probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?, in_kind=?,
-                        health_dependents=?, kouki_date=?
+                        health_dependents=?, kouki_date=?, koyo_info=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -675,7 +682,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         job_type, career_history, retirement_reason, death_date, death_cause,
                         probation_end, basic_pension_number, multi_office, address_kana, in_kind,
-                        health_dependents, kouki_date,
+                        health_dependents, kouki_date, koyo_info,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -901,6 +908,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         isHealthDependentsValid,
         targetKoukiDate,
         setTargetKoukiDate,
+        targetKoyoInfo,
+        setTargetKoyoInfo,
         targetTaxColumn,
         setTargetTaxColumn,
         targetResidentTax,

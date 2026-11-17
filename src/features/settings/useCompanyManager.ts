@@ -31,7 +31,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const dialog = useMessageDialog();
 
     // --- タブ管理 ---
-    const [activeSubTab, setActiveSubTab] = useState<"info" | "branches" | "rounding" | "payroll" | "social" | "leave" | "transfer">("info");
+    const [activeSubTab, setActiveSubTab] = useState<"info" | "branches" | "rounding" | "payroll" | "social" | "labor" | "leave" | "transfer">("info");
     const [hasSavedOnce, setHasSavedOnce] = useState(false);
 
     // --- 会社情報用ステート ---

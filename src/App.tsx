@@ -34,6 +34,9 @@ import {
   UsersRound,
   MapPin,
   FileHeart,
+  Briefcase,
+  HandCoins,
+  ScrollText,
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -60,6 +63,9 @@ import ZuijiManager from "./features/payroll/ZuijiManager";
 import BonusReportManager from "./features/payroll/BonusReportManager";
 import ShikakuReportManager from "./features/payroll/ShikakuReportManager";
 import FuyouReportManager from "./features/payroll/FuyouReportManager";
+import KoyoReportManager from "./features/payroll/KoyoReportManager";
+import KoyoBenefitManager from "./features/payroll/KoyoBenefitManager";
+import NendoKoshinManager from "./features/payroll/NendoKoshinManager";
 import HenkoReportManager from "./features/payroll/HenkoReportManager";
 import LeaveReportManager from "./features/payroll/LeaveReportManager";
 import LeaveEndRevisionManager from "./features/payroll/LeaveEndRevisionManager";
@@ -101,6 +107,9 @@ const TAB_NAMES: Record<string, string> = {
   menjo: "産休・育休の申出書",
   kyugyo: "休業終了時改定",
   youiku: "養育期間の特例",
+  koyo: "雇用保険の届書",
+  koyokyufu: "雇用保険の給付の書類",
+  nendo: "労働保険の年度更新",
   nencho: "年末調整",
   gensen: "源泉徴収票",
   gensenbo: "源泉徴収簿",
@@ -134,6 +143,9 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   menjo: <FileHeart size={18} />,
   kyugyo: <Baby size={18} />,
   youiku: <HeartHandshake size={18} />,
+  koyo: <Briefcase size={18} />,
+  koyokyufu: <HandCoins size={18} />,
+  nendo: <ScrollText size={18} />,
   nencho: <Calculator size={18} />,
   gensen: <FileSpreadsheet size={18} />,
   gensenbo: <BookOpen size={18} />,
@@ -314,6 +326,9 @@ function App() {
             "menjo",
             "kyugyo",
             "youiku",
+            "koyo",
+            "koyokyufu",
+            "nendo",
             "nencho",
             "gensen",
             "gensenbo",
@@ -326,7 +341,7 @@ function App() {
             "choubo"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
+            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "koyo", "koyokyufu", "nendo", "nencho", "gensen", "gensenbo", "kyuho", "juminzei", "nonyu", "mynumber", "payslip", "furikomi", "choubo"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -452,6 +467,15 @@ function App() {
               )}
               {activeTab === "shikaku" && db && (
                 <ShikakuReportManager db={db} staffList={staffList} currentUser={currentUser} />
+              )}
+              {activeTab === "koyo" && db && (
+                <KoyoReportManager db={db} staffList={staffList} currentUser={currentUser} />
+              )}
+              {activeTab === "koyokyufu" && db && (
+                <KoyoBenefitManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "nendo" && db && (
+                <NendoKoshinManager db={db} staffList={staffList} />
               )}
               {activeTab === "fuyou" && db && (
                 <FuyouReportManager db={db} staffList={staffList} currentUser={currentUser} onDataChange={refreshData} />

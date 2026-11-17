@@ -11,6 +11,7 @@ import WorkPatternSection from "./staff/WorkPatternSection";
 import BankAccountSection from "./staff/BankAccountSection";
 import InKindSection from "./staff/InKindSection";
 import HealthDependentsSection from "./staff/HealthDependentsSection";
+import KoyoSection from "./staff/KoyoSection";
 import RosterSection from "./staff/RosterSection";
 import StaffFilterBar from "./staff/StaffFilterBar";
 import StaffTable from "./staff/StaffTable";
@@ -62,6 +63,8 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                             <LeaveSection cm={cm} />
 
                             <HealthDependentsSection cm={cm} />
+
+                            <KoyoSection cm={cm} />
                         </div>
 
                         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
