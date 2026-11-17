@@ -106,6 +106,8 @@ describe("年度の12か月に入れる", () => {
   test("その年度だけ入れ替え、ほかの年度はそのまま", () => {
     expect(withNoticeAmounts(old, 2026, next)).toEqual([{ fiscalYear: 2025, amounts: Array(12).fill(9000) }, { fiscalYear: 2026, amounts: next }]);
     expect(withNoticeAmounts(old, 2025, next)).toEqual([{ fiscalYear: 2025, amounts: next }]);
+    // その人の宛名番号（通知の行の番号）は、給与所得者異動届出書に書くので年度に残す
+    expect(withNoticeAmounts([], 2026, next, "041009", " 12345678901 ")).toEqual([{ fiscalYear: 2026, amounts: next, municipality: "041009", atena: "12345678901" }]);
   });
   test("いまの額と比べる", () => {
     expect(compareWithSchedule(old, 2026, next)).toBe("new");

@@ -3,6 +3,7 @@
  * ・労働者名簿：従業員の画面の値（労働者名簿の項目：業務の種類・履歴・退職の事由・死亡も）。退職した人も入れられる（退職から5年（当分の間3年）保存）
  * ・賃金台帳：1人の1年分。確定した給与（支給月ごと）と賞与を横に並べる（確定したときに残した内訳。内訳がない月は額だけ）
  * ・出勤簿：1人の1か月分（給与の計算期間）。勤怠の記録から、日ごとの区分・出勤・退勤・休憩・労働時間
+ * ・年次有給休暇管理簿：付与（基準日）ごとの、取った日（時季）と日数（労働基準法施行規則24条の7。LeaveLedgerTab.tsx）
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 // @ts-ignore
@@ -16,13 +17,14 @@ import {
   GENDER_LABELS, ROSTER_COLUMNS, attendanceBookCsv, attendanceBookRows, attendanceBookTotals, hoursText, parseLedger, rosterCsv, rosterMissing,
   rosterRowOf, wageLedgerCsv, wageLedgerRows, type AttendanceBookRow, type WageLedgerColumn, type WageLedgerRow,
 } from "../../utils/legalBooks";
+import LeaveLedgerTab from "./LeaveLedgerTab";
 
 interface Props {
   db: Database;
   staffList: any[];
 }
 
-type Tab = "roster" | "wage" | "attendance";
+type Tab = "roster" | "wage" | "attendance" | "leave";
 const today = new Date();
 const yen = (n: number) => n.toLocaleString();
 
@@ -152,14 +154,14 @@ export default function LegalBooksManager({ db, staffList }: Props) {
     <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
       <style>{PRINT_STYLE}</style>
       <div className="no-print" style={card}>
-        <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>法定三帳簿</h3>
+        <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>法定三帳簿・年次有給休暇管理簿</h3>
         <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6, marginBottom: 10 }}>
           労働者名簿・賃金台帳・出勤簿を出します。書く項目は法令で決まっていますが、様式（労働者名簿は様式第19号、賃金台帳は様式第20号）は
           項目の最少限度を決めたもので、ほかの形でもかまいません（労働基準法施行規則59条の2）。印刷すると PDF にも保存できます。
           保存期間は5年（当分の間は3年。労働者名簿は退職・死亡の日から、賃金台帳は最後に書いた日から）です。
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          {([["roster", "労働者名簿"], ["wage", "賃金台帳"], ["attendance", "出勤簿"]] as [Tab, string][]).map(([key, name]) => (
+          {([["roster", "労働者名簿"], ["wage", "賃金台帳"], ["attendance", "出勤簿"], ["leave", "年次有給休暇管理簿"]] as [Tab, string][]).map(([key, name]) => (
             <button key={key} onClick={() => setTab(key)} style={tabButton(tab === key)}>{name}</button>
           ))}
         </div>
@@ -263,6 +265,8 @@ export default function LegalBooksManager({ db, staffList }: Props) {
           </div>
         </div>
       )}
+
+      {tab === "leave" && <LeaveLedgerTab db={db} staffList={staffList} saveCsv={saveCsv} />}
     </div>
   );
 }

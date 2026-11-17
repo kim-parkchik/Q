@@ -33,6 +33,11 @@ export interface ResidentTaxYear {
   amounts: number[];
   /** 納付先（その年度の通知をした市区町村の団体コード）。空なら従業員の市区町村 */
   municipality?: string;
+  /**
+   * 特別徴収税額通知に書いてあった、この人の宛名番号（通知の CSV から取り込んだときだけ入る。
+   * 給与所得者異動届出書に書く。utils/residentTaxIdou.ts）
+   */
+  atena?: string;
 }
 
 const nonNeg = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
@@ -61,11 +66,14 @@ export const annualTotal = (amounts: number[]) => amounts.reduce((sum, v) => sum
 const sortByYear = (list: ResidentTaxYear[]) => [...list].sort((a, b) => a.fiscalYear - b.fiscalYear);
 
 const normalize = (e: ResidentTaxYear): ResidentTaxYear => {
-  const municipality = typeof e.municipality === 'string' ? e.municipality.trim() : '';
+  const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const municipality = text(e.municipality);
+  const atena = text(e.atena);
   return {
     fiscalYear: Math.floor(Number(e.fiscalYear)),
     amounts: Array.from({ length: 12 }, (_, i) => nonNeg(e.amounts?.[i])),
     ...(municipality ? { municipality } : {}),
+    ...(atena ? { atena } : {}),
   };
 };
 

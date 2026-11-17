@@ -142,9 +142,14 @@ export const matchNoticeRecord = (r: NoticeRecord, staff: { id: string | number;
 };
 
 /** その年度の12か月を通知の額にし、納付先を通知をした市区町村にする（ほかの年度はそのまま） */
-export const withNoticeAmounts = (schedule: ResidentTaxYear[], fiscalYear: number, amounts: number[], municipality?: string): ResidentTaxYear[] =>
-  [...schedule.filter((e) => e.fiscalYear !== fiscalYear), { fiscalYear, amounts: [...amounts], ...(municipality ? { municipality } : {}) }]
-    .sort((a, b) => a.fiscalYear - b.fiscalYear);
+export const withNoticeAmounts = (
+  schedule: ResidentTaxYear[], fiscalYear: number, amounts: number[], municipality?: string, atena?: string,
+): ResidentTaxYear[] =>
+  [...schedule.filter((e) => e.fiscalYear !== fiscalYear), {
+    fiscalYear, amounts: [...amounts], ...(municipality ? { municipality } : {}),
+    // この人の宛名番号（通知の行ごとの番号。給与所得者異動届出書に書く）
+    ...(atena?.trim() ? { atena: atena.trim() } : {}),
+  }].sort((a, b) => a.fiscalYear - b.fiscalYear);
 
 /** いま入っている額と比べる（new：その年度の額がまだない / same：同じ / changed：違う） */
 export const compareWithSchedule = (schedule: ResidentTaxYear[], fiscalYear: number, amounts: number[]): "new" | "same" | "changed" => {

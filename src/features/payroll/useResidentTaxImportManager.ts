@@ -137,7 +137,8 @@ export function useResidentTaxImportManager(db: Database, staffList: any[], onDa
     if (!ok) return;
     try {
       for (const r of targets) {
-        const schedule = withNoticeAmounts(residentTaxScheduleOf(r.staff), fiscalYear, r.record.amounts, r.municipality ? r.record.code : undefined);
+        const schedule = withNoticeAmounts(residentTaxScheduleOf(r.staff), fiscalYear, r.record.amounts, r.municipality ? r.record.code : undefined,
+          r.record.atenaNumber);
         // 市区町村がまだ空なら、通知の市区町村を入れる（入っていれば変えない）
         await db.execute(
           `UPDATE staff SET resident_tax_schedule = ?,

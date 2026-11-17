@@ -111,3 +111,13 @@ describe("納付先（年度ごと）", () => {
         expect(stringifyResidentTaxSchedule([{ fiscalYear: 2026, amounts: simpleAmounts(1, 1), municipality: " " }])).not.toContain("municipality");
     });
 });
+
+describe("保存（年度ごとの12か月）", () => {
+    test("通知から取り込んだ宛名番号は、読み直しても残る（空なら持たない）", () => {
+        const list = [{ fiscalYear: 2026, amounts: simpleAmounts(8700, 8300), municipality: "131016", atena: "12345678901" }, { fiscalYear: 2025, amounts: simpleAmounts(0, 0), atena: " " }];
+        expect(parseResidentTaxSchedule(stringifyResidentTaxSchedule(list))).toEqual([
+            { fiscalYear: 2025, amounts: Array(12).fill(0) },
+            { fiscalYear: 2026, amounts: simpleAmounts(8700, 8300), municipality: "131016", atena: "12345678901" },
+        ]);
+    });
+});

@@ -21,6 +21,9 @@
  *   ・v4: 従業員に現物で払う報酬（in_kind）、確定した給与に現物の額（in_kind・in_kind_taxable・in_kind_emp）と内訳（in_kind_detail）、
  *     賞与の支給項目に現物で渡す印（bonus_item_master.in_kind）、確定した賞与に現物で渡した額（bonus_results.in_kind）を足す
  *   ・v5: 従業員に後期高齢者医療の障害認定の日（kouki_date）と、健康保険の被扶養者（health_dependents）を足す
+ *   ・v6: 会社に雇用保険の届書・年度更新の列（koyo_office_number・koyo_hello_work・koyo_media_seq・rousai_business・rousai_rate・nendo_koshin）、
+ *     拠点に koyo_office_number・koyo_hello_work・rousai_business・rousai_rate、従業員に雇用保険の届書に書くこと（koyo_info）を足す
+ *   ・v7: 会社に源泉所得税の納付書の設定と手で入れた額（gensen_nofu）、従業員に住民税の給与所得者異動届出書に書くこと（resident_tax_idou）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -113,6 +116,14 @@ export const MIGRATIONS: Migration[] = [
         ["koyo_office_number", "TEXT"], ["koyo_hello_work", "TEXT"], ["rousai_business", "TEXT"], ["rousai_rate", "REAL"],
       ]) await addColumnIfMissing(db, "branches", column, definition);
       await addColumnIfMissing(db, "staff", "koyo_info", "TEXT");
+    },
+  },
+  {
+    version: 7,
+    description: "源泉所得税の納付書（納期の特例・手で入れた額）と、住民税の給与所得者異動届出書に書くことの列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "company", "gensen_nofu", "TEXT");
+      await addColumnIfMissing(db, "staff", "resident_tax_idou", "TEXT");
     },
   },
 ];

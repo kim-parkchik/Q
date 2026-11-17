@@ -49,6 +49,7 @@ export const DB_SCHEMAS = [
     rousai_business TEXT,                -- 労災保険率表の事業の種類の番号（「98」など。年度更新の労災保険率。utils/nendoKoshin.ts）
     rousai_rate REAL,                    -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ。NULL なら表の率）
     nendo_koshin TEXT,                   -- 年度更新で入れたもの（JSON。年度・労働保険番号ごとの申告済概算保険料・延納・充当意思など）
+    gensen_nofu TEXT,                    -- 源泉所得税の納付書（所得税徴収高計算書）の設定と手で入れた額（JSON。納期の特例・退職手当等・税理士等の報酬。utils/withholdingPayment.ts）
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
     round_emp_ins TEXT DEFAULT 'currency_law', -- 雇用保険料（本人負担分）の端数：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ（厚生労働省）。特約があれば round など
@@ -171,6 +172,7 @@ export const DB_SCHEMAS = [
     in_kind TEXT,             -- 現物で払う報酬（食事・住宅（社宅・寮など）・その他（自社製品など）の期間ごとの行。JSON。詳しくは utils/genbutsu.ts）
     kouki_date TEXT,          -- 後期高齢者医療の被保険者になった日（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts）
     koyo_info TEXT,           -- 雇用保険の届書に書くこと（職種・雇用形態・就職経路・外国人の在留資格・離職の理由・転勤など。JSON。詳しくは utils/koyoInfo.ts）
+    resident_tax_idou TEXT,   -- 住民税の給与所得者異動届出書に書くこと（異動の日ごとの徴収方法・新しい勤務先・届け出た日。JSON。utils/residentTaxIdou.ts）
     health_dependents TEXT,   -- 健康保険の被扶養者（配偶者・子など。被扶養者（異動）届・国民年金第3号被保険者関係届に書く。JSON。詳しくは utils/healthDependents.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),
