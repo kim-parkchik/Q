@@ -13,6 +13,7 @@ import { parseInKind, stringifyInKind, validateInKindEntry, type InKindEntry } f
 import { dependentProblems, parseHealthDependents, stringifyHealthDependents, type HealthDependent } from "../../utils/healthDependents";
 import { emptyKoyoInfo, parseKoyoInfo, stringifyKoyoInfo, type KoyoInfo } from "../../utils/koyoInfo";
 import { parseForeignInfo, stringifyForeignInfo, type ForeignInfo } from "../../utils/foreignInfo";
+import { parseShahoLoss, stringifyShahoLoss, type ShahoLoss } from '../../utils/shahoLoss';
 import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
 import { countAnnualWorkDays } from "../../utils/annualWorkDays";
 import {
@@ -132,6 +133,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetInKind, setTargetInKind] = useState<InKindEntry[]>([]); // 現物で払う報酬（社宅・食事・自社製品など。utils/genbutsu.ts）
     const [targetHealthDependents, setTargetHealthDependents] = useState<HealthDependent[]>([]); // 健康保険の被扶養者（utils/healthDependents.ts）
     const [targetKoukiDate, setTargetKoukiDate] = useState(""); // 後期高齢者医療の障害認定を受けた日（この日に健康保険の資格を失う）
+    const [targetShahoLoss, setTargetShahoLoss] = useState<ShahoLoss | null>(null); // 在職中に退職以外で社会保険の資格を失う日（utils/shahoLoss.ts）
     const [targetKoyoInfo, setTargetKoyoInfo] = useState<KoyoInfo>(emptyKoyoInfo()); // 雇用保険の届書に書くこと（utils/koyoInfo.ts）
     const [targetForeignInfo, setTargetForeignInfo] = useState<ForeignInfo | null>(null); // 在留資格の情報（外国人の方。utils/foreignInfo.ts）
     const [targetTaxColumn, setTargetTaxColumn] = useState<TaxColumn>("kou"); // 源泉所得税の欄（甲欄・乙欄・丙欄）
@@ -364,6 +366,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetInKind([]);
         setTargetHealthDependents([]);
         setTargetKoukiDate("");
+        setTargetShahoLoss(null);
         setTargetKoyoInfo(emptyKoyoInfo());
         setTargetForeignInfo(null);
         setTargetTaxColumn("kou");
@@ -442,6 +445,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetInKind(parseInKind(s.in_kind));
         setTargetHealthDependents(parseHealthDependents(s.health_dependents));
         setTargetKoukiDate(s.kouki_date || "");
+        setTargetShahoLoss(parseShahoLoss(s.shaho_loss));
         setTargetKoyoInfo(parseKoyoInfo(s.koyo_info));
         setTargetForeignInfo(parseForeignInfo(s.foreign_info));
         setTargetTaxColumn(toTaxColumn(s.tax_column));
@@ -524,6 +528,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             JSON.stringify(targetInKind) !== JSON.stringify(parseInKind(original.in_kind)) ||
             stringifyHealthDependents(targetHealthDependents) !== stringifyHealthDependents(parseHealthDependents(original.health_dependents)) ||
             String(targetKoukiDate) !== String(original.kouki_date || "") ||
+            stringifyShahoLoss(targetShahoLoss) !== stringifyShahoLoss(parseShahoLoss(original.shaho_loss)) ||
             stringifyKoyoInfo(targetKoyoInfo) !== stringifyKoyoInfo(parseKoyoInfo(original.koyo_info)) ||
             stringifyForeignInfo(targetForeignInfo) !== stringifyForeignInfo(parseForeignInfo(original.foreign_info)) ||
             targetTaxColumn !== toTaxColumn(original.tax_column) ||
@@ -648,6 +653,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 stringifyForeignInfo(targetForeignInfo),
                 // 部門（支給控除一覧表・仕訳を部門ごとにまとめる）
                 targetDepartment.trim() || null,
+                // 在職中に退職以外で社会保険の資格を失う日（社会保障協定・特定減額特例対象者の任意喪失）
+                stringifyShahoLoss(targetShahoLoss),
             ];
 
             if (editingId) {
@@ -670,7 +677,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
                         probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?, in_kind=?,
-                        health_dependents=?, kouki_date=?, koyo_info=?, foreign_info=?, department=?
+                        health_dependents=?, kouki_date=?, koyo_info=?, foreign_info=?, department=?, shaho_loss=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -694,7 +701,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule, resident_tax_municipality, commute_setting, fixed_break_apply,
                         job_type, career_history, retirement_reason, death_date, death_cause,
                         probation_end, basic_pension_number, multi_office, address_kana, in_kind,
-                        health_dependents, kouki_date, koyo_info, foreign_info, department,
+                        health_dependents, kouki_date, koyo_info, foreign_info, department, shaho_loss,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -920,6 +927,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         isHealthDependentsValid,
         targetKoukiDate,
         setTargetKoukiDate,
+        targetShahoLoss,
+        setTargetShahoLoss,
         targetKoyoInfo,
         setTargetKoyoInfo,
         targetForeignInfo,

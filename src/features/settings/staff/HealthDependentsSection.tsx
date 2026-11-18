@@ -141,6 +141,20 @@ export default function HealthDependentsSection({ cm }: Props) {
                                     </select>
                                     {d.overseasReason === "その他" && <input value={d.overseasReasonNote} placeholder="理由" onChange={e => update(i, { overseasReasonNote: e.target.value })} style={{ ...small, width: "120px" }} />}
                                     {d.spouse && <span>該当した日 <input type="date" value={d.overseasFrom} onChange={e => update(i, { overseasFrom: e.target.value })} style={{ ...small, width: "140px" }} /></span>}
+                                    {d.reported && (
+                                        <span title="被扶養者のまま日本に住むようになったときなど。「変更」の届けで出します（被扶養者でなくなるときは、非該当の届けを出します）">
+                                            海外特例要件に非該当となった日 <input type="date" value={d.overseasUntil} onChange={e => update(i, { overseasUntil: e.target.value, overseasEndReason: e.target.value ? d.overseasEndReason || "国内転入" : "" })} style={{ ...small, width: "140px" }} />
+                                        </span>
+                                    )}
+                                    {d.overseasUntil && (
+                                        <>
+                                            <select value={d.overseasEndReason} onChange={e => update(i, { overseasEndReason: e.target.value })} style={{ ...small, width: "auto" }}>
+                                                {Object.keys(SHAHO_FUYOU_CODES.overseasEndReason).map(k => <option key={k} value={k}>{k}</option>)}
+                                            </select>
+                                            {d.overseasEndReason === "国内転入" && <span>国内転入日 <input type="date" value={d.returnedOn} onChange={e => update(i, { returnedOn: e.target.value })} style={{ ...small, width: "140px" }} /></span>}
+                                            {d.overseasEndReason === "その他" && <input value={d.overseasEndReasonNote} placeholder="理由" onChange={e => update(i, { overseasEndReasonNote: e.target.value })} style={{ ...small, width: "120px" }} />}
+                                        </>
+                                    )}
                                 </>
                             )}
                         </div>

@@ -27,6 +27,7 @@ import {
 import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 import { useMyNumberUnlock } from "../mynumber/MyNumberUnlock";
 import * as S from "./reportStyles";
+import ResidentTaxKirikaePanel from "./ResidentTaxKirikaePanel";
 
 interface Props {
   db: Database;
@@ -51,6 +52,7 @@ interface Entry {
 }
 
 const PRINT_ID = "idou-print";
+const KIRIKAE_ID = "resident-tax-kirikae-print";
 const todayStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -81,6 +83,8 @@ export default function ResidentTaxIdouManager({ db, staffList, currentUser, onD
   const [myNumberAccess, setMyNumberAccess] = useState(false);
   const [printNumbers, setPrintNumbers] = useState<Record<string, string> | null>(null);
   const [adding, setAdding] = useState<{ staffId: string; date: string; reason: string } | null>(null);
+  /** 特別徴収への切替申請書の内容を出す（印刷はその部分だけ） */
+  const [kirikae, setKirikae] = useState(false);
 
   useEffect(() => {
     const map: Record<string, Record<string, IdouInput>> = {};
@@ -233,7 +237,7 @@ export default function ResidentTaxIdouManager({ db, staffList, currentUser, onD
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
-      <style>{S.printStyle(PRINT_ID, false)}</style>
+      <style>{S.printStyle(kirikae ? KIRIKAE_ID : PRINT_ID, false)}</style>
       <div className="no-print" style={S.card}>
         <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>住民税の異動届出書（給与支払報告・特別徴収に係る給与所得者異動届出書）</h3>
         <div style={{ ...S.note, marginBottom: 10 }}>
@@ -251,6 +255,9 @@ export default function ResidentTaxIdouManager({ db, staffList, currentUser, onD
           </label>
           <button onClick={() => setAdding({ staffId: String(staffList[0]?.id ?? ""), date: todayStr(), reason: "3" })} style={S.button("#64748b")}>
             ＋ ほかの異動（休職・転勤など）を加える
+          </button>
+          <button onClick={() => setKirikae(!kirikae)} style={S.button(kirikae ? "#2563eb" : "#64748b")}>
+            {kirikae ? "切替申請書を閉じる" : "特別徴収への切替申請書"}
           </button>
           <span style={{ flex: 1 }} />
           <button onClick={exportCsv} style={S.button("#16a085")}>eLTAX 用の CSV を保存</button>
@@ -283,6 +290,7 @@ export default function ResidentTaxIdouManager({ db, staffList, currentUser, onD
           </div>
         )}
       </div>
+      {kirikae && <div id={KIRIKAE_ID}><ResidentTaxKirikaePanel db={db} staffList={staffList} /></div>}
 
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         <div className="no-print" style={{ ...S.card, width: 300, flexShrink: 0, padding: 12 }}>

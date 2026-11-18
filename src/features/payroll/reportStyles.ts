@@ -27,7 +27,9 @@ export const tabButton = (active: boolean): CSSProperties => ({
 
 /** 印刷するときは、id の部分だけを出す（2枚以上になるので absolute。表の見出しは紙ごとにくり返す） */
 export const printStyle = (id: string, landscape: boolean) => `
+.print-only { display: none; }
 @media print {
+  .print-only { display: inline !important; }
   @page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 10mm; }
   body { background: white !important; }
   body * { visibility: hidden !important; }

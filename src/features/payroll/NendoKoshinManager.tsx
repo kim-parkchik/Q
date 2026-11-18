@@ -2,6 +2,8 @@
  * 「労働保険の年度更新」の画面：確定保険料・一般拠出金算定基礎賃金集計表と、労働保険概算・確定保険料申告書に書く金額
  * ・労働保険の事業（労働保険番号）ごと。支店に別の労働保険番号があれば、その支店は別の申告書
  * ・申告済概算保険料・概算保険料の見込み・延納・充当意思は、この画面で入れて会社に残す（company.nendo_koshin）
+ * ・労災保険の特別加入（第1種。中小事業主・家族従事者・役員など）をしているときは、特別加入者ごとの給付基礎日額と適用月数から、
+ *   労働保険事務組合に出す「労働保険料算定基礎賃金等の報告」の特別加入者の欄と特別加入保険料（確定・概算）を出す
  * 計算は utils/nendoKoshin.ts
  */
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -10,9 +12,10 @@ import { useToast } from "../../components/Toast";
 import { loadKoyoBase, type KoyoBase } from "../../utils/koyoData";
 import { laborUnits } from "../../utils/koyoPlaces";
 import {
-  buildNendoTable, calcNendoDeclaration, koyoPartsOf, koyoRateOf, nendoDueDates, NENDO_CATEGORY_LABELS, rousaiRateOf,
-  type NendoBonus, type NendoCategory, type NendoRow, type NendoSalary,
+  buildNendoTable, calcNendoDeclaration, koyoPartsOf, koyoRateOf, nendoDueDates, NENDO_CATEGORY_LABELS, rousaiRateOf, specialPremiumOf,
+  type NendoBonus, type NendoCategory, type NendoRow, type NendoSalary, type SpecialMember,
 } from "../../utils/nendoKoshin";
+import { TOKUBETSU_TABLE } from "../../constants/tokubetsuKanyu";
 import { formatWareki } from "../../utils/wareki";
 import type { EmpInsType } from "../../constants/insurance/laborInsuranceRates";
 import { button, card, controls, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title } from "./ShahoFilePanel";
@@ -27,8 +30,10 @@ interface Saved {
   estimateKoyo: number | null;
   installments: boolean;
   allocation: "1" | "2" | "3";
+  /** 労災保険の特別加入者（第1種） */
+  special?: SpecialMember[];
 }
-const EMPTY: Saved = { declared: 0, estimateRousai: null, estimateKoyo: null, installments: true, allocation: "3" };
+const EMPTY: Saved = { declared: 0, estimateRousai: null, estimateKoyo: null, installments: true, allocation: "3", special: [] };
 
 export default function NendoKoshinManager({ db, staffList }: { db: any; staffList: any[] }) {
   const toast = useToast();
@@ -114,6 +119,16 @@ export default function NendoKoshinManager({ db, staffList }: { db: any; staffLi
     declared: inputs.declared, installments: inputs.installments, allocation: inputs.allocation,
   }) : null;
   const dues = nendoDueDates(fiscalYear + 1);
+  const special = inputs.special ?? [];
+  const specialConfirmed = rousaiRate !== null && special.length > 0 ? specialPremiumOf(special, rousaiRate) : null;
+  const specialEstimate = nextRousai !== null && special.length > 0 ? specialPremiumOf(special.map((m) => ({ daily: m.nextDaily, months: m.nextMonths })), nextRousai) : null;
+  const setMember = (i: number, patch: Partial<SpecialMember>) => setInputs({ ...inputs, special: special.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
+  const dailySelect = (value: number, onChange: (v: number) => void, allowZero = false) => (
+    <select value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ ...input, width: 110 }}>
+      {allowZero && <option value={0}>0（脱退）</option>}
+      {TOKUBETSU_TABLE.map((r) => <option key={r.daily} value={r.daily}>{yen(r.daily)}円</option>)}
+    </select>
+  );
   const problems: string[] = [];
   if (rousaiRate === null) problems.push("労災保険の事業の種類を、会社設定の「雇用保険・労働保険」で選んでください");
   if (!unit?.laborNumber) problems.push("労働保険番号を、会社設定の「基本情報」に入れてください");
@@ -254,6 +269,52 @@ export default function NendoKoshinManager({ db, staffList }: { db: any; staffLi
               {decl.notes.map((n) => <div key={n} style={{ ...small, marginTop: 2 }}>・{n}</div>)}
             </>
           )}
+          <div style={{ fontSize: 14, fontWeight: "bold", margin: "14px 0 4px" }}>労災保険の特別加入（第1種。中小事業主・家族従事者・役員など）</div>
+          <div style={{ ...small, marginBottom: 6 }} className="no-print">
+            特別加入をしている会社だけ入れます（中小事業主等の特別加入は、労働保険事務組合に事務を任せている事業です）。特別加入保険料は、
+            給付基礎日額の保険料算定基礎額（1年加入は日額 × 365日、年度の途中で加入・脱退した人は 1/12 の額 × 月数）の合計を千円未満切り捨てにして、
+            労災保険率をかけます。事務組合に出す「労働保険料算定基礎賃金等の報告」の特別加入者の欄に書きます。
+          </div>
+          {special.length > 0 && (
+            <table style={table}>
+              <thead>
+                <tr>{["特別加入者の氏名", "承認された給付基礎日額", "適用月数（確定）", "算定基礎額", "希望する給付基礎日額（来年度）", "適用月数（概算）", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {special.map((m, i) => (
+                  <tr key={i}>
+                    <td style={td}><input value={m.name} onChange={(e) => setMember(i, { name: e.target.value })} style={{ ...input, width: 140 }} /></td>
+                    <td style={td}>{dailySelect(m.daily, (v) => setMember(i, { daily: v }))}</td>
+                    <td style={td}><input type="number" min={0} max={12} value={m.months} onChange={(e) => setMember(i, { months: Math.max(0, Math.min(12, Number(e.target.value) || 0)) })} style={{ ...input, width: 60 }} /> か月</td>
+                    <td style={{ ...td, textAlign: "right" }}>{specialConfirmed?.bases[i] === null ? "表にない日額" : yen(specialConfirmed?.bases[i] ?? 0)}円</td>
+                    <td style={td}>{dailySelect(m.nextDaily, (v) => setMember(i, { nextDaily: v, nextMonths: v === 0 ? 0 : m.nextMonths || 12 }), true)}</td>
+                    <td style={td}><input type="number" min={0} max={12} value={m.nextMonths} onChange={(e) => setMember(i, { nextMonths: Math.max(0, Math.min(12, Number(e.target.value) || 0)) })} style={{ ...input, width: 60 }} /> か月</td>
+                    <td style={td} className="no-print"><button onClick={() => setInputs({ ...inputs, special: special.filter((_, j) => j !== i) })} style={button("#94a3b8")}>消す</button></td>
+                  </tr>
+                ))}
+                {specialConfirmed && (
+                  <tr>
+                    <th style={th} colSpan={3}>特別加入保険料（確定。{reiwa(fiscalYear)}）</th>
+                    <td style={td} colSpan={4}>算定基礎額の計 {yen(specialConfirmed.total)}円 → {yen(specialConfirmed.kilo)}千円 × {rousaiRate}/1000 ＝ <b>{yen(specialConfirmed.premium)}円</b></td>
+                  </tr>
+                )}
+                {specialEstimate && (
+                  <tr>
+                    <th style={th} colSpan={3}>特別加入保険料（概算。{reiwa(fiscalYear + 1)}）</th>
+                    <td style={td} colSpan={4}>算定基礎額の計 {yen(specialEstimate.total)}円 → {yen(specialEstimate.kilo)}千円 × {nextRousai}/1000 ＝ <b>{yen(specialEstimate.premium)}円</b></td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+          <button
+            className="no-print"
+            onClick={() => setInputs({ ...inputs, special: [...special, { name: "", daily: TOKUBETSU_TABLE[TOKUBETSU_TABLE.length - 1].daily, months: 12, nextDaily: TOKUBETSU_TABLE[TOKUBETSU_TABLE.length - 1].daily, nextMonths: 12 }] })}
+            style={{ ...button("#64748b"), marginTop: 6 }}
+          >
+            ＋ 特別加入者を足す
+          </button>
+
           <div style={{ ...small, marginTop: 8 }}>
             計算のしかたは、厚生労働省「令和８年度 労働保険年度更新申告書の書き方（継続事業用）」による。労災保険率は「労災保険率表（令和６年度～）」
             {rousaiRow ? `（${rousaiRow.codes.join("・")} ${rousaiRow.name}）` : ""}、雇用保険率は厚生労働省の発表の率。

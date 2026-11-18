@@ -13,13 +13,16 @@ import { MyNumberToggle, button, card, controls, fieldStyle, input, labelStyle, 
 import { KOYO_MODE_LABELS, koyoLossDateOf, useKoyoReportManager, type KoyoMode } from "./useKoyoReportManager";
 import { WageCertificateTable } from "./WageCertificateTable";
 import GaikokujinReportPanel from "./GaikokujinReportPanel";
+import KoyoOfficeFormsPanel from "./KoyoOfficeFormsPanel";
 
 const PRINT_ID = "koyo-print";
 
 export default function KoyoReportManager({ db, staffList, currentUser }: { db: any; staffList: any[]; currentUser: MyNumberUser | null }) {
   const m = useKoyoReportManager(db, staffList, currentUser);
   const [show, setShow] = useState<string | null>(null);
-  const [gaikoku, setGaikoku] = useState(false);
+  /** 届書のほかに出す画面（外国人雇用状況届出書・事業所の設置届と各種変更届） */
+  const [side, setSide] = useState<"" | "gaikoku" | "jigyosho">("");
+  const gaikoku = side !== "";
   const [printRequest, setPrintRequest] = useState(0);
   useEffect(() => { if (printRequest > 0) window.print(); }, [printRequest]);
   const monthMode = m.mode === "shutoku" || m.mode === "soshitsu";
@@ -38,9 +41,10 @@ export default function KoyoReportManager({ db, staffList, currentUser }: { db: 
         <div style={controls}>
           <div style={{ display: "flex", gap: 4 }}>
             {(Object.keys(KOYO_MODE_LABELS) as KoyoMode[]).map((k) => (
-              <button key={k} onClick={() => { setGaikoku(false); m.setMode(k); }} style={button(!gaikoku && m.mode === k ? "#2563eb" : "#94a3b8")}>{KOYO_MODE_LABELS[k]}</button>
+              <button key={k} onClick={() => { setSide(""); m.setMode(k); }} style={button(!gaikoku && m.mode === k ? "#2563eb" : "#94a3b8")}>{KOYO_MODE_LABELS[k]}</button>
             ))}
-            <button onClick={() => setGaikoku(true)} style={button(gaikoku ? "#2563eb" : "#94a3b8")}>外国人雇用状況届出書</button>
+            <button onClick={() => setSide("gaikoku")} style={button(side === "gaikoku" ? "#2563eb" : "#94a3b8")}>外国人雇用状況届出書</button>
+            <button onClick={() => setSide("jigyosho")} style={button(side === "jigyosho" ? "#2563eb" : "#94a3b8")}>事業所の設置届・各種変更届</button>
           </div>
           {!gaikoku && monthMode && (
             <label style={fieldStyle}>
@@ -53,7 +57,9 @@ export default function KoyoReportManager({ db, staffList, currentUser }: { db: 
         {m.loadError && <div style={{ color: "#b91c1c", fontSize: 12 }}>⚠ 読み込めませんでした：{m.loadError}</div>}
       </div>
       {gaikoku ? (
-        <div id={PRINT_ID} style={{ display: "flex", flexDirection: "column", gap: 16 }}><GaikokujinReportPanel db={db} staffList={staffList} /></div>
+        <div id={PRINT_ID} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {side === "gaikoku" ? <GaikokujinReportPanel db={db} staffList={staffList} /> : <KoyoOfficeFormsPanel db={db} staffList={staffList} />}
+        </div>
       ) : (<>
 
       <div style={card} className="no-print">

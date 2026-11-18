@@ -38,6 +38,10 @@ interface RateRow {
   health: string;
   care: string;
   childSupport: string;
+  /** 会社負担の%（空なら入れていない） */
+  companyHealth: string;
+  companyCare: string;
+  companyChild: string;
 }
 
 interface FormState {
@@ -65,7 +69,10 @@ const defaultChildSupport = (from: string): string => {
 };
 
 let rowKey = 0;
-const toRow = (r: UnionRate): RateRow => ({ key: ++rowKey, from: r.from, health: String(r.health), care: String(r.care), childSupport: String(r.childSupport) });
+const toRow = (r: UnionRate): RateRow => ({
+  key: ++rowKey, from: r.from, health: String(r.health), care: String(r.care), childSupport: String(r.childSupport),
+  companyHealth: r.company ? String(r.company.health) : "", companyCare: r.company ? String(r.company.care) : "", companyChild: r.company ? String(r.company.childSupport) : "",
+});
 
 const EMPTY_FORM: FormState = { name: "", type: "union", rates: [], officeNumber: "" };
 
@@ -114,7 +121,10 @@ export default function SocialInsuranceTab({ db }: Props) {
     const from = thisMonth();
     return {
       ...f,
-      rates: [...f.rates, { key: ++rowKey, from, health: last?.health ?? "", care: last?.care ?? "", childSupport: defaultChildSupport(from) }],
+      rates: [...f.rates, {
+        key: ++rowKey, from, health: last?.health ?? "", care: last?.care ?? "", childSupport: defaultChildSupport(from),
+        companyHealth: last?.companyHealth ?? "", companyCare: last?.companyCare ?? "", companyChild: last?.companyChild ?? "",
+      }],
     };
   });
   const setRate = (key: number, patch: Partial<RateRow>) =>
@@ -135,7 +145,16 @@ export default function SocialInsuranceTab({ db }: Props) {
         return `${monthLabel(r.from)}からの料率は、0〜${MAX_RATE}（%）の数で入れてください（本人負担の%。千分率（‰）なら10で割ります）。`;
       }
       if (nums[0] <= 0) return `${monthLabel(r.from)}からの健康保険の料率を入れてください。`;
-      result.push({ from: r.from, health: nums[0], care: nums[1], childSupport: nums[2] });
+      // 会社負担（入れていれば。健康保険を入れたら、介護保険・子ども・子育て支援金の空は 0）
+      let company: UnionRate["company"] = null;
+      if (r.companyHealth.trim() !== "") {
+        const c = [r.companyHealth, r.companyCare, r.companyChild].map((v) => (v.trim() === "" ? 0 : Number(v)));
+        if (c.some((n) => !Number.isFinite(n) || n < 0 || n > MAX_RATE)) return `${monthLabel(r.from)}からの会社負担の料率は、0〜${MAX_RATE}（%）の数で入れてください。`;
+        company = { health: c[0], care: c[1], childSupport: c[2] };
+      } else if (r.companyCare.trim() !== "" || r.companyChild.trim() !== "") {
+        return `${monthLabel(r.from)}からの会社負担の料率は、健康保険の%も入れてください（会社負担を使わないなら、3つとも空にします）。`;
+      }
+      result.push({ from: r.from, health: nums[0], care: nums[1], childSupport: nums[2], company });
     }
     return result.sort((a, b) => a.from.localeCompare(b.from));
   };
@@ -164,8 +183,10 @@ export default function SocialInsuranceTab({ db }: Props) {
       }
       for (const r of rates) {
         statements.push({
-          sql: `INSERT INTO social_insurance_group_rates (group_id, from_month, health_rate, care_rate, child_support_rate) VALUES (${groupIdSql}, ?, ?, ?, ?)`,
-          values: [...(editingId !== null ? [editingId] : []), r.from, r.health, r.care, r.childSupport],
+          sql: `INSERT INTO social_insurance_group_rates (group_id, from_month, health_rate, care_rate, child_support_rate, company_health_rate, company_care_rate, company_child_support_rate)
+                VALUES (${groupIdSql}, ?, ?, ?, ?, ?, ?, ?)`,
+          values: [...(editingId !== null ? [editingId] : []), r.from, r.health, r.care, r.childSupport,
+            r.company?.health ?? null, r.company?.care ?? null, r.company?.childSupport ?? null],
         });
       }
       await executeBatch(db, statements);
@@ -345,6 +366,7 @@ export default function SocialInsuranceTab({ db }: Props) {
               {form.rates.length > 0 && (
                 <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr auto", gap: "4px", fontSize: "11px", color: "#64748b", marginBottom: "4px" }}>
                   <span>何年何月分から</span><span>健康保険</span><span>介護保険</span><span>子ども・子育て支援金</span><span />
+                  <span style={{ textAlign: "right" }}>会社負担（なくてもよい）</span><span>健康保険</span><span>介護保険</span><span>子ども・子育て支援金</span><span />
                 </div>
               )}
               {form.rates.map((r) => (
@@ -354,11 +376,17 @@ export default function SocialInsuranceTab({ db }: Props) {
                   <input type="number" step="0.001" min={0} value={r.care} onChange={(e) => setRate(r.key, { care: e.target.value })} style={small} aria-label="介護保険（本人負担の%）" />
                   <input type="number" step="0.001" min={0} value={r.childSupport} onChange={(e) => setRate(r.key, { childSupport: e.target.value })} style={small} aria-label="子ども・子育て支援金（本人負担の%）" />
                   <button onClick={() => removeRate(r.key)} style={{ ...editBtnStyle, color: "#e74c3c" }} title="この料率を消す"><Trash2 size={14} /></button>
+                  <span style={{ fontSize: "11px", color: "#64748b", textAlign: "right" }}>会社負担の%</span>
+                  <input type="number" step="0.001" min={0} value={r.companyHealth} onChange={(e) => setRate(r.key, { companyHealth: e.target.value })} style={small} aria-label="健康保険（会社負担の%）" />
+                  <input type="number" step="0.001" min={0} value={r.companyCare} onChange={(e) => setRate(r.key, { companyCare: e.target.value })} style={small} aria-label="介護保険（会社負担の%）" />
+                  <input type="number" step="0.001" min={0} value={r.companyChild} onChange={(e) => setRate(r.key, { companyChild: e.target.value })} style={small} aria-label="子ども・子育て支援金（会社負担の%）" />
+                  <span />
                 </div>
               ))}
               <button onClick={addRate} style={{ ...editBtnStyle, marginTop: "4px" }}><PlusCircle size={14} /> 料率を足す</button>
               <div style={{ ...note, marginTop: "8px", marginBottom: 0 }}>
                 全体の料率ではなく、従業員が負担する分の%を入れます（組合は規約で会社の負担を半分より多くできるため。健康保険法162条）。
+                会社負担の%も入れると、保険料の集計表と法定福利費の仕訳に、組合の人の会社負担の見込みが入ります（入れなければ本人負担だけ）。
                 千分率（‰）で知らされたら、10で割って%にします（例：45‰ → 4.5%）。
                 料率が変わったら、新しい行を足します（前の月の分は、前の料率で計算します）。
                 子ども・子育て支援金は令和8年4月分からで、令和8年度は国が示した率が全体で0.23%（本人負担 0.115%）です。

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DISABILITY_EMPLOYMENT_RATE, DISABILITY_EMPLOYMENT_RATE_FORM6, DISABILITY_REPORT_MIN_WORKERS_FORM6, DISABILITY_WEEKLY_HOURS, ELDERLY_AGE_BANDS } from "../constants/roumu";
-import { disabilityRateFor, disabilityReport, disabilityWeight, elderlyReport, hoursClassOf, retirementAgeOf } from "./employmentStatus";
+import { disabilityRateFor, disabilityReport, disabilityReportByBranch, disabilityWeight, elderlyReport, hoursClassOf, retirementAgeOf, withTotalNi } from "./employmentStatus";
 
 /** 週の所定労働時間 hours の人（曜日で決める：月〜金のうち days 日 × 1日 hours/days 時間） */
 const person = (id: string, weeklyHours: number, o: Record<string, unknown> = {}) => ({
@@ -8,6 +8,30 @@ const person = (id: string, weeklyHours: number, o: Record<string, unknown> = {}
   is_employment_ins_eligible: 1, gender: "male", birthday: "1980-01-01", ...o,
 });
 const dis = (kind: string, severe = false) => JSON.stringify({ kind, severe, note: "" });
+
+describe("障害者雇用状況報告のＣ欄・Ｄ欄", () => {
+  test("Ｄ欄：身体障害者の種類別の実人数（様式第6号の第1号〜第5号）。種類を入れていない人は数えて知らせる", () => {
+    const staff = [
+      person("a", 40, { disability_employment: JSON.stringify({ kind: "physical", severe: true, physicalType: 4 }) }),
+      person("b", 25, { disability_employment: JSON.stringify({ kind: "physical", physicalType: 5 }) }),
+      person("c", 40, { disability_employment: JSON.stringify({ kind: "physical" }) }),
+      person("d", 40, { disability_employment: JSON.stringify({ kind: "mental", physicalType: 1 }) }),
+    ];
+    const r = disabilityReport(staff, 2026, 0);
+    expect([r.physicalTypes, r.physicalTypeUnknown]).toEqual([[0, 0, 0, 1, 1], 1]);
+  });
+  test("Ｃ欄：拠点ごとに数え、会社全体の 10(ニ) は事業所ごとの (ニ) の合計（除外率は事業所ごと）", () => {
+    const staff = [
+      ...Array.from({ length: 30 }, (_, i) => person(`h${i}`, 40, { branch_id: 1 })),
+      ...Array.from({ length: 20 }, (_, i) => person(`k${i}`, 40, { branch_id: 2 })),
+    ];
+    const by = disabilityReportByBranch(staff, 2026, [{ id: 1, name: "本社" }, { id: 2, name: "工場" }], { "2": { kubun: "3", exclusionPct: 20, business: "製造" } });
+    expect(by.list.map((x) => [x.report.ha, x.report.ni])).toEqual([[30, 30], [20, 16]]);
+    expect(by.ni).toBe(46);
+    const total = withTotalNi(disabilityReport(staff, 2026, 0), by.ni);
+    expect([total.ni, total.required]).toEqual([46, 1]); // 46 × 2.5% ＝ 1.15 → 1人
+  });
+});
 
 describe("障害者雇用状況報告", () => {
   test("記入要領と様式から作った数", () => {
@@ -20,7 +44,7 @@ describe("障害者雇用状況報告", () => {
   });
 
   test("数え方の表（重度×2・短時間×0.5・精神の短時間は1・特定短時間は重度と精神だけ0.5）", () => {
-    const w = (kind: "physical" | "intellectual" | "mental", severe: boolean, c: "regular" | "short" | "specified") => disabilityWeight({ kind, severe, note: "" }, c);
+    const w = (kind: "physical" | "intellectual" | "mental", severe: boolean, c: "regular" | "short" | "specified") => disabilityWeight({ kind, severe, physicalType: null, note: "" }, c);
     expect([w("physical", false, "regular"), w("physical", false, "short"), w("physical", false, "specified")]).toEqual([1, 0.5, 0]);
     expect([w("physical", true, "regular"), w("physical", true, "short"), w("physical", true, "specified")]).toEqual([2, 1, 0.5]);
     expect([w("intellectual", true, "regular"), w("intellectual", false, "short")]).toEqual([2, 0.5]);

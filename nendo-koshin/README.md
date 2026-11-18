@@ -23,7 +23,19 @@ Q の労働保険の年度更新（確定保険料・一般拠出金算定基礎
 | source/keizoku-21.pdf | 同 20 雇用保険料の控除方法・21 年度更新よくある質問（1,121,395バイト） | https://www.mhlw.go.jp/new-info/kobetu/roudou/gyousei/hoken/kakikata/dl/keizoku-21.pdf | `fa7a86b3d80449728f1441e3fa28b2a8eb6b62e390297bdd843f38f1ba0537e9` |
 | source/keizoku-22.pdf | 同 22 申告書作成チェックポイント（590,733バイト） | https://www.mhlw.go.jp/new-info/kobetu/roudou/gyousei/hoken/kakikata/dl/keizoku-22.pdf | `cd1a1e8fc4a39a2a0784d05377ef779400716fc371b95dbcd51de80e4c480dd4` |
 
-2026年11月17日に取得しました（ユーザーの許しを得て取得）。
+| source/yamagata-tebiki-2026.pdf | 山形労働局「年度更新の手引き」（令和8年度。労働保険事務組合向け）の「特別加入保険料算定基礎額表」と記入例（5,613,345バイト） | https://jsite.mhlw.go.jp/yamagata-roudoukyoku/content/contents/002587832.pdf | `29f5e65c7e7c6173f39da7b42254a6ef5ca69c0b8ffd10378235ba76d9473fb9` |
+
+2026年11月17日に取得しました（山形労働局の手引きは2026年11月18日。どれもユーザーの許しを得て取得）。
+
+### 労災保険の特別加入（第1種）の保険料算定基礎額
+
+```
+python3 -I scripts/import_tokubetsu_kanyu.py nendo-koshin/source/yamagata-tebiki-2026.pdf src/constants/tokubetsuKanyu.ts
+```
+
+「特別加入保険料算定基礎額表」の給付基礎日額（3,500円〜25,000円の16段階）ごとの保険料算定基礎額と「特例による 1/12 の額」を読みます。
+保険料算定基礎額がどの行も給付基礎日額の同じ倍数（365日）であること、1/12 の額が 保険料算定基礎額 ÷ 12 の1円未満を切り上げた額であること、
+記入例の「算定基礎額の計」5,748千円 × 9.5/1000 ＝ 54,606円 と合うことを確かめ、合わなければ止まります。
 
 **PDF は大きいので、リポジトリには入れていません**（`source/` は .gitignore）。
 作り直すときは、上の入手元から取ってきて `source/` に置き、SHA-256 を確かめてください（違えば、資料が変わったので、読んでから作り直します）。

@@ -106,6 +106,7 @@
  *  - 平均賃金を出せないとき（確定していない給与がある・入社して間もないなど）は計算せず、給与明細は確定できない
  */
 import { kaigoExemptMonth } from './kaigoExempt';
+import { shahoLossOnMonth } from "./shahoLoss";
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import { applyRounding } from './payrollUtils';
@@ -533,10 +534,16 @@ const monthReachingAge = (birthday: string, age: number) =>
  *      （「厚生年金保険は70歳（70歳の誕生日前日が属する月の前月まで）、健康保険は75歳まで（75歳誕生日当日が属する月の前月まで）」）
  *       賞与：https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html （資格喪失月に支払われた賞与は保険料賦課の対象とならない）
  */
-export const getInsuranceByAge = (birthday: string, year: number, month: number, koukiDate?: string | null, kaigoExempt?: unknown) => {
+export const getInsuranceByAge = (
+  birthday: string, year: number, month: number, koukiDate?: string | null, kaigoExempt?: unknown, shahoLoss?: unknown,
+) => {
   const result = insuranceByAgeOnly(birthday, year, month, koukiDate);
+  // 社会保障協定・特定減額特例対象者の任意喪失で資格を失った月の分からは、保険料をかけない
+  // （社会保障協定で年金だけが相手国の制度になったときは厚生年金だけ。健康保険は続く。utils/shahoLoss.ts）
+  const lost = shahoLoss ? shahoLossOnMonth(shahoLoss, year, month) : null;
+  const r = lost === "both" ? { health: false, nursing: false, pension: false } : lost === "pension" ? { ...result, pension: false } : result;
   // 介護保険の適用除外（国外居住・施設入所・在留資格3か月以下）の月の分は、介護保険料をかけない（utils/kaigoExempt.ts）
-  return kaigoExempt && result.nursing && kaigoExemptMonth(kaigoExempt, year, month) ? { ...result, nursing: false } : result;
+  return kaigoExempt && r.nursing && kaigoExemptMonth(kaigoExempt, year, month) ? { ...r, nursing: false } : r;
 };
 
 const insuranceByAgeOnly = (birthday: string, year: number, month: number, koukiDate?: string | null) => {
@@ -559,11 +566,13 @@ export const checkNursingCare = (birthday: string, year: number, month: number):
 
 /**
  * 健康保険・厚生年金に加入しているか
- * （その月の標準報酬月額が0＝未加入・対象外、または社保規定が「未加入 / 適用除外」なら加入していない）
+ * （その月の標準報酬月額が0＝未加入・対象外、または社保規定が「未加入 / 適用除外」なら加入していない。
+ *  社会保障協定・特定減額特例対象者の任意喪失で資格を失った月の分からも加入していない。年金だけ失うときは getInsuranceByAge で見る）
  */
 export const checkSocialInsEnrolled = (staff: any, year: number, month: number): boolean => {
   const socialGroupId = staff.social_insurance_group_id;
-  return getStandardRemuneration(staff, year, month) > 0 && (socialGroupId === undefined || Number(socialGroupId) > 0);
+  return getStandardRemuneration(staff, year, month) > 0 && (socialGroupId === undefined || Number(socialGroupId) > 0)
+    && shahoLossOnMonth(staff.shaho_loss, year, month) !== "both";
 };
 
 /** 雇用保険に加入しているか（従業員画面の「雇用保険加入」を外した人＝役員など は加入していない） */
@@ -910,7 +919,7 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
 
   // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
   // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
-  const byAge = getInsuranceByAge(staff.birthday || '', year, month, staff.kouki_date, staff.kaigo_exempt);
+  const byAge = getInsuranceByAge(staff.birthday || '', year, month, staff.kouki_date, staff.kaigo_exempt, staff.shaho_loss);
   // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
   const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
   // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）
@@ -1987,6 +1996,7 @@ export const calculateSalary = (
     ? inKindOfMonth(
       inKindEntries, inKindMonthOf(extras.period, targetYear, targetMonth), extras.prefecture,
       attendanceData.filter(row => (Number(row.work_hours) || 0) > 0).map(row => String(row.work_date)),
+      { executive: Number(staff.is_executive) === 1 },
     )
     : null;
   const inKind = inKindBase && commuteInKind ? addInKindLine(inKindBase, commuteInKindLine(commutePay, nonTaxableCommute)) : inKindBase;

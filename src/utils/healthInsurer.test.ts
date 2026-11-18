@@ -12,7 +12,7 @@ import { INSURANCE_2026 } from "../constants/insurance";
 import { DB_SCHEMAS } from "../types/dbSchema";
 
 const LAW = "currency_law";
-const rate = (from: string, health: number, care: number, childSupport: number): UnionRate => ({ from, health, care, childSupport });
+const rate = (from: string, health: number, care: number, childSupport: number): UnionRate => ({ from, health, care, childSupport, company: null });
 const union = (rates: UnionRate[], officeNumber = "", mediaSeq = 0): HealthInsurer => ({ id: 2, name: "確かめ健康保険組合", type: "union", rates, officeNumber, mediaSeq });
 const kokuho: HealthInsurer = { id: 3, name: "確かめ建設国保", type: "kokuho", rates: [], officeNumber: "", mediaSeq: 0 };
 const base = { base: 300000, prefecture: "東京", year: 2026, month: 6, nursing: false, rounding: LAW };

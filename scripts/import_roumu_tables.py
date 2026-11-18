@@ -234,6 +234,19 @@ def read_elderly_bands(path):
     return bands
 
 
+def read_physical_types(path):
+    """様式第6号のＤ欄「障害者の雇用の促進等に関する法律別表に掲げる種類別の身体障害者数」の種類（第1号〜第5号）"""
+    t = re.sub(r"\s+", "", unicodedata.normalize("NFKC", pdf_text(path)))
+    i = t.find("D障害者の雇用の促進等に関する法律別表に掲げる種類別の身体障害者数")
+    if i < 0:
+        fail("様式第6号にＤ欄（種類別の身体障害者数）が見つかりません")
+    found = re.findall(r"([^人()]+?)\(第([1-5])号に該当する者\)", t[i + 33:i + 400])
+    kinds = [(int(n), name.replace("(", "（").replace(")", "）")) for name, n in found]
+    if [n for n, _ in kinds] != [1, 2, 3, 4, 5]:
+        fail(f"様式第6号のＤ欄の種類が第1号〜第5号の順に読めません（{kinds}）")
+    return kinds
+
+
 def main():
     if len(sys.argv) != 3:
         fail("使い方: python3 -I scripts/import_roumu_tables.py roumu-forms src/constants/roumu.ts")
@@ -249,6 +262,7 @@ def main():
     dguide = os.path.join(folder, "source", "shougai-kinyuyouryou.pdf")
     dh = read_disability_guide(dguide, form_rate)
     bands = read_elderly_bands(guide)
+    physical_types = read_physical_types(form6)
 
     lines = [
         "// このファイルは scripts/import_roumu_tables.py で作ったものです。手で直さないでください。",
@@ -292,6 +306,9 @@ def main():
         f"export const DISABILITY_WEEKLY_HOURS = {{ regularMin: {dh['regularMin']}, shortBelow: {dh['shortBelow']}, specifiedMin: {dh['specifiedMin']} }} as const;",
         f"/** 令和8年6月1日現在の報告で、報告する事業主（常用雇用労働者 {dh['minWorkers']}人以上。法定雇用率 {form_rate[0]}/{form_rate[1]} の逆数） */",
         f"export const DISABILITY_REPORT_MIN_WORKERS_FORM6 = {dh['minWorkers']};",
+        "/** 様式第6号のＤ欄：障害者の雇用の促進等に関する法律別表に掲げる種類別の身体障害者数（第1号〜第5号。実人数で数える） */",
+        "export const DISABILITY_PHYSICAL_TYPES: { no: number; label: string }[] = ["
+        + ", ".join(f'{{ no: {n}, label: "{name}" }}' for n, name in physical_types) + "];",
         "",
     ]
     with open(out_path, "w", encoding="utf-8") as f:

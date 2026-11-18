@@ -21,6 +21,7 @@
  * 出典：厚生労働省「令和８年度 労働保険年度更新申告書の書き方（継続事業用）」（9 集計表の書き方・11 申告書の書き方（記入例1〜4）・
  *       12 常時使用労働者数・雇用保険被保険者数計算要領・13 一般拠出金・21 よくある質問・22 申告書作成チェックポイント）
  */
+import { TOKUBETSU_TABLE } from "../constants/tokubetsuKanyu";
 import dayjs from "dayjs";
 import { LABOR_INSURANCE_PERIODS, type EmpInsType } from "../constants/insurance/laborInsuranceRates";
 import { GENERAL_CONTRIBUTION_RATE, ROUSAI_RATE_PERIODS, type RousaiRateRow } from "../constants/insurance/rousaiRates";
@@ -423,3 +424,37 @@ export const nendoDueDates = (year: number, isHoliday: (date: string) => boolean
     while (x.day() === 0 || x.day() === 6 || isHoliday(x.format("YYYY-MM-DD"))) x = x.add(1, "day");
     return x.format("YYYY-MM-DD");
   });
+
+// ── 特別加入（第1種。中小事業主・家族従事者・役員など）────────────────────────
+
+/** 第1種特別加入者の1人分（労働保険事務組合に出す「労働保険料算定基礎賃金等の報告」に書く） */
+export interface SpecialMember {
+  name: string;
+  /** 承認された給付基礎日額（円） */
+  daily: number;
+  /** 適用月数（確定。その年度に加入していた月数。12 は1年） */
+  months: number;
+  /** 来年度に希望する給付基礎日額（円。0 は脱退）と、来年度の適用月数（概算） */
+  nextDaily: number;
+  nextMonths: number;
+}
+
+/**
+ * 特別加入者の保険料算定基礎額（1年加入は表の額、年度の途中で加入・脱退した人は「特例による 1/12 の額」× 加入月数）。
+ * 表にない給付基礎日額なら null（constants/tokubetsuKanyu.ts。山形労働局「年度更新の手引き」の表から作ったもの）
+ */
+export const specialBaseOf = (daily: number, months: number): number | null => {
+  if (months <= 0 || daily <= 0) return 0;
+  const row = TOKUBETSU_TABLE.find((r) => r.daily === daily);
+  if (!row) return null;
+  return months >= 12 ? row.yearly : row.monthly * months;
+};
+
+/** 特別加入保険料：全員の算定基礎額を足して千円未満を切り捨て、労災保険率をかけて1円未満を切り捨てる */
+export const specialPremiumOf = (members: { daily: number; months: number }[], ratePerMille: number) => {
+  const bases = members.map((m) => specialBaseOf(m.daily, m.months));
+  const unknown = bases.some((b) => b === null);
+  const total = bases.reduce<number>((t, b) => t + (b ?? 0), 0);
+  const kilo = kiloOf(total);
+  return { bases, total, kilo, premium: premiumOf(kilo, ratePerMille), unknown };
+};

@@ -8,6 +8,11 @@
  * ・労働者死傷病報告（令和7年1月1日からの様式。休業4日以上・死亡）：電子申請（帳票入力支援サービス）が原則。書く内容を出す
  * 様式は厚生労働省「主要様式ダウンロードコーナー（労災保険給付関係主要様式）」と「労働者死傷病報告の様式」による。
  * 請求書は労働者が出す（事業主は証明する）。死傷病報告は事業者が遅滞なく出す（休業4日未満は四半期ごと）。
+ * ・別紙1の裏面②・表面①：賃金計算期間のうち業務外の傷病の療養などで休業した期間があるとき、その日数(チ)と期間中の賃金(リ)を書き、
+ *   その期間を除いて計算した平均賃金（（賃金の総額(ホ) − (リ)）÷（総日数(イ) − (チ)））を書く（様式第8号 別紙1）
+ * ・別紙2（療養のため労働できなかった期間に、所定労働時間の一部だけ働いた日・賃金が支払われた休暇があるとき）：
+ *   ② 賃金を受けなかった日の日数を、③ 全部休業日と部分算定日（一部休業日・賃金が支払われた休暇）に分け、④ 部分算定日の年月日と賃金の額を書く。
+ *   月給などで休業日にも払った賃金は、月額 ÷ 30 × 日数（様式第8号 別紙2 の注意）
  */
 import dayjs from "dayjs";
 import type { AverageWageResult } from "./averageWage";
@@ -60,6 +65,89 @@ export interface Besshi1 {
   /** B がある（日・時間・出来高で決まる賃金がある） */
   hasB: boolean;
 }
+
+/** 別紙1 ②：業務外の傷病の療養などで休業した期間（賃金計算期間ごと）と、表面①の平均賃金 */
+export interface Besshi1NonWork {
+  rows: { from: string; to: string; days: number; wages: number }[];
+  /** (チ) 日数の計・(リ) 賃金の計 */
+  chi: number;
+  ri: number;
+  /** 表面①：（(ホ) − (リ)）÷（(イ) − (チ)）（銭） */
+  sen: number | null;
+  reason: string;
+}
+
+/**
+ * 別紙1 ②① を出す
+ * @param leaves 業務外の傷病の療養などで休業した期間
+ * @param wagesOf 賃金計算期間ごとの、その休業した日の賃金（null は 0：給与を払わない休職）
+ */
+export const besshi1NonWorkOf = (b: Besshi1, leaves: { start: string; end: string }[], reason: string, wagesOf: (i: number) => number | null = () => null): Besshi1NonWork | null => {
+  if (leaves.length === 0) return null;
+  const rows = b.a.map((p, i) => {
+    let days = 0;
+    for (let d = dayjs(p.from); !d.isAfter(dayjs(p.to), "day"); d = d.add(1, "day")) {
+      const x = d.format("YYYY-MM-DD");
+      if (leaves.some((l) => l.start <= x && (!l.end || x <= l.end))) days++;
+    }
+    return { from: p.from, to: p.to, days, wages: days > 0 ? wagesOf(i) ?? 0 : 0 };
+  });
+  const chi = rows.reduce((t, r) => t + r.days, 0);
+  if (chi === 0) return null;
+  const ri = rows.reduce((t, r) => t + r.wages, 0);
+  const restDays = b.i - chi;
+  return { rows, chi, ri, sen: restDays > 0 ? Math.floor(((b.ho - ri) * 100) / restDays + 1e-9) : null, reason };
+};
+
+/** 別紙2 の1日 */
+export interface Besshi2Day {
+  date: string;
+  /** whole：全部休業日 / partial：部分算定日（一部休業日・賃金が支払われた休暇） / worked：所定労働時間を働いた日（休業していない） */
+  kind: "whole" | "partial" | "worked";
+  /** 部分算定日の賃金の額（円。初めの値。画面で直せる） */
+  amount: number;
+  note: string;
+}
+
+/**
+ * 別紙2：療養のため労働できなかった期間の日を、全部休業日と部分算定日に分ける
+ * ・所定労働時間の一部だけ働いた日・有給休暇の日は部分算定日。所定労働時間を働いた日は休業していないので、②③に入れない
+ * ・ほかの日（休日を含む）は全部休業日（月給を休業日にも払っているときは、その日も部分算定日にする：monthlyPaid）
+ * ・賃金の額の初めの値：時給は 働いた時間 × 時給（有給休暇は所定労働時間分）、日給は日給、月給は 月額 ÷ 30
+ */
+export const besshi2Of = (
+  from: string, to: string, rows: { work_date: string; work_type?: string | null; work_hours?: number | string | null }[],
+  staff: any, monthlyPaid = false,
+): { days: Besshi2Day[]; whole: number; partial: number; worked: number } => {
+  const byDate = new Map(rows.map((r) => [String(r.work_date), r]));
+  const wageType = String(staff?.wage_type ?? "");
+  const base = Number(staff?.base_wage) || 0;
+  const scheduled = Number(staff?.scheduled_work_hours) || 8;
+  const out: Besshi2Day[] = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return { days: out, whole: 0, partial: 0, worked: 0 };
+  for (let d = dayjs(from); !d.isAfter(dayjs(to), "day"); d = d.add(1, "day")) {
+    const date = d.format("YYYY-MM-DD");
+    const r = byDate.get(date);
+    const hours = Number(r?.work_hours) || 0;
+    const paidLeave = r?.work_type === "paid_full" || r?.work_type === "paid_half";
+    const perDay = wageType === "monthly" ? Math.floor(base / 30) : wageType === "daily" ? base : Math.floor(base * scheduled);
+    if (hours >= scheduled) {
+      out.push({ date, kind: "worked", amount: 0, note: "所定労働時間を働いた日" });
+    } else if (hours > 0) {
+      out.push({ date, kind: "partial", amount: wageType === "hourly" ? Math.floor(base * hours) : perDay, note: `一部休業日（${hours}時間働いた）` });
+    } else if (paidLeave) {
+      out.push({ date, kind: "partial", amount: r?.work_type === "paid_half" ? Math.floor(perDay / 2) : perDay, note: "賃金が支払われた休暇（有給休暇）" });
+    } else if (monthlyPaid && wageType === "monthly") {
+      out.push({ date, kind: "partial", amount: perDay, note: "休業日にも月給を払った（月額 ÷ 30）" });
+    } else {
+      out.push({ date, kind: "whole", amount: 0, note: "" });
+    }
+  }
+  return {
+    days: out, whole: out.filter((x) => x.kind === "whole").length, partial: out.filter((x) => x.kind === "partial").length,
+    worked: out.filter((x) => x.kind === "worked").length,
+  };
+};
 
 export const besshi1Of = (r: AverageWageResult): Besshi1 => {
   const rows = r.periods.filter((p) => p.days > 0);

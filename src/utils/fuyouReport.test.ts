@@ -109,6 +109,27 @@ describe("被扶養者（異動）届／国民年金第3号被保険者関係届
     expect([row.values[20], row.values[23], row.values[55]]).toEqual(["3", "ｺｳﾈﾝ ｸﾐ", "氏名変更前：年金　久美"]);
   });
 
+  test("海外特例要件に非該当（国内転入）：変更の届けに、海外特例「2」・非該当となった日・理由「1」・国内転入日（配偶者は日の欄あり、子は理由と転入日だけ）", () => {
+    const abroad = { overseas: true, overseasReason: "留学", overseasFrom: "2025-04-01", overseasUntil: "2026-09-20", overseasEndReason: "国内転入", returnedOn: "2026-09-20" };
+    const sp = kumi({ ...abroad, reported: markedReported(kumi()) });
+    expect(suggestFuyouKind(sp)).toBe("変更");
+    expect(changeRemarks(sp)).toBe("海外特例要件非該当（国内転入）");
+    const row = buildFuyouRow(input({ kind: "変更", spouse: sp, receivedOn: "2026-09-25", today: "2026-09-25" }), office);
+    expect(row.problems).toEqual([]);
+    expect(row.values.slice(57, 68)).toEqual(["2", "", "", "", "", "9", "080920", "1", "", "9", "080920"]);
+    expect(row.values[55]).toBe("海外特例要件非該当（国内転入）");
+    // 届けたら、もう変更の届けは出さない
+    expect(suggestFuyouKind({ ...sp, reported: row.reported[sp.id] })).toBeNull();
+    // 子（その他の被扶養者1）：海外特例「2」、理由「2」（その他）と理由
+    const c = child("ichiro", { ...abroad, overseasEndReason: "その他", overseasEndReasonNote: "留学先の学校を卒業", returnedOn: "", reported: markedReported(child("ichiro")) });
+    const rowC = buildFuyouRow(input({ kind: "変更", spouse: null, others: [c], receivedOn: "2026-09-25", today: "2026-09-25" }), office);
+    expect(rowC.problems).toEqual([]);
+    expect(rowC.values.slice(69 + 13, 69 + 20)).toEqual(["2", "", "", "2", "留学先の学校を卒業", "", ""]);
+    // 3号関係届（健康保険組合の人の配偶者）も同じ形
+    const sango = buildSangoRow(input({ kind: "変更", spouse: sp, receivedOn: "2026-09-25", today: "2026-09-25" }), office);
+    expect(sango.values.slice(51, 62)).toEqual(["2", "", "", "", "", "9", "080920", "1", "", "9", "080920"]);
+  });
+
   test("入れていないもの（収入・続柄・なった日など）は直すところ", () => {
     const row = buildFuyouRow(input({ staffIncome: null, spouse: kumi({ relation: "", income: null, from: "" }) }), office);
     const text = row.problems.join("\n");

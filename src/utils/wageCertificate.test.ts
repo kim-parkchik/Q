@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import dayjs from "dayjs";
-import { buildWageCertificate, wageAmountsOf, type WageCertDay, type WageCertSalary } from "./wageCertificate";
+import { buildWageCertificate, commuteSpreadOf, shutdownHolidaysOf, wageAmountsOf, type WageCertDay, type WageCertSalary } from "./wageCertificate";
 
 /** from〜to の平日に働いた勤怠（except の日は欠勤） */
 const weekdays = (from: string, to: string, hours = 8, except: string[] = []): WageCertDay[] => {
@@ -113,6 +113,71 @@ describe("離職証明書の賃金の欄（⑧〜⑬）", () => {
     const after = r.insured.find((x) => x.from === "2026-01-01")!;
     expect(after.note).toContain("賃金なし");
     expect(r.notes.join("")).toContain("2026-02-01〜2026-04-30");
+  });
+
+  test("休業期間中の所定休日（手引き p.39 の例1・例2・例4）：休業手当の日のあいだに所定休日だけがあるとき、月給の人の⑬に書く", () => {
+    const day = (date: string, type: string): WageCertDay => ({ work_date: date, work_type: type, work_hours: type === "normal" ? 8 : 0 });
+    // 例1：1日（木）勤務、2日（金）休手、3・4日（土日）休日、5・6日（月火）休手 → 休日2日（2026年10月1日は木曜日）
+    const ex1 = new Map([["2026-10-01", "normal"], ["2026-10-02", "company_leave"], ["2026-10-05", "company_leave"], ["2026-10-06", "company_leave"], ["2026-10-07", "normal"]]
+      .map(([d, t]) => [d, day(d, t)]));
+    expect([...shutdownHolidaysOf(ex1, (d) => dayjs(d).day() !== 0 && dayjs(d).day() !== 6)]).toEqual(["2026-10-03", "2026-10-04"]);
+    // 例2：間に勤務した日（5日）があれば書かない
+    const ex2 = new Map([["2026-10-02", "company_leave"], ["2026-10-05", "normal"], ["2026-10-06", "company_leave"]].map(([d, t]) => [d, day(d, t)]));
+    expect(shutdownHolidaysOf(ex2, (d) => dayjs(d).day() !== 0 && dayjs(d).day() !== 6).size).toBe(0);
+    // 例4：賃金月をまたぐ（月末締め）。10月30日（金）休手・31日（土）・11月1日（日）休日・2日（月）・3日（火）休手 → 10月分に1日、11月分に1日
+    const attendance = [...weekdays("2026-04-01", "2026-10-29"), day("2026-10-30", "company_leave"), day("2026-11-02", "company_leave"), day("2026-11-03", "company_leave"),
+      ...weekdays("2026-11-04", "2026-11-30")];
+    const salaries: WageCertSalary[] = ["2026-10", "2026-11"].map((m) => ({
+      target_year: Number(m.slice(0, 4)), target_month: Number(m.slice(5)), total_earnings: 200000,
+      ledger: ledger(`${m}-01`, dayjs(`${m}-01`).endOf("month").format("YYYY-MM-DD"), [{ name: "基本給", amount: 190000 }, { name: "休業手当", amount: 10000 }]),
+    }));
+    const r = buildWageCertificate({
+      endDate: "2026-11-30", acquiredOn: "2026-04-01", elderly: false, staff: { wage_type: "monthly", scheduled_work_hours: 8 },
+      group: { closing_day: 99, is_next_month: 0, absence_deduction_method: "workdays" }, salaries, attendance,
+    });
+    expect(r.wages[0].note).toBe("休業2日 10000円 休業期間中の所定休日1日");
+    expect(r.wages[1].note).toBe("休業1日 10000円 休業期間中の所定休日1日");
+    // 日給の人には書かない
+    const daily = buildWageCertificate({
+      endDate: "2026-11-30", acquiredOn: "2026-04-01", elderly: false, staff: { wage_type: "daily", scheduled_work_hours: 8 },
+      group: { closing_day: 99, is_next_month: 0 }, salaries, attendance,
+    });
+    expect(daily.wages[0].note).not.toContain("所定休日");
+  });
+
+  test("通勤手当を6か月分まとめて払った月は、6で割ってそれぞれの月の A に入れる（手引き ⑫欄。端数は初めの月）", () => {
+    const salaries: WageCertSalary[] = [];
+    for (let m = 4; m <= 9; m++) {
+      const start = `2026-${String(m).padStart(2, "0")}-01`;
+      salaries.push({
+        target_year: 2026, target_month: m, total_earnings: 0,
+        ledger: ledger(start, dayjs(start).endOf("month").format("YYYY-MM-DD"), [
+          { name: "基本給", amount: 200000 }, ...(m === 4 ? [{ name: "通勤手当", amount: 60005 }] : []),
+        ]),
+      });
+    }
+    expect([...commuteSpreadOf(salaries, [{ pay: "2026-04", months: 6 }])]).toEqual([
+      ["2026-04", -50000], ["2026-05", 10000], ["2026-06", 10000], ["2026-07", 10000], ["2026-08", 10000], ["2026-09", 10000],
+    ]);
+    const r = buildWageCertificate({
+      endDate: "2026-09-30", acquiredOn: "2026-04-01", elderly: false, staff: { wage_type: "monthly", scheduled_work_hours: 8 },
+      group: { closing_day: 99, is_next_month: 0, absence_deduction_method: "none" }, salaries, attendance: [], commuteLumps: [{ pay: "2026-04", months: 6 }],
+    });
+    expect(r.wages.map((w) => w.a)).toEqual([210000, 210000, 210000, 210000, 210000, 210005]);
+  });
+
+  test("短期雇用特例被保険者：⑧は B 欄の暦月で、離職した月からさかのぼる（手引きの記入例(9)：5月10日取得・11月20日離職）", () => {
+    const attendance = weekdays("2026-05-10", "2026-11-20");
+    const r = buildWageCertificate({
+      endDate: "2026-11-20", acquiredOn: "2026-05-10", elderly: false, staff: { wage_type: "daily", scheduled_work_hours: 8 },
+      group: { closing_day: 99, is_next_month: 0 }, salaries: [], attendance, shortTerm: true,
+    });
+    expect(r.insured.map((x) => [x.month, x.from, x.to])).toEqual([
+      [11, "2026-11-01", "2026-11-20"], [10, "2026-10-01", "2026-10-31"], [9, "2026-09-01", "2026-09-30"], [8, "2026-08-01", "2026-08-31"],
+      [7, "2026-07-01", "2026-07-31"], [6, "2026-06-01", "2026-06-30"], [5, "2026-05-10", "2026-05-31"],
+    ]);
+    expect(r.insured.map((x) => x.days)).toEqual([15, 22, 22, 21, 23, 22, 15]);
+    expect(r.fullMonths).toBe(7);
   });
 
   test("離職日を含む給与を確定していなければ知らせる", () => {

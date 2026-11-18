@@ -12,12 +12,15 @@ import { useEffect, useMemo, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
-import { saveCsvFile } from "../../utils/fileSaveUtils";
+import { saveBinaryFile, saveCsvFile } from "../../utils/fileSaveUtils";
 import { parseLedger } from "../../utils/legalBooks";
 import {
   payChanges, payListCell, payListColumns, payListCsv, payListRows, payTrendRows, type PayDocPerson, type PayListGroupBy,
 } from "../../utils/payReports";
-import { buildPayJournal, journalCsv, journalTotals, parseJournalSettings, type JournalSettings } from "../../utils/payJournal";
+import {
+  buildPayJournal, JOURNAL_COLUMNS, JOURNAL_DATE_STYLES, JOURNAL_ENCODINGS, journalBytes, journalTotals, parseJournalSettings,
+  type JournalColumn, type JournalDateStyle, type JournalEncoding, type JournalSettings,
+} from "../../utils/payJournal";
 import { payDateOf } from "../../utils/koyoBenefits";
 import PaySlipSheet from "./PaySlipSheet";
 import RemunerationNoticeView from "./RemunerationNoticeView";
@@ -199,10 +202,18 @@ export default function PayReportManager({ db, staffList }: Props) {
   };
 
   const years = Array.from({ length: 7 }, (_, i) => today.getFullYear() + 1 - i);
-  const csvOfTab = () => {
-    if (tab === "list") return payListCsv(title, columns, rows);
-    if (tab === "journal") return journalCsv(journal.lines);
-    return "";
+  const csvOfTab = () => (tab === "list" ? payListCsv(title, columns, rows) : "");
+  /** 仕訳データは、設定した形（列・見出し・日付・文字コード）で保存する */
+  const saveJournal = async () => {
+    try {
+      const { bytes, unknown } = journalBytes(journal.lines, journalSettings);
+      if (unknown.length > 0) await dialog.warning(`シフトJIS にない字（${unknown.join("・")}）を「?」にしました。`);
+      const saved = await saveBinaryFile(bytes, `${title}.csv`.replace(/[\\/:*?"<>|\s]/g, "_"), { name: "CSV", extensions: ["csv"] });
+      if (saved) toast.success(`「${saved.name}」を保存しました`);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`CSV を保存できませんでした。\n${e}`);
+    }
   };
 
   return (
@@ -273,7 +284,7 @@ export default function PayReportManager({ db, staffList }: Props) {
             <span style={{ flex: 1 }} />
             {tab !== "journal" && <button onClick={() => window.print()} disabled={shown.length === 0 && tab !== "trend"} style={S.button("#2563eb", shown.length === 0 && tab !== "trend")}>🖨 印刷・PDF保存</button>}
             {(tab === "list" || tab === "journal") && (
-              <button onClick={() => save(csvOfTab(), `${title}.csv`)} disabled={shown.length === 0 || (tab === "journal" && journalSum.debit !== journalSum.credit)}
+              <button onClick={() => (tab === "journal" ? void saveJournal() : save(csvOfTab(), `${title}.csv`))} disabled={shown.length === 0 || (tab === "journal" && journalSum.debit !== journalSum.credit)}
                 style={S.button("#16a085", shown.length === 0 || (tab === "journal" && journalSum.debit !== journalSum.credit))}>CSV に保存</button>
             )}
           </div>
@@ -415,12 +426,23 @@ function ChangesView({ title, before, after }: { title: string; before: PayDocPe
 function JournalView({ settings, onSettings, lines, notes, totals }: {
   settings: JournalSettings; onSettings: (s: JournalSettings) => void; lines: ReturnType<typeof buildPayJournal>["lines"]; notes: string[]; totals: { debit: number; credit: number };
 }) {
-  const text = (labelText: string, key: Exclude<keyof JournalSettings, "byDepartment">, w = 130) => (
+  type TextKey = "salary" | "executiveSalary" | "bonus" | "executiveBonus" | "commute" | "deposit" | "socialInsuranceSub" | "employmentInsuranceSub"
+    | "incomeTaxSub" | "residentTaxSub" | "payment" | "welfare" | "accrued";
+  const text = (labelText: string, key: TextKey, w = 130) => (
     <label style={S.field} key={key}>
       <span style={S.label}>{labelText}</span>
       <input defaultValue={settings[key]} onBlur={(e) => e.target.value !== settings[key] && onSettings({ ...settings, [key]: e.target.value.trim() })} style={{ ...S.input, width: w }} />
     </label>
   );
+  const allColumns = Object.keys(JOURNAL_COLUMNS) as JournalColumn[];
+  const move = (c: JournalColumn, d: -1 | 1) => {
+    const list = [...settings.columns];
+    const i = list.indexOf(c);
+    const j = i + d;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    onSettings({ ...settings, columns: list });
+  };
   return (
     <div style={S.card}>
       <details style={{ marginBottom: 10 }}>
@@ -435,7 +457,46 @@ function JournalView({ settings, onSettings, lines, notes, totals }: {
             部門ごとに分ける（従業員の画面の「部門」）
           </label>
         </div>
+        <div style={{ ...S.controls, marginTop: 4 }}>
+          {text("会社負担の保険料の科目（法定福利費）", "welfare", 150)}{text("その相手の科目（未払費用）", "accrued", 150)}
+        </div>
         <div style={S.small}>そのほかの控除（社宅家賃など）は、控除の勘定科目に、項目の名前を補助科目にして書きます。年末調整の還付・徴収は、所得税の補助科目で書きます。</div>
+      </details>
+      <details style={{ marginBottom: 10 }}>
+        <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: "bold" }}>CSV の形（使っている会計ソフトの取り込みの設定に合わせます）</summary>
+        <div style={{ ...S.controls, marginTop: 8 }}>
+          <label style={S.field}>
+            <span style={S.label}>文字コード</span>
+            <select value={settings.encoding} onChange={(e) => onSettings({ ...settings, encoding: e.target.value as JournalEncoding })} style={S.input}>
+              {(Object.keys(JOURNAL_ENCODINGS) as JournalEncoding[]).map((k) => <option key={k} value={k}>{JOURNAL_ENCODINGS[k]}</option>)}
+            </select>
+          </label>
+          <label style={S.field}>
+            <span style={S.label}>日付の書き方</span>
+            <select value={settings.dateStyle} onChange={(e) => onSettings({ ...settings, dateStyle: e.target.value as JournalDateStyle })} style={S.input}>
+              {(Object.keys(JOURNAL_DATE_STYLES) as JournalDateStyle[]).map((k) => <option key={k} value={k}>{JOURNAL_DATE_STYLES[k]}</option>)}
+            </select>
+          </label>
+          <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={settings.header} onChange={(e) => onSettings({ ...settings, header: e.target.checked })} /> 1行目に見出しを書く
+          </label>
+        </div>
+        <table style={{ ...S.table, maxWidth: 620, marginTop: 6 }}>
+          <thead><tr>{["使う", "列", "見出しの名前", "並び"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {[...settings.columns, ...allColumns.filter((c) => !settings.columns.includes(c))].map((c) => {
+              const used = settings.columns.includes(c);
+              return (
+                <tr key={c}>
+                  <td style={S.td}><input type="checkbox" checked={used} onChange={(e) => onSettings({ ...settings, columns: e.target.checked ? [...settings.columns, c] : settings.columns.filter((x) => x !== c) })} /></td>
+                  <td style={S.td}>{JOURNAL_COLUMNS[c]}</td>
+                  <td style={S.td}><input defaultValue={settings.headers[c] ?? ""} placeholder={JOURNAL_COLUMNS[c]} onBlur={(e) => onSettings({ ...settings, headers: { ...settings.headers, [c]: e.target.value.trim() } })} style={{ ...S.input, width: 160 }} /></td>
+                  <td style={S.td}>{used && <><button onClick={() => move(c, -1)} style={{ ...S.button("#94a3b8"), padding: "2px 8px" }}>↑</button> <button onClick={() => move(c, 1)} style={{ ...S.button("#94a3b8"), padding: "2px 8px" }}>↓</button></>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </details>
       {totals.debit !== totals.credit && <div style={S.errorBox}>借方（{totals.debit.toLocaleString()}円）と貸方（{totals.credit.toLocaleString()}円）が合いません。確定し直してください。</div>}
       {notes.length > 0 && <div style={{ ...S.warnBox, marginBottom: 8 }}>{notes.map((x, i) => <div key={i}>・{x}</div>)}</div>}
@@ -460,7 +521,7 @@ function JournalView({ settings, onSettings, lines, notes, totals }: {
       </table>
       <div style={{ ...S.small, marginTop: 6 }}>
         多くの会計ソフトが取り込める一般的な形の CSV です（1行に借方か貸方の一方。同じ伝票番号で1つの仕訳）。取り込むときは、会計ソフトの取り込みの設定で列を合わせてください。
-        会社が負担する社会保険料・労働保険料（法定福利費）は入れていません。
+        会社が負担する社会保険料・労働保険料（法定福利費）の仕訳は、「保険料の集計表」の画面で月ごとに作れます。
       </div>
     </div>
   );

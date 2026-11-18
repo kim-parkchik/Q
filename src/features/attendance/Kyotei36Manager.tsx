@@ -389,6 +389,8 @@ function CheckPanel({ db, staff, k }: { db: Database; staff: any[]; k: Kyotei36 
   const [start, setStart] = useState(defaultStart);
   useEffect(() => setStart(defaultStart), [defaultStart]);
   const [rows, setRows] = useState<{ id: string; name: string; months: MonthHours[] }[] | null>(null);
+  /** 給与の計算期間の初めの日（日にち。起算日とずれていないかを見る） */
+  const [periodStartDays, setPeriodStartDays] = useState<number[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -399,6 +401,7 @@ function CheckPanel({ db, staff, k }: { db: Database; staff: any[]; k: Kyotei36 
         const from = dayjs(start).subtract(6, "month");
         const to = dayjs(start).add(1, "year").add(1, "month");
         const out: { id: string; name: string; months: MonthHours[] }[] = [];
+        const startDays = new Set<number>();
         for (const s of staff) {
           const res = await db.select<any[]>(
             `SELECT target_year, target_month, ledger, total_overtime_hours FROM salary_results
@@ -407,6 +410,7 @@ function CheckPanel({ db, staff, k }: { db: Database; staff: any[]; k: Kyotei36 
           );
           const months = (res ?? []).map((r): MonthHours => {
             const l = parseLedger(r.ledger);
+            if (l?.periodStart) startDays.add(Number(l.periodStart.slice(8, 10)));
             const ym = `${r.target_year}-${String(r.target_month).padStart(2, "0")}`;
             return {
               ym,
@@ -417,7 +421,10 @@ function CheckPanel({ db, staff, k }: { db: Database; staff: any[]; k: Kyotei36 
           });
           out.push({ id: String(s.id), name: String(s.name ?? ""), months });
         }
-        if (!cancelled) setRows(out);
+        if (!cancelled) {
+          setRows(out);
+          setPeriodStartDays([...startDays]);
+        }
       } catch (e) {
         console.error("36協定の確認の読み込みエラー:", e);
         if (!cancelled) setRows([]);
@@ -440,6 +447,13 @@ function CheckPanel({ db, staff, k }: { db: Database; staff: any[]; k: Kyotei36 
             : `協定が入っていないので、法律の限度時間（1か月 ${limits.month}時間・1年 ${limits.year}時間）で見ます`}
         </div>
       </div>
+      {periodStartDays.length > 0 && !periodStartDays.includes(dayjs(start).date()) && (
+        <div style={{ ...S.warnBox, marginBottom: 8 }}>
+          協定の起算日（{dayjs(start).date()}日）と、給与の計算期間の初めの日（{periodStartDays.sort((a, b) => a - b).join("日・")}日）がずれています。
+          Q は給与の計算期間を1か月として数えるので、協定の1か月とは日がずれます（上限に近い月は、出勤簿で協定の1か月の時間を確かめてください）。
+          協定の起算日を賃金締切日の翌日にそろえると、そのまま確かめられます。
+        </div>
+      )}
       <p style={S.small}>
         時間は確定した給与の賃金台帳の内訳（時間外労働時間数＝法定時間外、休日労働時間数＝法定休日）から、給与の計算期間を1か月として数えます。
         赤は法律や協定を超えたところ、黄色は近づいているところです。2〜6か月の平均は、起算日の前の月とも合わせて見ます。

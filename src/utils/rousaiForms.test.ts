@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { calcAverageWage, type AverageWageSalary } from "./averageWage";
 import type { LedgerLine } from "./legalBooks";
-import { besshi1Of, senText, shishobyoForm, youshiki8Form } from "./rousaiForms";
+import { besshi1Of, senText, shishobyoForm, youshiki8Form, besshi1NonWorkOf, besshi2Of } from "./rousaiForms";
 
 const ledger = (earnings: LedgerLine[]) => JSON.stringify({
   periodStart: null, periodEnd: null, workDays: 0, workHours: 0, overtimeHours: 0, holidayHours: 0, nightHours: 0,
@@ -75,5 +75,38 @@ describe("労災の書類", () => {
     expect(sv("経験期間（その職種の経験。1年以上は年数、1年未満は月数）")).toBe("2年（この会社に入ってから。前の経験があれば足す）");
     expect(sv("職種（日本標準職業分類の小分類の3桁）")).toBe("倉庫作業");
     expect(s.problems).toEqual([]);
+  });
+});
+
+describe("別紙1の①②と別紙2", () => {
+  test("別紙1 ②：賃金計算期間ごとの業務外の傷病で休業した日数(チ)と賃金(リ)、表面①は（(ホ) − (リ)）÷（(イ) − (チ)）", () => {
+    const b = {
+      a: [
+        { from: "2026-08-21", to: "2026-09-20", days: 31, workedDays: 0, base: 300000, allowance: 0, total: 300000 },
+        { from: "2026-07-21", to: "2026-08-20", days: 31, workedDays: 0, base: 300000, allowance: 0, total: 300000 },
+        { from: "2026-06-21", to: "2026-07-20", days: 30, workedDays: 0, base: 200000, allowance: 0, total: 200000 },
+      ],
+      b: [], i: 92, ro: 800000, ha: 0, ni: 0, ho: 800000, principleSen: 869565, heSen: null, toSen: null, minimumSen: null, amountSen: 869565, hasB: false,
+    };
+    const r = besshi1NonWorkOf(b, [{ start: "2026-07-01", end: "2026-07-10" }], "私傷病", () => null)!;
+    expect(r.rows.map((x) => x.days)).toEqual([0, 0, 10]);
+    expect([r.chi, r.ri]).toEqual([10, 0]);
+    // 800,000円 ÷ 82日 ＝ 9,756円09銭
+    expect(r.sen).toBe(975609);
+    expect(besshi1NonWorkOf(b, [{ start: "2026-01-01", end: "2026-01-10" }], "私傷病")).toBeNull();
+  });
+  test("別紙2：働いた時間がある日・有給休暇は部分算定日、ほかは全部休業日（休日も数える）。時給は働いた時間 × 時給", () => {
+    const rows = [
+      { work_date: "2026-10-05", work_type: "normal", work_hours: 3 },
+      { work_date: "2026-10-06", work_type: "paid_full", work_hours: 0 },
+    ];
+    const r = besshi2Of("2026-10-04", "2026-10-07", rows, { wage_type: "hourly", base_wage: 1200, scheduled_work_hours: 8 });
+    expect([r.whole, r.partial, r.worked]).toEqual([2, 2, 0]);
+    // 所定労働時間を働いた日は休業していないので、②③に入れない
+    expect(besshi2Of("2026-10-05", "2026-10-05", [{ work_date: "2026-10-05", work_type: "normal", work_hours: 8 }], { wage_type: "hourly", base_wage: 1200, scheduled_work_hours: 8 }).worked).toBe(1);
+    expect(r.days.filter((d) => d.kind === "partial").map((d) => [d.date, d.amount])).toEqual([["2026-10-05", 3600], ["2026-10-06", 9600]]);
+    // 月給で休業した日にも払ったときは、月額 ÷ 30
+    const m = besshi2Of("2026-10-04", "2026-10-05", [], { wage_type: "monthly", base_wage: 300000 }, true);
+    expect(m.days.map((d) => [d.kind, d.amount])).toEqual([["partial", 10000], ["partial", 10000]]);
   });
 });

@@ -1,6 +1,7 @@
 /**
  * 「保険料の集計表」の画面：社会保険料（保険料の月ごと）・労働保険料（支給した月ごと）の、納入告知額の見込み・本人負担・会社負担を出す
  * （作り方は utils/premiumSummary.ts）。年金事務所から届く納入告知書（保険料納入告知額通知書）と照らし合わせ、会社負担分の会計に使う
+ * ・会社負担の見込みを、借方 法定福利費・貸方 未払費用の仕訳データ（会計ソフトに取り込む CSV。明細書・一覧表の画面の仕訳データと同じ形と科目の設定）にできる
  */
 import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
@@ -8,7 +9,8 @@ import Database from "@tauri-apps/plugin-sql";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { branchPrefectureOf, type BranchLike } from "../../utils/branchPrefecture";
-import { saveCsvFile } from "../../utils/fileSaveUtils";
+import { saveBinaryFile, saveCsvFile } from "../../utils/fileSaveUtils";
+import { buildWelfareJournal, journalBytes, parseJournalSettings, type JournalSettings } from "../../utils/payJournal";
 import { loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
 import { rousaiRateOf } from "../../utils/nendoKoshin";
 import { premiumSummary, type PremiumBonus, type PremiumSalary } from "../../utils/premiumSummary";
@@ -37,13 +39,17 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
   const [ctx, setCtx] = useState<Ctx | null>(null);
   const [salaries, setSalaries] = useState<PremiumSalary[] | null>(null);
   const [bonuses, setBonuses] = useState<PremiumBonus[]>([]);
+  const [journalSettings, setJournalSettings] = useState<JournalSettings>(parseJournalSettings(null));
+  /** 法定福利費の仕訳の日付（初めはその月の末日） */
+  const [welfareDate, setWelfareDate] = useState("");
 
   useEffect(() => {
     (async () => {
       try {
         const insurers = await loadHealthInsurers(db);
         const branches = await db.select<any[]>("SELECT id, name, prefecture, rousai_business, rousai_rate FROM branches ORDER BY id");
-        const c = await db.select<any[]>("SELECT rousai_business, rousai_rate FROM company WHERE id = 1");
+        const c = await db.select<any[]>("SELECT rousai_business, rousai_rate, journal_settings FROM company WHERE id = 1");
+        setJournalSettings(parseJournalSettings(c?.[0]?.journal_settings));
         const g = await db.select<{ id: number; social_ins_collection: string | null }[]>("SELECT id, social_ins_collection FROM payroll_groups");
         setCtx({
           insurers, branches: branches ?? [], company: c?.[0] ?? {},
@@ -122,6 +128,28 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
     }
   };
 
+  // 法定福利費の仕訳（会社負担の見込み。社会保険は保険料の月、労働保険は支給した月の分）
+  const monthEnd = new Date(year, month, 0);
+  const defaultWelfareDate = `${year}-${String(month).padStart(2, "0")}-${String(monthEnd.getDate()).padStart(2, "0")}`;
+  const welfareLines = summary
+    ? buildWelfareJournal(welfareDate || defaultWelfareDate, `${year}年${month}月分`, [
+      ...summary.social.map((l) => ({ sub: l.label.replace(/（.*$/, ""), amount: l.company ?? 0 })),
+      ...summary.labor.map((l) => ({ sub: l.label.replace(/（.*$/, ""), amount: l.company ?? 0 })),
+    ], journalSettings)
+    : [];
+  const saveWelfare = async () => {
+    if (welfareLines.length === 0) return;
+    try {
+      const { bytes, unknown } = journalBytes(welfareLines, journalSettings);
+      if (unknown.length > 0) await dialog.warning(`シフトJIS にない字（${unknown.join("・")}）を「?」にしました。`);
+      const saved = await saveBinaryFile(bytes, `法定福利費の仕訳_${year}年${month}月分.csv`, { name: "CSV", extensions: ["csv"] });
+      if (saved) toast.success(`「${saved.name}」を保存しました`);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`CSV を保存できませんでした。\n${e}`);
+    }
+  };
+
   const years = Array.from({ length: 7 }, (_, i) => today.getFullYear() + 1 - i);
   const yen = (v: number | null) => (v === null ? "—" : `${v.toLocaleString()} 円`);
   return (
@@ -180,6 +208,21 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
               </tbody>
             </table>
             {summary.notes.length > 0 && <div style={{ ...S.warnBox, marginTop: 10 }}>{summary.notes.map((x, i) => <div key={i}>・{x}</div>)}</div>}
+            <div className="no-print" style={{ marginTop: 14, padding: 10, backgroundColor: "#f8fafc", borderRadius: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: "bold", marginBottom: 6 }}>会社負担の法定福利費の仕訳データ</div>
+              <div style={S.controls}>
+                <label style={S.field}>
+                  <span style={S.label}>仕訳の日付</span>
+                  <input type="date" value={welfareDate || defaultWelfareDate} onChange={(e) => setWelfareDate(e.target.value)} style={S.input} />
+                </label>
+                <button onClick={saveWelfare} disabled={welfareLines.length === 0} style={S.button("#16a085", welfareLines.length === 0)}>仕訳データを保存</button>
+              </div>
+              <div style={S.small}>
+                借方「{journalSettings.welfare}」（補助科目に保険の名前）・貸方「{journalSettings.accrued}」で、上の会社負担の見込みの仕訳を作ります
+                （{welfareLines.filter((l) => l.side === "debit").map((l) => `${l.sub} ${l.amount.toLocaleString()}円`).join("・") || "会社負担がありません"}）。
+                科目の名前と CSV の形は、「明細書・一覧表」の画面の仕訳データの設定と同じです。健康保険組合の人の会社負担は、組合の会社負担の料率を入れたときだけ入ります。
+              </div>
+            </div>
             <div style={{ ...S.small, marginTop: 8, lineHeight: 1.7 }}>
               納入告知額は、年金事務所が月末に知らせる額（その月の分を翌月末に納める）です。この見込みと違うときは、入社・退職・標準報酬月額の変更・賞与の届けが年金事務所に届いているかを確かめてください。
               協会けんぽの料率は、拠点の都道府県で決めます。

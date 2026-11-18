@@ -11,9 +11,9 @@ import dayjs from "dayjs";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import {
-  disabilityReport, elderlyReport, hoursClassOf, parseDisabilityInfo, retirementAgeOf, stringifyDisabilityInfo,
-  type DisabilityInfo,
+  disabilityReport, elderlyReport, hoursClassOf, parseDisabilityInfo, retirementAgeOf, stringifyDisabilityInfo, type DisabilityInfo, disabilityReportByBranch, withTotalNi, type BranchReportSetting,
 } from "../../utils/employmentStatus";
+import { DISABILITY_PHYSICAL_TYPES } from "../../constants/roumu";
 import { parseCompanyLaborConditions } from "../../utils/laborConditions";
 import { weeklyMinutesOf } from "../../utils/koyoInfo";
 import { formatWareki } from "../../utils/wareki";
@@ -22,7 +22,12 @@ import * as S from "./reportStyles";
 const PRINT_ID = "employment-status-print";
 const CLASS_LABELS = { regular: "30時間以上", short: "20〜30時間（短時間）", specified: "10〜20時間（特定短時間）", none: "10時間未満" } as const;
 
-interface Settings { exclusionPct: number; disabilityPromoter: string; elderlyPromoter: string; writer: string }
+interface Settings {
+  exclusionPct: number; disabilityPromoter: string; elderlyPromoter: string; writer: string;
+  /** Ｃ欄（事業所別の内訳）を書く（除外率が設定されている事業所・特例子会社・Ａ型事業所がある企業）と、拠点ごとの設定 */
+  byBranch: boolean;
+  branches: Record<string, BranchReportSetting>;
+}
 
 export default function EmploymentStatusManager({ db, staffList }: { db: Database; staffList: any[] }) {
   const toast = useToast();
@@ -30,7 +35,8 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
   const thisYear = dayjs().month() >= 5 ? dayjs().year() : dayjs().year() - 1;
   const [year, setYear] = useState(thisYear);
   const [tab, setTab] = useState<"disability" | "elderly">("disability");
-  const [settings, setSettings] = useState<Settings>({ exclusionPct: 0, disabilityPromoter: "", elderlyPromoter: "", writer: "" });
+  const [settings, setSettings] = useState<Settings>({ exclusionPct: 0, disabilityPromoter: "", elderlyPromoter: "", writer: "", byBranch: false, branches: {} });
+  const [branchList, setBranchList] = useState<{ id: number; name: string; address: string; koyo: string }[]>([]);
   const [retirementText, setRetirementText] = useState<string | undefined>(undefined);
   const [company, setCompany] = useState<any>({});
   const [tick, setTick] = useState(0);
@@ -41,7 +47,12 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
         const [c] = await db.select<any[]>("SELECT * FROM company WHERE id = 1");
         setCompany(c ?? {});
         const o = c?.employment_report ? JSON.parse(String(c.employment_report)) : {};
-        setSettings({ exclusionPct: Number(o.exclusionPct) || 0, disabilityPromoter: String(o.disabilityPromoter ?? ""), elderlyPromoter: String(o.elderlyPromoter ?? ""), writer: String(o.writer ?? "") });
+        setSettings({
+          exclusionPct: Number(o.exclusionPct) || 0, disabilityPromoter: String(o.disabilityPromoter ?? ""), elderlyPromoter: String(o.elderlyPromoter ?? ""), writer: String(o.writer ?? ""),
+          byBranch: o.byBranch === true, branches: o.branches && typeof o.branches === "object" ? o.branches : {},
+        });
+        const bs = await db.select<any[]>("SELECT id, name, address, koyo_office_number FROM branches ORDER BY id");
+        setBranchList((bs ?? []).map((b) => ({ id: Number(b.id), name: String(b.name ?? ""), address: String(b.address ?? ""), koyo: String(b.koyo_office_number ?? "") })));
         setRetirementText(parseCompanyLaborConditions(c?.labor_conditions).retirementAge);
       } catch (e) {
         console.error("会社の情報の読み込みエラー:", e);
@@ -77,7 +88,15 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
     const leave = String(s.retirement_date ?? "");
     return (!join || join <= asOf) && (!leave || leave >= asOf);
   }), [staffList, asOf]);
-  const dr = useMemo(() => disabilityReport(staffList, year, settings.exclusionPct), [staffList, year, settings.exclusionPct, tick]);
+  const byBranch = useMemo(() => (settings.byBranch ? disabilityReportByBranch(staffList, year, branchList, settings.branches) : null), [staffList, year, branchList, settings, tick]);
+  const dr = useMemo(() => {
+    const r = disabilityReport(staffList, year, settings.exclusionPct);
+    return byBranch ? withTotalNi(r, byBranch.ni) : r;
+  }, [staffList, year, settings.exclusionPct, tick, byBranch]);
+  const setBranch = (id: number, patch: Partial<BranchReportSetting>) => {
+    const cur = settings.branches[String(id)] ?? { kubun: "3", exclusionPct: 0, business: "" };
+    void saveSettings({ ...settings, branches: { ...settings.branches, [String(id)]: { ...cur, ...patch } } });
+  };
   const retirementAge = retirementAgeOf(retirementText);
   const er = useMemo(() => elderlyReport(staffList, year, retirementAge), [staffList, year, retirementAge]);
 
@@ -110,7 +129,10 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
             <div style={S.controls}>
               <label style={S.field}>
                 <span style={S.label}>除外率（%。除外率設定業種のときだけ）</span>
-                <input type="number" min={0} max={100} value={settings.exclusionPct} onChange={(e) => void saveSettings({ ...settings, exclusionPct: Number(e.target.value) || 0 })} style={{ ...S.input, width: 120 }} />
+                <input type="number" min={0} max={100} value={settings.exclusionPct} disabled={settings.byBranch} onChange={(e) => void saveSettings({ ...settings, exclusionPct: Number(e.target.value) || 0 })} style={{ ...S.input, width: 120 }} />
+              </label>
+              <label style={{ fontSize: 13, alignSelf: "center" }}>
+                <input type="checkbox" checked={settings.byBranch} onChange={(e) => void saveSettings({ ...settings, byBranch: e.target.checked })} /> 事業所別の内訳（Ｃ欄）を書く（除外率が設定されている事業所・特例子会社・Ａ型事業所がある企業）
               </label>
               <label style={S.field}>
                 <span style={S.label}>障害者雇用推進者（役職名・氏名）</span>
@@ -125,6 +147,28 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
               障害者手帳など（身体障害者手帳・療育手帳または判定書・精神障害者保健福祉手帳）で確かめた人だけを入れます。本人の同意を得て、報告のためだけに使います
               （プライバシーに配慮した障害者の把握・確認ガイドライン）。週の所定労働時間は、従業員の設定（出勤する曜日と1日の所定労働時間、または雇用保険の欄の1週間の所定労働時間）から数えます。
             </p>
+            {settings.byBranch && (
+              <table style={{ ...S.table, marginBottom: 10 }}>
+                <thead><tr>{["事業所（拠点）", "⑥ 事業所の区分", "⑨ 除外率（%）", "⑧ 事業の内容"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {branchList.map((b) => {
+                    const set = settings.branches[String(b.id)] ?? { kubun: "3", exclusionPct: 0, business: "" };
+                    return (
+                      <tr key={b.id}>
+                        <td style={S.td}>{b.name}</td>
+                        <td style={S.td}>
+                          <select value={set.kubun} onChange={(e) => setBranch(b.id, { kubun: e.target.value as BranchReportSetting["kubun"] })} style={S.input}>
+                            <option value="1">1 特例子会社に含まれる事業所</option><option value="2">2 指定就労継続支援Ａ型事業所</option><option value="3">3 上記1及び2以外</option>
+                          </select>
+                        </td>
+                        <td style={S.td}><input type="number" min={0} max={100} value={set.exclusionPct} onChange={(e) => setBranch(b.id, { exclusionPct: Number(e.target.value) || 0 })} style={{ ...S.input, width: 80 }} /></td>
+                        <td style={S.td}><input defaultValue={set.business} onBlur={(e) => { if (e.target.value !== set.business) setBranch(b.id, { business: e.target.value }); }} style={S.input} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
             <table style={S.table}>
               <thead><tr>{["従業員", "週の所定労働時間", "障害の種類", "確かめた書類（メモ）", "数え方"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
               <tbody>
@@ -139,7 +183,7 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
                       <td style={S.td}>
                         <select value={value} onChange={(e) => {
                           const [kind, sev] = e.target.value.split(":");
-                          void saveDisability(s, { kind: (kind || "") as DisabilityInfo["kind"], severe: sev === "severe", note: d.note });
+                          void saveDisability(s, { kind: (kind || "") as DisabilityInfo["kind"], severe: sev === "severe", physicalType: kind === "physical" ? d.physicalType : null, note: d.note });
                         }} style={S.input}>
                           <option value="">—</option>
                           <option value="physical">身体障害者</option>
@@ -148,6 +192,12 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
                           <option value="intellectual:severe">知的障害者（重度）</option>
                           <option value="mental">精神障害者</option>
                         </select>
+                        {d.kind === "physical" && (
+                          <select value={d.physicalType ?? ""} onChange={(e) => void saveDisability(s, { ...d, physicalType: e.target.value ? Number(e.target.value) : null })} style={{ ...S.input, marginLeft: 4 }} title="Ｄ欄の種類（2つ以上の障害があれば主たる障害）">
+                            <option value="">種類（Ｄ欄）</option>
+                            {DISABILITY_PHYSICAL_TYPES.map((x) => <option key={x.no} value={x.no}>{x.label}</option>)}
+                          </select>
+                        )}
                       </td>
                       <td style={S.td}>
                         {d.kind && <input defaultValue={d.note} onBlur={(e) => { if (e.target.value !== d.note) void saveDisability(s, { ...d, note: e.target.value }); }} style={S.input} />}
@@ -159,7 +209,7 @@ export default function EmploymentStatusManager({ db, staffList }: { db: Databas
               </tbody>
             </table>
           </div>
-          <div id={PRINT_ID} style={S.card}><DisabilitySheet r={dr} company={company} settings={settings} /></div>
+          <div id={PRINT_ID} style={S.card}><DisabilitySheet r={dr} company={company} settings={settings} byBranch={byBranch} branchList={branchList} /></div>
         </>
       ) : (
         <>
@@ -186,7 +236,10 @@ const cell: CSSProperties = { border: "1px solid #333", padding: "3px 6px", font
 const lab: CSSProperties = { ...cell, textAlign: "left", backgroundColor: "#f8fafc" };
 const num = (n: number) => (Number.isInteger(n) ? `${n}.0` : `${n}`);
 
-function DisabilitySheet({ r, company, settings }: { r: ReturnType<typeof disabilityReport>; company: any; settings: Settings }) {
+function DisabilitySheet({ r, company, settings, byBranch, branchList }: {
+  r: ReturnType<typeof disabilityReport>; company: any; settings: Settings;
+  byBranch: ReturnType<typeof disabilityReportByBranch> | null; branchList: { id: number; name: string; address: string; koyo: string }[];
+}) {
   const c = r.cells;
   const line = (label: string, v: { n: number; newN: number }) => (
     <tr><td style={lab}>{label}</td><td style={cell}>{v.n}人（{v.newN}人）</td></tr>
@@ -222,12 +275,39 @@ function DisabilitySheet({ r, company, settings }: { r: ReturnType<typeof disabi
           <tr><td style={lab}>13 実雇用率（12 ÷ 10(ニ) × 100）</td><td style={cell}>{r.actualRate === null ? "" : `${r.actualRate.toFixed(2)}%`}</td></tr>
           <tr><td style={lab}>法定雇用障害者数（10(ニ) × 法定雇用率。1人未満切り捨て）</td><td style={cell}>{r.required}人</td></tr>
           <tr><td style={lab}>14 不足数</td><td style={cell}>{num(r.shortage)}人</td></tr>
+          <tr><td style={{ ...lab, fontWeight: "bold" }} colSpan={2}>Ｄ 障害者の雇用の促進等に関する法律別表に掲げる種類別の身体障害者数（実人数）</td></tr>
+          {DISABILITY_PHYSICAL_TYPES.map((x, i) => (
+            <tr key={x.no}><td style={lab}>{x.label}（第{x.no}号に該当する者）</td><td style={cell}>{r.physicalTypes[i]}人</td></tr>
+          ))}
           <tr><td style={lab}>E 障害者雇用推進者／F 記入担当者</td><td style={{ ...cell, textAlign: "left" }}>{settings.disabilityPromoter}／{settings.writer}</td></tr>
         </tbody>
       </table>
+      {r.physicalTypeUnknown > 0 && <p className="no-print" style={{ ...S.small, color: "#b45309" }}>身体障害者のうち {r.physicalTypeUnknown}人は、Ｄ欄の種類が入っていません（障害の種類の欄で選んでください）。</p>}
+      {byBranch && (
+        <>
+          <div style={{ fontSize: "10pt", fontWeight: "bold", margin: "10px 0 4px" }}>Ｃ 事業所別の内訳</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><th style={lab}>欄</th>{byBranch.list.map((x) => <th key={x.branch.id} style={{ ...lab, textAlign: "center" }}>{x.branch.name}</th>)}</tr></thead>
+            <tbody>
+              <tr><td style={lab}>④ 適用事業所番号</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{branchList.find((b) => b.id === x.branch.id)?.koyo || "（会社の番号）"}</td>)}</tr>
+              <tr><td style={lab}>⑥ 事業所の区分</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{x.setting.kubun}</td>)}</tr>
+              <tr><td style={lab}>⑦ 事業所の所在地</td>{byBranch.list.map((x) => <td key={x.branch.id} style={{ ...cell, textAlign: "left" }}>{branchList.find((b) => b.id === x.branch.id)?.address || company.address || ""}</td>)}</tr>
+              <tr><td style={lab}>⑧ 事業の内容</td>{byBranch.list.map((x) => <td key={x.branch.id} style={{ ...cell, textAlign: "left" }}>{x.setting.business}</td>)}</tr>
+              <tr><td style={lab}>⑨ 除外率</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{x.setting.exclusionPct}%</td>)}</tr>
+              <tr><td style={lab}>⑩(イ)・(ロ)・(ハ)・(ニ)</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{x.report.i}・{x.report.ro}・{num(x.report.ha)}・{num(x.report.ni)}人</td>)}</tr>
+              <tr><td style={lab}>(ヌ)・(タ)・(ネ)</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{num(x.report.physical)}・{num(x.report.intellectual)}・{num(x.report.mental)}人</td>)}</tr>
+              <tr><td style={lab}>12 計</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{num(x.report.total)}人</td>)}</tr>
+              {DISABILITY_PHYSICAL_TYPES.map((t, i) => (
+                <tr key={t.no}><td style={lab}>Ｄ {t.label}</td>{byBranch.list.map((x) => <td key={x.branch.id} style={cell}>{x.report.physicalTypes[i]}人</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
       <p className="no-print" style={{ ...S.small, marginTop: 6 }}>
         {r.mustReport ? "法定雇用障害者数が1人以上なので、報告が要ります。" : "法定雇用障害者数が1人未満なので、報告は要りません（会社全体の常用雇用労働者で数えます）。"}
-        事業所が2つ以上あるときは、事業所別の内訳（C欄）も書きます。D欄（身体障害者の種類別の人数）は手帳で確かめて書きます。
+        事業所別の内訳（Ｃ欄）は、除外率が設定されている事業所・特例子会社・Ａ型事業所がある企業だけが書きます（ほかの企業は合計欄だけ）。
+        Ｄ欄（身体障害者の種類別の人数）は、身体障害者手帳で確かめた種類（2つ以上あれば主たる障害）で数えます。
       </p>
     </div>
   );

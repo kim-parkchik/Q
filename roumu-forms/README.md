@@ -51,6 +51,7 @@ Q の次の画面で使う、書類の欄・決まり・数の出どころです
 | source/shougai-youshiki6.pdf | 障害者雇用状況報告書（様式第6号） | https://www.mhlw.go.jp/content/000940558.pdf | 141,923 | f35700e657753e58374f524f1be952502a43cc8e85314c87859d5055183dba94 |
 | source/shougai-kinyuyouryou.pdf | 障害者雇用状況報告記入要領（令和8年6月1日現在の報告） | https://www.mhlw.go.jp/content/001100468.pdf | 3,448,559 | c8f5aa65e60af2deeb2de3c659fe185d3b2bcfdd32ed88282a592e499d57d14e |
 | source/maikin-kinyuyouryou.pdf | 毎月勤労統計調査 全国調査及び地方調査 調査票の記入要領（令和8年7月。全体版） | https://www.mhlw.go.jp/toukei/list/dl/30-1e.pdf | 6,421,216 | 24c44b142d88af9bd86af2603c8903f02f998b2dd9a9d145458f2fd578d9ddc2 |
+| source/setagaya-kirikae.pdf | 世田谷区「特別区民税・都民税・森林環境税 特別徴収への切替申請書」（市区町村の切替申請書の例。2026年11月18日に取得） | https://www.city.setagaya.lg.jp/documents/233/kirikaesinnseisyo_2.pdf | 342,692 | 90e856de7309851c66cb45b84062192f625235c998aaec50c9487ea843b9000f |
 
 毎月勤労統計調査の記入要領と、高年齢者雇用状況等報告書の正誤表・様式の絵のページは、字が「字の形の線」で描かれていて PDFKit で字を取り出せないので、
 macOS の文字認識（`scripts/pdf_ocr.swift`）で読みました。
@@ -73,6 +74,10 @@ python3 -I scripts/import_roumu_tables.py roumu-forms src/constants/roumu.ts
 - 障害者雇用状況報告記入要領の、常用雇用労働者（20時間以上・1年を超えて雇用）・短時間労働者（20〜30時間）・特定短時間労働者（10〜20時間）の決まりと、
   障害者のカウントの表が見つからないか、様式第6号の式と合わない。報告する事業主の規模（40.0人以上）が法定雇用率の逆数と合わない
 - 高年齢者雇用状況等報告書の記入要領の「常用労働者」（20時間以上）が見つからない、様式第2号の⑮の年齢の区分がつながっていない
+- 様式第6号のＤ欄「障害者の雇用の促進等に関する法律別表に掲げる種類別の身体障害者数」の種類が、第1号〜第5号の順に読めない
+
+切替申請書（setagaya-kirikae.pdf）はスクリプトでは読みません。市区町村ごとに様式が違うので、市区町村の切替申請書に共通する欄の例として見て、
+Q の「特別徴収への切替申請書」の書く内容（`src/features/payroll/ResidentTaxKirikaePanel.tsx`）を決めました。
 
 ## 気をつけること
 

@@ -148,6 +148,14 @@ export const MIGRATIONS: Migration[] = [
       await moveForeignInfo(db);
     },
   },
+  {
+    version: 10,
+    description: "従業員に、在職中に退職以外で社会保険の資格を失う日と原因（社会保障協定・特定減額特例対象者の任意喪失）の列を、健康保険組合の料率に会社負担の料率の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "staff", "shaho_loss", "TEXT");
+      for (const column of ["company_health_rate", "company_care_rate", "company_child_support_rate"]) await addColumnIfMissing(db, "social_insurance_group_rates", column, "REAL");
+    },
+  },
 ];
 
 /**

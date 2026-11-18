@@ -219,6 +219,35 @@ describe("健康保険だけの資格喪失（75歳到達・障害認定）", ()
   });
 });
 
+describe("在職中に退職以外で資格を失う（社会保障協定・特定減額特例対象者の任意喪失）", () => {
+  test("社会保障協定：入れた資格喪失年月日に喪失（原因 11）。退職日・70歳不該当は書かない", () => {
+    const staff = { birthday: "1985-04-20", join_date: "2020-04-01", shaho_loss: JSON.stringify({ cause: "社会保障協定", date: "2026-10-01", pensionOnly: false }) };
+    expect(lossEventsOf(staff)).toContainEqual({ cause: "社会保障協定", date: "2026-10-01" });
+    const row = buildSoshitsuRow(soshitsu({ cause: "社会保障協定", eventDate: "2026-10-01", today: "2026-10-02" }, staff), office);
+    expect(row.problems).toEqual([]);
+    expect([row.lostOn, row.deadline]).toEqual(["2026-10-01", "2026-10-06"]);
+    expect(row.values.slice(13, 18)).toEqual(["9", "081001", "11", "", ""]);
+    expect(row.notes.join("")).toContain("相手国の制度に入る");
+  });
+  test("特定減額特例対象者の任意喪失（原因 12）。年金だけの社会保障協定は知らせ、組合には出さない。退職より後の日は入れない", () => {
+    const staff = { birthday: "1985-04-20", join_date: "2020-04-01", shaho_loss: JSON.stringify({ cause: "特定減額特例対象者の任意喪失", date: "2026-11-16" }) };
+    const row = buildSoshitsuRow(soshitsu({ cause: "特定減額特例対象者の任意喪失", eventDate: "2026-11-16", today: "2026-11-18" }, staff), office);
+    expect(row.values.slice(13, 18)).toEqual(["9", "081116", "12", "", ""]);
+    const pension = { ...staff, health_ins_num: "123", shaho_loss: JSON.stringify({ cause: "社会保障協定", date: "2026-10-01", pensionOnly: true }) };
+    const u = buildSoshitsuRow(soshitsu({ cause: "社会保障協定", eventDate: "2026-10-01", today: "2026-10-02", insurer: union }, pension), office);
+    expect(u.union).toBeNull();
+    expect(u.notes.join("")).toContain("年金だけが相手国の制度");
+    expect(lossEventsOf({ ...staff, retirement_date: "2026-11-10" })).not.toContainEqual({ cause: "特定減額特例対象者の任意喪失", date: "2026-11-16" });
+  });
+  test("保険料：資格喪失年月日がある月の分からかからない（年金だけの社会保障協定は厚生年金だけ）", () => {
+    const both = JSON.stringify({ cause: "社会保障協定", date: "2026-10-15" });
+    expect(getInsuranceByAge("1985-04-20", 2026, 9, null, null, both)).toMatchObject({ health: true, pension: true });
+    expect(getInsuranceByAge("1985-04-20", 2026, 10, null, null, both)).toMatchObject({ health: false, pension: false });
+    const pension = JSON.stringify({ cause: "社会保障協定", date: "2026-10-15", pensionOnly: true });
+    expect(getInsuranceByAge("1985-04-20", 2026, 10, null, null, pension)).toMatchObject({ health: true, pension: false });
+  });
+});
+
 describe("電子申請用ファイル", () => {
   test("マイナンバーは保存するときに入れる（番号がない人がいれば止める）", () => {
     const row = buildShutokuRow(shutoku(), office);

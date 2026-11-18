@@ -43,6 +43,8 @@ export interface PayLedger {
   overtimeHours: number;
   holidayHours: number;
   nightHours: number;
+  /** 法定内の残業の時間（所定労働時間が8時間より短い人の、所定を超えて8時間までの時間。毎月勤労統計の所定外労働時間に入れる。前の内訳にはない） */
+  statutoryOvertimeHours?: number;
   /** 支給の行（給与明細と同じ。足すと総支給額。現物で払った報酬は入れない） */
   earnings: LedgerLine[];
   /**
@@ -125,6 +127,7 @@ export const salaryLedgerOf = (
   return {
     periodStart: opts.period?.start ?? null, periodEnd: opts.period?.end ?? null,
     workDays: r.workDays, workHours: r.totalWorkHours, overtimeHours: r.totalOvertimeHours, holidayHours: r.holidayWorkHours, nightHours: r.totalNightHours,
+    ...(r.totalStatutoryOvertimeHours > 0 ? { statutoryOvertimeHours: r.totalStatutoryOvertimeHours } : {}),
     earnings, deductions, totalEarnings: r.totalEarnings, totalDeductions: r.totalDeductions, netPay: r.netPay, yearEndSettlement: r.yearEndSettlement,
     ...(inKind.length > 0 ? { inKind } : {}),
     ...(r.shutdownWorkedPay > 0 ? { shutdownWorkedPay: r.shutdownWorkedPay } : {}),

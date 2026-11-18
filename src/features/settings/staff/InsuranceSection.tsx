@@ -2,6 +2,7 @@
  * 「税・社会保険・労働保険」：加入区分・標準報酬月額・扶養人数・住民税・各種番号
  * （StaffManager.tsx から分割）
  */
+import { SHAHO_LOSS_CAUSES, type ShahoLossCause } from '../../../utils/shahoLoss';
 import { UserCheck, Shield, Timer } from 'lucide-react';
 import RemunerationHistory from './RemunerationHistory';
 import { DependentsHistoryEditor } from './WageDependentsHistory';
@@ -40,6 +41,8 @@ export default function InsuranceSection({ cm }: Props) {
         setTargetMultiOffice,
         targetKoukiDate,
         setTargetKoukiDate,
+        targetShahoLoss,
+        setTargetShahoLoss,
         targetEmploymentInsNum,
         setTargetEmploymentInsNum,
         targetSocialInsGroupId,
@@ -298,6 +301,37 @@ export default function InsuranceSection({ cm }: Props) {
                             disabled={targetStandardRemuneration === 0}
                             style={{ ...inputStyle, maxWidth: "180px", backgroundColor: targetStandardRemuneration > 0 ? "#fff" : "#f1f5f9" }}
                         />
+                    </div>
+                    {/* 在職中に退職以外で資格を失う（社会保障協定・特定減額特例対象者の任意喪失。utils/shahoLoss.ts） */}
+                    <div style={{ gridColumn: "span 2" }}>
+                        <label style={{ ...labelStyle, color: targetStandardRemuneration > 0 || targetShahoLoss ? "#2c3e50" : "#bdc3c7" }}>
+                            在職中に退職以外で社会保険の資格を失う（社会保障協定で相手国の制度に入る・特定減額特例対象者が申出をやめる）。資格喪失年月日がある月の分から保険料がかからず、資格喪失届を出します
+                        </label>
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <select
+                                value={targetShahoLoss?.cause ?? ""}
+                                onChange={e => setTargetShahoLoss(e.target.value
+                                    ? { cause: e.target.value as ShahoLossCause, date: targetShahoLoss?.date ?? "", pensionOnly: e.target.value === "社会保障協定" && !!targetShahoLoss?.pensionOnly }
+                                    : null)}
+                                style={{ ...inputStyle, maxWidth: "260px" }}
+                            >
+                                <option value="">なし</option>
+                                {SHAHO_LOSS_CAUSES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            {targetShahoLoss && (
+                                <>
+                                    <span style={{ fontSize: "12px" }}>資格喪失年月日</span>
+                                    <input type="date" value={targetShahoLoss.date} onChange={e => setTargetShahoLoss({ ...targetShahoLoss, date: e.target.value })} style={{ ...inputStyle, maxWidth: "180px" }} />
+                                    {targetShahoLoss.cause === "社会保障協定" && (
+                                        <label style={{ fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
+                                            <input type="checkbox" checked={targetShahoLoss.pensionOnly} onChange={e => setTargetShahoLoss({ ...targetShahoLoss, pensionOnly: e.target.checked })} />
+                                            年金だけが相手国の制度（健康保険は続く）
+                                        </label>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                        {targetShahoLoss && !targetShahoLoss.date && <div style={{ fontSize: "11px", color: "#b45309", marginTop: "4px" }}>⚠ 資格喪失年月日を入れないと保存されません</div>}
                     </div>
 
                     {/* 雇用保険（こちらは既存の targetIsEmploymentInsEligible で制御） */}

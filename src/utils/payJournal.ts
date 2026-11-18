@@ -9,10 +9,30 @@
  *   年末調整の還付は、源泉所得税の預り金を減らす（借方）
  * ・貸方：社会保険料・雇用保険料・源泉所得税・住民税の預り金、そのほかの控除（項目の名前を補助科目にする）、差引支給額（普通預金など）。
  *   年末調整の徴収は、源泉所得税の預り金（貸方）
- * ・現物で払った報酬はお金を払っていないので入れない。会社が負担する社会保険料・労働保険料（法定福利費）は、保険料の集計表で出す
+ * ・現物で払った報酬はお金を払っていないので入れない。会社が負担する社会保険料・労働保険料（法定福利費）は、保険料の集計表の画面で、
+ *   借方 法定福利費（補助科目に保険の名前）・貸方 未払費用の仕訳にする（buildWelfareJournal。科目の名前は変えられる）
  * ・部門ごとにすると、部門（従業員の画面の「部門」）ごとに分けて、借方・貸方の部門に書く
+ * ・CSV の形は、会計ソフトの取り込みの設定に合わせて選べる（列の並びと見出し・見出しの行の有無・日付の書き方・文字コード（UTF-8・シフトJIS））
  */
 import type { PayLedger } from "./legalBooks";
+import { encodeSjisText } from "./sjisText";
+
+/** CSV の列（見出しの名前の初めの値） */
+export const JOURNAL_COLUMNS = {
+  date: "日付", voucher: "伝票番号",
+  debitAccount: "借方勘定科目", debitSub: "借方補助科目", debitDept: "借方部門", debitAmount: "借方金額",
+  creditAccount: "貸方勘定科目", creditSub: "貸方補助科目", creditDept: "貸方部門", creditAmount: "貸方金額",
+  memo: "摘要",
+} as const;
+export type JournalColumn = keyof typeof JOURNAL_COLUMNS;
+const ALL_COLUMNS = Object.keys(JOURNAL_COLUMNS) as JournalColumn[];
+
+/** 日付の書き方：slash 2026/11/25・hyphen 2026-11-25・compact 20261125 */
+export type JournalDateStyle = "slash" | "hyphen" | "compact";
+export const JOURNAL_DATE_STYLES: Record<JournalDateStyle, string> = { slash: "2026/11/25", hyphen: "2026-11-25", compact: "20261125" };
+/** 文字コード：utf8bom UTF-8（BOM 付き）・utf8 UTF-8・sjis シフトJIS */
+export type JournalEncoding = "utf8bom" | "utf8" | "sjis";
+export const JOURNAL_ENCODINGS: Record<JournalEncoding, string> = { utf8bom: "UTF-8（BOM 付き）", utf8: "UTF-8（BOM なし）", sjis: "シフトJIS" };
 
 export interface JournalSettings {
   salary: string;
@@ -30,12 +50,22 @@ export interface JournalSettings {
   payment: string;
   /** 部門ごとに分ける */
   byDepartment: boolean;
+  /** 会社負担の社会保険料・労働保険料の仕訳：借方の科目（法定福利費）・貸方の科目（未払費用） */
+  welfare: string;
+  accrued: string;
+  /** CSV の形：列の並び（入れない列は省く）・見出しの名前・見出しの行を書くか・日付の書き方・文字コード */
+  columns: JournalColumn[];
+  headers: Partial<Record<JournalColumn, string>>;
+  header: boolean;
+  dateStyle: JournalDateStyle;
+  encoding: JournalEncoding;
 }
 
 export const DEFAULT_JOURNAL_SETTINGS: JournalSettings = {
   salary: "給与手当", executiveSalary: "役員報酬", bonus: "賞与", executiveBonus: "役員賞与", commute: "",
   deposit: "預り金", socialInsuranceSub: "社会保険料", employmentInsuranceSub: "雇用保険料", incomeTaxSub: "源泉所得税", residentTaxSub: "住民税",
-  payment: "普通預金", byDepartment: false,
+  payment: "普通預金", byDepartment: false, welfare: "法定福利費", accrued: "未払費用",
+  columns: [...ALL_COLUMNS], headers: {}, header: true, dateStyle: "slash", encoding: "utf8bom",
 };
 
 export const parseJournalSettings = (v: unknown): JournalSettings => {
@@ -44,7 +74,16 @@ export const parseJournalSettings = (v: unknown): JournalSettings => {
     const x = JSON.parse(v);
     const out = { ...DEFAULT_JOURNAL_SETTINGS };
     for (const k of Object.keys(out) as (keyof JournalSettings)[]) {
-      if (k === "byDepartment") out.byDepartment = !!x?.byDepartment;
+      if (k === "byDepartment" || k === "header") (out as any)[k] = k === "header" ? x?.header !== false : !!x?.byDepartment;
+      else if (k === "columns") {
+        const cols = Array.isArray(x?.columns) ? x.columns.filter((c: unknown) => ALL_COLUMNS.includes(c as JournalColumn)) : [];
+        out.columns = cols.length > 0 ? [...new Set(cols as JournalColumn[])] : [...ALL_COLUMNS];
+      } else if (k === "headers") {
+        out.headers = x?.headers && typeof x.headers === "object"
+          ? Object.fromEntries(Object.entries(x.headers).filter(([c, v]) => ALL_COLUMNS.includes(c as JournalColumn) && typeof v === "string" && v.trim())) as JournalSettings["headers"]
+          : {};
+      } else if (k === "dateStyle") out.dateStyle = x?.dateStyle in JOURNAL_DATE_STYLES ? x.dateStyle : "slash";
+      else if (k === "encoding") out.encoding = x?.encoding in JOURNAL_ENCODINGS ? x.encoding : "utf8bom";
       else if (typeof x?.[k] === "string") (out as any)[k] = x[k];
     }
     return out;
@@ -142,14 +181,46 @@ export const journalTotals = (lines: JournalLine[]) => ({
 
 const csvEscape = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 
-/** CSV（1行目は見出し。1行に借方か貸方の一方） */
-export const journalCsv = (lines: JournalLine[]): string => {
-  const head = ["日付", "伝票番号", "借方勘定科目", "借方補助科目", "借方部門", "借方金額", "貸方勘定科目", "貸方補助科目", "貸方部門", "貸方金額", "摘要"];
+/** CSV（1行に借方か貸方の一方。列の並び・見出し・日付の書き方は設定から。設定がなければ一般的な形） */
+export const journalCsv = (lines: JournalLine[], st: Pick<JournalSettings, "columns" | "headers" | "header" | "dateStyle"> = DEFAULT_JOURNAL_SETTINGS): string => {
+  const cols = st.columns.length > 0 ? st.columns : ALL_COLUMNS;
+  const head = cols.map((c) => st.headers[c] || JOURNAL_COLUMNS[c]);
+  const dateOf = (d: string) => (st.dateStyle === "hyphen" ? d : st.dateStyle === "compact" ? d.replace(/-/g, "") : d.replace(/-/g, "/"));
   const rows = lines.map((l) => {
-    const d = l.date.replace(/-/g, "/");
-    const side = [l.account, l.sub, l.department, String(l.amount)];
-    const blank = ["", "", "", ""];
-    return [d, String(l.voucher), ...(l.side === "debit" ? side : blank), ...(l.side === "credit" ? side : blank), l.memo];
+    const debit = l.side === "debit";
+    const v: Record<JournalColumn, string> = {
+      date: dateOf(l.date), voucher: String(l.voucher),
+      debitAccount: debit ? l.account : "", debitSub: debit ? l.sub : "", debitDept: debit ? l.department : "", debitAmount: debit ? String(l.amount) : "",
+      creditAccount: debit ? "" : l.account, creditSub: debit ? "" : l.sub, creditDept: debit ? "" : l.department, creditAmount: debit ? "" : String(l.amount),
+      memo: l.memo,
+    };
+    return cols.map((c) => v[c]);
   });
-  return [head, ...rows].map((c) => c.map(csvEscape).join(",")).join("\r\n") + "\r\n";
+  return [...(st.header ? [head] : []), ...rows].map((c) => c.map(csvEscape).join(",")).join("\r\n") + "\r\n";
+};
+
+/** 保存するファイルのバイト（文字コードは設定から）。シフトJIS にない字は「?」にして unknown で知らせる */
+export const journalBytes = (lines: JournalLine[], st: JournalSettings): { bytes: Uint8Array; unknown: string[] } => {
+  const text = journalCsv(lines, st);
+  if (st.encoding === "sjis") return encodeSjisText(text);
+  const body = new TextEncoder().encode(text);
+  if (st.encoding === "utf8") return { bytes: body, unknown: [] };
+  const out = new Uint8Array(body.length + 3);
+  out.set([0xef, 0xbb, 0xbf], 0);
+  out.set(body, 3);
+  return { bytes: out, unknown: [] };
+};
+
+/**
+ * 会社負担の社会保険料・労働保険料（法定福利費）の仕訳（保険料の集計表の会社負担の見込みから。1つの伝票）
+ * 借方：法定福利費（補助科目に保険の名前）、貸方：未払費用（合計）
+ */
+export const buildWelfareJournal = (date: string, label: string, items: { sub: string; amount: number }[], st: JournalSettings): JournalLine[] => {
+  const list = items.filter((x) => x.amount > 0);
+  if (list.length === 0) return [];
+  const memo = `${label} 会社負担の社会保険料・労働保険料`;
+  return [
+    ...list.map((x): JournalLine => ({ date, voucher: 1, side: "debit", account: st.welfare, sub: x.sub, department: "", amount: x.amount, memo })),
+    { date, voucher: 1, side: "credit", account: st.accrued, sub: "", department: "", amount: list.reduce((t, x) => t + x.amount, 0), memo },
+  ];
 };

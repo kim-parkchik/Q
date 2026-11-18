@@ -175,6 +175,7 @@ export const DB_SCHEMAS = [
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
     in_kind TEXT,             -- 現物で払う報酬（食事・住宅（社宅・寮など）・その他（自社製品など）の期間ごとの行。JSON。詳しくは utils/genbutsu.ts）
     kouki_date TEXT,          -- 後期高齢者医療の被保険者になった日（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts）
+    shaho_loss TEXT,          -- 在職中に退職以外で社会保険の資格を失う日と原因（社会保障協定・特定減額特例対象者の任意喪失。JSON。utils/shahoLoss.ts）
     koyo_info TEXT,           -- 雇用保険の届書に書くこと（職種・雇用形態・就職経路・離職の理由・転勤など。JSON。詳しくは utils/koyoInfo.ts）
     foreign_info TEXT,        -- 在留資格の情報（外国人の方。ローマ字の氏名・国籍・在留資格・在留期間・在留カード番号・確かめた日など。JSON。utils/foreignInfo.ts）
     resident_tax_idou TEXT,   -- 住民税の給与所得者異動届出書に書くこと（異動の日ごとの徴収方法・新しい勤務先・届け出た日。JSON。utils/residentTaxIdou.ts）
@@ -493,6 +494,9 @@ export const DB_SCHEMAS = [
     health_rate REAL NOT NULL DEFAULT 0,   -- 健康保険（本人負担の%）
     care_rate REAL NOT NULL DEFAULT 0,     -- 介護保険（本人負担の%。40〜64歳）
     child_support_rate REAL NOT NULL DEFAULT 0, -- 子ども・子育て支援金（本人負担の%。令和8年4月分から）
+    company_health_rate REAL,              -- 会社負担の%（健康保険・介護保険・子ども・子育て支援金。保険料の集計表と法定福利費の仕訳の会社負担に使う。NULL は入れていない）
+    company_care_rate REAL,
+    company_child_support_rate REAL,
     UNIQUE(group_id, from_month),
     FOREIGN KEY (group_id) REFERENCES social_insurance_groups(id) ON DELETE CASCADE
   );`,

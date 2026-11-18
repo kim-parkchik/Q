@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { GENBUTSU_PERIODS } from "../constants/genbutsu";
 import {
-  emptyInKindEntry, genbutsuPeriodOf, housingMonthValue, inKindEntryWarnings, inKindEstimateOf, inKindMonthOf, inKindOfMonth, mealAmount,
-  parseInKind, parseInKindRecord, stringifyInKind, validateInKindEntry, type InKindEntry,
+  empInKindOf, emptyInKindEntry, genbutsuPeriodOf, housingMonthValue, housingTaxOf, inKindEntryWarnings, inKindEstimateOf, inKindMonthOf, inKindOfMonth,
+  mealAmount, mealTaxOf, parseInKind, parseInKindRecord, rentEquivalentOf, stringifyInKind, validateInKindEntry, type InKindEntry,
 } from "./genbutsu";
 
 const housing = (o: Partial<InKindEntry>): InKindEntry => ({ ...emptyInKindEntry("housing"), name: "社宅", start: "2019-01-01", ...o });
@@ -130,6 +130,66 @@ describe("1か月分の現物の額", () => {
     expect(inKindMonthOf({ start: "2026-03-16", end: "2026-04-15" }, 2026, 4)).toBe("2026-04");
     expect(inKindMonthOf({ start: "2026-04-01", end: "2026-04-30" }, 2026, 5)).toBe("2026-04");
     expect(inKindMonthOf(null, 2026, 5)).toBe("2026-05");
+  });
+});
+
+describe("所得税（国税庁の決まり。タックスアンサー No.2594・2597・2600）と雇用保険（手引き 第2編）", () => {
+  test("食事：本人が半分以上を払い、消費税を除いた会社の負担が月7,500円以下なら0円。No.2594 の例（13,000円・本人 6,000円 → 7,000円が課税）", () => {
+    expect(mealTaxOf(13_000, 6_000, 8)).toMatchObject({ taxable: 7_000, half: false, ok: false });
+    // 13,000円・本人 6,500円：6,500円 ÷ 1.08 ＝ 6,018円 → 6,010円（10円未満切り捨て）≦ 7,500円
+    expect(mealTaxOf(13_000, 6_500, 8)).toMatchObject({ taxable: 0, excl: 6_010, ok: true });
+    // 20,000円・本人 10,000円：10,000円 ÷ 1.08 ＝ 9,259円 → 9,250円 ＞ 7,500円 → 10,000円が課税。8,100円 ÷ 1.08 ＝ 7,500円ちょうどは0円
+    expect(mealTaxOf(20_000, 10_000, 8)).toMatchObject({ taxable: 10_000, excl: 9_250 });
+    expect(mealTaxOf(16_200, 8_100, 8)).toMatchObject({ taxable: 0, excl: 7_500 });
+    expect(mealTaxOf(16_500, 8_250, 10).excl).toBe(7_500);
+  });
+  test("社宅（使用人）：賃貸料相当額 ＝ 建物 × 0.2％ ＋ 12円 × 総床面積 ÷ 3.3㎡ ＋ 敷地 × 0.22％。No.2597 の例（10,000円で本人 3,000円 → 7,000円、6,000円 → 0円）", () => {
+    // 1,000,000円 × 0.2％ ＝ 2,000円、12円 × 40㎡ ÷ 3.3㎡ ＝ 145.45…円、2,000,000円 × 0.22％ ＝ 4,400円 → 6,545円（1円未満切り捨て）
+    const e = { bldgBase: 1_000_000, landBase: 2_000_000, floorArea: 40, longLife: false, leasedRent: 0 };
+    expect(rentEquivalentOf(e, false).value).toBe(6_545);
+    expect(rentEquivalentOf({ ...e, floorArea: 33 }, false).value).toBe(6_520);
+    expect(housingTaxOf(10_000, 3_000, false)).toBe(7_000);
+    expect(housingTaxOf(10_000, 6_000, false)).toBe(0);
+    expect(housingTaxOf(10_000, 4_999, false)).toBe(5_001);
+  });
+  test("社宅（役員）：小規模な住宅は同じ式で差額が課税。それ以外は（建物 × 12％（30年超は10％）＋ 敷地 × 6％）÷ 12、借り上げは家賃の50％と多い方。240㎡超は知らせる", () => {
+    const big = { bldgBase: 10_000_000, landBase: 20_000_000, floorArea: 150, longLife: false, leasedRent: 0 };
+    expect(rentEquivalentOf(big, true).value).toBe(200_000); // （1,200,000 ＋ 1,200,000）÷ 12
+    expect(rentEquivalentOf({ ...big, longLife: true }, true).value).toBe(183_333); // （1,000,000 ＋ 1,200,000）÷ 12
+    expect(rentEquivalentOf({ ...big, leasedRent: 500_000 }, true).value).toBe(250_000);
+    expect(rentEquivalentOf({ ...big, leasedRent: 300_000 }, true).value).toBe(200_000);
+    // 132㎡以下（30年超の建物は99㎡以下）は小規模な住宅
+    expect(rentEquivalentOf({ ...big, floorArea: 132 }, true).formula).toStartWith("小規模な住宅（132㎡以下）");
+    expect(rentEquivalentOf({ ...big, floorArea: 100, longLife: true }, true).formula).not.toStartWith("小規模");
+    expect(rentEquivalentOf({ ...big, floorArea: 250 }, true).notes[0]).toContain("豪華社宅");
+    expect(housingTaxOf(10_000, 6_000, true)).toBe(4_000);
+  });
+  test("雇用保険：無償なら実際費用、徴収金額が実際費用の3分の1を下回れば「3分の1 − 徴収金額」、3分の1以上なら0円", () => {
+    expect(empInKindOf(30_000, 0)).toBe(30_000);
+    expect(empInKindOf(30_000, 9_000)).toBe(1_000);
+    expect(empInKindOf(30_000, 10_000)).toBe(0);
+  });
+  test("1か月分の行に入る：令和8年4月分から決まりで計算し、それより前は入れた額。雇用保険は印を付けた行だけ", () => {
+    const e = housing({
+      tatami: 16, area: 40, selfPay: 3_000, taxable: 1_234, taxMode: "auto", bldgBase: 1_000_000, landBase: 2_000_000, floorArea: 40,
+      empWage: true, actualCost: 60_000,
+    });
+    const nov = inKindOfMonth([e], "2026-11", "東京");
+    expect([nov.lines[0].taxable, nov.lines[0].emp]).toEqual([3_545, 17_000]); // 6,545 − 3,000（50％未満）、60,000 ÷ 3 − 3,000
+    expect(nov.lines[0].detail).toContain("所得税：賃貸料相当額 6,545円");
+    const mar = inKindOfMonth([e], "2026-03", "東京");
+    expect(mar.lines[0].taxable).toBe(1_234);
+    expect(mar.lines[0].detail).toContain("2026年4月分より前は入れた額");
+    // 役員は差額（50％の決まりがない）
+    expect(inKindOfMonth([{ ...e, selfPay: 4_000 }], "2026-11", "東京", [], { executive: true }).lines[0].taxable).toBe(2_545);
+    // 出勤した日ごとの食事：1日 600円 × 20日 ＝ 12,000円、本人 300円 × 20日 ＝ 6,000円（半分以上）・会社の負担 6,000円 ÷ 1.08 → 5,550円 ≦ 7,500円 → 0円
+    const lunch = meal({ mealPattern: "workday", lunch: true, selfPay: 300, taxMode: "auto", taxPrice: 600 });
+    const days = Array.from({ length: 20 }, (_, i) => `2026-11-${String(i + 1).padStart(2, "0")}`);
+    expect(inKindOfMonth([lunch], "2026-11", "東京", days).lines[0].taxable).toBe(0);
+    expect(inKindOfMonth([{ ...lunch, selfPay: 200 }], "2026-11", "東京", days).lines[0].taxable).toBe(8_000);
+    // 決まりで計算するのに額がない月は、確定できないように知らせる
+    expect(inKindOfMonth([{ ...lunch, taxPrice: 0 }], "2026-11", "東京", days).problems[0]).toContain("食事の価額");
+    expect(parseInKind(stringifyInKind([e]))[0]).toEqual(e);
   });
 });
 

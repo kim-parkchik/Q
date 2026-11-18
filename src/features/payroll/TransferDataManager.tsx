@@ -7,6 +7,9 @@
  * ・確定した給与・賞与だけを入れる（差引支給額は確定した結果から読む）
  * 計算は utils/zengin.ts（レコードの形は constants/zengin.ts。銀行の仕様書からスクリプトで作ったもの）
  * ・振込一覧表（振込先・振込額・件数・合計）を印刷できる。口座がない（現金で払う）人の金種表（お札と硬貨の枚数。utils/kinshu.ts）も出す
+ * ・退職金（退職金の画面で保存したもの）は、支払う日を選び、支払金額から所得税・住民税を引いた額を振り込む。銀行の仕様書の種別コードは
+ *   給与振込（11）と賞与振込（12）だけなので、どちらで送るかを選ぶ（銀行との契約で確かめる）。死亡退職の退職金は受給者（相続人など）の
+ *   口座に振り込むので入れない
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 // @ts-ignore
@@ -18,6 +21,7 @@ import { saveBinaryFile } from "../../utils/fileSaveUtils";
 import { loadSourceAccounts, loadStaffBankAccounts, type SourceAccountRow } from "../../utils/bankAccounts";
 import { salaryPayDate } from "../../utils/flatTaxReduction";
 import { KINSHU, kinshuLabel, kinshuOf, kinshuTotal } from "../../utils/kinshu";
+import { parseRetirementInput } from "../../utils/retirementIncome";
 import { printStyle } from "./reportStyles";
 import {
   ACCOUNT_TYPE_LABELS, bankAccountProblems, buildZenginRecords, encodeZengin, sourceAccountProblems, splitTransfer,
@@ -29,7 +33,9 @@ interface Props {
   staffList: any[];
 }
 
+type Kind = "salary" | "bonus" | "retirement";
 interface Group { id: number; name: string; payment_day: number | null }
+interface Retirement { staffId: string; payDate: string; net: number; death: boolean }
 interface Bonus { id: number; name: string; target_year: number; target_month: number; payment_date: string | null; is_closed: number }
 
 /** 1人分（振込の行・口座がない・分けられない） */
@@ -50,7 +56,11 @@ const today = new Date();
 export default function TransferDataManager({ db, staffList }: Props) {
   const toast = useToast();
   const dialog = useMessageDialog();
-  const [kind, setKind] = useState<"salary" | "bonus">("salary");
+  const [kind, setKind] = useState<Kind>("salary");
+  /** 退職金：支払う日と、送る種別（給与振込・賞与振込） */
+  const [retireDate, setRetireDate] = useState("");
+  const [retireCode, setRetireCode] = useState<"salary" | "bonus" | "">("");
+  const [retirements, setRetirements] = useState<Retirement[]>([]);
   const [payYear, setPayYear] = useState(today.getFullYear());
   const [payMonth, setPayMonth] = useState(today.getMonth() + 1);
   const [groupId, setGroupId] = useState(1);
@@ -71,12 +81,21 @@ export default function TransferDataManager({ db, staffList }: Props) {
   // 口座・給与規定グループ・賞与を読む
   const loadBase = useCallback(async () => {
     try {
-      const [src, grp, bns, acc] = await Promise.all([
+      const [src, grp, bns, acc, ret] = await Promise.all([
         loadSourceAccounts(db),
         db.select("SELECT id, name, payment_day FROM payroll_groups ORDER BY id") as Promise<Group[]>,
         db.select("SELECT id, name, target_year, target_month, payment_date, is_closed FROM bonus_settings ORDER BY target_year DESC, target_month DESC, id DESC") as Promise<Bonus[]>,
         loadStaffBankAccounts(db),
+        db.select("SELECT staff_id, pay_date, amount, income_tax, city_tax, pref_tax, detail FROM retirement_allowances ORDER BY pay_date DESC, id")
+          .catch(() => []) as Promise<any[]>,
       ]);
+      const rets: Retirement[] = (ret ?? []).map((r) => ({
+        staffId: String(r.staff_id), payDate: String(r.pay_date ?? ""),
+        net: (Number(r.amount) || 0) - (Number(r.income_tax) || 0) - (Number(r.city_tax) || 0) - (Number(r.pref_tax) || 0),
+        death: parseRetirementInput(r.detail).death,
+      }));
+      setRetirements(rets);
+      setRetireDate((d) => d || rets.find((r) => !r.death && r.payDate)?.payDate || "");
       const active = src.filter((s) => s.active);
       setSources(active);
       setSourceId((id) => (id !== null && active.some((s) => s.id === id) ? id : active[0]?.id ?? null));
@@ -98,13 +117,20 @@ export default function TransferDataManager({ db, staffList }: Props) {
   // 振込日の初めの値：給与はその月のグループの支払日、賞与は支給日
   useEffect(() => {
     if (kind === "salary") setTransferDate(salaryPayDate(payYear, payMonth, group?.payment_day ?? 25));
+    else if (kind === "retirement") setTransferDate(retireDate);
     else setTransferDate(bonus?.payment_date || (bonus ? `${bonus.target_year}-${pad(bonus.target_month)}-01` : ""));
-  }, [kind, payYear, payMonth, group?.payment_day, bonusId, bonus?.payment_date]);
+  }, [kind, payYear, payMonth, group?.payment_day, bonusId, bonus?.payment_date, retireDate]);
 
   // 確定した差引支給額を読む
   useEffect(() => {
     let cancelled = false;
     setNetPays(null);
+    if (kind === "retirement") {
+      const map = new Map<string, number>();
+      for (const r of retirements.filter((x) => x.payDate === retireDate && !x.death)) map.set(r.staffId, (map.get(r.staffId) ?? 0) + r.net);
+      setNetPays(map);
+      return;
+    }
     (async () => {
       try {
         const rows = (kind === "salary"
@@ -117,7 +143,7 @@ export default function TransferDataManager({ db, staffList }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [db, kind, payYear, payMonth, bonusId]);
+  }, [db, kind, payYear, payMonth, bonusId, retirements, retireDate]);
 
   const staffById = useMemo(() => new Map(staffList.map((s) => [String(s.id), s])), [staffList]);
 
@@ -158,14 +184,16 @@ export default function TransferDataManager({ db, staffList }: Props) {
   const withProblems = rows.filter((r) => r.problems.length > 0);
   const weekday = transferDate ? new Date(`${transferDate}T00:00:00`).getDay() : -1;
 
+  /** 銀行に送る種別（退職金は、選んだ給与振込か賞与振込） */
+  const zenginKind = kind === "retirement" ? retireCode || null : kind;
   const records = useMemo(() => {
-    if (!source || sourceProblems.length > 0 || !transferDate || transferLines.length === 0 || withProblems.length > 0) return null;
+    if (!source || sourceProblems.length > 0 || !transferDate || transferLines.length === 0 || withProblems.length > 0 || !zenginKind) return null;
     try {
-      return buildZenginRecords({ kind, source, transferDate, lines: transferLines });
+      return buildZenginRecords({ kind: zenginKind, source, transferDate, lines: transferLines });
     } catch (e) {
       return null;
     }
-  }, [source, sourceProblems.length, transferDate, transferLines, withProblems.length, kind]);
+  }, [source, sourceProblems.length, transferDate, transferLines, withProblems.length, zenginKind]);
 
   const blocked = [
     ...(netPays === null ? ["確定した給与・賞与を読み込んでいます"] : []),
@@ -173,7 +201,10 @@ export default function TransferDataManager({ db, staffList }: Props) {
     ...(!transferDate ? ["振込日を入れてください"] : []),
     ...(netPays !== null && transferLines.length === 0 ? ["振り込む人がいません（確定した給与・賞与と、従業員の振込先口座を確かめてください）"] : []),
     ...(withProblems.length > 0 ? [`口座を直す人がいます（${withProblems.map((r) => r.name).join("・")}）`] : []),
+    ...(kind === "retirement" && !retireCode ? ["退職金を送る種別（給与振込か賞与振込）を選んでください"] : []),
   ];
+  const retireDates = [...new Set(retirements.filter((r) => !r.death && r.payDate).map((r) => r.payDate))];
+  const deathOnDate = kind === "retirement" ? retirements.filter((r) => r.death && r.payDate === retireDate) : [];
 
   // 印刷する部分を決めてから印刷し、終わったら戻す
   useEffect(() => {
@@ -188,17 +219,20 @@ export default function TransferDataManager({ db, staffList }: Props) {
   const cashRows = rows.filter((r) => r.skip === "口座がない（現金で払う）");
   const cashTotal = kinshuTotal(cashRows.map((r) => r.netPay));
 
-  const targetLabel = kind === "salary" ? `${payYear}年${payMonth}月支給の給与（${group?.name ?? ""}）` : bonus ? `${bonus.name}（${bonus.payment_date ?? ""}）` : "";
+  const targetLabel = kind === "salary" ? `${payYear}年${payMonth}月支給の給与（${group?.name ?? ""}）`
+    : kind === "retirement" ? (retireDate ? `退職金（${retireDate}支払）` : "退職金")
+    : bonus ? `${bonus.name}（${bonus.payment_date ?? ""}）` : "";
+  const kindLabel = zenginKind === "salary" ? "給与振込" : zenginKind === "bonus" ? "賞与振込" : "";
 
   const exportFile = async () => {
     if (!records || blocked.length > 0) return dialog.warning(blocked.join("\n"));
     try {
       const bytes = encodeZengin(records, newline);
-      const fileName = `${kind === "salary" ? "kyuyo" : "shoyo"}_fb_${transferDate.replace(/-/g, "")}.txt`;
+      const fileName = `${kind === "salary" ? "kyuyo" : kind === "bonus" ? "shoyo" : "taishoku"}_fb_${transferDate.replace(/-/g, "")}.txt`;
       const saved = await saveBinaryFile(bytes, fileName, { name: "振込データ", extensions: ["txt", "dat"] });
       if (!saved) return;
       // 口座番号はログに書かない
-      await writeLog(db, "INFO", "salary", `振込データ（${kind === "salary" ? "給与振込" : "賞与振込"}・${targetLabel}・振込日 ${transferDate}・${transferLines.length}件・合計 ${total.toLocaleString()}円）を書き出しました（${saved.name}）`);
+      await writeLog(db, "INFO", "salary", `振込データ（${kindLabel}・${targetLabel}・振込日 ${transferDate}・${transferLines.length}件・合計 ${total.toLocaleString()}円）を書き出しました（${saved.name}）`);
       toast.success(`振込データを保存しました（${saved.name}）`);
     } catch (e) {
       console.error(e);
@@ -211,19 +245,38 @@ export default function TransferDataManager({ db, staffList }: Props) {
       <div style={card}>
         <h3 style={{ margin: "0 0 10px", fontSize: 16 }}>振込データ（全銀協規定形式）</h3>
         <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6, marginBottom: 12 }}>
-          確定した給与・賞与の差引支給額を、銀行のインターネットバンキングなどに送る振込データ（給与振込・賞与振込）にします。
+          確定した給与・賞与の差引支給額と、退職金の画面で保存した退職金の差引支給額を、銀行のインターネットバンキングなどに送る振込データ（給与振込・賞与振込）にします。
           振込先は従業員の画面の「振込先口座」、振込元は会社設定の「振込元口座」です。口座がない人は現金で払うので入れません。
           給与振込は、ふつう振込日の3営業日前までに銀行に送ります（銀行との契約を確かめてください）。
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
           <label style={field}>
             <span style={label}>振り込むもの</span>
-            <select value={kind} onChange={(e) => setKind(e.target.value as "salary" | "bonus")} style={input}>
+            <select value={kind} onChange={(e) => setKind(e.target.value as Kind)} style={input}>
               <option value="salary">給与（給与振込）</option>
               <option value="bonus">賞与（賞与振込）</option>
+              <option value="retirement">退職金</option>
             </select>
           </label>
-          {kind === "salary" ? (
+          {kind === "retirement" ? (
+            <>
+              <label style={field}>
+                <span style={label}>退職金を支払う日</span>
+                <select value={retireDate} onChange={(e) => setRetireDate(e.target.value)} style={input}>
+                  {retireDates.length === 0 && <option value="">（退職金の画面で保存した退職金がありません）</option>}
+                  {retireDates.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </label>
+              <label style={field}>
+                <span style={label}>送る種別</span>
+                <select value={retireCode} onChange={(e) => setRetireCode(e.target.value as "salary" | "bonus" | "")} style={input}>
+                  <option value="">選んでください</option>
+                  <option value="salary">給与振込（11）</option>
+                  <option value="bonus">賞与振込（12）</option>
+                </select>
+              </label>
+            </>
+          ) : kind === "salary" ? (
             <>
               <label style={field}>
                 <span style={label}>支給年月</span>
@@ -275,6 +328,15 @@ export default function TransferDataManager({ db, staffList }: Props) {
         {kind === "bonus" && bonus && Number(bonus.is_closed) !== 1 && (
           <div style={warn}>⚠ この賞与はまだ確定していません。賞与の画面で確定してから書き出してください（確定した人だけを入れます）。</div>
         )}
+        {kind === "retirement" && (
+          <div style={{ ...warn, color: "#475569" }}>
+            退職金の振込データの種別コードは、銀行の給与・賞与振込の仕様書に「11（給与振込）」と「12（賞与振込）」しかないので、どちらで送るかを選びます。
+            退職金を給与・賞与振込で送れるかは、銀行との契約で確かめてください（送れないときは、銀行の画面の総合振込などで振り込みます）。
+          </div>
+        )}
+        {deathOnDate.length > 0 && (
+          <div style={warn}>⚠ 死亡退職の退職金（{deathOnDate.map((r) => staffById.get(r.staffId)?.name ?? r.staffId).join("・")}）は、受給者（相続人など）の口座に振り込むので、入れていません。</div>
+        )}
         {unconfirmed.length > 0 && (
           <div style={warn}>⚠ 給与がまだ確定していない人がいます（入れていません）：{unconfirmed.join("・")}</div>
         )}
@@ -302,7 +364,7 @@ export default function TransferDataManager({ db, staffList }: Props) {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={5} style={{ ...td, color: "#94a3b8" }}>{netPays === null ? "読み込んでいます…" : "確定した給与・賞与がありません"}</td></tr>
+              <tr><td colSpan={5} style={{ ...td, color: "#94a3b8" }}>{netPays === null ? "読み込んでいます…" : kind === "retirement" ? "この日に支払う退職金がありません" : "確定した給与・賞与がありません"}</td></tr>
             )}
             {rows.map((r) => (
               <tr key={r.staffId}>

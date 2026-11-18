@@ -27,7 +27,7 @@ import {
 } from "../constants/shahoTodoke";
 import { PREFECTURE_MASTER } from "../constants/prefectures";
 import type { InsurerType } from "./healthInsurer";
-import { isSango, suggestFuyouKind, type DependentReported, type FuyouChangeKind, type HealthDependent } from "./healthDependents";
+import { isSango, overseasEnded, suggestFuyouKind, type DependentReported, type FuyouChangeKind, type HealthDependent } from "./healthDependents";
 import { familyKey } from "./myNumber";
 import { MY_NUMBER_PLACEHOLDER, hasNameSpace, shahoDate, toShahoKana, toShahoKanji, unusableChars, valueProblem } from "./shahoCsv";
 import { splitBasicPensionNumber } from "./shahoPerson";
@@ -166,7 +166,31 @@ export const changeRemarks = (d: HealthDependent): string => {
   if (r.name !== d.name || r.kana !== d.kana) parts.push(`氏名変更前：${r.name || r.kana}`);
   if (r.birthday !== d.birthday) parts.push(`生年月日訂正前：${r.birthday}`);
   if (r.gender !== d.gender) parts.push(`性別変更前：${r.gender === "male" ? "男" : r.gender === "female" ? "女" : ""}`);
+  if (overseasEnded(d)) parts.push(`海外特例要件非該当（${d.overseasEndReason === "国内転入" ? "国内転入" : d.overseasEndReasonNote || "その他"}）`);
   return parts.join("　");
+};
+
+/** 海外特例要件に非該当となった日（配偶者だけ）・理由・その他の理由・国内転入日（元号は令和だけ。仕様書 表4.10.1-1・表4.11.1-1） */
+const overseasEndValues = (
+  d: HealthDependent, who: string, add: (m: string, ...f: number[]) => void, v: string[],
+  at: { date: [number, number] | null; reason: number; note: number; returned: [number, number] },
+) => {
+  if (at.date) {
+    const u = shahoDate(d.overseasUntil, SHAHO_FUYOU_OVERSEAS_ERA_CODES) ?? { era: "", ymd: "" };
+    if (!u.era) add(`${who}が海外特例要件に非該当となった日を入れてください（令和の日付）`, ...at.date);
+    v[at.date[0]] = u.era; v[at.date[1]] = u.ymd;
+  }
+  v[at.reason] = (SHAHO_FUYOU_CODES.overseasEndReason as Record<string, string>)[d.overseasEndReason] ?? "";
+  if (!v[at.reason]) add(`${who}が海外特例要件に非該当となった理由（国内転入・その他）を選んでください`, at.reason);
+  if (d.overseasEndReason === "その他") {
+    v[at.note] = toShahoKanji(d.overseasEndReasonNote);
+    if (!v[at.note]) add(`${who}が海外特例要件に非該当となった理由（その他）を入れてください`, at.note);
+  }
+  if (d.overseasEndReason === "国内転入") {
+    const r = shahoDate(d.returnedOn, SHAHO_FUYOU_OVERSEAS_ERA_CODES) ?? { era: "", ymd: "" };
+    if (!r.era) add(`${who}の国内転入日を入れてください（令和の日付）`, ...at.returned);
+    v[at.returned[0]] = r.era; v[at.returned[1]] = r.ymd;
+  }
 };
 
 /** 被保険者（従業員）の項目：整理番号・氏名・生年月日・性別・個人番号・基礎年金番号・住所 */
@@ -299,6 +323,11 @@ export const buildFuyouRow = (input: FuyouInput, office: string[], key = ""): Fu
       if (!v[60]) add(`${who}が海外特例要件に該当した理由を選んでください`, 60);
       if (spouse.overseasReason === "その他") v[61] = toShahoKanji(spouse.overseasReasonNote);
     }
+    if (kind === "変更" && overseasEnded(spouse)) {
+      // 海外特例要件に非該当となった（被扶養者のまま日本に住むなど）：海外特例「2」・非該当となった日・理由・国内転入日（項番58・63〜68）
+      v[57] = SHAHO_FUYOU_CODES.overseas["非該当"];
+      overseasEndValues(spouse, who, add, v, { date: [62, 63], reason: 64, note: 65, returned: [66, 67] });
+    }
   } else if (kind === "該当" && input.spouseIncome !== null) {
     // 被扶養者でない配偶者がいるとき、その年間収入（夫婦ともに収入があるときは、年間収入の多い方の被扶養者にする）
     v[68] = amountText(input.spouseIncome);
@@ -335,6 +364,11 @@ export const buildFuyouRow = (input: FuyouInput, office: string[], key = ""): Fu
       v[base + 14] = (SHAHO_FUYOU_CODES.overseasReason as Record<string, string>)[d.overseasReason] ?? "";
       if (!v[base + 14]) add(`${who}が海外特例要件に該当した理由を選んでください`, base + 14);
       if (d.overseasReason === "その他") v[base + 15] = toShahoKanji(d.overseasReasonNote);
+    }
+    if (kind === "変更" && overseasEnded(d)) {
+      // その他の被扶養者には、非該当となった日の欄はない（理由・国内転入日だけ）
+      v[base + 13] = SHAHO_FUYOU_CODES.overseas["非該当"];
+      overseasEndValues(d, who, add, v, { date: null, reason: base + 16, note: base + 17, returned: [base + 18, base + 19] });
     }
     if (kind === "該当") {
       const from = eventDate(d.from);
@@ -474,6 +508,10 @@ export const buildSangoRow = (input: FuyouInput, office: string[], key = ""): Fu
     v[54] = (SHAHO_FUYOU_CODES.overseasReason as Record<string, string>)[spouse.overseasReason] ?? "";
     if (spouse.overseasReason === "その他") v[55] = toShahoKanji(spouse.overseasReasonNote);
   }
+  if (kind === "変更" && overseasEnded(spouse)) {
+    v[51] = SHAHO_FUYOU_CODES.overseas["非該当"];
+    overseasEndValues(spouse, who, add, v, { date: [56, 57], reason: 58, note: 59, returned: [60, 61] });
+  }
   notes.push("健康保険組合などの被保険者の配偶者なので、年金事務所には国民年金第3号被保険者関係届だけを出します（健康保険の被扶養者の届けは、組合の様式で組合に出します）");
   problems.push(...checkFields(F, v, skip));
   return rowOf(key, staff, "sango", kind, [spouse], v, persons, personNames, problems, notes, input.today);
@@ -490,6 +528,7 @@ const rowOf = (
     problems: [...new Set(problems)], notes,
     reported: Object.fromEntries(people.map((d) => [d.id, {
       kind, on: today, name: d.name, kana: d.kana, birthday: d.birthday, gender: d.gender, ...(d.spouse ? { sango: form === "sango" || isSango(d, d.from || today) } : {}),
+      ...(d.overseasUntil ? { overseasUntil: d.overseasUntil } : {}),
     }])),
   };
 };

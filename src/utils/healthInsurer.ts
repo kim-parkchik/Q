@@ -36,6 +36,8 @@ export interface UnionRate {
   health: number;
   care: number;
   childSupport: number;
+  /** 会社負担の%（組合の規約で決まる。入れていなければ null。保険料の集計表と法定福利費の仕訳に使う） */
+  company?: { health: number; care: number; childSupport: number } | null;
 }
 
 export interface HealthInsurer {
@@ -77,9 +79,14 @@ export const loadHealthInsurers = async (db: SelectDb): Promise<Map<number, Heal
   const groups = (await db.select<{ id: number; name: string; type: string; union_office_number: string | null; union_media_seq: number | null }[]>(
     "SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups ORDER BY id",
   )) ?? [];
-  const rates = (await db.select<{ group_id: number; from_month: string; health_rate: number; care_rate: number; child_support_rate: number }[]>(
+  type RateRow = { group_id: number; from_month: string; health_rate: number; care_rate: number; child_support_rate: number;
+    company_health_rate?: number | null; company_care_rate?: number | null; company_child_support_rate?: number | null };
+  // 会社負担の列がない古いファイルでも読めるように、読めなければ本人負担だけを読む
+  const rates = (await db.select<RateRow[]>(
+    "SELECT group_id, from_month, health_rate, care_rate, child_support_rate, company_health_rate, company_care_rate, company_child_support_rate FROM social_insurance_group_rates ORDER BY group_id, from_month",
+  ).catch(() => db.select<RateRow[]>(
     "SELECT group_id, from_month, health_rate, care_rate, child_support_rate FROM social_insurance_group_rates ORDER BY group_id, from_month",
-  )) ?? [];
+  ))) ?? [];
   const map = new Map<number, HealthInsurer>();
   for (const g of groups) {
     map.set(Number(g.id), {
@@ -93,6 +100,8 @@ export const loadHealthInsurers = async (db: SelectDb): Promise<Map<number, Heal
       health: Number(r.health_rate) || 0,
       care: Number(r.care_rate) || 0,
       childSupport: Number(r.child_support_rate) || 0,
+      company: r.company_health_rate === null || r.company_health_rate === undefined ? null
+        : { health: Number(r.company_health_rate) || 0, care: Number(r.company_care_rate) || 0, childSupport: Number(r.company_child_support_rate) || 0 },
     });
   }
   return map;

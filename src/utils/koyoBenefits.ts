@@ -22,7 +22,7 @@ import { birthdayAt } from "./calcSalary";
 import { buildWageCertificate, type WageCertDay, type WageCertResult, type WageCertSalary } from "./wageCertificate";
 import { formatWareki } from "./wareki";
 import { formatKoyoNumber } from "./koyoCsv";
-import { koyoAcquiredOn } from "./koyoInfo";
+import { koyoAcquiredOn, parseKoyoInfo } from "./koyoInfo";
 import type { PrintItem } from "./printForms";
 
 export type BenefitKind = "childcare" | "papa" | "family_care" | "elderly" | "short_time";
@@ -154,6 +154,7 @@ const certFor = (data: BenefitData, end: string, elderly = false): WageCertResul
   buildWageCertificate({
     endDate: end, acquiredOn: koyoAcquiredOn(data.staff), elderly, staff: data.staff, group: data.group,
     salaries: data.salaries, attendance: data.attendance, isWorkDay: data.isWorkDay,
+    commuteLumps: parseKoyoInfo(data.staff.koyo_info).commuteLumps,
   });
 
 const personItems = (data: BenefitData): PrintItem[] => [

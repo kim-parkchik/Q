@@ -1,7 +1,8 @@
 /**
  * 「所得税の納付書」の画面：給与所得・退職所得等の所得税徴収高計算書（源泉所得税の納付書）に書き写す中身を、
  * 確定した給与・賞与から出す（作り方は utils/withholdingPayment.ts）
- * ・退職手当等は、退職金の画面で保存したもの（retirement_allowances）を入れる
+ * ・退職手当等は、退職金の画面で保存したもの（retirement_allowances）を入れる（死亡退職と、非居住者に払ったものは入れない。
+ *   非居住者の分は「非居住者・外国法人の所得についての所得税徴収高計算書（納付書）」で納める）
  * ・納期の特例の承認を受けているか（会社ごと）と、Q で計算しない退職手当等・税理士等の報酬（期間ごと）は、会社の gensen_nofu（JSON）に残す
  * ・納付書は税務署から届いた用紙に書く（用紙の代わりに印刷したものは使えない）。e-Tax で納めるときも、この中身を入れる
  */
@@ -83,13 +84,13 @@ export default function WithholdingPaymentManager({ db }: Props) {
            WHERE b.target_year IN (?, ?)`,
           [year - 1, year],
         );
-        // 退職金の画面で保存した退職手当等（死亡退職は源泉徴収しないので除く）
+        // 退職金の画面で保存した退職手当等（死亡退職は源泉徴収しないので除く。非居住者の分は別の納付書なので除く）
         const rets = await db.select<any[]>(
           "SELECT staff_id, pay_date, amount, income_tax, detail FROM retirement_allowances WHERE pay_date BETWEEN ? AND ?",
           [`${year - 1}-01-01`, `${year}-12-31`],
         );
         if (cancelled) return;
-        setRetirements((rets ?? []).filter((r) => !parseRetirementInput(r.detail).death).map((r) => ({
+        setRetirements((rets ?? []).filter((r) => { const d = parseRetirementInput(r.detail); return !d.death && !d.nonResident; }).map((r) => ({
           staffId: String(r.staff_id), payDate: String(r.pay_date), amount: Number(r.amount) || 0, tax: Number(r.income_tax) || 0,
         })));
         setSalaries((rows ?? []).map((r): NofuSalaryInput => {
@@ -152,6 +153,7 @@ export default function WithholdingPaymentManager({ db }: Props) {
           納付書は、税務署から届いた用紙に書きます（用紙の代わりに印刷したものは使えません。e-Tax で納めるときも、この中身を入れます）。
           書き方は、国税庁「所得税徴収高計算書（納付書）の記載のしかた」によります。支給額は、所得税がかかる額（非課税の通勤手当を除く。源泉徴収簿の総支給金額と同じ）です。
           退職手当等の欄は、退職金の画面で保存した退職金です（Q で計算しない退職手当等があれば「手で入れる」で足します）。
+          非居住者に払った退職金の所得税は、この納付書ではなく「非居住者・外国法人の所得についての所得税徴収高計算書（納付書）」で納めるので、入れていません。
           納期限：納期の特例を受けていなければ支払った月の翌月10日、受けていれば1月〜6月分は7月10日・7月〜12月分は翌年1月20日（土日祝日なら次の日）。
         </div>
         <div style={S.controls}>

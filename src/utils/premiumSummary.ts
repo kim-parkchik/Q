@@ -9,14 +9,15 @@
  *   その月に支払った賞与の標準賞与額（厚生年金は1か月150万円、健康保険は年度で573万円まで）から、協会けんぽの料率（拠点の都道府県ごと）で
  *   健康保険料（介護保険料を含む）・子ども・子育て支援金・厚生年金保険料・子ども・子育て拠出金（事業主だけが負担）の見込みを出す。
  *   本人負担は、その月の分を引いた給与（当月徴収はその月に支給、翌月徴収は次の月に支給。給与規定グループの設定）と、その月に支払った賞与から。
- *   健康保険組合・国民健康保険組合の人の健康保険料は、組合の決まりによるので本人負担だけを出す
+ *   健康保険組合の人の健康保険料は、社会保険規定に組合の会社負担の料率を入れていれば、本人負担と会社負担の料率を足した率で
+ *   見込みを出す（入れていなければ本人負担だけ）。国民健康保険組合の人は本人負担だけを出す
  * ■ 労働保険料（支給した月ごと）：その月に支給した給与・賞与の労働保険の賃金（年度更新と同じ。utils/nendoKoshin.ts）から、
  *   雇用保険料の本人負担（給与・賞与から引いた額）と会社負担の見込み（賃金 × 事業主負担の率）、労災保険料（賃金 × 労災保険率。会社だけが負担）を出す。
  *   年度の保険料は年度更新で申告・精算する（ここは毎月の会計の見込み）
  */
 import * as Master from "../constants";
 import { checkInsuredMonth, checkSocialInsEnrolled, getInsuranceByAge } from "./calcSalary";
-import { insurerOf, type HealthInsurer } from "./healthInsurer";
+import { insurerOf, unionRateFor, type HealthInsurer } from "./healthInsurer";
 import { checkLeaveExemptMonth, exemptLeavePeriodsOf } from "./leaveExemption";
 import { pensionStandardOf } from "./remunerationReport";
 import { getStandardRemuneration } from "./standardRemuneration";
@@ -104,6 +105,14 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
   let contributionBase = 0;
   const emp = { kyokaiHealth: 0, kyokaiChild: 0, unionHealth: 0, unionChild: 0, pension: 0, kokuho: 0 };
   let unionPeople = 0;
+  /** 健康保険組合の人の、本人負担と会社負担を足した率で計算した額（会社負担の料率がない人がいれば unionUnknown） */
+  let unionScaled = 0;
+  let unionUnknown = false;
+  const addUnion = (insurer: HealthInsurer | null, base: number, nursing: boolean, child: boolean) => {
+    const r = insurer ? unionRateFor(insurer.rates, year, month) : null;
+    if (!r || !r.company) { unionUnknown = true; return; }
+    unionScaled += base * (milli(r.health + r.company.health) + (nursing ? milli(r.care + r.company.care) : 0) + (child ? milli(r.childSupport + r.company.childSupport) : 0));
+  };
   let persons = 0;
   const pending: string[] = [];
   const addKenpo = (pref: string, health: number, child: number) => {
@@ -117,7 +126,7 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
     const id = String(s.id);
     const insurer = insurerOf(p.insurers, s.social_insurance_group_id);
     const type = insurer?.type ?? "kyokai";
-    const byAge = getInsuranceByAge(String(s.birthday ?? ""), year, month, s.kouki_date, s.kaigo_exempt);
+    const byAge = getInsuranceByAge(String(s.birthday ?? ""), year, month, s.kouki_date, s.kaigo_exempt, s.shaho_loss);
     const insured = checkSocialInsEnrolled(s, year, month) && checkInsuredMonth(s.join_date, s.retirement_date, year, month)
       && !checkLeaveExemptMonth(exemptLeavePeriodsOf(s), year, month);
     // 本人負担：その月の分を引いた給与（当月徴収はその月、翌月徴収は次の月に支給）
@@ -135,7 +144,10 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
         else addKenpo(pref, Math.min(std, ins.KENPO_MAX_HYOJUN) * (milli(rate[1]) + (byAge.nursing ? milli(ins.KENPO_CARE_RATE[1]) : 0)),
           childMonth ? Math.min(std, ins.KENPO_MAX_HYOJUN) * milli(ins.CHILD_SUPPORT_RATE![1]) : 0);
       }
-      if (byAge.health && type === "union") unionPeople += 1;
+      if (byAge.health && type === "union") {
+        unionPeople += 1;
+        addUnion(insurer, Math.min(std, ins.KENPO_MAX_HYOJUN), byAge.nursing, childMonth);
+      }
       if (byAge.pension) {
         const ps = pensionStandardOf(std, range);
         pensionBase += ps * milli(ins.PENSION_RATE[1]);
@@ -163,6 +175,7 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
           if (pref && rate) addKenpo(pref, healthStd * (milli(rate[1]) + (n(b.nursing_insurance) > 0 ? milli(ins.KENPO_CARE_RATE[1]) : 0)),
             childMonth && n(b.child_support) > 0 ? healthStd * milli(ins.CHILD_SUPPORT_RATE![1]) : 0);
         }
+        if (n(b.health_insurance) > 0 && type === "union") addUnion(insurer, healthStd, n(b.nursing_insurance) > 0, childMonth && n(b.child_support) > 0);
         if (n(b.welfare_pension) > 0) {
           const ps = Math.min(hyojun, ins.PENSION_INS_SINGLE_LIMIT);
           pensionBase += ps * milli(ins.PENSION_RATE[1]);
@@ -188,8 +201,10 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
     line("子ども・子育て拠出金（会社だけが負担）", contribution, 0),
   ];
   if (unionPeople > 0 || emp.unionHealth > 0) {
-    social.push(line("健康保険料（介護保険料・子ども・子育て支援金を含む。健康保険組合）", null, emp.unionHealth + emp.unionChild));
-    notes.push("健康保険組合の人の保険料の合計と会社負担は、組合の決まり（料率・負担の割合）によるので、本人負担だけを出しています。");
+    const known = unionPeople > 0 && !unionUnknown;
+    social.push(line("健康保険料（介護保険料・子ども・子育て支援金を含む。健康保険組合）", known ? floorYen(unionScaled) : null, emp.unionHealth + emp.unionChild));
+    if (!known) notes.push("健康保険組合の人の会社負担は、社会保険規定に組合の会社負担の料率を入れると出します（いまは本人負担だけ）。");
+    else notes.push("健康保険組合の人の保険料は、社会保険規定の本人負担と会社負担の料率を足した率での見込みです（組合の納入告知額と照らし合わせてください）。");
   }
   if (emp.kokuho > 0) social.push(line("国民健康保険組合の保険料", null, emp.kokuho));
   if (pending.length > 0) {

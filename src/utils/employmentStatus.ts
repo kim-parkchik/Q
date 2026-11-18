@@ -13,6 +13,7 @@
  * ■ 高年齢者雇用状況等報告：Q で数えられる欄だけを出す（⑮常用労働者数（年齢の区分ごと・うち女性）、⑯過去1年間の解雇等による45歳以上70歳未満の
  *   離職者、⑰の定年に達した人）。定年・継続雇用制度などの欄は、就業規則で確かめて書く
  */
+import { DISABILITY_PHYSICAL_TYPES } from "../constants/roumu";
 import dayjs from "dayjs";
 import {
   DISABILITY_EMPLOYMENT_RATE, DISABILITY_EMPLOYMENT_RATE_FORM6, DISABILITY_WEEKLY_HOURS, ELDERLY_AGE_BANDS, ELDERLY_REPORT_REGULAR_WEEKLY_HOURS,
@@ -28,6 +29,8 @@ export interface DisabilityInfo {
   kind: DisabilityKind;
   /** 重度（身体・知的のとき） */
   severe: boolean;
+  /** 身体障害者の種類（様式第6号のＤ欄の第1号〜第5号。constants/roumu.ts の DISABILITY_PHYSICAL_TYPES。2つ以上あれば主たる障害） */
+  physicalType: number | null;
   /** 確かめた書類（身体障害者手帳1級など）。報告には出さない */
   note: string;
 }
@@ -36,9 +39,14 @@ export const parseDisabilityInfo = (json: unknown): DisabilityInfo => {
   try {
     const o = typeof json === "string" && json.trim() ? JSON.parse(json) : null;
     const kind = ["physical", "intellectual", "mental"].includes(o?.kind) ? o.kind : "";
-    return { kind, severe: kind !== "mental" && o?.severe === true, note: typeof o?.note === "string" ? o.note : "" };
+    const pt = Number(o?.physicalType);
+    return {
+      kind, severe: kind !== "mental" && o?.severe === true,
+      physicalType: kind === "physical" && DISABILITY_PHYSICAL_TYPES.some((x) => x.no === pt) ? pt : null,
+      note: typeof o?.note === "string" ? o.note : "",
+    };
   } catch {
-    return { kind: "", severe: false, note: "" };
+    return { kind: "", severe: false, physicalType: null, note: "" };
   }
 };
 export const stringifyDisabilityInfo = (d: DisabilityInfo): string | null => (d.kind ? JSON.stringify(d) : null);
@@ -117,6 +125,9 @@ export interface DisabilityReport {
   shortage: number;
   /** 報告する事業主（法定雇用障害者数が1人以上） */
   mustReport: boolean;
+  /** Ｄ欄：種類別の身体障害者数（実人数。第1号〜第5号の順）と、種類を入れていない人の数 */
+  physicalTypes: number[];
+  physicalTypeUnknown: number;
   rows: DisabilityRow[];
 }
 
@@ -134,6 +145,8 @@ export const disabilityReport = (staffList: any[], year: number, exclusionPct: n
   const cells: DisabilityReport["cells"] = {
     ho: empty(), he: empty(), to: empty(), chi: empty(), ri: empty(), ru: empty(), wo: empty(), wa: empty(), ka: empty(), yo: empty(), re: empty(), so: empty(), tsu: empty(),
   };
+  const physicalTypes = DISABILITY_PHYSICAL_TYPES.map(() => 0);
+  let physicalTypeUnknown = 0;
   for (const s of staffList) {
     if (!employedOn(s, asOf) || notWorker(s) || !overOneYear(s)) continue;
     const c = hoursClassOf(s);
@@ -151,6 +164,11 @@ export const disabilityReport = (staffList: any[], year: number, exclusionPct: n
           : (c === "regular" ? "re" : c === "short" ? "so" : "tsu");
     cells[key].n++;
     if (newHire) cells[key].newN++;
+    if (info.kind === "physical") {
+      const t = DISABILITY_PHYSICAL_TYPES.findIndex((x) => x.no === info.physicalType);
+      if (t >= 0) physicalTypes[t]++;
+      else physicalTypeUnknown++;
+    }
   }
   const ha = i + ro * 0.5;
   const ni = round1(ha - floor1((ha * exclusionPct) / 100));
@@ -163,8 +181,40 @@ export const disabilityReport = (staffList: any[], year: number, exclusionPct: n
   return {
     year, asOf, i, ro, ha, ni, cells, physical, intellectual, mental, total,
     actualRate: ni > 0 ? Math.round((total / ni) * 10000) / 100 : null,
-    rate, required, shortage: Math.max(0, round1(required - total)), mustReport: required >= 1, rows,
+    rate, required, shortage: Math.max(0, round1(required - total)), mustReport: required >= 1, physicalTypes, physicalTypeUnknown, rows,
   };
+};
+
+/** 事業所別の 10(ニ) の合計を、会社全体の 10(ニ) にして、実雇用率・法定雇用障害者数・不足数を出し直す */
+export const withTotalNi = (r: DisabilityReport, ni: number): DisabilityReport => {
+  const required = floor1((ni * r.rate[0]) / r.rate[1]);
+  return {
+    ...r, ni, required, mustReport: required >= 1, shortage: Math.max(0, round1(required - r.total)),
+    actualRate: ni > 0 ? Math.round((r.total / ni) * 10000) / 100 : null,
+  };
+};
+
+/** Ｃ欄（事業所別の内訳）の1つの事業所の設定：事業所の区分（1 特例子会社に含まれる・2 Ａ型事業所・3 それ以外）・除外率・事業の内容 */
+export interface BranchReportSetting {
+  kubun: "1" | "2" | "3";
+  exclusionPct: number;
+  business: string;
+}
+
+/**
+ * Ｃ欄「事業所別の内訳」（除外率が設定されている事業所・特例子会社・Ａ型事業所がある企業だけが書く。障害者雇用状況報告記入要領）。
+ * 拠点ごとに同じ数え方で数え、会社全体の 10(ニ) は事業所ごとの (ニ) の合計にする
+ */
+export const disabilityReportByBranch = (
+  staffList: any[], year: number, branches: { id: number; name: string }[], settings: Record<string, BranchReportSetting>,
+) => {
+  const list = branches.map((b) => {
+    const set = settings[String(b.id)] ?? { kubun: "3", exclusionPct: 0, business: "" };
+    const report = disabilityReport(staffList.filter((s) => Number(s.branch_id ?? 1) === b.id), year, set.exclusionPct);
+    return { branch: b, setting: set, report };
+  });
+  const ni = round1(list.reduce((t, x) => t + x.report.ni, 0));
+  return { list, ni };
 };
 
 // ── 高年齢者雇用状況等報告 ──────────────────────────────────

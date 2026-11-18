@@ -21,6 +21,12 @@
  *   ・日給月給（欠勤控除をする月給制）：所定労働日のうち、欠勤した日を除いた日数（記入例(5)(6)）
  *   ・日給・時給：働いた日・有給休暇の日・有給の特別休暇の日・休業手当を払った日
  *   ・給与を払わない休業・休職の日は数えない
+ * ■ 短期雇用特例被保険者（季節的に雇用される人）は、⑧を B 欄（暦月）で書く：離職した月から順にさかのぼり、⑨はその暦月の基礎日数
+ *   （離職日以前1年間・資格取得日まで。手引きの記入例(9)。特例一時金は、11日以上の月が6か月以上で受けられる）
+ * ■ 休業期間中の所定休日（月給の人だけ）：休業手当を払った日と、その直後に休業手当を払った日のあいだに、所定休日（有給休暇は含まない）だけが
+ *   あるとき、その休日を⑬に「休業期間中の所定休日○日」と書く（賃金月ごとに数える。日給・時給の人は書かない。手引き p.39 の例1〜5）
+ * ■ 通勤手当を何か月分かまとめて払ったときは、その月数で割り、それぞれの月に入れる（手引き ⑫欄。従業員の雇用保険の欄で、まとめて払った
+ *   給与の支給年月と月数を入れる。1円未満の端数は初めの月に入れる）
  * 出典：厚生労働省「雇用保険事務手続きの手引き【第２編】被保険者資格の取得・喪失編」（令和８年８月版）の離職証明書の記入例と説明
  */
 import dayjs from "dayjs";
@@ -67,6 +73,10 @@ export interface WageCertInput {
   attendance: WageCertDay[];
   /** その日が所定労働日か（日給月給の人で、勤怠を入れていない月に使う。なければ土日を除く） */
   isWorkDay?: (date: string) => boolean;
+  /** 短期雇用特例被保険者（⑧を B 欄の暦月で書く） */
+  shortTerm?: boolean;
+  /** 通勤手当を何か月分かまとめて払った給与（支給年月 YYYY-MM と月数） */
+  commuteLumps?: { pay: string; months: number }[];
 }
 
 /** ⑧⑨ の1行 */
@@ -81,6 +91,8 @@ export interface InsuredPeriodRow {
   complete: boolean;
   /** ⑬ 備考 */
   note: string;
+  /** 短期雇用特例被保険者の B 欄の月（1〜12。一般被保険者等は書かない） */
+  month?: number;
 }
 
 /** ⑩⑪⑫⑬ の1行 */
@@ -190,6 +202,46 @@ const daysIn = (
   return { days, hours: Math.round(hours * 10) / 10, leaveDays, absentDays, shutdownDays };
 };
 
+/**
+ * 休業期間中の所定休日：休業手当を払った日と、その直後に休業手当を払った日のあいだに、所定休日（有給休暇・働いた日を除く）だけがあるときの、
+ * その休日（手引き p.39。月給の人の⑬に書く）
+ */
+export const shutdownHolidaysOf = (byDate: Map<string, WageCertDay>, isWorkDay: (date: string) => boolean): Set<string> => {
+  const shutdown = [...byDate.values()].filter((r) => r.work_type === SHUTDOWN_WORK_TYPE).map((r) => r.work_date).sort();
+  const out = new Set<string>();
+  for (let i = 0; i + 1 < shutdown.length; i++) {
+    const between: string[] = [];
+    let onlyHolidays = true;
+    for (let d = addDays(shutdown[i], 1); d < shutdown[i + 1]; d = addDays(d, 1)) {
+      const r = byDate.get(d);
+      if (isWorkDay(d) || isPaidDay(r) || isAbsentDay(r)) { onlyHolidays = false; break; }
+      between.push(d);
+    }
+    if (onlyHolidays) between.forEach((d) => out.add(d));
+  }
+  return out;
+};
+
+/**
+ * 通勤手当を何か月分かまとめて払った給与の、月ごとに入れる額との差（支給年月 YYYY-MM → A に足す額。まとめて払った月は、割った額から払った額を引いた額）
+ * @param commuteOf その給与で払った通勤手当（給与の内訳の「通勤」を含む行）
+ */
+export const commuteSpreadOf = (salaries: WageCertSalary[], lumps: { pay: string; months: number }[]): Map<string, number> => {
+  const out = new Map<string, number>();
+  const add = (ym: string, v: number) => out.set(ym, (out.get(ym) ?? 0) + v);
+  for (const lump of lumps) {
+    const s = salaries.find((x) => `${x.target_year}-${String(x.target_month).padStart(2, "0")}` === lump.pay);
+    if (!s) continue;
+    const ledger = parseLedger(s.ledger);
+    const paid = (ledger?.earnings ?? []).filter((l) => String(l.name ?? "").includes("通勤")).reduce((t, l) => t + (Number(l.amount) || 0), 0);
+    if (paid <= 0) continue;
+    const share = Math.floor(paid / lump.months);
+    add(lump.pay, -paid + share + (paid - share * lump.months));
+    for (let k = 1; k < lump.months; k++) add(dayjs(`${lump.pay}-01`).add(k, "month").format("YYYY-MM"), share);
+  }
+  return out;
+};
+
 /** 給与の、A（月・週など）・B（日・時間・出来高）の額と、休業手当の額 */
 export const wageAmountsOf = (salary: WageCertSalary, wageType: string): { a: number; b: number; shutdownPay: number; excluded: number; fromLedger: boolean } => {
   const ledger = parseLedger(salary.ledger);
@@ -255,12 +307,29 @@ export const buildWageCertificate = (input: WageCertInput): WageCertResult => {
   }
 
   // ── ⑧⑨ ──
+  if (input.shortTerm) {
+    // 短期雇用特例被保険者：B 欄。離職した月から暦月でさかのぼる（離職日以前1年間・資格取得日まで）
+    const yearAgo = addDays(fmt(dayjs(endDate).subtract(1, "year")), 1);
+    for (let k = 0; k < 12; k++) {
+      const first = dayjs(endDate).startOf("month").subtract(k, "month");
+      const from = maxDate(maxDate(fmt(first), acquiredOn), yearAgo);
+      const to = minDate(fmt(first.endOf("month")), endDate);
+      if (to < from) break;
+      const monthly = wageTypeOn(to) === "monthly";
+      const d = daysIn(from, to, byDate, leaves, monthly, fullMonthly, scheduled, isWorkDay);
+      const complete = from === fmt(first) && to === fmt(first.endOf("month"));
+      result.insured.push({ from, to, days: d.days, hours: d.hours, complete, note: "", month: first.month() + 1 });
+      if (d.days >= 11) result.fullMonths++;
+      if (from > fmt(first)) break;
+    }
+    if (result.fullMonths < 6) notes.push(`⑨が11日以上の月が${result.fullMonths}か月です（特例一時金は、離職の日以前1年間に11日以上の月が6か月以上あるときに受けられます）。`);
+  }
   const needFull = input.elderly ? 6 : 12;
   const span = input.elderly ? 12 : 24;
   let limit = span;
   let prevStart = nextDay;
   let skipped: { from: string; to: string; days: number; reason: string } | null = null;
-  for (let k = 1; k <= 48 && k <= limit; k++) {
+  for (let k = 1; !input.shortTerm && k <= 48 && k <= limit; k++) {
     const start = monthsBefore(nextDay, k);
     const to = addDays(prevStart, -1);
     prevStart = start;
@@ -289,7 +358,7 @@ export const buildWageCertificate = (input: WageCertInput): WageCertResult => {
     if (result.fullMonths >= needFull || from > start) break;
   }
   if (skipped) notes.push(`${skipped.from}〜${skipped.to}は${skipped.reason}で賃金を払っていない期間です。`);
-  if (result.fullMonths < needFull) {
+  if (!input.shortTerm && result.fullMonths < needFull) {
     // 11日以上の完全月が足りないとき：10日以下の行の時間数を備考に（80時間以上なら1か月として数える）
     for (const r of result.insured) {
       if (r.complete && r.days <= 10 && r.hours > 0) r.note = [r.note, `${Math.floor(r.hours)}時間`].filter(Boolean).join(" ");
@@ -313,6 +382,9 @@ export const buildWageCertificate = (input: WageCertInput): WageCertResult => {
     problems.push(`離職日（${endDate}）を含む給与の計算期間の給与を確定してください`);
   }
   const lowest = fmt(dayjs(endDate).subtract(2, "year"));
+  const commuteSpread = commuteSpreadOf(salaries, input.commuteLumps ?? []);
+  const holidays = shutdownHolidaysOf(byDate, isWorkDay);
+  if ((input.commuteLumps ?? []).length > 0) notes.push("まとめて払った通勤手当は、月数で割ってそれぞれの月の A に入れました。");
   for (const s of salaries) {
     const p = periodOf(s);
     if (p.start > endDate) continue;
@@ -323,11 +395,17 @@ export const buildWageCertificate = (input: WageCertInput): WageCertResult => {
     const monthly = wageType === "monthly";
     const d = daysIn(from, to, byDate, leaves, monthly, fullMonthly, scheduled, isWorkDay);
     const amounts = wageAmountsOf(s, wageType);
+    amounts.a += commuteSpread.get(`${s.target_year}-${String(s.target_month).padStart(2, "0")}`) ?? 0;
     const total = amounts.a + amounts.b;
     if (total === 0 && d.days === 0) continue; // 賃金のない期間（休業など）は書かない
     const complete = from === p.start && to === p.end;
     const noteParts: string[] = [];
     if (d.shutdownDays > 0 && amounts.shutdownPay > 0) noteParts.push(`休業${d.shutdownDays}日 ${amounts.shutdownPay}円`);
+    if (monthly) {
+      let n = 0;
+      eachDate(from, to, (x) => { if (holidays.has(x)) n++; });
+      if (n > 0) noteParts.push(`休業期間中の所定休日${n}日`);
+    }
     if (monthly && !fullMonthly && d.absentDays > 0) noteParts.push(`欠勤${d.absentDays}日`);
     result.wages.push({
       from, to, days: d.days, hours: d.hours, a: amounts.a, b: amounts.b, total, complete, note: noteParts.join(" "),

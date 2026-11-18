@@ -17,7 +17,7 @@ import { writeLog } from "../../utils/logUtils";
 import { KOYO_FILE_NAMES, type KoyoForm } from "../../constants/koyoTodoke";
 import { buildKoyoLines, koyoOfficeValues, KOYO_FORM_TITLES } from "../../utils/koyoCsv";
 import { encodeShahoFile, nextMediaNumber } from "../../utils/shahoCsv";
-import { koyoAcquiredOn, parseKoyoInfo, stringifyKoyoInfo, wantsCertificate } from "../../utils/koyoInfo";
+import { isShortTermInsured, koyoAcquiredOn, parseKoyoInfo, stringifyKoyoInfo, wantsCertificate } from "../../utils/koyoInfo";
 import { buildKoyoBango, buildKoyoShutoku, buildKoyoSoshitsu, buildKoyoTenkin, type KoyoRow } from "../../utils/koyoReport";
 import { koyoOfficeOf, koyoPlaceOf, koyoPlaces } from "../../utils/koyoPlaces";
 import { groupOfStaff, loadKoyoBase, loadWageData, type KoyoBase } from "../../utils/koyoData";
@@ -32,13 +32,19 @@ export const KOYO_MODE_LABELS: Record<KoyoMode, string> = {
 };
 
 const ymOf = (date: string) => (date ? date.slice(0, 7) : "");
-/** 離職日（死亡日が退職日より前か同じなら死亡日） */
+/**
+ * 離職日（死亡日が退職日より前か同じなら死亡日）。退職・死亡のほかに資格を失うできごと（週20時間未満・取締役への就任・出向など。
+ * 従業員の画面の雇用保険の欄）があり、退職日・死亡日より前なら、その離職等年月日
+ */
 export const koyoLossDateOf = (s: any): string => {
   const death = String(s?.death_date ?? "");
   const retire = String(s?.retirement_date ?? "");
-  return death && (!retire || death <= retire) ? death : retire;
+  const end = death && (!retire || death <= retire) ? death : retire;
+  const event = parseKoyoInfo(s?.koyo_info).lossEvent;
+  return event && (!end || event.date < end) ? event.date : end;
 };
-const eligible = (s: any) => Number(s?.is_employment_ins_eligible ?? 1) === 1;
+/** 雇用保険に入っている人（退職のほかのできごとで資格を失う人は、加入の印を外していても届書に出す） */
+const eligible = (s: any) => Number(s?.is_employment_ins_eligible ?? 1) === 1 || !!parseKoyoInfo(s?.koyo_info).lossEvent;
 
 export function useKoyoReportManager(db: any, staffList: any[], user: MyNumberUser | null) {
   const dialog = useMessageDialog();
@@ -96,6 +102,7 @@ export function useKoyoReportManager(db: any, staffList: any[], user: MyNumberUs
           next[String(s.id)] = buildWageCertificate({
             endDate: lossDate, acquiredOn: koyoAcquiredOn(s), elderly, staff: s, group: groupOfStaff(s, base.groups),
             salaries: data.salaries, attendance: data.attendance, isWorkDay: data.isWorkDay,
+            shortTerm: isShortTermInsured(s), commuteLumps: parseKoyoInfo(s.koyo_info).commuteLumps,
           });
         } catch (e) {
           console.error("離職証明書の賃金を読めませんでした:", e);

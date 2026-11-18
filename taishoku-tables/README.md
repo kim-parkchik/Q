@@ -7,6 +7,12 @@ Q の退職金の計算（退職所得控除額・課税退職所得金額・源
 申告書がないときの住民税・他の退職手当等があるとき）は、国税庁 タックスアンサー No.2732「退職手当等に対する源泉徴収」
 （令和8年4月1日現在法令等）と、地方税法 第20条の4の2・第50条の6・第328条〜第328条の6 によります
 （タックスアンサーの例・手引の見本の額と同じになることを `src/utils/retirementIncome.test.ts` で確かめています）。
+同じ年に区分の違う退職手当等があるときは国税庁 タックスアンサー No.2741 と所得税法施行令 第71条の2（収入金額がその区分の控除額に満たないときの調整・
+前年以前の退職手当等と重なるときの短期・特定役員の控除額）、前年以前の退職手当等と勤続期間が重なるときは所得税法施行令 第70条、
+死亡退職の「退職手当金等受給者別支払調書」と同合計表は国税庁の様式と記載要領・相続税法 第59条・相続税法施行規則 第30条（翌月15日・100万円以下）、
+非居住者に払う退職手当等は所得税法 第212条・第213条・地方税法 第328条と「非居住者等に支払われる給与、報酬、年金及び賞金の支払調書」の記載要領、
+「退職所得の受給に関する申告書」の下書きは所得税法 第203条・所得税法施行規則 第77条と国税庁の様式（令和8年1月1日以後）の書き方、
+e-Tax で出す CSV は e-Tax の「レコードの内容及び記録要領」（316・325・339）と「法定調書の作成・提出について」の留意事項によります。
 
 ## 出典
 
@@ -18,9 +24,34 @@ Q の退職金の計算（退職所得控除額・課税退職所得金額・源
 | chihouzei-328-3.xml | 地方税法 第328条の3（市町村民税の分離課税に係る所得割の税率）（740バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=325AC0000000226;article=328_3 | `3985d8771601778478d00d16b72e9a9a1cf7d60ad6d15a51ffec278ff7647471` |
 | source/zeigakuhyo2026-18.pdf | 国税庁「退職所得の源泉徴収税額の速算表（令和8年分）」（「令和8年分 源泉徴収税額表」の18ページ）（626,384バイト） | https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2026/data/18.pdf | `897dcc15c50c63cd5d5a2477b05097b8af946e137a0f4430585a210b38d67651` |
 | source/zeigakuhyo2027-18.pdf | 国税庁「退職所得の源泉徴収税額の速算表（令和9年分）」（627,639バイト） | https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2027/data/18.pdf | `2d5228a70e85d38212b56d096e4e6104fc84fb9adeeb669114115df0f9b38427` |
+| shotokuzei-rei-70.xml | 所得税法施行令 第70条（退職所得控除額の計算の特例）（9,105バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=340CO0000000096;article=70 | `8192e537259cf6d7cdc246a8e6618f62dc43009bde337be09a346759ea250d75` |
+| source/ta2741.htm | 国税庁 タックスアンサー No.2741「同じ年に一般退職手当等のほか、短期退職手当等や特定役員退職手当等がある場合」（35,058バイト） | https://www.nta.go.jp/taxes/shiraberu/taxanswer/gensen/2741.htm | `460a2d07be6bd9ba27de6ac55df8cb5649de5732cff4ec07394f85992261d669` |
+| source/chousho46.pdf | 国税庁「退職手当金等受給者別支払調書」の様式（令和8年分。525,298バイト） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/chousho46.pdf | `98b6015e3f30a142288cd417845bde928a8f8bdc8e9141f09480f26d6a5879df` |
+| source/kisai_chousho46.pdf | 同 記載要領（99,831バイト） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/kisai_chousho46.pdf | `5eac66521cd3d5302e9decdc4f24763457d6de1e045216f7f832d5400a4fe2e4` |
+| source/goukei40.pdf | 国税庁「退職手当金等受給者別支払調書合計表」の様式（533,922バイト） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/goukei40.pdf | `44939526805c6250e3940d2baf9053842a8419963f48229347c4596874f8f78b` |
+| source/kisai_goukei40.pdf | 同 記載要領（80,587バイト） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/kisai_goukei40.pdf | `1ea940e11819f2f3a1370def5120980090e8d9f5e16150e1dc5c9ba1841dc465` |
+| source/etax-316.pdf | e-Tax 法定調書の CSV の記録要領「退職所得の源泉徴収票：316」（e-Tax ソフト（WEB版）。482,247バイト） | https://www.e-tax.nta.go.jp/e-taxsoftweb/hoteichosho/csv2/web_316.pdf | `7cc7f5aebf9b26daef4e89fa2594bdcbca7d3b255d18f948366f99f38c7fb853` |
+| source/etax-325.pdf | 同「退職手当金等受給者別支払調書：325」（e-Tax ソフト。479,041バイト） | https://www.e-tax.nta.go.jp/e-taxsoftweb/hoteichosho/csv2/soft_325.pdf | `89b317daaf823e10642c4241f12b459f2e43a219ba627de2ab8316d6151e1779` |
+| source/etax-soft-all.pdf | 同 e-Tax ソフト用の全体版（「非居住者等に支払われる給与、報酬、年金及び賞金の支払調書：339」と 325 を読む。2,622,658バイト） | https://www.e-tax.nta.go.jp/e-taxsoftweb/hoteichosho/csv2/soft_all.pdf | `ee658d0a6696a6b946771dc81d96a99772a71c55cef3d9c0be6eeb68afb44e43` |
+| shotokuzei-rei-71-2.xml | 所得税法施行令 第71条の2（一般退職手当等、短期退職手当等又は特定役員退職手当等のうち二以上の退職手当等がある場合の退職所得の金額の計算）（32,239バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=340CO0000000096;article=71_2 | `19eeaf09415baadccd9e82ea9c3b63c517555d78c85b17f2bce0de3c5f625940` |
+| shotokuzei-203.xml | 所得税法 第203条（退職所得の受給に関する申告書）（6,114バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=340AC0000000033;article=203 | `4a205b3e0c58601d445927f992658c25e2a2244b33162e441c7d1d88a4fb6c92` |
+| shotokuzei-kisoku-77.xml | 所得税法施行規則 第77条（退職所得の受給に関する申告書の記載事項等）（11,115バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=340M50000040011;article=77 | `6c0ae3103323358fd25ac896da608e7422a3b22f88ff8c94ea3fb33487f54e86` |
+| shotokuzei-212.xml | 所得税法 第212条（非居住者に払う国内源泉所得の源泉徴収義務）（5,146バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=340AC0000000033;article=212 | `ab8f2aca981a5342cbda29462c7426111c8539841e28ab97978a4869395a80ec` |
+| shotokuzei-213.xml | 所得税法 第213条（徴収税額）（6,295バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=340AC0000000033;article=213 | `2f8bcab3eb8cc53e0cd147f5a78d2a434483d68b3d25ead7419a83ad619ea581` |
+| chihouzei-328.xml | 地方税法 第328条（退職所得の課税の特例）（1,312バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=325AC0000000226;article=328 | `40a173346bf68c2107a29703178be7763c3aea9baf4a4fe6a0cf1a85f7581761` |
+| souzokuzei-59.xml | 相続税法 第59条（調書の提出）（10,499バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=325AC0000000073;article=59 | `53b8354417b0c8d09f1908039896414611448c70229446430a363522577e3d53` |
+| souzokuzei-kisoku-30.xml | 相続税法施行規則 第30条（調書の記載事項等）（39,660バイト） | https://laws.e-gov.go.jp/api/1/articles;lawId=325M50000040017;article=30 | `9136033beb8e324a8d2c19625f7618933ce1e050caf08387847170dee023f3c8` |
+| source/shinkokusho-2026.pdf | 国税庁「退職所得の受給に関する申告書（退職所得申告書）」の様式（令和8年1月1日以後。643,946バイト） | https://www.nta.go.jp/law/tsutatsu/kobetsu/hojin/010705/pdf/0025006-122_07.pdf | `e3fc4518f1048e613575b7757b9130a9e8c401f7dd388940dc51f68feb50c62e` |
+| source/chousho27.pdf | 国税庁「非居住者等に支払われる給与、報酬、年金及び賞金の支払調書」の様式（令和8年分。538,514バイト。見た目を合わせるのに見る。スクリプトでは読まない） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/chousho27.pdf | `912a19ca5cfb270d3f2d9363ddebefe965aa8a041246a26dd631c8bb22d11747` |
+| source/kisai_chousho27.pdf | 同 記載要領（134,858バイト） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/kisai_chousho27.pdf | `1a341398aba05bd5ae93f2899fe5c993c1f7d7c4accbd4314c5f09b2a1ab99cf` |
+| source/goukei21.pdf | 同 合計表の様式（640,834バイト。見た目を合わせるのに見る。スクリプトでは読まない） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/goukei21.pdf | `7e68243dd4227ac43a15df4d7e6f6757325fb1a8c61c6cb79850c322b4d7733e` |
+| source/kisai_goukei21.pdf | 同 合計表の記載要領（117,555バイト） | https://www.nta.go.jp/taxes/tetsuzuki/shinsei/annai/hotei/pdf/r08/kisai_goukei21.pdf | `3bb05370bcc09e1155c573eab2aff52071f8b68dc1fa0a018cbc327c2c63ca1c` |
 | source/tebiki2026-03.pdf | 国税庁「令和8年分 給与所得の源泉徴収票等の法定調書の作成と提出の手引」第3章 退職所得の源泉徴収票・特別徴収票（447,172バイト） | https://www.nta.go.jp/publication/pamph/hotei/tebiki2026/PDF/03.pdf | `b53451729d3e1c3bf333467f39d1061f12b596bfade549f4e66cb4ab16660a87` |
 
-2026年11月17日に取得しました（ユーザーの許しを得て取得）。
+2026年11月17日に取得しました（所得税法施行令 第70条・No.2741・支払調書と合計表・e-Tax の記録要領と、施行令 第71条の2 から下の表の終わりまでは2026年11月18日。
+どれもユーザーの許しを得て取得）。e-Tax の CSV の共通の決まり（1行が1枚・カンマの扱い・外字・最後の項目のスペース・タイトル行を書かない）は、
+e-Tax のページ「法定調書の作成・提出について」（https://www.e-tax.nta.go.jp/e-taxsoftweb/hoteichosho.htm）と「法定調書CSVファイル作成用 標準フォーム」
+（https://www.e-tax.nta.go.jp/e-taxsoftweb/hoteichosho/csv.htm）で読みました（ページはファイルとして取っていません）。
 
 法令の条文（XML）はリポジトリに入れています（法令は著作権の対象になりません。著作権法13条）。
 **国税庁の PDF はリポジトリには入れていません**（`source/` は .gitignore）。
@@ -40,7 +71,27 @@ python3 -I scripts/import_taishoku_tables.py taishoku-tables src/constants/taish
 ・所得税法施行令 第69条2項の「一年未満の端数を生じたときは、これを一年として」を確かめます。
 ・地方税法 第50条の4・第328条の3 から、住民税の税率（百分の四・百分の六）を読みます。
 ・速算表の PDF（令和8年分・令和9年分）から、行ごとの境目・税率・控除額と「×102.1％」を読みます。
-・手引 第3章から、「退職所得の受給に関する申告書」の提出がないときの「100 分の 20.42」を読みます。
+・手引 第3章から、「退職所得の受給に関する申告書」の提出がないときの「100 分の 20.42」と、源泉徴収票の「④ 番号」の区分（1〜7）と、
+摘要に経済的利益の価額を書く番号（「5」〜「7」）を読みます。
+・所得税法施行令 第70条から、前年以前の退職手当等と重なる期間を数える年数（4年・9年・19年）と、確定拠出年金の一時金を9年で数える日
+（令和8年1月1日）、前の勤続期間を短くするときの数（800万円・40万円・70万円・20）、1年未満の端数の切り捨てを読みます。
+・タックスアンサー No.2741 から、区分の違う退職手当等の控除額の係数（40万円・20万円・全重複期間の14万円・13万円）を読み、
+2つの具体例（120万円・80万円・1,650万円、90万円・85万円・225万円・3,155万円）が読んだ係数で計算した額と合うことを確かめます。
+・支払調書と合計表の記載要領から、「元号」欄に書く数字（令和 5・平成 4）を読みます（2つの記載要領で同じことを確かめる）。
+・所得税法施行令 第71条の2 で、区分の違う退職手当等の係数（40万円・20万円・14万円・13万円）が No.2741 と同じことを確かめ、
+収入金額がその区分の控除額に満たないときの調整（2つの区分は1項・3項・5項、3つの区分は9項の「二分の一」）と、11項・12項（前年以前の退職手当等と
+重なるときの短期・特定役員の控除額）、10項（年数の1年未満の切り上げ）の言い回しを確かめます。
+・所得税法 第213条1項1号から、非居住者の国内源泉所得の税率（百分の二十）を読み、102.1％ をかけると手引の 20.42％ と同じことを確かめます。
+第212条から納付の期限（翌月十日。国外で払うときは翌月末日）を読みます。
+・地方税法 第328条で、住民税の分離課税が「所得税法第百九十九条の規定によりその所得税を徴収して納付すべきもの」（居住者に払う退職手当等）だけにかかり、
+1月1日の住所の市町村が課すことを確かめます。
+・相続税法 第59条から退職手当金等受給者別支払調書の提出期限（翌月十五日）を、相続税法施行規則 第30条3項から出さなくてよい額（百万円以下）を読みます。
+・所得税法 第203条・所得税法施行規則 第77条で申告書に書くことを確かめ、申告書の様式の裏の書き方の年数（4年内・9年内・19年内）・
+令和8年1月1日・前の勤続期間を短くする算式が施行令 第70条と同じことを確かめます。
+・非居住者等の支払調書と合計表の記載要領から、退職手当等の「区分」の書き方（「退職手当等」）と「元号」欄の数字（令和 5・平成 4・昭和 3）を読みます。
+・e-Tax の記録要領（316・325・339）から、項番の順の項目の名前・全角か半角か・文字数（「以内」がなければその文字数ちょうど）を読みます。
+表の枠がつながっているので、`scripts/pdf_to_chars.swift` の字の位置で列（項番・項目名・入力文字基準・記録要領）に分け、
+「19 ～ 22」のような項番は、その前の同じ数の項目のまとまりをくり返します。325 は個別の PDF と全体版で同じことを確かめます。
 
 スクリプトは、次のときにファイルを作らずに止まります。
 
@@ -49,6 +100,12 @@ python3 -I scripts/import_taishoku_tables.py taishoku-tables src/constants/taish
 - 速算表の見出し・行を読めない、行の境目がつながらない、税率・控除額が「税額の算式」の欄と違う、
   控除額が速算表の作り（前の行の控除額 ＋ 境目の金額 × 税率の差）と合わない、「1 円未満の端数があるときは、これを切り捨てます」がない
 - 20.42 が、速算表の 102.1％ を整数の税率（20％）にかけた率でない
+- 施行令70条の言い回し・数が見つからない、2項の数が退職所得控除額の数と合わない、No.2741 の具体例の額が合わない、
+  「④ 番号」の表が 1 から順に並んでいない、2つの記載要領の元号の数字が違う
+- 施行令71条の2 の係数が No.2741 と違う、調整の言い回しがそろっていない、所得税法213条の 20％ に 102.1％ をかけた率が手引の 20.42％ と違う、
+  申告書の様式の書き方の年数・算式が施行令70条と違う
+- e-Tax の CSV の項番が 1 から続いていない、項番と入力文字基準の数が合わない、項番1 に「「316」を記録してください。」などがない、
+  325 が個別の PDF と全体版で違う
 
 速算表は年分ごとにあります（令和8年分と令和9年分は同じ額で、令和9年分からは防衛特別所得税を含みます）。
 次の年分の速算表が出たら、取ってきて `source/` に置き、スクリプトの読む PDF に足して作り直します。

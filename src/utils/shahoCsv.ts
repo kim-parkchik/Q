@@ -41,7 +41,7 @@ const singleByteOf = (c: string): number => {
  * 同じ字の書き方が違うもの（JIS の書き方の字 → シフトJISのコードで読んだときの字。〜 と ～、− と －、— と ― など）
  * IME や貼り付けで、どちらの字にもなるので、同じコードにする
  */
-const SJIS_ALIASES: Record<string, string> = {
+export const SJIS_ALIASES: Record<string, string> = {
   "〜": "～", // 〜（波ダッシュ） → ～
   "‖": "∥", // ‖ → ∥
   "−": "－", // −（マイナス） → －

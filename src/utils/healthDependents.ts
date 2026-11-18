@@ -29,6 +29,8 @@ export interface DependentReported {
   gender: string;
   /** 3号被保険者として届けたか（配偶者） */
   sango?: boolean;
+  /** 届け出た、海外特例要件に非該当となった日（国内転入など） */
+  overseasUntil?: string;
 }
 
 /** 健康保険の被扶養者1人 */
@@ -78,6 +80,14 @@ export interface HealthDependent {
   overseasReason: string;
   overseasReasonNote: string;
   overseasFrom: string;
+  /**
+   * 海外特例要件に非該当となった日・理由（国内転入・その他）・国内転入日。被扶養者のまま日本に住むようになったときなど
+   * （異動の別「変更」の届けで出す。被扶養者でなくなるときは、非該当の届けに海外特例は書かない。仕様書 表4.10.1-1）
+   */
+  overseasUntil: string;
+  overseasEndReason: string;
+  overseasEndReasonNote: string;
+  returnedOn: string;
   /** 資格確認書の発行が要る（マイナ保険証を使わない人） */
   certificate: boolean;
   /** 事業主が、戸籍謄本・住民票で続柄を確かめた（マイナンバーと一緒なら、続柄の書類を省ける） */
@@ -100,6 +110,7 @@ export const emptyDependent = (spouse: boolean, id = String(Date.now())): Health
   from: "", reason: spouse ? "婚姻" : "出生", reasonNote: "",
   until: "", endReason: "", endReasonNote: "", deathDate: "",
   overseas: false, overseasReason: "", overseasReasonNote: "", overseasFrom: "",
+  overseasUntil: "", overseasEndReason: "", overseasEndReasonNote: "", returnedOn: "",
   certificate: false, relationChecked: false, sango: null, remarks: "",
 });
 
@@ -129,10 +140,14 @@ export const parseHealthDependents = (json: string | null | undefined): HealthDe
       from: date(d.from), reason: str(d.reason) || base.reason, reasonNote: str(d.reasonNote),
       until: date(d.until), endReason: str(d.endReason), endReasonNote: str(d.endReasonNote), deathDate: date(d.deathDate),
       overseas: d.overseas === true, overseasReason: str(d.overseasReason), overseasReasonNote: str(d.overseasReasonNote), overseasFrom: date(d.overseasFrom),
+      overseasUntil: date(d.overseasUntil), overseasEndReason: str(d.overseasEndReason), overseasEndReasonNote: str(d.overseasEndReasonNote), returnedOn: date(d.returnedOn),
       certificate: d.certificate === true, relationChecked: d.relationChecked === true,
       sango: d.sango === true ? true : d.sango === false ? false : null, remarks: str(d.remarks),
       ...(r && typeof r === "object" && ["該当", "非該当", "変更"].includes(r.kind)
-        ? { reported: { kind: r.kind, on: date(r.on), name: str(r.name), kana: str(r.kana), birthday: date(r.birthday), gender: str(r.gender), ...(typeof r.sango === "boolean" ? { sango: r.sango } : {}) } }
+        ? { reported: {
+          kind: r.kind, on: date(r.on), name: str(r.name), kana: str(r.kana), birthday: date(r.birthday), gender: str(r.gender),
+          ...(typeof r.sango === "boolean" ? { sango: r.sango } : {}), ...(date(r.overseasUntil) ? { overseasUntil: date(r.overseasUntil) } : {}),
+        } }
         : {}),
     };
   });
@@ -170,7 +185,11 @@ export const incomeLimitOf = (d: HealthDependent, on: string): number => {
   return 1_300_000;
 };
 
-/** 氏名・生年月日・性別が、届け出た内容と違うか（変更の届けを出す） */
+/** 海外特例要件に非該当となった日を入れていて、まだ届けていないか（変更の届けで出す） */
+export const overseasEnded = (d: HealthDependent): boolean =>
+  !!d.overseas && !!d.overseasUntil && !d.until && !!d.reported && d.reported.kind !== "非該当" && d.reported.overseasUntil !== d.overseasUntil;
+
+/** 氏名・生年月日・性別・海外特例要件の非該当が、届け出た内容と違うか（変更の届けを出す） */
 export const changedFromReported = (d: HealthDependent): string[] => {
   const r = d.reported;
   if (!r || r.kind === "非該当") return [];
@@ -178,6 +197,7 @@ export const changedFromReported = (d: HealthDependent): string[] => {
   if (r.name !== d.name || r.kana !== d.kana) items.push("氏名");
   if (r.birthday !== d.birthday) items.push("生年月日");
   if (r.gender !== d.gender) items.push("性別");
+  if (overseasEnded(d)) items.push("海外特例要件の非該当");
   return items;
 };
 
@@ -206,5 +226,9 @@ export const dependentProblems = (d: HealthDependent): string[] => {
   if (d.until && !d.endReason) p.push("被扶養者でなくなった理由を選んでください");
   if (d.endReason === "死亡" && !d.deathDate) p.push("死亡した日を入れてください");
   if (d.overseas && !d.overseasReason) p.push("海外特例要件に該当した理由を選んでください");
+  if (d.overseasUntil && !d.overseas) p.push("海外特例要件に非該当となった日は、海外特例要件に該当している人だけ入れます");
+  if (d.overseasUntil && !d.overseasEndReason) p.push("海外特例要件に非該当となった理由（国内転入・その他）を選んでください");
+  if (d.overseasEndReason === "国内転入" && !d.returnedOn) p.push("国内転入日を入れてください");
+  if (d.overseasEndReason === "その他" && !d.overseasEndReasonNote.trim()) p.push("海外特例要件に非該当となった理由（その他）を入れてください");
   return p;
 };

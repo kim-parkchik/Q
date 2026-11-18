@@ -3,6 +3,8 @@
  * 従業員と負傷又は発病の日を選ぶと、平均賃金算定内訳（様式第8号 別紙1。確定した給与から計算する平均賃金）と、
  * 休業補償給付支給請求書（様式第8号）・療養補償給付たる療養の給付請求書（様式第5号）の事業主が証明する欄、
  * 労働者死傷病報告に書く内容を出して印刷する。
+ * ・別紙1：「その他の休職」が業務外の傷病の療養などのときは、裏面②（休業した期間の日数・賃金）と表面①（その期間を除いた平均賃金）も出す
+ * ・別紙2：療養のため労働できなかった期間の勤怠から、全部休業日と部分算定日（一部休業日・有給休暇）を分け、部分算定日の賃金の額を出す
  */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 // @ts-ignore
@@ -11,16 +13,19 @@ import dayjs from "dayjs";
 import type { AverageWageResult } from "../../utils/averageWage";
 import { loadAverageWage } from "../../utils/averageWageStore";
 import {
-  besshi1Of, payMethodLabel, periodText, senText, shishobyoForm, youshiki5Form, youshiki8Form, type AccidentInput, type Besshi1,
+  besshi1NonWorkOf, besshi1Of, besshi2Of, payMethodLabel, periodText, senText, shishobyoForm, youshiki5Form, youshiki8Form,
+  type AccidentInput, type Besshi1, type Besshi1NonWork,
 } from "../../utils/rousaiForms";
+import { parseLeavePeriods } from "../../utils/leaveExemption";
 import { formatWareki } from "../../utils/wareki";
 import { PrintFormSheet } from "./PrintFormSheet";
 import * as S from "./reportStyles";
 
 const PRINT_ID = "rousai-print";
-type Doc = "besshi1" | "youshiki8" | "youshiki5" | "shishobyo";
+type Doc = "besshi1" | "besshi2" | "youshiki8" | "youshiki5" | "shishobyo";
 const DOC_LABELS: Record<Doc, string> = {
   besshi1: "平均賃金算定内訳（様式第8号 別紙1）",
+  besshi2: "一部休業などの内訳（様式第8号 別紙2）",
   youshiki8: "休業補償給付支給請求書（様式第8号）の事業主の証明",
   youshiki5: "療養補償給付たる療養の給付請求書（様式第5号）の事業主の証明",
   shishobyo: "労働者死傷病報告（休業4日以上・死亡）",
@@ -40,6 +45,13 @@ export default function RousaiManager({ db, staffList }: { db: Database; staffLi
   const [groups, setGroups] = useState<any[]>([]);
   const [wage, setWage] = useState<AverageWageResult | null>(null);
   const [bonuses, setBonuses] = useState<{ date: string; amount: number }[]>([]);
+  /** 別紙1 ②：「その他の休職」を業務外の傷病の療養などとして書く・休業した日に払った賃金（賃金計算期間の番号 → 円） */
+  const [nonWork, setNonWork] = useState(false);
+  const [nonWorkWages, setNonWorkWages] = useState<Record<number, number>>({});
+  /** 別紙2：療養のため労働できなかった期間の勤怠・休業日にも月給を払った・直した賃金の額（日 → 円） */
+  const [leaveRows, setLeaveRows] = useState<any[]>([]);
+  const [monthlyPaid, setMonthlyPaid] = useState(false);
+  const [partialAmounts, setPartialAmounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     (async () => {
@@ -89,6 +101,21 @@ export default function RousaiManager({ db, staffList }: { db: Database; staffLi
     name: branch && branch.id !== 1 ? `${company.name ?? ""} ${branch.name}` : company.name,
   };
   const besshi = wage ? besshi1Of(wage) : null;
+  const otherLeaves = staff ? parseLeavePeriods(staff.leave_periods).filter((l) => l.type === "other") : [];
+  const besshiNonWork = besshi && nonWork
+    ? besshi1NonWorkOf(besshi, otherLeaves.map((l) => ({ start: l.start, end: l.end })), "業務外の傷病の療養など", (i) => nonWorkWages[i] ?? null)
+    : null;
+  // 別紙2：療養のため労働できなかった期間の勤怠を読む
+  useEffect(() => {
+    setLeaveRows([]);
+    if (!staff || !/^\d{4}-\d{2}-\d{2}$/.test(v.leaveFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(v.leaveTo)) return;
+    let cancelled = false;
+    db.select<any[]>("SELECT work_date, work_type, work_hours FROM attendance WHERE staff_id = ? AND work_date BETWEEN ? AND ?", [String(staff.id), v.leaveFrom, v.leaveTo])
+      .then((rows) => { if (!cancelled) setLeaveRows(rows ?? []); })
+      .catch((e) => console.error("勤怠の読み込みエラー:", e));
+    return () => { cancelled = true; };
+  }, [db, staff, v.leaveFrom, v.leaveTo]);
+  const besshi2 = staff ? besshi2Of(v.leaveFrom, v.leaveTo, leaveRows, staff, monthlyPaid) : null;
   const input: AccidentInput | null = staff ? { ...v, staff, company: place } : null;
   const workers = staffList.filter((s) => (s.status || "active") !== "retired" && Number(s.branch_id ?? 1) === Number(staff?.branch_id ?? 1)).length;
   const form = useMemo(() => {
@@ -134,7 +161,29 @@ export default function RousaiManager({ db, staffList }: { db: Database; staffLi
           {text("time", "時刻（14時30分など）", 150)}
           <button onClick={() => window.print()} disabled={!staff} style={S.button("#2563eb", !staff)}>🖨 印刷・PDF保存</button>
         </div>
-        {doc !== "besshi1" && (
+        {doc === "besshi1" && otherLeaves.length > 0 && (
+          <div style={S.controls}>
+            <label style={{ fontSize: 13 }}>
+              <input type="checkbox" checked={nonWork} onChange={(e) => setNonWork(e.target.checked)} /> 「その他の休職」（{otherLeaves.map((l) => `${l.start}〜${l.end || ""}`).join("・")}）は業務外の傷病の療養などのため（別紙1の①②を書く）
+            </label>
+            {nonWork && besshiNonWork && besshiNonWork.rows.map((r, i) => r.days > 0 && (
+              <label key={i} style={S.field}>
+                <span style={S.label}>{periodText(r.from, r.to)}の休業した日の賃金（給与を払わない休職なら0）</span>
+                <input type="number" min={0} value={nonWorkWages[i] ?? 0} onChange={(e) => setNonWorkWages({ ...nonWorkWages, [i]: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} style={{ ...S.input, width: 140 }} />
+              </label>
+            ))}
+          </div>
+        )}
+        {doc === "besshi2" && (
+          <div style={S.controls}>
+            {text("leaveFrom", "療養のため労働できなかった期間（から）", 200, "date")}
+            {text("leaveTo", "（まで）", 170, "date")}
+            {staff?.wage_type === "monthly" && (
+              <label style={{ fontSize: 13 }}><input type="checkbox" checked={monthlyPaid} onChange={(e) => setMonthlyPaid(e.target.checked)} /> 休業した日にも月給を払った（月額 ÷ 30 を部分算定日の賃金にする）</label>
+            )}
+          </div>
+        )}
+        {doc !== "besshi1" && doc !== "besshi2" && (
           <>
             <div style={S.controls}>
               {text("witness", "災害発生の事実を確認した者の職名・氏名", 300)}
@@ -167,16 +216,20 @@ export default function RousaiManager({ db, staffList }: { db: Database; staffLi
       </div>
       <div id={PRINT_ID} style={S.card}>
         {!staff ? <div style={S.small}>従業員を選んでください。</div>
-          : doc === "besshi1" ? (besshi ? <Besshi1Sheet b={besshi} staff={staff} eventDate={v.date} laborNum={place.labor_ins_num} closingDay={closingDay} bonuses={bonuses} />
+          : doc === "besshi1" ? (besshi ? <Besshi1Sheet b={besshi} staff={staff} eventDate={v.date} laborNum={place.labor_ins_num} closingDay={closingDay} bonuses={bonuses} nonWork={besshiNonWork} />
             : <div style={S.small}>負傷又は発病年月日を入れてください。</div>)
+          : doc === "besshi2" ? (besshi2 && besshi2.days.length > 0
+            ? <Besshi2Sheet staff={staff} eventDate={v.date} laborNum={place.labor_ins_num} from={v.leaveFrom} to={v.leaveTo} b2={besshi2} amounts={partialAmounts} setAmounts={setPartialAmounts} />
+            : <div style={S.small}>療養のため労働できなかった期間を入れてください。</div>)
           : form ? <PrintFormSheet form={form} office={[]} /> : null}
       </div>
     </div>
   );
 }
 
-function Besshi1Sheet({ b, staff, eventDate, laborNum, closingDay, bonuses }: {
+function Besshi1Sheet({ b, staff, eventDate, laborNum, closingDay, bonuses, nonWork }: {
   b: Besshi1; staff: any; eventDate: string; laborNum: string; closingDay: number | undefined; bonuses: { date: string; amount: number }[];
+  nonWork: Besshi1NonWork | null;
 }) {
   const cell: CSSProperties = { border: "1px solid #333", padding: "3px 5px", fontSize: "9pt", textAlign: "right", whiteSpace: "nowrap" };
   const head: CSSProperties = { ...cell, textAlign: "center", backgroundColor: "#f1f5f9", fontWeight: "bold", whiteSpace: "normal" };
@@ -218,8 +271,23 @@ function Besshi1Sheet({ b, staff, eventDate, laborNum, closingDay, bonuses }: {
             </td></tr>
           )}
           <tr><td style={lab}>使う平均賃金</td><td style={{ ...cell, fontWeight: "bold" }}>{senText(b.amountSen)}</td></tr>
+          {nonWork && (
+            <tr><td style={lab}>① 業務外の傷病の療養等のため休業した期間の日数・賃金を除いた平均賃金</td><td style={{ ...cell, whiteSpace: "normal" }}>
+              （賃金の総額(ホ) {y(b.ho)} − (リ) {y(nonWork.ri)}）÷（総日数(イ) {b.i}日 − (チ) {nonWork.chi}日）＝ {senText(nonWork.sen)}
+            </td></tr>
+          )}
         </tbody>
       </table>
+      {nonWork && (<>
+        <div style={{ fontSize: "9pt", margin: "10px 0 2px" }}>様式第８号（別紙１）（裏面）② 業務外の傷病の療養等のため休業した期間及びその期間中の賃金の内訳（休業の事由：{nonWork.reason}）</div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr><th style={{ ...head, width: "26%" }}>賃金計算期間</th>{nonWork.rows.map((r, i) => <th key={i} style={head}>{periodText(r.from, r.to)}</th>)}<th style={head}>計</th></tr></thead>
+          <tbody>
+            <tr><td style={lab}>休業した期間の日数</td>{nonWork.rows.map((r, i) => <td key={i} style={cell}>{r.days}日</td>)}<td style={cell}>(チ) {nonWork.chi}日</td></tr>
+            <tr><td style={lab}>休業した期間中の賃金</td>{nonWork.rows.map((r, i) => <td key={i} style={cell}>{y(r.wages)}</td>)}<td style={cell}>(リ) {y(nonWork.ri)}</td></tr>
+          </tbody>
+        </table>
+      </>)}
       <div style={{ fontSize: "9pt", margin: "10px 0 2px" }}>様式第８号（別紙１）（裏面）③ 特別給与の額（負傷又は発病の日以前1年間に支払われた、3か月を超える期間ごとに支払われる賃金）</div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <tbody>
@@ -230,7 +298,53 @@ function Besshi1Sheet({ b, staff, eventDate, laborNum, closingDay, bonuses }: {
         </tbody>
       </table>
       <p className="no-print" style={{ ...S.small, marginTop: 6 }}>
-        業務外の傷病の療養などで休業した期間がある場合の①・②の欄と、日日雇い入れられる人・漁業・林業の人の欄は、ここでは出しません（届書に書き足します）。
+        日日雇い入れられる人・漁業・林業の人の欄は、ここでは出しません（届書に書き足します）。業務外の傷病の療養などで休業した期間があるときは、上で印を付けると①・②を出します。
+      </p>
+    </div>
+  );
+}
+
+function Besshi2Sheet({ staff, eventDate, laborNum, from, to, b2, amounts, setAmounts }: {
+  staff: any; eventDate: string; laborNum: string; from: string; to: string;
+  b2: { days: { date: string; kind: "whole" | "partial" | "worked"; amount: number; note: string }[]; whole: number; partial: number; worked: number };
+  amounts: Record<string, number>; setAmounts: (v: Record<string, number>) => void;
+}) {
+  const cell: CSSProperties = { border: "1px solid #333", padding: "3px 5px", fontSize: "9pt" };
+  const lab: CSSProperties = { ...cell, backgroundColor: "#f8fafc", width: "30%" };
+  const partial = b2.days.filter((d) => d.kind === "partial");
+  return (
+    <div style={{ fontFamily: "'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif" }}>
+      <div style={{ fontSize: "9pt" }}>様式第８号（別紙２）</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 4 }}>
+        <tbody>
+          <tr><td style={lab}>労働保険番号</td><td style={cell}>{laborNum}</td><td style={lab}>氏名</td><td style={cell}>{staff.name}</td></tr>
+          <tr><td style={lab}>災害発生年月日</td><td style={cell} colSpan={3}>{formatWareki(eventDate)}</td></tr>
+          <tr><td style={lab}>① 療養のため労働できなかった期間</td><td style={cell} colSpan={3}>{formatWareki(from)}から{formatWareki(to)}まで {b2.days.length}日間</td></tr>
+          <tr><td style={lab}>② ①のうち賃金を受けなかった日の日数</td><td style={cell} colSpan={3}>{b2.whole + b2.partial}日</td></tr>
+          <tr><td style={lab}>③ ②の日数の内訳</td><td style={cell} colSpan={3}>全部休業日 {b2.whole}日・部分算定日 {b2.partial}日</td></tr>
+        </tbody>
+      </table>
+      <div style={{ fontSize: "9pt", margin: "8px 0 2px" }}>④ 部分算定日の年月日及び当該労働者に対し支払われる賃金の額</div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr><th style={cell}>年月日</th><th style={cell}>賃金の額</th><th style={cell}>備考</th></tr></thead>
+        <tbody>
+          {partial.length === 0 ? <tr><td style={cell} colSpan={3}>なし</td></tr> : partial.map((d) => (
+            <tr key={d.date}>
+              <td style={cell}>{formatWareki(d.date)}</td>
+              <td style={{ ...cell, textAlign: "right" }}>
+                <span className="print-only">{(amounts[d.date] ?? d.amount).toLocaleString()}円</span>
+                <input className="no-print" type="number" min={0} value={amounts[d.date] ?? d.amount}
+                  onChange={(e) => setAmounts({ ...amounts, [d.date]: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} style={{ ...S.input, width: 110, textAlign: "right" }} />
+              </td>
+              <td style={cell}>{d.note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {b2.worked > 0 && <p className="no-print" style={{ ...S.warnBox, marginTop: 6 }}>この期間に、所定労働時間を働いた日が {b2.worked}日あります（休業していないので②③に入れていません。療養のため労働できなかった期間を確かめてください）。</p>}
+      <p className="no-print" style={{ ...S.small, marginTop: 6 }}>
+        勤怠から、所定労働時間の一部だけ働いた日と有給休暇の日を部分算定日にしました。賃金の額の初めの値は、時給は働いた時間 × 時給、
+        日給は日給、月給は月額 ÷ 30 です。実際に払った額に直してください。
       </p>
     </div>
   );

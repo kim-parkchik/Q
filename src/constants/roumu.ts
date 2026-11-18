@@ -39,3 +39,5 @@ export const ELDERLY_AGE_BANDS: [number | null, number | null][] = [[null, 44], 
 export const DISABILITY_WEEKLY_HOURS = { regularMin: 20, shortBelow: 30, specifiedMin: 10 } as const;
 /** 令和8年6月1日現在の報告で、報告する事業主（常用雇用労働者 40.0人以上。法定雇用率 25/1000 の逆数） */
 export const DISABILITY_REPORT_MIN_WORKERS_FORM6 = 40.0;
+/** 様式第6号のＤ欄：障害者の雇用の促進等に関する法律別表に掲げる種類別の身体障害者数（第1号〜第5号。実人数で数える） */
+export const DISABILITY_PHYSICAL_TYPES: { no: number; label: string }[] = [{ no: 1, label: "視覚障害者" }, { no: 2, label: "聴覚又は平衡機能障害者" }, { no: 3, label: "音声・言語・そしゃく機能障害者" }, { no: 4, label: "肢体不自由者" }, { no: 5, label: "内部障害者" }];

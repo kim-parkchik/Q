@@ -57,6 +57,18 @@ export interface KoyoTransfer {
   reported?: string;
 }
 
+/**
+ * 退職・死亡のほかに雇用保険の資格を失うできごと（雇用保険事務手続きの手引き 第2編「資格喪失届は以下のような場合でも提出してください」と
+ * 資格喪失届の記入例の「喪失原因」の区分。名前 → 喪失原因の区分の名前（KOYO_CODES["喪失原因"] の名前））
+ */
+export const KOYO_LOSS_EVENTS: Record<string, string> = {
+  "週の所定労働時間が20時間未満": "3以外の離職",
+  "取締役への就任": "3以外の離職",
+  "移籍出向": "3以外の離職",
+  "在籍出向（出向先で被保険者となる場合）": "離職以外の理由",
+  "出向元への復帰": "離職以外の理由",
+};
+
 export interface KoyoInfo {
   /** 資格取得年月日（入社日と違うとき。週の所定労働時間が20時間以上になった日など） */
   acquiredOn: string;
@@ -85,6 +97,12 @@ export interface KoyoInfo {
   /** 個人番号（マイナンバー）をハローワークに届けている（Q を使う前に届けた・資格取得届に書いた・個人番号登録届を出した） */
   numberReported: boolean;
   loss: KoyoLoss;
+  /** 退職・死亡のほかに資格を失うできごと（KOYO_LOSS_EVENTS の名前）と、離職等年月日（事業所に籍があった最後の日・被保険者でなくなった日の前日） */
+  lossEvent: { kind: string; date: string } | null;
+  /** 短期雇用特例被保険者（季節的に雇用される人。null なら、雇用形態が「季節的雇用」のとき。離職証明書の⑧は暦月で書く） */
+  shortTerm: boolean | null;
+  /** 通勤手当を何か月分かまとめて払った給与（支給した年月 YYYY-MM と月数）。離職証明書の賃金の欄で、月数で割ってそれぞれの月に入れる */
+  commuteLumps: { pay: string; months: number }[];
   transfers: KoyoTransfer[];
   /** ファイルを保存した日（資格取得届・資格喪失届・個人番号登録届） */
   reported: { shutoku?: string; soshitsu?: string; bango?: string };
@@ -99,7 +117,7 @@ export const emptyKoyoInfo = (): KoyoInfo => ({
   acquiredOn: "", acquireKind: "", cause: "", employmentForm: "", occupation: "", route: "", weeklyMinutes: null, wageMonthly: null,
   contract: { has: false, start: "", end: "", renewal: "" }, remarks: "",
   registeredName: "", registeredKana: "", nameChangedOn: "", numberReported: false,
-  loss: emptyKoyoLoss(), transfers: [], reported: {},
+  loss: emptyKoyoLoss(), lossEvent: null, shortTerm: null, commuteLumps: [], transfers: [], reported: {},
 });
 
 const str = (v: unknown): string => (typeof v === "string" ? v : v === null || v === undefined ? "" : String(v));
@@ -147,6 +165,13 @@ export const parseKoyoInfo = (json: unknown): KoyoInfo => {
       signature: str(l.signature),
       ...(l.rowNotes && typeof l.rowNotes === "object" ? { rowNotes: Object.fromEntries(Object.entries(l.rowNotes).map(([k, x]) => [k, str(x)])) } : {}),
     },
+    lossEvent: v.lossEvent && typeof v.lossEvent === "object" && KOYO_LOSS_EVENTS[str(v.lossEvent.kind)] && date(v.lossEvent.date)
+      ? { kind: str(v.lossEvent.kind), date: date(v.lossEvent.date) } : null,
+    shortTerm: v.shortTerm === true ? true : v.shortTerm === false ? false : null,
+    commuteLumps: Array.isArray(v.commuteLumps)
+      ? v.commuteLumps.filter((c: any) => c && /^\d{4}-\d{2}$/.test(str(c.pay)) && Number(c.months) >= 2)
+        .map((c: any) => ({ pay: str(c.pay), months: Math.min(12, Math.floor(Number(c.months))) }))
+      : [],
     transfers: Array.isArray(v.transfers)
       ? v.transfers.filter((t: any) => t && date(t.on)).map((t: any) => ({
         on: date(t.on), from: Number(t.from) || 0, to: Number(t.to) || 0, ...(date(t.reported) ? { reported: date(t.reported) } : {}),
@@ -251,6 +276,10 @@ export const certificateRequired = (staff: any, lossDate: string): boolean => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(birthday) || !/^\d{4}-\d{2}-\d{2}$/.test(lossDate)) return false;
   return lossDate >= birthdayAt(birthday, 59).subtract(1, "day").format("YYYY-MM-DD");
 };
+
+/** 短期雇用特例被保険者か（入れていなければ、雇用形態が「季節的雇用」の人） */
+export const isShortTermInsured = (staff: any, info = parseKoyoInfo(staff?.koyo_info)): boolean =>
+  info.shortTerm ?? employmentFormOf(staff, info) === KOYO_CODES["雇用形態"]["季節的雇用"];
 
 /** 離職票を交付する（資格喪失届（離職票交付あり）を出す）か */
 export const wantsCertificate = (staff: any, info: KoyoInfo, lossDate: string): boolean =>

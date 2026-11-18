@@ -129,7 +129,8 @@ export const maikinResult = (staff: any[], period: { from: string; to: string },
     const l = parseLedger(sal.ledger);
     if (l) {
       add(r.days, k, l.workDays);
-      const over = l.overtimeHours + l.holidayHours;
+      // 所定外労働時間：法定時間外・法定休日と、所定労働時間が8時間より短い人の法定内の残業の時間
+      const over = l.overtimeHours + (l.statutoryOvertimeHours ?? 0) + l.holidayHours;
       add(hours.overtime, k, over);
       add(hours.scheduled, k, Math.max(0, l.workHours - over));
       const overtimePay = l.earnings.filter((x) => OVERTIME_LINE.test(x.name)).reduce((sum, x) => sum + Math.max(0, x.amount), 0);
@@ -157,6 +158,6 @@ export const maikinResult = (staff: any[], period: { from: string; to: string },
     r.specialPay[key] = thousand(yen.special[key]);
   }
   r.notes.push(`パートタイム労働者は、1日の所定労働時間が ${standard}時間（月給の人に多い時間）より短いか、出勤する曜日が週5日より少ない人として数えました。`);
-  r.notes.push("所定外労働時間は、法定時間外と法定休日の時間です。所定労働時間が8時間より短い人の法定内の残業の時間は入っていません（あれば足します）。");
+  r.notes.push("所定外労働時間は、法定時間外・法定休日の時間と、所定労働時間が8時間より短い人の法定内の残業の時間です（法定内の残業の時間は、この機能を入れたあとに確定した給与から数えます）。");
   return r;
 };

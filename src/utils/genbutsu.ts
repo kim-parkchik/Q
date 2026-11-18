@@ -21,10 +21,18 @@
  *   食事（毎日3食）は1日当たりの額 × 日数。本人が払う額（1か月）も、同じ日数で日割りする
  * ■ 食事を出勤した日ごとに出すとき（社員食堂の昼食など）は、給与の計算期間に出勤した日（働いた時間がある日）の数で数える
  *   （1日当たりの額は、その月分の表の額。本人が払う額も1日の額）
- * ■ 所得税：食事・住宅は、かかる額を入れてもらう（国税庁の決まりは社会保険と違い、食事は材料費などの実際の費用、
- *   社宅は固定資産税の課税標準額などから決めるため）。その他は、価額（から本人が払う額を引いた額）にかかる（かからないものは印を付ける）
- * ■ 雇用保険：食事・住宅は入れない（労働保険では、食事・住居の利益は福利厚生として賃金にしないことが多く、賃金にするときも額の決まりが
- *   社会保険と違う）。その他（自社製品など）は、労働の対償として払うものなので入れる
+ * ■ 所得税：食事・住宅は、かかる額を入れてもらうか（manual）、国税庁の決まりで計算する（auto。constants/genbutsuTax.ts。
+ *   タックスアンサーの「現在法令等」の日（令和8年4月1日）の月の分から。それより前の月は入れた額）。その他は、価額（から本人が払う額を引いた額）にかかる
+ *   ・食事（No.2594）：食事の価額は社会保険の表の額ではなく、業者に払う額・材料費などの実際の費用。本人が半分以上を払い、（食事の価額 − 本人が払う額）を
+ *     消費税を除いた額（10円未満切り捨て）が1か月7,500円以下なら課税しない。満たさなければ（食事の価額 − 本人が払う額）が課税される
+ *   ・社宅（No.2597・No.2600）：賃貸料相当額（1か月）＝ 建物の固定資産税の課税標準額 × 0.2％ ＋ 12円 ×（総床面積 ÷ 3.3㎡）＋ 敷地の課税標準額 × 0.22％
+ *     （1円未満切り捨て。タックスアンサーに端数の決まりがないので Q の決まり）。使用人は本人が50％以上を払えば課税しない（満たさなければ差額）。
+ *     役員は、小規模な住宅（法定耐用年数30年以下は132㎡以下、30年超は99㎡以下）なら同じ式、それ以外は（建物 × 12％（30年超は10％）＋ 敷地 × 6％）÷ 12、
+ *     借り上げは家主に払う家賃の50％と比べて多い方。賃貸料相当額との差額が課税される。240㎡を超えれば豪華社宅（時価）かどうかを知らせる
+ * ■ 雇用保険：その他（自社製品など）は、労働の対償として払うものなので入れる。食事・住宅は、初めは入れない（労働保険では、福利厚生とみなされる
+ *   ものや代金を徴収するものは原則として賃金にならない）。現金の給与の代わりに出すなど賃金にするとき（empWage）は、実際費用を入れてもらい、
+ *   無償なら実際費用、代金を徴収していれば、徴収金額が実際費用の3分の1を下回るときだけ「実際費用 × 3分の1 − 徴収金額」を賃金にする
+ *   （雇用保険事務手続きの手引き 第2編「賃金の範囲に算入される現物給与とは」。constants/genbutsuTax.ts の EMP_IN_KIND）
  * ■ 月変：現物の価額が変わったら（告示の改正・社宅に入った・出た・本人が払う額が変わったなど）固定的賃金の変動になる。
  *   変わった後の額が1か月分そろった月を変動月にするので、月の途中から・までの行がある月は比べない（settled が false）
  *
@@ -40,6 +48,7 @@
  */
 import dayjs from "dayjs";
 import { GENBUTSU_PERIODS, type GenbutsuPeriod } from "../constants/genbutsu";
+import { EMP_IN_KIND, GENBUTSU_TAX_SINCE, HOUSING_TAX, MEAL_TAX } from "../constants/genbutsuTax";
 import { toKenpoPrefName } from "../constants/prefectures";
 
 /** meal: 食事 / housing: 住宅（社宅・寮など） / other: その他（自社製品など。時価） */
@@ -90,11 +99,33 @@ export interface InKindEntry {
   taxable: number;
   /** その他：所得税がかからない（制服など、所得税法で非課税のもの） */
   taxFree: boolean;
+  /** 食事・住宅：所得税がかかる額の決め方（manual：taxable に入れた額、auto：国税庁の決まりで計算） */
+  taxMode: "manual" | "auto";
+  /** 食事（auto）：食事の価額（業者に払う額・材料費など。消費税を含む。食事を出勤した日ごとに出すときは1日、ほかは1か月の額） */
+  taxPrice: number;
+  /** 食事（auto）：食事の消費税の率（％。軽減税率か標準税率） */
+  taxRate: number;
+  /** 住宅（auto）：その年度の建物の固定資産税の課税標準額 */
+  bldgBase: number;
+  /** 住宅（auto）：その年度の敷地の固定資産税の課税標準額 */
+  landBase: number;
+  /** 住宅（auto）：建物の総床面積（平方メートル。区分所有なら共用部分をあん分して加える） */
+  floorArea: number;
+  /** 住宅（auto・役員）：法定耐用年数が30年を超える建物（鉄筋コンクリート造など） */
+  longLife: boolean;
+  /** 住宅（auto・役員）：他から借りて貸すとき、会社が家主に払う家賃（1か月。自社所有なら0） */
+  leasedRent: number;
+  /** 食事・住宅：雇用保険の賃金にする（現金の給与の代わりに出すなど、福利厚生でないとき） */
+  empWage: boolean;
+  /** 食事・住宅（empWage）：実際費用（食事を出勤した日ごとに出すときは1日、ほかは1か月の額） */
+  actualCost: number;
 }
 
 export const emptyInKindEntry = (kind: InKindKind = "housing"): InKindEntry => ({
   kind, name: "", start: "", end: "", mealPattern: "month", breakfast: false, lunch: true, dinner: false,
   tatami: 0, roomSqm: 0, area: 0, sharers: 1, value: 0, selfPay: 0, taxable: 0, taxFree: false,
+  taxMode: "manual", taxPrice: 0, taxRate: MEAL_TAX.rates.reduced, bldgBase: 0, landBase: 0, floorArea: 0, longLife: false, leasedRent: 0,
+  empWage: false, actualCost: 0,
 });
 
 const nonNeg = (v: unknown) => Math.max(0, Number(v) || 0);
@@ -118,6 +149,12 @@ export const parseInKind = (json: unknown): InKindEntry[] => {
       sharers: Math.max(1, Math.floor(Number(v?.sharers) || 1)),
       value: Math.floor(nonNeg(v?.value)), selfPay: Math.floor(nonNeg(v?.selfPay)), taxable: Math.floor(nonNeg(v?.taxable)),
       taxFree: !!v?.taxFree,
+      taxMode: v?.taxMode === "auto" ? "auto" : "manual",
+      taxPrice: Math.floor(nonNeg(v?.taxPrice)),
+      taxRate: Number(v?.taxRate) === MEAL_TAX.rates.standard ? MEAL_TAX.rates.standard : MEAL_TAX.rates.reduced,
+      bldgBase: Math.floor(nonNeg(v?.bldgBase)), landBase: Math.floor(nonNeg(v?.landBase)), floorArea: nonNeg(v?.floorArea),
+      longLife: !!v?.longLife, leasedRent: Math.floor(nonNeg(v?.leasedRent)),
+      empWage: !!v?.empWage, actualCost: Math.floor(nonNeg(v?.actualCost)),
     }));
   } catch {
     return [];
@@ -233,6 +270,69 @@ export const housingMonthValue = (e: Pick<InKindEntry, "tatami" | "roomSqm" | "a
   return Math.floor((price * (Math.round(e.tatami * 100) * 165 + Math.round(e.roomSqm * 100) * 100)) / 16500);
 };
 
+// ── 所得税（auto）と雇用保険（empWage）の額 ─────────────────────────────
+
+/** [分子, 分母] の額をいくつか足して、1円未満を切り捨てる（小数を使わないように、分母をそろえて整数で足す） */
+const sumFloor = (terms: [number, number][]): number => {
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const den = terms.reduce((l, [, d]) => (l / gcd(l, d)) * d, 1);
+  return Math.floor(terms.reduce((s, [n, d]) => s + n * (den / d), 0) / den);
+};
+const pct = ([n, d]: readonly [number, number]) => `${Math.round((n * 100 * 10000) / d) / 10000}％`;
+
+/** 食事の所得税がかかる額（No.2594。price・self はその月（出勤した日ごとなら、その月の日数分）の額） */
+export const mealTaxOf = (price: number, self: number, rate: number) => {
+  const [sn, sd] = MEAL_TAX.selfShare;
+  const half = self * sd >= price * sn;
+  const diff = Math.max(0, price - self);
+  // 消費税を除いた額（10円未満切り捨て）で、1か月の額以下かを見る
+  const excl = Math.floor((diff * 100) / ((100 + rate) * MEAL_TAX.roundTo)) * MEAL_TAX.roundTo;
+  const ok = half && excl <= MEAL_TAX.monthlyLimit;
+  return { taxable: ok ? 0 : diff, half, excl, ok };
+};
+
+/** 社宅の賃貸料相当額（1か月。使用人は No.2597、役員は No.2600） */
+export const rentEquivalentOf = (
+  e: Pick<InKindEntry, "bldgBase" | "landBase" | "floorArea" | "longLife" | "leasedRent">, executive: boolean,
+): { value: number; formula: string; notes: string[] } => {
+  const H = HOUSING_TAX;
+  const area100 = Math.round(e.floorArea * 100);
+  const [an, ad] = H.areaUnit;
+  // 12円 × 総床面積 ÷ 3.3㎡（面積は100倍した整数で持つ）
+  const small = sumFloor([[e.bldgBase * H.building[0], H.building[1]], [H.perArea * area100 * ad, 100 * an], [e.landBase * H.land[0], H.land[1]]]);
+  const smallFormula = `建物 ${yen(e.bldgBase)} × ${pct(H.building)} ＋ ${H.perArea}円 × ${num(e.floorArea)}㎡ ÷ ${an / ad}㎡ ＋ 敷地 ${yen(e.landBase)} × ${pct(H.land)}`;
+  if (!executive) return { value: small, formula: smallFormula, notes: [] };
+  const O = H.officer;
+  const notes: string[] = [];
+  if (e.floorArea > O.luxuryArea) notes.push(`床面積が${O.luxuryArea}㎡を超えるので、豪華社宅（通常支払うべき使用料（時価）が賃貸料相当額）かどうかを確かめてください（タックスアンサー No.2600）`);
+  const limit = e.longLife ? O.smallArea.long : O.smallArea.short;
+  if (e.floorArea <= limit) return { value: small, formula: `小規模な住宅（${limit}㎡以下）：${smallFormula}`, notes };
+  const b = e.longLife ? O.building.long : O.building.short;
+  const own = sumFloor([[e.bldgBase * b[0], b[1] * O.months], [e.landBase * O.land[0], O.land[1] * O.months]]);
+  const ownFormula = `（建物 ${yen(e.bldgBase)} × ${pct(b)} ＋ 敷地 ${yen(e.landBase)} × ${pct(O.land)}）÷ ${O.months}`;
+  if (e.leasedRent > 0) {
+    const half = Math.floor((e.leasedRent * O.leasedShare[0]) / O.leasedShare[1]);
+    return half > own
+      ? { value: half, formula: `家主に払う家賃 ${yen(e.leasedRent)} × ${pct(O.leasedShare)}（${ownFormula} ＝ ${yen(own)} より多い）`, notes }
+      : { value: own, formula: `${ownFormula}（家主に払う家賃 ${yen(e.leasedRent)} × ${pct(O.leasedShare)} ＝ ${yen(half)} 以上）`, notes };
+  }
+  return { value: own, formula: ownFormula, notes };
+};
+
+/** 社宅の所得税がかかる額（使用人は本人が賃貸料相当額の50％以上を払えば0。役員は差額） */
+export const housingTaxOf = (equivalent: number, self: number, executive: boolean): number => {
+  if (executive) return Math.max(0, equivalent - self);
+  const [n, d] = HOUSING_TAX.employeeShare;
+  return self * d >= equivalent * n ? 0 : Math.max(0, equivalent - self);
+};
+
+/** 雇用保険の賃金に入れる現物の額（cost は実際費用、self は徴収金額。無償なら実際費用、徴収金額が実際費用の3分の1を下回れば、その差額） */
+export const empInKindOf = (cost: number, self: number): number => {
+  if (self <= 0) return cost;
+  const [n, d] = EMP_IN_KIND.share;
+  return self * d >= cost * n ? 0 : Math.max(0, Math.floor((cost * n) / d) - self);
+};
+
 /** その月（YYYY-MM）の、行の期間に入る日数 */
 const daysIn = (e: InKindEntry, ym: string, monthDays: number): number => {
   if (!isDate(e.start)) return 0;
@@ -249,7 +349,9 @@ const daysIn = (e: InKindEntry, ym: string, monthDays: number): number => {
  * @param prefecture  勤務地（拠点）の都道府県（東京・大阪・北海道など。わからなければ空）
  * @param workedDates 給与の計算期間に出勤した日（働いた時間がある日。食事を出勤した日ごとに出すときに数える）
  */
-export const inKindOfMonth = (entries: InKindEntry[], ym: string, prefecture: string | null | undefined, workedDates: string[] = []): InKindMonth => {
+export const inKindOfMonth = (
+  entries: InKindEntry[], ym: string, prefecture: string | null | undefined, workedDates: string[] = [], opts: { executive?: boolean } = {},
+): InKindMonth => {
   const result: InKindMonth = { month: ym, lines: [], amount: 0, taxable: 0, emp: 0, fixed: { monthly: 0, daily: 0 }, settled: true, problems: [] };
   const monthDays = dayjs(`${ym}-01`).daysInMonth();
   const period = genbutsuPeriodOf(ym);
@@ -267,6 +369,30 @@ export const inKindOfMonth = (entries: InKindEntry[], ym: string, prefecture: st
     // 月の途中から・までの月は、1か月の額を日数で日割りする（1円未満切り捨て）
     const prorate = (monthly: number) => (full ? monthly : Math.floor((monthly * days) / monthDays));
     const partNote = full ? "" : `（${days}日 ÷ ${monthDays}日で日割り）`;
+    // 所得税を国税庁の決まりで計算するのは、タックスアンサーの「現在法令等」の日の月の分から（それより前は入れた額）
+    const autoTax = e.kind !== "other" && e.taxMode === "auto" && ym >= GENBUTSU_TAX_SINCE.slice(0, 7);
+    const autoBefore = e.kind !== "other" && e.taxMode === "auto" && !autoTax;
+    if (autoTax && e.kind === "meal" && e.taxPrice <= 0) {
+      result.problems.push(`${name}：所得税の計算に使う食事の価額（業者に払う額・材料費など）を入れてください`);
+      continue;
+    }
+    if (autoTax && e.kind === "housing" && e.floorArea <= 0) {
+      result.problems.push(`${name}：所得税の賃貸料相当額に使う建物の総床面積（平方メートル）を入れてください`);
+      continue;
+    }
+    if (e.kind !== "other" && e.empWage && e.actualCost <= 0) {
+      result.problems.push(`${name}：雇用保険の賃金にする額の計算に使う実際費用を入れてください`);
+      continue;
+    }
+    const empNote = (emp: number, cost: number, self: number) => !e.empWage ? ""
+      : `。雇用保険：${self <= 0 ? `無償なので実際費用 ${yen(cost)}`
+        : emp === 0 ? `徴収金額 ${yen(self)} が実際費用 ${yen(cost)} の${EMP_IN_KIND.share[0]}/${EMP_IN_KIND.share[1]}以上なので0円`
+        : `実際費用 ${yen(cost)} × ${EMP_IN_KIND.share[0]}/${EMP_IN_KIND.share[1]} − 徴収金額 ${yen(self)} ＝ ${yen(emp)}`}`;
+    const mealTaxNote = (t: ReturnType<typeof mealTaxOf>, price: number, self: number) =>
+      `。所得税：食事の価額 ${yen(price)}${self > 0 ? ` − 本人 ${yen(self)}` : ""}${t.ok
+        ? `（本人が半分以上を払い、消費税を除いて ${yen(t.excl)} が月${yen(MEAL_TAX.monthlyLimit)}以下なので0円）`
+        : ` ＝ ${yen(t.taxable)}（${t.half ? `消費税を除いて ${yen(t.excl)} が月${yen(MEAL_TAX.monthlyLimit)}を超える` : "本人が半分以上を払っていない"}）`}`;
+    const beforeNote = autoBefore ? `。所得税：${GENBUTSU_TAX_SINCE.slice(0, 4)}年${Number(GENBUTSU_TAX_SINCE.slice(5, 7))}月分より前は入れた額` : "";
     if (e.kind === "other") {
       const value = prorate(e.value);
       const self = prorate(e.selfPay);
@@ -304,10 +430,13 @@ export const inKindOfMonth = (entries: InKindEntry[], ym: string, prefecture: st
         const self = e.selfPay * count;
         const amount = mealAmount(price, self);
         const meals = [e.breakfast && "朝食", e.lunch && "昼食", e.dinner && "夕食"].filter(Boolean).join("・");
+        const tax = autoTax ? mealTaxOf(e.taxPrice * count, self, e.taxRate) : null;
+        const emp = e.empWage ? empInKindOf(e.actualCost * count, self) : 0;
         result.lines.push({
-          name, kind: e.kind, amount, taxable: e.taxable * count, emp: 0,
+          name, kind: e.kind, amount, taxable: tax ? tax.taxable : e.taxable * count, emp,
           detail: `${meals} ${yen(unit)} × 出勤した日 ${count}日 ＝ ${yen(price)}（${source}）`
-            + (self > 0 ? (amount === 0 ? `。本人が払う額 ${yen(self)} が価額の3分の2以上なので0円` : ` − 本人が払う額 ${yen(self)}`) : ""),
+            + (self > 0 ? (amount === 0 ? `。本人が払う額 ${yen(self)} が価額の3分の2以上なので0円` : ` − 本人が払う額 ${yen(self)}`) : "")
+            + (tax ? mealTaxNote(tax, e.taxPrice * count, self) : beforeNote) + empNote(emp, e.actualCost * count, self),
         });
         // 1日の額（本人が払う1日の額を引いた額。3分の2の決まりも1日で見る）が固定的賃金
         if (full) result.fixed.daily += mealAmount(unit, e.selfPay);
@@ -316,10 +445,13 @@ export const inKindOfMonth = (entries: InKindEntry[], ym: string, prefecture: st
       const price = full ? values.meal.month : values.meal.day * days;
       const self = prorate(e.selfPay);
       const amount = mealAmount(price, self);
+      const tax = autoTax ? mealTaxOf(prorate(e.taxPrice), self, e.taxRate) : null;
+      const emp = e.empWage ? empInKindOf(prorate(e.actualCost), self) : 0;
       result.lines.push({
-        name, kind: e.kind, amount, taxable: prorate(e.taxable), emp: 0,
+        name, kind: e.kind, amount, taxable: tax ? tax.taxable : prorate(e.taxable), emp,
         detail: (full ? `1か月の食事の額 ${yen(price)}` : `1日の食事の額 ${yen(values.meal.day)} × ${days}日 ＝ ${yen(price)}`) + `（${source}）`
-          + (self > 0 ? (amount === 0 ? `。本人が払う額 ${yen(self)} が価額の3分の2以上なので0円` : ` − 本人が払う額 ${yen(self)}`) : ""),
+          + (self > 0 ? (amount === 0 ? `。本人が払う額 ${yen(self)} が価額の3分の2以上なので0円` : ` − 本人が払う額 ${yen(self)}`) : "")
+          + (tax ? mealTaxNote(tax, prorate(e.taxPrice), self) : beforeNote) + empNote(emp, prorate(e.actualCost), self),
       });
       if (full) result.fixed.monthly += mealAmount(values.meal.month, e.selfPay);
       continue;
@@ -337,13 +469,23 @@ export const inKindOfMonth = (entries: InKindEntry[], ym: string, prefecture: st
     const value = prorate(monthValue);
     const self = prorate(e.selfPay);
     const amount = Math.max(0, value - self);
+    const executive = !!opts.executive;
+    const rent = autoTax ? rentEquivalentOf(e, executive) : null;
+    const equivalent = rent ? prorate(rent.value) : 0;
+    const houseTax = rent ? housingTaxOf(equivalent, self, executive) : prorate(e.taxable);
+    const emp = e.empWage ? empInKindOf(prorate(e.actualCost), self) : 0;
+    const taxNote = rent
+      ? `。所得税：賃貸料相当額 ${yen(rent.value)}（${rent.formula}）${partNote}${self > 0 ? ` − 本人 ${yen(self)}` : ""}`
+        + (houseTax === 0 ? (executive ? "（差額なし）" : `（本人が${pct(HOUSING_TAX.employeeShare)}以上を払っているので0円）`) : ` → ${yen(houseTax)}`)
+        + rent.notes.map((n) => `。${n}`).join("")
+      : beforeNote;
     const size = sqm
       ? `総面積 ${num(e.area)}㎡${e.sharers > 1 ? ` ÷ ${e.sharers}人` : ""}`
       : [e.tatami > 0 ? `${num(e.tatami)}畳` : "", e.roomSqm > 0 ? `${num(e.roomSqm)}㎡ ÷ 1.65㎡` : ""].filter(Boolean).join(" ＋ ");
     result.lines.push({
-      name, kind: e.kind, amount, taxable: prorate(e.taxable), emp: 0,
+      name, kind: e.kind, amount, taxable: houseTax, emp,
       detail: `${sqm ? "1㎡" : "1畳"} ${yen(price)} × ${size} ＝ ${yen(monthValue)}（${source}）${partNote}`
-        + (self > 0 ? ` − 本人が払う額 ${yen(self)}` : ""),
+        + (self > 0 ? ` − 本人が払う額 ${yen(self)}` : "") + taxNote + empNote(emp, prorate(e.actualCost), self),
     });
     if (full) result.fixed.monthly += Math.max(0, monthValue - e.selfPay);
   }

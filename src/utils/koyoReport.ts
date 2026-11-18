@@ -15,7 +15,7 @@ import {
   KOYO_FIELDS, koyoDateValues, koyoKana, koyoKanji, koyoNameKanji, koyoNameProblem, koyoRomaji, koyoRowProblems, koyoText,
   splitKoyoNumber, splitPhone3,
 } from "./koyoCsv";
-import {
+import { KOYO_LOSS_EVENTS,
   acquireKindOf, causeOf, certificateRequired, employmentFormOf, estimatedKoyoWage, koyoAcquiredOn, parseKoyoInfo,
   payStyleOf, REASON_DETAILS, REASON_OPTIONS, wageThousand, weeklyMinutesOf, type KoyoInfo,
 } from "./koyoInfo";
@@ -262,8 +262,10 @@ export interface KoyoSoshitsuInput {
 }
 
 /** 喪失原因の初めの値：死亡は 1（離職以外の理由）、解雇・退職勧奨などの離職理由なら 3、ほかの退職は 2 */
-export const lossCauseOf = (staff: any, info: KoyoInfo): string => {
+export const lossCauseOf = (staff: any, info: KoyoInfo, lossDate = ""): string => {
   if (info.loss.cause) return info.loss.cause;
+  // 退職・死亡のほかのできごと（週20時間未満・取締役への就任・出向など）は、手引きの記入例の区分
+  if (info.lossEvent && (!lossDate || info.lossEvent.date === lossDate)) return KOYO_CODES["喪失原因"][KOYO_LOSS_EVENTS[info.lossEvent.kind]] ?? "";
   if (staff.death_date && (!staff.retirement_date || staff.death_date <= staff.retirement_date)) return KOYO_CODES["喪失原因"]["離職以外の理由"];
   const employerSide = ["1(1)", "1(2)", "4(1)", "4(3)①", "4(3)②"];
   if (employerSide.includes(info.loss.reason)) return KOYO_CODES["喪失原因"]["事業主の都合による離職"];
@@ -294,7 +296,12 @@ export const buildKoyoSoshitsu = (input: KoyoSoshitsuInput): KoyoRow => {
   const acquiredOn = koyoAcquiredOn(staff, info);
   v.setDate("資格取得年月日", acquiredOn);
   v.setDate("離職等年月日", lossDate);
-  const cause = lossCauseOf(staff, info);
+  const cause = lossCauseOf(staff, info, lossDate);
+  const event = info.lossEvent && info.lossEvent.date === lossDate ? info.lossEvent : null;
+  if (event) {
+    notes.push(`退職ではなく「${event.kind}」で雇用保険の資格を失います（離職等年月日は、被保険者でなくなった日の前日の ${lossDate}）。` +
+      "雇用保険の加入の印（従業員の画面）も、その後の給与で外してください");
+  }
   if (!cause) problems.push("喪失原因を選んでください（従業員の画面の雇用保険の「離職」）");
   v.set("喪失原因", cause);
   v.set("離職票交付希望", KOYO_RISHOKUHYO_WISH[form === "rishoku" ? "rishoku" : "soshitsu"]);
@@ -319,7 +326,7 @@ export const buildKoyoSoshitsu = (input: KoyoSoshitsuInput): KoyoRow => {
   v.setDate("生年月日", staff.birthday);
   v.set("被保険者の住所又は居所", [...koyoText(staff.address)].slice(0, 64).join(""));
   v.set("事業所名称", [...koyoText(place.name)].slice(0, 34).join(""));
-  const causeText = koyoText(info.loss.causeText || staff.retirement_reason || "");
+  const causeText = koyoText(info.loss.causeText || (event ? event.kind : staff.retirement_reason) || "");
   v.set("被保険者でなくなったことの原因", [...causeText].slice(0, 78).join(""));
   const minutes = weeklyMinutesOf(staff, info);
   v.set("１週間の所定労働時間（時間）", p2(Math.max(20, Math.min(99, Math.floor(minutes / 60)))));
@@ -398,13 +405,20 @@ const fillCertificate = (
   v.set("離職日の翌日（日）", p2(Number(next.slice(8, 10))));
   // 賃金の欄（行 01〜25。⑧⑨ と ⑩〜⑬ を、上から同じ行に並べる）
   const rows = Math.max(cert.insured.length, cert.wages.length);
-  if (rows > 25) problems.push(`離職証明書の賃金の欄が${rows}行あり、電子申請のファイルに書ける25行を超えます（ハローワークに相談してください）`);
+  if (rows > 25) {
+    problems.push(`離職証明書の賃金の欄が${rows}行あり、電子申請のファイルに書ける25行を超えます。26行目からは「続紙」になるので、` +
+      "離職証明書の内容を印刷して（続紙の分も出ます）紙で出すか、ハローワークに相談してください");
+  }
   const rowNotes = info.loss.rowNotes ?? {};
   for (let i = 1; i <= Math.min(25, rows); i++) {
     const ins = cert.insured[i - 1];
     const w = cert.wages[i - 1];
     const set = (base: string, value: string) => v.set(rowName(base, i), value);
-    if (ins) {
+    if (ins && ins.month) {
+      // 短期雇用特例被保険者：B 欄の月（1行目は「離職月」なので書かない）と、その暦月の基礎日数
+      if (i > 1) set("短期雇用特例被保険者（月）", p2(ins.month));
+      set("賃金支払基礎日数", String(ins.days));
+    } else if (ins) {
       set("被保険者期間算定対象期間開始（月）", p2(Number(ins.from.slice(5, 7))));
       set("被保険者期間算定対象期間開始（日）", p2(Number(ins.from.slice(8, 10))));
       if (i > 1) {
@@ -452,7 +466,8 @@ const fillCertificate = (
   notes.push(...cert.notes);
   problems.push(...cert.problems);
   // 賃金の欄の日付（⑧の初めの行の終わりは離職日）
-  if (cert.insured[0] && cert.insured[0].to !== input.lossDate) notes.push(`⑧の初めの行は ${md(cert.insured[0].from)}〜離職日 です`);
+  if (cert.insured[0] && !cert.insured[0].month && cert.insured[0].to !== input.lossDate) notes.push(`⑧の初めの行は ${md(cert.insured[0].from)}〜離職日 です`);
+  if (cert.insured[0]?.month) notes.push("短期雇用特例被保険者なので、⑧は B 欄（暦月）に書きます");
   void KOYO_RISHOKU_FIELDS;
 };
 

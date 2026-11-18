@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildNendoTable, calcNendoDeclaration, koyoPartsOf, koyoRateOf, nendoDueDates, premiumOf, rousaiRateOf, type NendoSalary } from "./nendoKoshin";
+import { buildNendoTable, calcNendoDeclaration, koyoPartsOf, koyoRateOf, nendoDueDates, premiumOf, rousaiRateOf, type NendoSalary, specialBaseOf, specialPremiumOf } from "./nendoKoshin";
 
 /** 令和８年度の書き方の記入例1（和菓子の卸売業・小売業）：労災 3/1000、雇用（一般）令和7年度 14.5/1000・令和8年度 13.5/1000 */
 const example1 = {
@@ -121,5 +121,19 @@ describe("確定保険料・一般拠出金算定基礎賃金集計表", () => {
     expect(t.workers).toBe(2);
     expect(t.insured).toBe(1);
     expect(koyoPartsOf(t)).toEqual([{ ratePerMille: 14.5, wages: 300000 * 12 + 400000 }]);
+  });
+});
+
+describe("労災保険の特別加入（第1種）", () => {
+  test("保険料算定基礎額：1年加入は表の額（日額 × 365日）、年度の途中は 1/12 の額 × 月数。表にない日額は null", () => {
+    expect(specialBaseOf(10_000, 12)).toBe(3_650_000);
+    expect(specialBaseOf(4_000, 6)).toBe(121_667 * 6);
+    expect(specialBaseOf(4_000, 0)).toBe(0);
+    expect(specialBaseOf(4_100, 12)).toBeNull();
+  });
+  test("特別加入保険料：全員の合計を千円未満切り捨てにして、労災保険率をかける（手引きの記入例 5,748千円 × 9.5/1000 ＝ 54,606円）", () => {
+    const r = specialPremiumOf([{ daily: 10_000, months: 12 }, { daily: 4_000, months: 6 }], 9.5);
+    expect([r.total, r.kilo, r.premium, r.unknown]).toEqual([4_380_002, 4_380, 41_610, false]);
+    expect(premiumOf(5_748, 9.5)).toBe(54_606);
   });
 });

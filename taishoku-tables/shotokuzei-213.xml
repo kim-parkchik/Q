@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataRoot>
+  <Result>
+    <Code>0</Code>
+    <Message/>
+  </Result>
+  <ApplData>
+    <LawId>340AC0000000033</LawId>
+    <LawNum/>
+    <Article>213</Article>
+    <Paragraph/>
+    <AppdxTable/>
+    <LawContents>
+      <Article Num="213">
+        <ArticleCaption>（徴収税額）</ArticleCaption>
+        <ArticleTitle>第二百十三条</ArticleTitle>
+        <Paragraph Num="1">
+          <ParagraphNum/>
+          <ParagraphSentence>
+            <Sentence Num="1">前条第一項の規定により徴収すべき所得税の額は、次の各号の区分に応じ当該各号に定める金額とする。</Sentence>
+          </ParagraphSentence>
+          <Item Num="1">
+            <ItemTitle>一</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1">前条第一項に規定する国内源泉所得（次号及び第三号に掲げるものを除く。）</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1">その金額（次に掲げる国内源泉所得については、それぞれ次に定める金額）に百分の二十の税率を乗じて計算した金額</Sentence>
+              </Column>
+            </ItemSentence>
+            <Subitem1 Num="1">
+              <Subitem1Title>イ</Subitem1Title>
+              <Subitem1Sentence>
+                <Column Num="1">
+                  <Sentence Num="1">第百六十一条第一項第十二号ロ（国内源泉所得）に掲げる年金</Sentence>
+                </Column>
+                <Column Num="2">
+                  <Sentence Num="1">その支払われる年金の額から五万円にその支払われる年金の額に係る月数を乗じて計算した金額を控除した残額</Sentence>
+                </Column>
+              </Subitem1Sentence>
+            </Subitem1>
+            <Subitem1 Num="2">
+              <Subitem1Title>ロ</Subitem1Title>
+              <Subitem1Sentence>
+                <Column Num="1">
+                  <Sentence Num="1">第百六十一条第一項第十三号に掲げる賞金</Sentence>
+                </Column>
+                <Column Num="2">
+                  <Sentence Num="1">その金額（金銭以外のもので支払われる場合には、その支払の時における価額として政令で定めるところにより計算した金額）から五十万円を控除した残額</Sentence>
+                </Column>
+              </Subitem1Sentence>
+            </Subitem1>
+            <Subitem1 Num="3">
+              <Subitem1Title>ハ</Subitem1Title>
+              <Subitem1Sentence>
+                <Column Num="1">
+                  <Sentence Num="1">第百六十一条第一項第十四号に掲げる年金</Sentence>
+                </Column>
+                <Column Num="2">
+                  <Sentence Num="1">同号に規定する契約に基づいて支払われる年金の額から当該契約に基づいて払い込まれた保険料又は掛金の額のうちその支払われる年金の額に対応するものとして政令で定めるところにより計算した金額を控除した残額</Sentence>
+                </Column>
+              </Subitem1Sentence>
+            </Subitem1>
+          </Item>
+          <Item Num="2">
+            <ItemTitle>二</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1">第百六十一条第一項第五号に掲げる国内源泉所得</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1">その金額に百分の十の税率を乗じて計算した金額</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+          <Item Num="3">
+            <ItemTitle>三</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1">第百六十一条第一項第八号及び第十五号に掲げる国内源泉所得</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1">その金額に百分の十五の税率を乗じて計算した金額</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+        </Paragraph>
+        <Paragraph Num="2">
+          <ParagraphNum>２</ParagraphNum>
+          <ParagraphSentence>
+            <Sentence Num="1">前条第三項の規定により徴収すべき所得税の額は、次の各号の区分に応じ当該各号に定める金額とする。</Sentence>
+          </ParagraphSentence>
+          <Item Num="1">
+            <ItemTitle>一</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1">前条第三項に規定する利子等、給付補塡金、利息、利益又は差益</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1">その金額に百分の十五の税率を乗じて計算した金額</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+          <Item Num="2">
+            <ItemTitle>二</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1">前条第三項に規定する配当等又は利益の分配</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1">その金額に百分の二十の税率を乗じて計算した金額</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+          <Item Num="3">
+            <ItemTitle>三</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1">前条第三項に規定する賞金</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1">その金額（金銭以外のもので支払われる場合には、その支払の時における価額として政令で定めるところにより計算した金額）から政令で定める金額を控除した残額に百分の十の税率を乗じて計算した金額</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+        </Paragraph>
+      </Article>
+    </LawContents>
+  </ApplData>
+</DataRoot>

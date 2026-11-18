@@ -2,12 +2,16 @@
  * 賃金の証明の欄（離職証明書の「離職の日以前の賃金支払状況等」⑧〜⑬。休業開始時賃金月額証明書・六十歳到達時等賃金証明書も同じ形）
  * 左に ⑧ 被保険者期間算定対象期間と ⑨ 基礎日数、右に ⑩ 賃金支払対象期間・⑪ 基礎日数・⑫ 賃金額（A・B・計）・⑬ 備考を、
  * 上から同じ行に並べる（1行目の終わりは「離職日」）。計算は utils/wageCertificate.ts
+ * ・短期雇用特例被保険者は、⑧を B 欄（暦月。1行目は「離職月」）で出す
+ * ・離職証明書の1枚に書けるのは25行まで。26行目からは「続紙」として、見出しを付けて続けて出す
  */
 import type { WageCertResult } from "../../utils/wageCertificate";
 import { md } from "../../utils/wageCertificate";
 import { small, table, td, th } from "./ShahoFilePanel";
 
 const yen = (n: number) => (n > 0 ? n.toLocaleString() : "");
+/** 離職証明書の1枚に書ける賃金の欄の行（電子申請のファイルも25行まで） */
+const CERT_ROWS_PER_SHEET = 25;
 
 export function WageCertificateTable({ cert, endLabel = "離職日", noteOverrides }: {
   cert: WageCertResult;
@@ -42,9 +46,13 @@ export function WageCertificateTable({ cert, endLabel = "離職日", noteOverrid
             const ins = cert.insured[i];
             const w = cert.wages[i];
             const note = noteOverrides?.[String(i + 1)] ?? [ins?.note, w?.note].filter(Boolean).join(" ");
-            return (
+            const period = !ins ? "" : ins.month ? (i === 0 ? `離職月（${ins.month}月）` : `B ${ins.month}月`) : `${md(ins.from)}〜${i === 0 ? endLabel : md(ins.to)}`;
+            return [
+              i === CERT_ROWS_PER_SHEET && (
+                <tr key={`c${i}`}><td style={{ ...td, fontWeight: "bold", backgroundColor: "#f1f5f9" }} colSpan={8}>続紙（{CERT_ROWS_PER_SHEET + 1}行目から）</td></tr>
+              ),
               <tr key={i}>
-                <td style={{ ...td, whiteSpace: "nowrap" }}>{ins ? `${md(ins.from)}〜${i === 0 ? endLabel : md(ins.to)}` : ""}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{period}</td>
                 <td style={{ ...td, textAlign: "right" }}>{ins ? `${ins.days}日` : ""}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>{w ? `${md(w.from)}〜${i === 0 ? endLabel : md(w.to)}` : ""}</td>
                 <td style={{ ...td, textAlign: "right" }}>{w ? `${w.days}日` : ""}</td>
@@ -52,8 +60,8 @@ export function WageCertificateTable({ cert, endLabel = "離職日", noteOverrid
                 <td style={{ ...td, textAlign: "right" }}>{w ? yen(w.b) : ""}</td>
                 <td style={{ ...td, textAlign: "right" }}>{w ? yen(w.total) : ""}</td>
                 <td style={td}>{note}</td>
-              </tr>
-            );
+              </tr>,
+            ];
           })}
         </tbody>
       </table>

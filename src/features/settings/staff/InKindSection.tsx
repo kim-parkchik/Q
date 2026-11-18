@@ -1,12 +1,14 @@
 /**
  * 「現物で払う報酬」：社宅・寮（住宅）、食事、自社製品など（その他）を、期間ごとに入れる（staff.in_kind。utils/genbutsu.ts）
  * 価額は、厚生労働大臣が定める現物給与の価額（勤務地の都道府県・月ごと）で Q が出し、社会保険の報酬（標準報酬月額の決め方と届書の「現物」）に入れる。
- * 給与明細の支給合計・差引支払額には入れない。所得税は、食事・住宅は入れた額、その他は時価にかかる。雇用保険は、その他だけ入れる
+ * 給与明細の支給合計・差引支払額には入れない。所得税は、食事・住宅は入れた額か国税庁の決まりで計算した額（令和8年4月分から）、その他は時価にかかる。
+ * 雇用保険は、その他と、賃金にすると決めた食事・住宅（実際費用と徴収金額から）を入れる
  */
 import { Home, Plus, Trash2 } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { branchPrefectureOf } from '../../../utils/branchPrefecture';
+import { GENBUTSU_TAX_SINCE, MEAL_TAX } from '../../../constants/genbutsuTax';
 import {
     IN_KIND_KIND_LABELS, MEAL_PATTERN_LABELS, emptyInKindEntry, inKindEntryWarnings, inKindOfMonth, validateInKindEntry,
     type InKindEntry, type InKindKind, type MealPattern,
@@ -35,7 +37,9 @@ const NumberField = ({ label, value, unit, step, onChange, title }: { label: str
 const NAME_PLACEHOLDERS: Record<InKindKind, string> = { housing: "社宅・寮など", meal: "寮の食事・昼食など", other: "自社製品など" };
 
 export default function InKindSection({ cm }: Props) {
-    const { targetInKind, setTargetInKind, branches, targetBranchId } = cm;
+    const { targetInKind, setTargetInKind, branches, targetBranchId, targetIsExecutive } = cm;
+    const executive = Number(targetIsExecutive) === 1;
+    const since = `${GENBUTSU_TAX_SINCE.slice(0, 4)}年${Number(GENBUTSU_TAX_SINCE.slice(5, 7))}月分`;
     const update = (index: number, patch: Partial<InKindEntry>) =>
         setTargetInKind(targetInKind.map((e, i) => (i === index ? { ...e, ...patch } : e)));
     const remove = (index: number) => setTargetInKind(targetInKind.filter((_, i) => i !== index));
@@ -48,10 +52,13 @@ export default function InKindSection({ cm }: Props) {
     const preview = (e: InKindEntry): string | null => {
         if (validateInKindEntry(e)) return null;
         const workday = e.kind === "meal" && e.mealPattern === "workday";
-        const m = inKindOfMonth([{ ...e, start: `${ym}-01`, end: "" }], ym, prefecture, workday ? [`${ym}-01`] : []);
+        const m = inKindOfMonth([{ ...e, start: `${ym}-01`, end: "" }], ym, prefecture, workday ? [`${ym}-01`] : [], { executive });
         if (m.problems.length > 0) return `いまの価額を出せません（${m.problems.join("。")}）`;
         const line = m.lines[0];
-        return line ? `${now.getFullYear()}年${now.getMonth() + 1}月分の${workday ? "1日" : "1か月"}の額：${line.amount.toLocaleString()}円（${line.detail}）` : null;
+        return line
+            ? `${now.getFullYear()}年${now.getMonth() + 1}月分の${workday ? "1日" : "1か月"}の額：${line.amount.toLocaleString()}円・所得税がかかる額 ${line.taxable.toLocaleString()}円`
+              + `${line.emp ? `・雇用保険の賃金 ${line.emp.toLocaleString()}円` : ""}（${line.detail}）`
+            : null;
     };
 
     return (
@@ -130,19 +137,73 @@ export default function InKindSection({ cm }: Props) {
                             <NumberField label={e.kind === "housing" ? "本人が払う家賃" : workday ? "本人が払う額（1日）" : "本人が払う額（1か月）"} value={e.selfPay} unit={per}
                                 onChange={v => update(i, { selfPay: Math.floor(v) })}
                                 title={e.kind === "meal" ? "食費として給与から引く額など。価額の3分の2以上を払っていれば0円になります" : "家賃などとして給与から引く額など。価額から引きます"} />
-                            {e.kind !== "other" ? (
-                                <NumberField label={workday ? "所得税がかかる額（1日）" : "所得税がかかる額（1か月）"} value={e.taxable} unit={per}
-                                    onChange={v => update(i, { taxable: Math.floor(v) })}
-                                    title={e.kind === "meal"
-                                        ? "食事は、本人が半分以上を払い、会社の負担が月7,500円以下（令和8年3月までは3,500円。消費税を除く）なら所得税はかかりません（0円）。かかるときは会社の負担額を入れます"
-                                        : "社宅は、本人が賃貸料相当額（固定資産税の課税標準額などから計算）の50%以上を払っていれば所得税はかかりません（0円）。かかるときは、その差額を入れます"} />
-                            ) : (
+                            {e.kind === "other" && (
                                 <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", marginTop: "18px", cursor: "pointer" }}>
                                     <input type="checkbox" checked={e.taxFree} onChange={ev => update(i, { taxFree: ev.target.checked })} />
                                     所得税がかからない
                                 </label>
                             )}
                         </div>
+
+                        {e.kind !== "other" && (
+                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "6px", paddingTop: "6px", borderTop: "1px dashed #ddd6fe" }}>
+                                <div style={{ flex: 2, minWidth: "200px" }}>
+                                    <label style={{ ...labelStyle, fontSize: "11px" }}>所得税がかかる額</label>
+                                    <select value={e.taxMode} onChange={ev => update(i, { taxMode: ev.target.value as "manual" | "auto" })} style={{ ...inputStyle, fontSize: "12px" }}>
+                                        <option value="manual">額を入れる</option>
+                                        <option value="auto">国税庁の決まりで計算する（{since}から）</option>
+                                    </select>
+                                </div>
+                                {e.taxMode === "manual" && (
+                                    <NumberField label={workday ? "所得税がかかる額（1日）" : "所得税がかかる額（1か月）"} value={e.taxable} unit={per}
+                                        onChange={v => update(i, { taxable: Math.floor(v) })}
+                                        title={e.kind === "meal"
+                                            ? "食事は、本人が半分以上を払い、会社の負担が月7,500円以下（消費税を除く）なら所得税はかかりません（0円）。かかるときは会社の負担の額を入れます"
+                                            : "社宅は、本人が賃貸料相当額（固定資産税の課税標準額などから計算）の50%以上を払っていれば所得税はかかりません（0円）。かかるときは、その差額を入れます"} />
+                                )}
+                                {e.taxMode === "auto" && e.kind === "meal" && (
+                                    <>
+                                        <NumberField label={workday ? "食事の価額（1日）" : "食事の価額（1か月）"} value={e.taxPrice} unit={per} onChange={v => update(i, { taxPrice: Math.floor(v) })}
+                                            title="弁当などを買って出すときは業者に払う額、社員食堂で作るときは材料費・調味料など作るのに直接かかった費用（消費税を含む）。社会保険の表の額とは違います（タックスアンサー No.2594）" />
+                                        <div style={{ flex: 1, minWidth: "130px" }}>
+                                            <label style={{ ...labelStyle, fontSize: "11px" }}>食事の消費税</label>
+                                            <select value={e.taxRate} onChange={ev => update(i, { taxRate: Number(ev.target.value) })} style={{ ...inputStyle, fontSize: "12px" }}>
+                                                <option value={MEAL_TAX.rates.reduced}>{MEAL_TAX.rates.reduced}%（軽減税率。弁当・材料など）</option>
+                                                <option value={MEAL_TAX.rates.standard}>{MEAL_TAX.rates.standard}%（標準税率。ケータリングなど）</option>
+                                            </select>
+                                        </div>
+                                    </>
+                                )}
+                                {e.taxMode === "auto" && e.kind === "housing" && (
+                                    <>
+                                        <NumberField label="建物の固定資産税の課税標準額（その年度）" value={e.bldgBase} unit="円" onChange={v => update(i, { bldgBase: Math.floor(v) })}
+                                            title="借りて貸している社宅は、貸主に確かめます。新築などで決まっていないときは、似た住宅の額をもとにします" />
+                                        <NumberField label="敷地の固定資産税の課税標準額（その年度）" value={e.landBase} unit="円" onChange={v => update(i, { landBase: Math.floor(v) })} />
+                                        <NumberField label="建物の総床面積" value={e.floorArea} unit="㎡" step="0.01" onChange={v => update(i, { floorArea: v })}
+                                            title="区分所有の建物は、共用部分の床面積をあん分して専用部分に加えます" />
+                                        {executive && (
+                                            <>
+                                                <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", marginTop: "18px", cursor: "pointer" }}>
+                                                    <input type="checkbox" checked={e.longLife} onChange={ev => update(i, { longLife: ev.target.checked })} />
+                                                    法定耐用年数が30年を超える建物（鉄筋コンクリート造など）
+                                                </label>
+                                                <NumberField label="借りて貸すとき：家主に払う家賃" value={e.leasedRent} unit="円/月" onChange={v => update(i, { leasedRent: Math.floor(v) })}
+                                                    title="会社が家主から借りて役員に貸している社宅は、家主に払う家賃の50%と比べて多い方が賃貸料相当額です（自社所有なら0）" />
+                                            </>
+                                        )}
+                                    </>
+                                )}
+                                <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", marginTop: "18px", cursor: "pointer" }}
+                                    title="現金の給与の代わりに出す・労働協約で出すと決めているなど、福利厚生でないときだけ。無償なら実際費用、代金を取っていれば実際費用の3分の1を下回る分を賃金にします（雇用保険事務手続きの手引き 第2編）">
+                                    <input type="checkbox" checked={e.empWage} onChange={ev => update(i, { empWage: ev.target.checked })} />
+                                    雇用保険の賃金にする（福利厚生でないとき）
+                                </label>
+                                {e.empWage && (
+                                    <NumberField label={workday ? "実際費用（1日）" : "実際費用（1か月）"} value={e.actualCost} unit={per} onChange={v => update(i, { actualCost: Math.floor(v) })}
+                                        title="会社が食事・住居のために実際にかけている費用" />
+                                )}
+                            </div>
+                        )}
 
                         {p && <div style={{ fontSize: "11px", color: "#5b21b6", marginTop: "6px" }}>{p}</div>}
                         {error && <div style={{ fontSize: "11px", color: "#b91c1c", marginTop: "4px" }}>⚠ {error}</div>}
@@ -157,7 +218,8 @@ export default function InKindSection({ cm }: Props) {
             <div style={{ fontSize: "11px", color: "#64748b", marginTop: "6px", lineHeight: 1.6 }}>
                 社宅・寮・食事の価額は、厚生労働大臣が定める現物給与の価額（勤務地の都道府県・月ごと）で計算し、社会保険の報酬（標準報酬月額の決め方と届書の「現物」）に入れます。
                 給与明細の支給合計・差引支払額には入れません。月の途中から・までの月は日割りします。家賃・広さなどが変わったときは、前の行にやめた日を入れ、新しい行を足してください。
-                雇用保険料には、その他（自社製品など）だけを入れます（食事・住宅は、労働保険では福利厚生として賃金にしないことが多いため）。
+                所得税は、「国税庁の決まりで計算する」にすると、食事は本人が半分以上を払い会社の負担が月7,500円以下（消費税を除く）なら0円、社宅は固定資産税の課税標準額などから賃貸料相当額を出して計算します（{since}から）。
+                雇用保険料には、その他（自社製品など）と、「雇用保険の賃金にする」にした食事・住宅を入れます（労働保険では、福利厚生とみなされるものや代金を取るものは原則として賃金にしないため）。
                 健康保険組合が規約で別の価額を決めているときは、組合に確かめてください。定期券などを現物で渡す人は、通勤手当の欄で印を付けます。
             </div>
         </div>

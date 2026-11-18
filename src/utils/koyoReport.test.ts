@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { KOYO_EXAMPLES, KOYO_FORM_VERSIONS, KOYO_RISHOKU_FIELDS } from "../constants/koyoTodoke";
+import { KOYO_EXAMPLES, KOYO_FORM_VERSIONS, KOYO_RISHOKU_FIELDS, KOYO_SOSHITSU_FIELDS } from "../constants/koyoTodoke";
 import { buildKoyoLines, koyoOfficeValues, sameCharsAsShaho, splitKoyoNumber } from "./koyoCsv";
 import { buildKoyoBango, buildKoyoShutoku, buildKoyoSoshitsu, buildKoyoTenkin, soshitsuDeadline, shutokuDeadline, type KoyoPlace } from "./koyoReport";
 import { certificateRequired, estimatedKoyoWage, weeklyMinutesOf } from "./koyoInfo";
@@ -126,6 +126,46 @@ describe("雇用保険の届書のファイル", () => {
     for (let i = at("選択１－１"); i <= at("選択２（継続雇用の事由）"); i++) expect(row.values[i]).toBe(ex[i]);
     expect(row.values[at("離職票交付希望")]).toBe("1");
     expect(row.values[at("具体的事情記載欄")]).toBe("定年による退職");
+  });
+
+  test("退職のほかのできごとで資格を失う：週20時間未満は「3以外の離職」（2）、出向元への復帰は「離職以外の理由」（1）。原因の字はできごとの名前", () => {
+    const base = {
+      id: "7", name: "週二　十郎", furigana: "シュウニ ジュウロウ", gender: "male", birthday: "1980-01-10", employment_ins_num: "1111-200001-7",
+      join_date: "2015-04-01", address: "東京都新宿区", scheduled_work_hours: 8,
+    };
+    const info = (kind: string) => JSON.stringify({ weeklyMinutes: 2400, lossEvent: { kind, date: "2026-10-31" }, loss: { replacement: "無" } });
+    const row = buildKoyoSoshitsu({
+      staff: { ...base, koyo_info: info("週の所定労働時間が20時間未満") }, place: place({ name: "新宿事務所", helloWork: "新宿" }), lossDate: "2026-10-31",
+      myNumber: true, cert: null, employer: { name: "", address: "", owner: "" }, today: "2026-11-02",
+    });
+    const at = (name: string) => KOYO_SOSHITSU_FIELDS.findIndex((f) => f.name === name);
+    expect(row.values[at("喪失原因")]).toBe("2");
+    expect(row.values[at("被保険者でなくなったことの原因")]).toBe("週の所定労働時間が20時間未満");
+    expect(row.notes.join("")).toContain("退職ではなく");
+    const back = buildKoyoSoshitsu({
+      staff: { ...base, koyo_info: info("出向元への復帰") }, place: place({ name: "新宿事務所", helloWork: "新宿" }), lossDate: "2026-10-31",
+      myNumber: true, cert: null, employer: { name: "", address: "", owner: "" }, today: "2026-11-02",
+    });
+    expect(back.values[at("喪失原因")]).toBe("1");
+  });
+
+  test("短期雇用特例被保険者の離職証明書：⑧は B 欄の月（1行目は離職月なので書かない）と基礎日数", () => {
+    const staff = {
+      id: "8", name: "季節　春子", furigana: "キセツ ハルコ", gender: "female", birthday: "1990-03-03", employment_ins_num: "0101-001234-1",
+      join_date: "2026-05-10", retirement_date: "2026-11-20", address: "東京都新宿区西新宿１－２３－４", zip_code: "185-0024", phone: "090-1234-5678",
+      scheduled_work_hours: 8, koyo_info: JSON.stringify({ weeklyMinutes: 2400, employmentForm: "5", loss: { cause: "2", certificate: true, replacement: "無", reason: "2", circumstances: "契約期間の満了" } }),
+    };
+    const cert: WageCertResult = {
+      nextDay: "2026-11-21", fullMonths: 2, fullWageMonths: 0, problems: [], notes: [], wages: [],
+      insured: [{ from: "2026-11-01", to: "2026-11-20", days: 15, hours: 120, complete: false, note: "", month: 11 }, { from: "2026-10-01", to: "2026-10-31", days: 22, hours: 176, complete: true, note: "", month: 10 }],
+    };
+    const row = buildKoyoSoshitsu({
+      staff, place: place({ name: "新宿事務所", address: "東京都新宿区西新宿８－８８－８", phone: "03-1234-5678", koyoNumber: "1111-012345-1" }),
+      lossDate: "2026-11-20", myNumber: false, cert, employer: { name: "事業　太郎", address: "", owner: "事業　次郎" }, today: "2026-11-21",
+    });
+    const at = (name: string) => KOYO_RISHOKU_FIELDS.findIndex((f) => f.name === name);
+    expect([row.values[at("被保険者期間算定対象期間開始（月）01")], row.values[at("賃金支払基礎日数01")]]).toEqual(["", "15"]);
+    expect([row.values[at("被保険者期間算定対象期間開始（月）02")], row.values[at("短期雇用特例被保険者（月）02")], row.values[at("賃金支払基礎日数02")]]).toEqual(["", "10", "22"]);
   });
 
   test("ファイルの行：項目行とデータ行（ＦＤ管理レコードの作成例 図4.1.1-2 と同じ形）", () => {

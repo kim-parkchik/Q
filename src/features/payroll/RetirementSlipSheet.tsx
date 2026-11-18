@@ -4,6 +4,7 @@
  * ・受給者交付用：無効区分・マイナンバー・法人番号の欄は書かない
  * ・税務署提出用・市区町村提出用：無効区分「0」、受給者のマイナンバー（事務取扱担当者が選んで鍵を開けたときだけ）、支払者の法人番号を書く
  * ・区分の段：上段（申告書あり・他の退職手当等なし）、中段（申告書あり・他の退職手当等あり）、下段（申告書なし）の1つに書く
+ * ・④番号は、確定拠出年金の一時金・譲渡制限付株式などのときだけ書く。⑤支払金額は、作る日に未払の額があれば内書きする
  */
 import type { CSSProperties } from "react";
 import { deductionLabel, type RetirementResult, type RetirementSection } from "../../utils/retirementIncome";
@@ -25,6 +26,10 @@ export interface RetirementSlipData {
   amount: number;
   serviceFrom: string;
   serviceTo: string;
+  /** 源泉徴収票を作る日に未払の額（内書きする） */
+  unpaid: number | null;
+  /** ④番号（空なら書かない） */
+  slipNumber: string;
   result: RetirementResult;
 }
 
@@ -99,8 +104,11 @@ export default function RetirementSlipSheet({ data, payer, copy, myNumber }: { d
             return (
               <tr key={s.key}>
                 <td style={{ ...td, fontSize: 8 }}>{s.label}</td>
-                <td style={ctr} />
-                <td style={num}>{on ? `${n(data.amount)}` : ""}</td>
+                <td style={ctr}>{on ? data.slipNumber : ""}</td>
+                <td style={num}>
+                  {on && !!data.unpaid && <div style={{ fontSize: 8, textAlign: "left" }}>内 {n(data.unpaid)}</div>}
+                  {on ? n(data.amount) : ""}
+                </td>
                 <td style={num}>{on ? n(r.incomeTax) : ""}</td>
                 <td style={num}>{on ? n(r.cityTax) : ""}</td>
                 <td style={num}>{on ? n(r.prefTax) : ""}</td>

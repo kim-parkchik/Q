@@ -26,7 +26,8 @@
  *     喪失）・障害認定（65歳から74歳で、広域連合の障害認定を受けて後期高齢者医療の被保険者になった日に喪失）。
  *     健康保険だけ失うときは、退職日・死亡日と70歳不該当は書かず、70歳以上被用者は続く（厚生年金・70歳以上被用者の届はない）。
  *     健康保険組合の人は組合にだけ、国民健康保険組合の人は年金事務所にも組合にも出さない（国保組合で手続きする）。
- *     社会保障協定・特定減額特例対象者の任意喪失は、まだ作れない
+ *     在職中に退職以外で資格を失う社会保障協定・特定減額特例対象者の任意喪失（従業員の画面で入れた資格喪失年月日。utils/shahoLoss.ts）は、
+ *     その日を資格喪失年月日にし、退職日・死亡日と70歳不該当は書かない。社会保障協定で年金だけが相手国の制度になるときは知らせる
  *     （電子申請の自動チェック csv201：75歳到達は資格喪失年月日が75歳の誕生日以後、退職日・死亡日は退職等・死亡のときだけ書く）
  * ■ 健康保険組合の人は、年金事務所（厚生年金）と健康保険組合（健康保険）の両方に出す（utils/unionReport.ts）
  * 項目の並び・種別・文字数・コードは src/constants/shahoTodoke.ts（仕様書の PDF から作ったもの）
@@ -42,6 +43,7 @@ import { inKindEstimateOf, parseInKind } from "./genbutsu";
 import type { HealthInsurer, InsurerType } from "./healthInsurer";
 import { MY_NUMBER_PLACEHOLDER, shahoDate, toShahoKana, toShahoKanji, unusableChars, valueProblem } from "./shahoCsv";
 import { healthLossOf, noHealthOn, reach70Date, shahoPersonValues, type HealthLossCause, type ShahoPersonPart } from "./shahoPerson";
+import { parseShahoLoss, type ShahoLossCause } from "./shahoLoss";
 import { remunerationHistoryOf } from "./standardRemuneration";
 import { unionRecordOf, type UnionRecord } from "./unionReport";
 
@@ -250,7 +252,10 @@ export const buildShutokuRow = (input: ShutokuInput, office: string[]): ShutokuR
  * Q で作れる喪失の原因（退職等：退職日の翌日に喪失／死亡：死亡日の翌日に喪失／
  * 75歳到達・障害認定：健康保険だけ、75歳の誕生日・障害認定の日に喪失）
  */
-export type LossCause = "退職等" | "死亡" | HealthLossCause;
+export type LossCause = "退職等" | "死亡" | HealthLossCause | ShahoLossCause;
+
+/** 在職中に、退職以外で資格を失う原因（社会保障協定・特定減額特例対象者の任意喪失。従業員の画面で入れた日が資格喪失年月日） */
+export const isOtherLoss = (cause: LossCause): cause is ShahoLossCause => cause === "社会保障協定" || cause === "特定減額特例対象者の任意喪失";
 
 /** 健康保険だけ資格を失う原因か */
 export const isHealthOnlyLoss = (cause: LossCause): cause is HealthLossCause => cause === "75歳到達" || cause === "障害認定";
@@ -286,10 +291,13 @@ const SOSHITSU_PERSON: Record<ShahoPersonPart, number[]> = { pensionNumber: [5],
 
 /** 喪失の原因の、届書のコード（仕様書の名前で引く） */
 export const lossReasonCode = (cause: LossCause): string =>
-  isHealthOnlyLoss(cause) ? SHAHO_LOSS_REASONS[`${cause}(健康保険のみ喪失)`] : SHAHO_LOSS_REASONS[cause];
+  isHealthOnlyLoss(cause) ? SHAHO_LOSS_REASONS[`${cause}(健康保険のみ喪失)`] : SHAHO_LOSS_REASONS[cause] ?? "";
 
 /** 喪失の原因の日の呼び方 */
-const EVENT_NAMES: Record<LossCause, string> = { "退職等": "退職日", "死亡": "死亡日", "75歳到達": "75歳の誕生日", "障害認定": "障害認定の日" };
+const EVENT_NAMES: Record<LossCause, string> = {
+  "退職等": "退職日", "死亡": "死亡日", "75歳到達": "75歳の誕生日", "障害認定": "障害認定の日",
+  "社会保障協定": "資格喪失年月日", "特定減額特例対象者の任意喪失": "資格喪失年月日",
+};
 
 export const buildSoshitsuRow = (input: SoshitsuInput, office: string[]): SoshitsuRow => {
   const { staff } = input;
@@ -298,16 +306,30 @@ export const buildSoshitsuRow = (input: SoshitsuInput, office: string[]): Soshit
   const birthday = String(staff.birthday ?? "");
   const type: InsurerType = input.insurer?.type ?? "kyokai";
   const healthOnly = isHealthOnlyLoss(input.cause);
+  const otherLoss = isOtherLoss(input.cause);
+  /** 退職日・死亡日を書かない（健康保険だけ失う・在職中に退職以外で失う） */
+  const noEvent = healthOnly || otherLoss;
   const eventName = EVENT_NAMES[input.cause];
-  // 退職等・死亡はその翌日に、75歳到達・障害認定はその日に資格を失う
-  const lostOn = !input.eventDate ? "" : healthOnly ? input.eventDate : dayjs(input.eventDate).add(1, "day").format("YYYY-MM-DD");
+  // 退職等・死亡はその翌日に、75歳到達・障害認定はその日に、社会保障協定・任意喪失は入れた資格喪失年月日に資格を失う
+  const lostOn = !input.eventDate ? "" : noEvent ? input.eventDate : dayjs(input.eventDate).add(1, "day").format("YYYY-MM-DD");
   // 年齢は退職日・死亡日で数える（70歳以上被用者だった人は「70歳不該当」。健康保険の資格がない人は「70歳以上被用者不該当届」だけ）。
   // 健康保険だけ失うとき（75歳到達・障害認定）は健康保険の資格喪失届で、70歳以上被用者は続く
   const age = ageOn(staff, input.eventDate);
-  const over70Only = !healthOnly && age.over70 && (age.over75 || type !== "kyokai");
+  const over70Only = !noEvent && age.over70 && (age.over75 || type !== "kyokai");
   // 健康保険組合の人が健康保険だけ失うときは、組合にだけ出す（年金事務所の届はない）
   const toOffice = !healthOnly || type === "kyokai";
-  if (healthOnly) {
+  const shahoLoss = otherLoss ? parseShahoLoss(staff.shaho_loss) : null;
+  if (otherLoss) {
+    notes.push(input.cause === "社会保障協定"
+      ? "社会保障協定で相手国の制度に入る（相手国の適用証明書がある）ので、在職中に資格を失います。適用証明書の写しなど添付するものは、年金事務所に確かめてください"
+      : "特定減額特例対象者が、申出をやめて資格を失います（退職ではないので、退職日は書きません）");
+    if (shahoLoss?.pensionOnly) {
+      notes.push(type === "kyokai"
+        ? "年金だけが相手国の制度になり、健康保険は続きます。協会けんぽの人の届け方（厚生年金保険だけの資格喪失）は、年金事務所に確かめてください"
+        : "年金だけが相手国の制度になり、健康保険は続きます（健康保険組合には出しません）");
+    }
+    if (age.over70) notes.push("70歳以上の人です。70歳以上被用者の届け方は、年金事務所に確かめてください");
+  } else if (healthOnly) {
     notes.push(input.cause === "75歳到達"
       ? "75歳の誕生日に健康保険の資格を失い、後期高齢者医療制度に移ります（厚生年金の70歳以上被用者は続きます）"
       : "後期高齢者医療の障害認定を受けた日に健康保険の資格を失い、後期高齢者医療制度に移ります（厚生年金は続きます）");
@@ -328,7 +350,7 @@ export const buildSoshitsuRow = (input: SoshitsuInput, office: string[]): Soshit
   else if ((over70Only ? input.eventDate : lostOn) > input.today) {
     add(over70Only
       ? `${eventName}（${input.eventDate}）になってから届け出ます（e-Gov は、不該当年月日が届け出る日より後の届書を受け付けません）`
-      : healthOnly
+      : noEvent
         ? `${eventName}（${lostOn}）になってから届け出ます（e-Gov は、資格喪失日が届け出る日より後の届書を受け付けません）`
         : `資格喪失日（${eventName}の翌日 ${lostOn}）になってから届け出ます（e-Gov は、資格喪失日が届け出る日より後の届書を受け付けません）`, 13, 14);
   }
@@ -336,11 +358,11 @@ export const buildSoshitsuRow = (input: SoshitsuInput, office: string[]): Soshit
   if (type === "kyokai" && (healthOnly || !age.over75) && input.returned === null && input.unreturned === null) {
     notes.push("資格確認書などを交付していれば、回収して添付し、枚数を書きます（回収できないときは「健康保険 資格確認書回収不能届」も出します）");
   }
-  const rehired = !healthOnly && input.rehired;
+  const rehired = !noEvent && input.rehired;
   if (rehired) notes.push("退職後の継続再雇用なので、同じ日付の資格取得届も出し、就業規則・雇用契約書の写しなどを添付します");
   const multiOffice = Number(staff.multi_office) === 1;
   /** 70歳不該当（退職・死亡で70歳以上被用者でなくなる。健康保険だけ失うときは付けない） */
-  const not70 = !healthOnly && age.over70;
+  const not70 = !noEvent && age.over70;
   const returns = type === "kyokai" && !over70Only;
 
   const values = [
@@ -348,7 +370,7 @@ export const buildSoshitsuRow = (input: SoshitsuInput, office: string[]): Soshit
     person.pensionNumber, person.kana, person.kanji, person.birth?.era ?? "", person.birth?.ymd ?? "",
     input.myNumber ? MY_NUMBER_PLACEHOLDER : "", person.basic?.[0] ?? "", person.basic?.[1] ?? "",
     over70Only ? "" : lost.era, over70Only ? "" : lost.ymd,
-    lossReasonCode(input.cause), healthOnly ? "" : event.era, healthOnly ? "" : event.ymd,
+    lossReasonCode(input.cause), noEvent ? "" : event.era, noEvent ? "" : event.ymd,
     multiOffice ? "1" : "", rehired ? "1" : "", toShahoKanji(input.remarks),
     returns ? count(input.returned) : "", returns ? count(input.unreturned) : "",
     not70 ? "1" : "", not70 ? event.era : "", not70 ? event.ymd : "",
@@ -357,7 +379,7 @@ export const buildSoshitsuRow = (input: SoshitsuInput, office: string[]): Soshit
   problems.push(...checkFields(SHAHO_SOSHITSU_FIELDS, values, reported, 4));
 
   let union: UnionRecord | null = null;
-  if (type === "union" && input.insurer && (healthOnly || !age.over75)) {
+  if (type === "union" && input.insurer && (healthOnly || !age.over75) && !shahoLoss?.pensionOnly) {
     // 組合に出す届書：健康保険の資格喪失（被保険者整理番号・資格喪失年月日・資格確認書の回収を書く）
     union = unionRecordOf(input.insurer, staff, values, SHAHO_SOSHITSU_UNION_FIELDS, {
       5: String(staff.pension_num ?? "").normalize("NFKC").trim(), 13: lost.era, 14: lost.ymd,
@@ -428,6 +450,9 @@ export const lossEventsOf = (staff: any): { cause: LossCause; date: string }[] =
   const health = healthLossOf(staff);
   const join = String(staff?.join_date ?? "");
   if (health && (!join || health.date > join) && (!loss || health.date <= loss.date)) events.push(health);
+  // 社会保障協定・特定減額特例対象者の任意喪失（その日が資格喪失年月日。退職日の翌日より後は資格がない）
+  const other = parseShahoLoss(staff?.shaho_loss);
+  if (other && (!join || other.date > join) && (!loss || other.date <= loss.date)) events.push({ cause: other.cause, date: other.date });
   if (loss) events.push(loss);
   return events;
 };

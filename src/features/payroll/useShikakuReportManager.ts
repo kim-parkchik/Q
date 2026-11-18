@@ -12,7 +12,7 @@ import { branchPrefectureOf } from "../../utils/branchPrefecture";
 import { checkSocialInsEnrolled, prescribedWorkDays } from "../../utils/calcSalary";
 import { insurerOf, loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
 import {
-  acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedInKindOf, estimatedWageOf, isHealthOnlyLoss, lossEventsOf,
+  acquiredOnOf, buildShutokuRow, buildSoshitsuRow, estimatedInKindOf, estimatedWageOf, isHealthOnlyLoss, isOtherLoss, lossEventsOf,
   type LossCause, type ShutokuRow, type SoshitsuRow,
 } from "../../utils/shikakuReport";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
@@ -106,8 +106,10 @@ export function useShikakuReportManager(db: any, staffList: any[], user: MyNumbe
   }), [staffList, month]);
   // 資格喪失届：その月に退職した・亡くなった加入者と、健康保険だけの資格を失った加入者（75歳の誕生日・障害認定の日。
   // 国民健康保険組合の人は、国保組合で手続きするので入れない）
+  // 社会保障協定・任意喪失は、その月の分から加入していないので、前の月に加入していたかで見る
   const soshitsuEvents = useMemo(() => staffList.flatMap((s) => lossEventsOf(s)
-    .filter((e) => ymOf(e.date) === month && enrolledOn(s, e.date)
+    .filter((e) => ymOf(e.date) === month
+      && enrolledOn(s, isOtherLoss(e.cause) ? dayjs(`${ymOf(e.date)}-01`).subtract(1, "day").format("YYYY-MM-DD") : e.date)
       && !(isHealthOnlyLoss(e.cause) && insurerOf(insurers, s.social_insurance_group_id)?.type === "kokuho"))
     .map((e) => ({ staff: s, cause: e.cause as LossCause, date: e.date, key: `${s.id}:${e.cause}` }))), [staffList, month, insurers]);
 
