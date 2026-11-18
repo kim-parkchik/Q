@@ -12,9 +12,13 @@ import BankAccountSection from "./staff/BankAccountSection";
 import InKindSection from "./staff/InKindSection";
 import HealthDependentsSection from "./staff/HealthDependentsSection";
 import KoyoSection from "./staff/KoyoSection";
+import ForeignSection from "./staff/ForeignSection";
 import RosterSection from "./staff/RosterSection";
 import StaffFilterBar from "./staff/StaffFilterBar";
 import StaffTable from "./staff/StaffTable";
+import dayjs from "dayjs";
+import { foreignOf, RESIDENCE_ALERT_MONTHS, residencePeriodAlert } from "../../utils/foreignInfo";
+import { formatWareki } from "../../utils/wareki";
 
 interface Props {
     db: Database;
@@ -25,6 +29,12 @@ interface Props {
 export default function StaffManager({ db, onDataChange, staffList }: Props) {
     const cm = useStaffManager({ db, onDataChange, staffList });
     const { showForm, setShowForm, editingId, isSaving, setDeletingId, clearForm, canSave, saveStaff, isFirstRun, isFormVisible } = cm;
+    // 在留期間の満了日が近い・過ぎた人（在籍している外国人の方）
+    const today = dayjs().format("YYYY-MM-DD");
+    const residenceAlerts = staffList
+        .filter((s) => (s.status || "active") !== "retired")
+        .map((s) => ({ s, alert: residencePeriodAlert(foreignOf(s), today) }))
+        .filter((x) => x.alert !== null);
 
     return (
         <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
@@ -64,6 +74,7 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
 
                             <HealthDependentsSection cm={cm} />
 
+                            <ForeignSection cm={cm} />
                             <KoyoSection cm={cm} />
                         </div>
 
@@ -91,6 +102,15 @@ export default function StaffManager({ db, onDataChange, staffList }: Props) {
                         <button onClick={() => { clearForm(); setShowForm(false); }} style={{ ...btnStyle, flex: 1, backgroundColor: "#94a3b8" }}>キャンセル</button>
                     </div>
                 </section>
+            )}
+
+            {!isFirstRun && !showForm && residenceAlerts.length > 0 && (
+                <div style={{ backgroundColor: "#fef3c7", border: "1px solid #f59e0b", color: "#92400e", borderRadius: "8px", padding: "10px 14px", marginBottom: "12px", fontSize: "13px", lineHeight: 1.7 }}>
+                    <div style={{ fontWeight: "bold" }}>在留期間の満了日が近い・過ぎた外国人の方がいます（満了日まで{RESIDENCE_ALERT_MONTHS}か月を切った人）</div>
+                    {residenceAlerts.map(({ s, alert }) => (
+                        <div key={s.id}>・{s.name}：{formatWareki(alert!.periodEnd)}{alert!.state === "expired" ? "（過ぎています。新しい在留カードで確かめてください）" : `（あと${alert!.days}日）`}</div>
+                    ))}
+                </div>
             )}
 
             {/* 💡 スタッフがいて、かつフォームを閉じてる時だけリストを表示 */}

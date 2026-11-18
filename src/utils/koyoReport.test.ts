@@ -34,8 +34,8 @@ describe("雇用保険の届書のファイル", () => {
       koyo_info: JSON.stringify({
         acquireKind: "2", cause: "3", employmentForm: "6", occupation: "09", route: "1", weeklyMinutes: 2400,
         contract: { has: true, start: "2010-11-19", end: "2011-11-20", renewal: "有" },
-        foreign: { romaji: "Romaji Name", nationality: "フランス", status: "29", statusText: "", periodEnd: "2020-12-31", permission: "有", card: "aa12345678aa", dispatch: "該当" },
       }),
+      foreign_info: JSON.stringify({ romaji: "Romaji Name", nationality: "フランス", status: "29", statusText: "", periodEnd: "2020-12-31", permission: "有", card: "aa12345678aa", dispatch: "該当" }),
     };
     const row = buildKoyoShutoku({ staff, place: place(), myNumber: true, fixedItems: 0, today: "2015-11-05" });
     expect(row.problems).toEqual([]);
@@ -50,9 +50,9 @@ describe("雇用保険の届書のファイル", () => {
       join_date: "1987-04-01", retirement_date: "2010-11-19", address: "東京都新宿区", scheduled_work_hours: 8,
       koyo_info: JSON.stringify({
         weeklyMinutes: 2400, registeredName: "漢字　次郎", registeredKana: "カンジ ジロウ", nameChangedOn: "2010-06-30",
-        foreign: { romaji: "ROMAJI NAME", nationality: "フランス", status: "29", statusText: "", periodEnd: "2020-12-31", permission: "", card: "AA12345678AA", dispatch: "該当" },
         loss: { cause: "3", replacement: "無", certificate: false },
       }),
+      foreign_info: JSON.stringify({ romaji: "ROMAJI NAME", nationality: "フランス", status: "29", statusText: "", periodEnd: "2020-12-31", permission: "", card: "AA12345678AA", dispatch: "該当" }),
     };
     const row = buildKoyoSoshitsu({
       staff, place: place({ name: "新宿事務所", helloWork: "飯田橋公共職業安定所" }), lossDate: "2010-11-19", myNumber: true, cert: null,
@@ -86,8 +86,8 @@ describe("雇用保険の届書のファイル", () => {
       id: "4", name: "田中　太郎", furigana: "タナカ タロウ", gender: "male", birthday: "1987-04-01", employment_ins_num: "9999-999999-9",
       koyo_info: JSON.stringify({
         registeredName: "変更　太郎", registeredKana: "ヘンコウ タロウ", nameChangedOn: "2019-12-31",
-        foreign: { romaji: "TANAKA TAROU", nationality: "", status: "", statusText: "", periodEnd: "", permission: "", card: "", dispatch: "" },
       }),
+      foreign_info: JSON.stringify({ romaji: "TANAKA TAROU", nationality: "", status: "", statusText: "", periodEnd: "", permission: "", card: "", dispatch: "" }),
     };
     const row = buildKoyoBango({ staff, place: place(), today: "2026-11-17" });
     expect(row.problems).toEqual([]);

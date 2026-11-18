@@ -51,6 +51,9 @@ export const DB_SCHEMAS = [
     nendo_koshin TEXT,                   -- 年度更新で入れたもの（JSON。年度・労働保険番号ごとの申告済概算保険料・延納・充当意思など）
     gensen_nofu TEXT,                    -- 源泉所得税の納付書（所得税徴収高計算書）の設定と手で入れた額（JSON。納期の特例・退職手当等・税理士等の報酬。utils/withholdingPayment.ts）
     journal_settings TEXT,               -- 給与・賞与の仕訳データの勘定科目などの設定（JSON。utils/payJournal.ts）
+    labor_conditions TEXT,               -- 労働条件通知書の会社の初めの値（JSON。更新の判断の基準・定年・相談窓口など。utils/laborConditions.ts）
+    kyotei36 TEXT,                       -- 36協定（JSON。拠点の番号ごとの協定の中身。様式第9号・第9号の2と上限の確認に使う。utils/kyotei36.ts）
+    employment_report TEXT,              -- 高年齢者・障害者雇用状況報告の設定（JSON。除外率・障害者雇用推進者・高年齢者雇用等推進者・記入担当者。utils/employmentStatus.ts）
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
     round_emp_ins TEXT DEFAULT 'currency_law', -- 雇用保険料（本人負担分）の端数：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ（厚生労働省）。特約があれば round など
@@ -172,9 +175,13 @@ export const DB_SCHEMAS = [
     youiku_tokurei TEXT,      -- 養育期間の標準報酬月額の特例の申出（子・養育特例開始年月日など。JSON。詳しくは utils/youikuTokurei.ts）
     in_kind TEXT,             -- 現物で払う報酬（食事・住宅（社宅・寮など）・その他（自社製品など）の期間ごとの行。JSON。詳しくは utils/genbutsu.ts）
     kouki_date TEXT,          -- 後期高齢者医療の被保険者になった日（65歳から74歳で、広域連合の障害認定を受けたとき。この日に健康保険の資格を失う。utils/shahoPerson.ts）
-    koyo_info TEXT,           -- 雇用保険の届書に書くこと（職種・雇用形態・就職経路・外国人の在留資格・離職の理由・転勤など。JSON。詳しくは utils/koyoInfo.ts）
+    koyo_info TEXT,           -- 雇用保険の届書に書くこと（職種・雇用形態・就職経路・離職の理由・転勤など。JSON。詳しくは utils/koyoInfo.ts）
+    foreign_info TEXT,        -- 在留資格の情報（外国人の方。ローマ字の氏名・国籍・在留資格・在留期間・在留カード番号・確かめた日など。JSON。utils/foreignInfo.ts）
     resident_tax_idou TEXT,   -- 住民税の給与所得者異動届出書に書くこと（異動の日ごとの徴収方法・新しい勤務先・届け出た日。JSON。utils/residentTaxIdou.ts）
     department TEXT,          -- 部門（「営業部」など。支給控除一覧表・仕訳を部門ごとにまとめる。なくてもよい）
+    labor_conditions TEXT,    -- 労働条件通知書の、その人だけの値（JSON。様式（一般・短時間）と直した欄。utils/laborConditions.ts）
+    kaigo_exempt TEXT,        -- 介護保険の適用除外の期間（JSON。国外居住者・施設入居者・在留資格3か月以下。その月の分から介護保険料をかけない。utils/kaigoExempt.ts）
+    disability_employment TEXT, -- 障害者雇用状況報告に数える障害の種類（JSON。身体・知的・精神と重度かどうか。手帳などで確かめたもの。utils/employmentStatus.ts）
     health_dependents TEXT,   -- 健康保険の被扶養者（配偶者・子など。被扶養者（異動）届・国民年金第3号被保険者関係届に書く。JSON。詳しくは utils/healthDependents.ts）
     my_number TEXT,           -- 使わない（マイナンバーは my_numbers の表に置く。従業員の一覧に入らないように）
     FOREIGN KEY (calendar_pattern_id) REFERENCES calendar_patterns(id),

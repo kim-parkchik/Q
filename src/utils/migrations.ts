@@ -25,6 +25,9 @@
  *     拠点に koyo_office_number・koyo_hello_work・rousai_business・rousai_rate、従業員に雇用保険の届書に書くこと（koyo_info）を足す
  *   ・v7: 会社に源泉所得税の納付書の設定と手で入れた額（gensen_nofu）、従業員に住民税の給与所得者異動届出書に書くこと（resident_tax_idou）を足す
  *   ・v8: 従業員に部門（department）、会社に仕訳データの設定（journal_settings）、住民税の市区町村に送付先（mail_zip・mail_address・mail_name）を足す
+ *   ・v9: 会社に労働条件通知書の初めの値（labor_conditions）・36協定（kyotei36）・雇用状況報告の設定（employment_report）、
+ *     従業員に労働条件通知書の値（labor_conditions）・介護保険の適用除外の期間（kaigo_exempt）・障害者雇用状況報告に数える障害の種類（disability_employment）・
+ *     在留資格の情報（foreign_info）を足す。在留資格の情報は、雇用保険の届書に書くこと（koyo_info の foreign）から移す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -136,7 +139,41 @@ export const MIGRATIONS: Migration[] = [
       for (const column of ["mail_zip", "mail_address", "mail_name"]) await addColumnIfMissing(db, "resident_tax_municipalities", column, "TEXT");
     },
   },
+  {
+    version: 9,
+    description: "労働条件通知書・36協定・雇用状況報告の設定、従業員の介護保険の適用除外・障害者雇用・在留資格の情報の列を足す（在留資格の情報は雇用保険の欄から移す）",
+    up: async (db) => {
+      for (const column of ["labor_conditions", "kyotei36", "employment_report"]) await addColumnIfMissing(db, "company", column, "TEXT");
+      for (const column of ["labor_conditions", "kaigo_exempt", "disability_employment", "foreign_info"]) await addColumnIfMissing(db, "staff", column, "TEXT");
+      await moveForeignInfo(db);
+    },
+  },
 ];
+
+/**
+ * 在留資格の情報を、雇用保険の届書に書くこと（staff.koyo_info の foreign）から、独立した列（staff.foreign_info）に移す（v9）
+ * 読めない koyo_info（壊れた JSON）は触らない。すでに foreign_info がある人は上書きしない
+ */
+const moveForeignInfo = async (db: MigrationDb) => {
+  const cols = await db.select<{ name: string }[]>("PRAGMA table_info(staff)");
+  if (!cols.some((c) => c.name === "koyo_info") || !cols.some((c) => c.name === "foreign_info")) return;
+  const rows = await db.select<{ id: string; koyo_info: string | null; foreign_info: string | null }[]>(
+    "SELECT id, koyo_info, foreign_info FROM staff WHERE koyo_info IS NOT NULL AND koyo_info <> ''",
+  );
+  for (const r of rows ?? []) {
+    let info: any;
+    try {
+      info = JSON.parse(String(r.koyo_info));
+    } catch {
+      continue;
+    }
+    if (!info || typeof info !== "object" || !("foreign" in info)) continue;
+    const foreign = info.foreign && typeof info.foreign === "object" ? { ...info.foreign, checkedOn: "" } : null;
+    delete info.foreign;
+    const keep = !r.foreign_info && foreign ? JSON.stringify(foreign) : r.foreign_info;
+    await db.execute("UPDATE staff SET foreign_info = ?, koyo_info = ? WHERE id = ?", [keep ?? null, JSON.stringify(info), r.id]);
+  }
+};
 
 /** v1（2026-11-14 の dbSchema.ts の形）の番号 */
 export const BASE_DB_VERSION = 1;

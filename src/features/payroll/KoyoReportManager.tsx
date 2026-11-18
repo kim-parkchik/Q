@@ -12,12 +12,14 @@ import type { MyNumberUser } from "../mynumber/myNumberStore";
 import { MyNumberToggle, button, card, controls, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title } from "./ShahoFilePanel";
 import { KOYO_MODE_LABELS, koyoLossDateOf, useKoyoReportManager, type KoyoMode } from "./useKoyoReportManager";
 import { WageCertificateTable } from "./WageCertificateTable";
+import GaikokujinReportPanel from "./GaikokujinReportPanel";
 
 const PRINT_ID = "koyo-print";
 
 export default function KoyoReportManager({ db, staffList, currentUser }: { db: any; staffList: any[]; currentUser: MyNumberUser | null }) {
   const m = useKoyoReportManager(db, staffList, currentUser);
   const [show, setShow] = useState<string | null>(null);
+  const [gaikoku, setGaikoku] = useState(false);
   const [printRequest, setPrintRequest] = useState(0);
   useEffect(() => { if (printRequest > 0) window.print(); }, [printRequest]);
   const monthMode = m.mode === "shutoku" || m.mode === "soshitsu";
@@ -36,19 +38,23 @@ export default function KoyoReportManager({ db, staffList, currentUser }: { db: 
         <div style={controls}>
           <div style={{ display: "flex", gap: 4 }}>
             {(Object.keys(KOYO_MODE_LABELS) as KoyoMode[]).map((k) => (
-              <button key={k} onClick={() => m.setMode(k)} style={button(m.mode === k ? "#2563eb" : "#94a3b8")}>{KOYO_MODE_LABELS[k]}</button>
+              <button key={k} onClick={() => { setGaikoku(false); m.setMode(k); }} style={button(!gaikoku && m.mode === k ? "#2563eb" : "#94a3b8")}>{KOYO_MODE_LABELS[k]}</button>
             ))}
+            <button onClick={() => setGaikoku(true)} style={button(gaikoku ? "#2563eb" : "#94a3b8")}>外国人雇用状況届出書</button>
           </div>
-          {monthMode && (
+          {!gaikoku && monthMode && (
             <label style={fieldStyle}>
               <span style={labelStyle}>{m.mode === "shutoku" ? "資格を取得した月" : "離職した月"}</span>
               <input type="month" value={m.month} onChange={(e) => m.setMonth(e.target.value)} style={input} />
             </label>
           )}
-          <MyNumberToggle my={m.my} />
+          {!gaikoku && <MyNumberToggle my={m.my} />}
         </div>
         {m.loadError && <div style={{ color: "#b91c1c", fontSize: 12 }}>⚠ 読み込めませんでした：{m.loadError}</div>}
       </div>
+      {gaikoku ? (
+        <div id={PRINT_ID} style={{ display: "flex", flexDirection: "column", gap: 16 }}><GaikokujinReportPanel db={db} staffList={staffList} /></div>
+      ) : (<>
 
       <div style={card} className="no-print">
         <h3 style={{ ...title, fontSize: 14 }}>届ける人（{m.rows.length}人）</h3>
@@ -161,6 +167,7 @@ export default function KoyoReportManager({ db, staffList, currentUser }: { db: 
           })}
         </div>
       )}
+      </>)}
     </div>
   );
 }

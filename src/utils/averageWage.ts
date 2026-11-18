@@ -197,6 +197,9 @@ export interface AverageWagePeriodRow extends AverageWagePeriod {
   /** 月で決まる賃金・日や時間で決まる賃金（除いた分を引いた後） */
   monthWages: number;
   timeWages: number;
+  /** そのうち基本賃金（月給の基本給・日給・時給の分。残りは手当。平均賃金算定内訳（様式第8号 別紙1）の欄に使う） */
+  monthBase: number;
+  timeBase: number;
   /** 入れなかった賃金（休業手当・休業補償・臨時の賃金など）と、除いた期間の分として引いた賃金 */
   notIncluded: number;
   /** 働いた日数（働いた時間がある日。除いた日を除く。最低保障に使う） */
@@ -309,7 +312,7 @@ export const calcAverageWage = (input: AverageWageInput): AverageWageResult => {
     const salary = input.salaries.find((s) => s.payYear === p.payYear && s.payMonth === p.payMonth);
     const row: AverageWagePeriodRow = {
       ...p, from: pFrom, to: pTo, days, excludedDays, excludedReasons,
-      monthWages: 0, timeWages: 0, notIncluded: 0, workedDays, confirmed: !!salary, notes: [],
+      monthWages: 0, timeWages: 0, monthBase: 0, timeBase: 0, notIncluded: 0, workedDays, confirmed: !!salary, notes: [],
     };
     if (!salary) {
       if (excludedDays < days) unconfirmed.push(`${p.payYear}年${p.payMonth}月支給の給与（${mdJa(p.start)}〜${mdJa(p.end)}の分）`);
@@ -320,8 +323,17 @@ export const calcAverageWage = (input: AverageWageInput): AverageWageResult => {
     let month = 0;
     let time = 0;
     let none = 0;
+    let monthBaseRaw = 0;
+    let timeBaseRaw = 0;
     if (ledger) {
       const wt = wageTypeOfLedger(ledger, wageType);
+      // 基本賃金の行（基本給・日給・時給分）
+      const baseLine = ledger.earnings[0] && ['基本給', '日給', '時給分'].includes(ledger.earnings[0].name) ? ledger.earnings[0] : null;
+      if (baseLine) {
+        const k = averageWageKindOfLine(baseLine, wt);
+        if (k === 'month') monthBaseRaw = baseLine.amount;
+        else if (k === 'time') timeBaseRaw = baseLine.amount;
+      }
       // 現物で払った報酬の行（定期券などで渡した通勤手当は通勤手当と同じに分け、食事・住宅などは入れない。残した分け方で決める）
       for (const line of [...ledger.earnings, ...(ledger.inKind ?? [])]) {
         const kind = averageWageKindOfLine(line, wt);
@@ -372,6 +384,9 @@ export const calcAverageWage = (input: AverageWageInput): AverageWageResult => {
     }
     row.monthWages = month;
     row.timeWages = time;
+    // 基本賃金：基本給の行の額（除いた分を引いて、賃金がそれより少なくなったときは、その額まで）
+    row.monthBase = Math.min(month, monthBaseRaw);
+    row.timeBase = Math.min(time, timeBaseRaw);
     row.notIncluded = none;
     rows.push(row);
   }

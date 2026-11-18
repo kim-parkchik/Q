@@ -16,9 +16,10 @@ import {
   splitKoyoNumber, splitPhone3,
 } from "./koyoCsv";
 import {
-  acquireKindOf, causeOf, certificateRequired, employmentFormOf, estimatedKoyoWage, koyoAcquiredOn, nationalityCodeOf, parseKoyoInfo,
-  payStyleOf, REASON_DETAILS, REASON_OPTIONS, residenceStatusOf, wageThousand, weeklyMinutesOf, type KoyoForeign, type KoyoInfo,
+  acquireKindOf, causeOf, certificateRequired, employmentFormOf, estimatedKoyoWage, koyoAcquiredOn, parseKoyoInfo,
+  payStyleOf, REASON_DETAILS, REASON_OPTIONS, wageThousand, weeklyMinutesOf, type KoyoInfo,
 } from "./koyoInfo";
+import { foreignOf, nationalityCodeOf, residenceStatusOf, type ForeignInfo } from "./foreignInfo";
 import { hasNameSpace, MY_NUMBER_PLACEHOLDER } from "./shahoCsv";
 import { md, type WageCertResult } from "./wageCertificate";
 
@@ -98,14 +99,14 @@ const nameParts = (name: string, kana: string, problems: string[], label = "氏�
 };
 
 /** 外国人の方の項目（ローマ字の氏名・国籍・在留資格など） */
-const foreignParts = (foreign: KoyoForeign | null, problems: string[]) => {
+const foreignParts = (foreign: ForeignInfo | null, problems: string[]) => {
   if (!foreign) return null;
   const status = residenceStatusOf(foreign);
   const code = nationalityCodeOf(foreign.nationality);
   const romaji = koyoRomaji(foreign.romaji);
-  if (!romaji) problems.push("外国人の方の、ローマ字の氏名（在留カードのとおり）を入れてください（従業員の画面の雇用保険）");
-  if (!code) problems.push("外国人の方の、国籍・地域を選んでください（従業員の画面の雇用保険）");
-  if (!status) problems.push("外国人の方の、在留資格を選んでください（従業員の画面の雇用保険）");
+  if (!romaji) problems.push("外国人の方の、ローマ字の氏名（在留カードのとおり）を入れてください（従業員の画面の在留資格の情報）");
+  if (!code) problems.push("外国人の方の、国籍・地域を選んでください（従業員の画面の在留資格の情報）");
+  if (!status) problems.push("外国人の方の、在留資格を選んでください（従業員の画面の在留資格の情報）");
   else if (!status.csv) problems.push("在留資格が「不明」のときは、在留資格（または理由）を20字以内で入れてください");
   const period = koyoDateValues(foreign.periodEnd);
   if (!period[0]) problems.push("外国人の方の、在留期間（満了日）を入れてください");
@@ -214,7 +215,7 @@ export const buildKoyoShutoku = (input: KoyoShutokuInput): KoyoRow => {
     if (!info.contract.renewal) problems.push("契約更新条項の有無を選んでください（従業員の画面の雇用保険）");
   }
   v.set("事業所名", [...koyoText(place.name)].slice(0, 34).join(""));
-  const f = foreignParts(info.foreign, problems);
+  const f = foreignParts(foreignOf(staff), problems);
   if (f) {
     v.set("被保険者氏名（ローマ字）", f.romaji);
     v.set("国籍・地域", f.nationality);
@@ -325,7 +326,7 @@ export const buildKoyoSoshitsu = (input: KoyoSoshitsuInput): KoyoRow => {
   v.set("１週間の所定労働時間（分）", p2(minutes % 60));
   if (minutes < 20 * 60) notes.push(`1週間の所定労働時間が20時間未満（${Math.floor(minutes / 60)}時間）なので、届書には20時間と書きます。離職したときの時間を確かめてください`);
   v.set("あて先", helloWorkName(place.helloWork));
-  const f = foreignParts(info.foreign, problems);
+  const f = foreignParts(foreignOf(staff), problems);
   if (f) {
     v.set("被保険者氏名（ローマ字）", f.romaji);
     v.set("国籍・地域", f.nationality);
@@ -482,7 +483,7 @@ export const buildKoyoTenkin = (input: KoyoTenkinInput): KoyoRow => {
   const now = nameParts(staff.name, staff.furigana, problems);
   v.set("被保険者氏名", now.kanji);
   v.set("被保険者氏名フリガナ（カタカナ）", [...now.kana].slice(0, 20).join(""));
-  if (info.foreign) v.set("被保険者氏名（ローマ字）", koyoRomaji(info.foreign.romaji));
+  { const fr = foreignOf(staff); if (fr) v.set("被保険者氏名（ローマ字）", koyoRomaji(fr.romaji)); }
   v.setDate("資格取得年月日", koyoAcquiredOn(staff, info));
   const t = numberParts(to.koyoNumber);
   v.set("事業所番号（安定所番号）", t[0]);
@@ -525,7 +526,7 @@ export const buildKoyoBango = (input: { staff: any; place: KoyoPlace; today: str
   v.set("被保険者番号6桁", n?.[1] ?? "");
   v.set("被保険者番号CD", n?.[2] ?? "");
   v.set("氏名（カタカナ）", [...koyoKana(staff.furigana)].slice(0, 30).join(""));
-  if (info.foreign) v.set("被保険者氏名（ローマ字）", koyoRomaji(info.foreign.romaji));
+  { const fr = foreignOf(staff); if (fr) v.set("被保険者氏名（ローマ字）", koyoRomaji(fr.romaji)); }
   v.set("性別", genderCode(staff.gender));
   v.setDate("生年月日", staff.birthday);
   if (info.registeredName.trim()) {

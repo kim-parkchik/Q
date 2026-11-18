@@ -117,7 +117,7 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
     const id = String(s.id);
     const insurer = insurerOf(p.insurers, s.social_insurance_group_id);
     const type = insurer?.type ?? "kyokai";
-    const byAge = getInsuranceByAge(String(s.birthday ?? ""), year, month, s.kouki_date);
+    const byAge = getInsuranceByAge(String(s.birthday ?? ""), year, month, s.kouki_date, s.kaigo_exempt);
     const insured = checkSocialInsEnrolled(s, year, month) && checkInsuredMonth(s.join_date, s.retirement_date, year, month)
       && !checkLeaveExemptMonth(exemptLeavePeriodsOf(s), year, month);
     // 本人負担：その月の分を引いた給与（当月徴収はその月、翌月徴収は次の月に支給）

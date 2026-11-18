@@ -28,6 +28,8 @@ import KoyoBenefitManager from "../../src/features/payroll/KoyoBenefitManager";
 import NendoKoshinManager from "../../src/features/payroll/NendoKoshinManager";
 import LaborInsuranceTab from "../../src/features/settings/company/LaborInsuranceTab";
 import KoyoSection from "../../src/features/settings/staff/KoyoSection";
+import ForeignSection from "../../src/features/settings/staff/ForeignSection";
+import { parseForeignInfo, type ForeignInfo } from "../../src/utils/foreignInfo";
 import { createKeys, encryptNumber, type DeriveKey } from "../../src/utils/myNumberCrypto";
 import { parseKoyoInfo, type KoyoInfo } from "../../src/utils/koyoInfo";
 
@@ -78,8 +80,7 @@ const staffList: any[] = [
     base_wage: 1300, scheduled_work_hours: 6, calendar_pattern_id: 0,
     koyo_info: info({
       occupation: "08", route: "1", contract: { has: true, start: "2026-11-10", end: "2027-11-09", renewal: "有" },
-      foreign: { romaji: "NGUYEN VAN AN", nationality: "ベトナム", status: "35", statusText: "", periodEnd: "2029-03-31", permission: "無", card: "AB12345678CD", dispatch: "非該当" },
-    }) }),
+    }), foreign_info: JSON.stringify({ romaji: "NGUYEN VAN AN", nationality: "ベトナム", status: "35", statusText: "", periodEnd: "2029-03-31", permission: "無", card: "AB12345678CD", dispatch: "非該当", checkedOn: "2026-10-05" }) }),
   person({ id: "8003", name: "退職　一郎", furigana: "タイショク イチロウ", birthday: "1985-06-15", employment_ins_num: "1301-111111-1",
     retirement_date: "2026-11-15", retirement_reason: "一身上の都合による退職",
     koyo_info: info({ numberReported: true, loss: { cause: "", certificate: true, replacement: "無", causeText: "", reason: "5(2)", details: {},
@@ -226,6 +227,8 @@ const user = { id: 1, login_id: "tanto", display_name: "事務 担当" };
 function KoyoEditor() {
   const s = staffList.find((x) => x.id === "8004");
   const [value, setValue] = useState<KoyoInfo>(parseKoyoInfo(s.koyo_info));
+  // 在留資格の情報の欄（見本：外国人の方。在留期間の満了日を近くして、知らせを出す）
+  const [foreign, setForeign] = useState<ForeignInfo | null>({ ...parseForeignInfo(staffList.find((x) => x.foreign_info)?.foreign_info)!, periodEnd: "2027-01-31" });
   const cm: any = {
     targetKoyoInfo: value, setTargetKoyoInfo: setValue, targetIsEmploymentInsEligible: 1, targetWageType: s.wage_type, targetWage: s.base_wage,
     targetDailyHours: 8, targetWorkDays: s.work_days, targetPatternId: 1, targetCommuteType: "none", targetCommuteAmount: 0,
@@ -234,6 +237,8 @@ function KoyoEditor() {
   };
   return (
     <div style={{ backgroundColor: "white", padding: 20, borderRadius: 12, maxWidth: 900 }}>
+      <ForeignSection cm={{ targetForeignInfo: foreign, setTargetForeignInfo: setForeign } as any} />
+      <pre id="foreign-json" style={{ fontSize: 10, whiteSpace: "pre-wrap", color: "#64748b" }}>{JSON.stringify(foreign)}</pre>
       <KoyoSection cm={cm} />
       <pre id="koyo-json" style={{ fontSize: 10, whiteSpace: "pre-wrap", color: "#64748b" }}>{JSON.stringify({ reason: value.loss.reason, details: value.loss.details })}</pre>
     </div>

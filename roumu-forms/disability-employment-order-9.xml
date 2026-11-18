@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataRoot>
+  <Result>
+    <Code>0</Code>
+    <Message/>
+  </Result>
+  <ApplData>
+    <LawId>335CO0000000292</LawId>
+    <LawNum/>
+    <Article>9</Article>
+    <Paragraph/>
+    <AppdxTable/>
+    <LawContents>
+      <Article Num="9">
+        <ArticleCaption>（障害者雇用率）</ArticleCaption>
+        <ArticleTitle>第九条</ArticleTitle>
+        <Paragraph Num="1">
+          <ParagraphNum/>
+          <ParagraphSentence>
+            <Sentence Num="1" WritingMode="vertical">法第四十三条第二項に規定する障害者雇用率は、百分の二・七とする。</Sentence>
+          </ParagraphSentence>
+        </Paragraph>
+      </Article>
+    </LawContents>
+  </ApplData>
+</DataRoot>

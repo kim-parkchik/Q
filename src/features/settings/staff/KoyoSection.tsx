@@ -1,8 +1,7 @@
 /**
  * 「雇用保険の届書に書くこと」（staff.koyo_info。utils/koyoInfo.ts）
  * ・資格取得届：取得区分・被保険者となったことの原因・雇用形態・職種・就職経路・1週間の所定労働時間・賃金月額・契約期間・備考
- * ・外国人の方：ローマ字の氏名・国籍・地域・在留資格・在留期間・資格外活動許可・在留カード番号・派遣・請負就労区分
- *   （資格取得届・資格喪失届に書くと、外国人雇用状況の届出をしたことになる）
+ * 外国人の方の在留資格の情報は、別の欄（staff/ForeignSection.tsx。staff.foreign_info）に入れ、届書はそこから読む
  * ・ハローワークに届けている氏名（いまの氏名と違うとき。資格喪失届・転勤届で新しい氏名を届ける）
  * ・離職（退職日・死亡日を入れた人）：喪失原因・離職票の交付・補充採用予定・離職理由（離職証明書の⑦欄）・具体的事情記載欄など
  * ・転勤（雇用保険適用事業所の違う拠点に移った日）
@@ -13,9 +12,9 @@ import { Briefcase, Plus, Trash2 } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import {
-    ACQUIRE_KIND_OPTIONS, CAUSE_OPTIONS, certificateRequired, EMPLOYMENT_FORM_OPTIONS, emptyKoyoForeign, employmentFormOf, estimatedKoyoWage,
-    LOSS_CAUSE_OPTIONS, NATIONALITY_OPTIONS, OCCUPATION_OPTIONS, REASON_DETAILS, REASON_GROUP_TITLES, REASON_OPTIONS, reasonCodeOptions,
-    RESIDENCE_STATUS_OPTIONS, ROUTE_OPTIONS, weeklyMinutesOf, type KoyoInfo, type KoyoLoss,
+    ACQUIRE_KIND_OPTIONS, CAUSE_OPTIONS, certificateRequired, EMPLOYMENT_FORM_OPTIONS, employmentFormOf, estimatedKoyoWage,
+    LOSS_CAUSE_OPTIONS, OCCUPATION_OPTIONS, REASON_DETAILS, REASON_GROUP_TITLES, REASON_OPTIONS, reasonCodeOptions,
+    ROUTE_OPTIONS, weeklyMinutesOf, type KoyoInfo, type KoyoLoss,
 } from '../../../utils/koyoInfo';
 
 interface Props {
@@ -49,8 +48,6 @@ export default function KoyoSection({ cm }: Props) {
     const autoForm = employmentFormOf(staffNow, { ...info, employmentForm: "" });
     const lossDate = cm.targetDeathDate && (!cm.targetRetirementDate || cm.targetDeathDate <= cm.targetRetirementDate) ? cm.targetDeathDate : cm.targetRetirementDate;
     const required = !!lossDate && certificateRequired({ birthday: cm.targetBirthday }, lossDate);
-    const foreign = info.foreign;
-    const setForeign = (patch: Partial<NonNullable<KoyoInfo["foreign"]>>) => set({ foreign: { ...(foreign ?? emptyKoyoForeign()), ...patch } });
     const details = REASON_DETAILS[info.loss.reason] ?? [];
     const branches: any[] = cm.branches ?? [];
 
@@ -117,36 +114,6 @@ export default function KoyoSection({ cm }: Props) {
                 <input type="checkbox" checked={info.numberReported} onChange={e => set({ numberReported: e.target.checked })} /> マイナンバーをハローワークに届けている（Q を使う前に届けた人・資格取得届に書いた人）
             </label>
 
-            {sub("外国人の方（在留資格「外交」「公用」と特別永住者を除く）")}
-            <label style={{ fontSize: "12px", display: "block", marginBottom: "6px" }}>
-                <input type="checkbox" checked={!!foreign} onChange={e => set({ foreign: e.target.checked ? emptyKoyoForeign() : null })} /> 外国人の方（届書に在留資格などを書くと、外国人雇用状況の届出になります）
-            </label>
-            {foreign && (<>
-                {row(
-                    field("氏名（ローマ字。在留カードのとおり）", <input value={foreign.romaji} onChange={e => setForeign({ romaji: e.target.value })} style={small} />, 1.5),
-                    field("国籍・地域", <select value={foreign.nationality} onChange={e => setForeign({ nationality: e.target.value })} style={small}>
-                        <option value="">（選ぶ）</option>
-                        {NATIONALITY_OPTIONS.map(([n, c]) => <option key={c + n} value={n}>{n}</option>)}
-                    </select>),
-                )}
-                {row(
-                    field("在留資格", <select value={foreign.status} onChange={e => setForeign({ status: e.target.value })} style={small}>
-                        <option value="">（選ぶ）</option>
-                        {RESIDENCE_STATUS_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.name}{o.abolished ? "（廃止済）" : ""}</option>)}
-                    </select>, 1.5),
-                    ...(RESIDENCE_STATUS_OPTIONS.find(o => o.code === foreign.status)?.free ? [field("在留資格（または理由。20字まで）", <input value={foreign.statusText} onChange={e => setForeign({ statusText: e.target.value })} style={small} />)] : []),
-                    field("在留期間（満了日）", <input type="date" value={foreign.periodEnd} onChange={e => setForeign({ periodEnd: e.target.value })} style={small} />),
-                )}
-                {row(
-                    field("在留カード番号", <input value={foreign.card} onChange={e => setForeign({ card: e.target.value })} placeholder="AB12345678CD" style={small} />),
-                    field("資格外活動許可", <select value={foreign.permission} onChange={e => setForeign({ permission: e.target.value as "" | "有" | "無" })} style={small}>
-                        <option value="">（選ぶ）</option><option value="有">有</option><option value="無">無</option>
-                    </select>, 0.7),
-                    field("派遣・請負就労区分", <select value={foreign.dispatch} onChange={e => setForeign({ dispatch: e.target.value as "" | "該当" | "非該当" })} style={small}>
-                        <option value="">（選ぶ）</option><option value="該当">該当（主に他の事業所で働く）</option><option value="非該当">非該当</option>
-                    </select>),
-                )}
-            </>)}
 
             {lossDate && (<>
                 {sub(`離職したとき（資格喪失届・離職証明書。離職日 ${lossDate}）`)}

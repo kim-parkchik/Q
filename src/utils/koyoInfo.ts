@@ -3,9 +3,8 @@
  *
  * ・資格取得届：取得区分（新規・再取得）・被保険者となったことの原因・雇用形態・職種・就職経路・1週間の所定労働時間・賃金月額・
  *   契約期間・資格取得年月日（入社日と違うとき）・備考
- * ・外国人の方（在留資格「外交」「公用」と特別永住者を除く）：ローマ字の氏名・国籍・地域・在留資格・在留期間・資格外活動許可・
- *   在留カード番号・派遣・請負就労区分。資格取得届・資格喪失届に書くと、外国人雇用状況の届出をしたことになる
- *   （雇用保険事務手続きの手引き【第２編】）
+ * ・外国人の方の在留資格の情報は、ここではなく staff.foreign_info（utils/foreignInfo.ts）に入れる。資格取得届・資格喪失届に書くと、
+ *   外国人雇用状況の届出をしたことになる（雇用保険事務手続きの手引き【第２編】）
  * ・ハローワークに届けている氏名（いまの氏名と違うとき）：資格取得届（再取得）の被保険者証の氏名・資格喪失届と転勤届の氏名変更
  *   （雇用保険被保険者氏名変更届はなく、資格喪失届・転勤届などで新しい氏名を届ける）
  * ・離職（loss）：喪失原因・離職票の交付希望・補充採用予定・被保険者でなくなったことの原因・離職理由（離職証明書の⑦欄）・
@@ -14,29 +13,10 @@
  * ・届け出た日（reported）：ファイルを保存した日（次に出す届書を決めるのに使う）
  * コードは src/constants/koyoTodoke.ts（仕様書の項目説明から作ったもの）
  */
-import { KOYO_CODES, KOYO_NATIONALITIES, KOYO_REASON_CODES, KOYO_REASON_TITLES, KOYO_RESIDENCE_STATUSES } from "../constants/koyoTodoke";
+import { KOYO_CODES, KOYO_REASON_CODES, KOYO_REASON_TITLES } from "../constants/koyoTodoke";
 import { parseWorkDays } from "./annualWorkDays";
 import { birthdayAt } from "./calcSalary";
 
-/** 外国人の方の情報（資格取得届・資格喪失届・転勤届に書く） */
-export interface KoyoForeign {
-  /** 被保険者氏名（ローマ字。在留カードのとおり） */
-  romaji: string;
-  /** 国籍・地域（参考資料３の名前。在留カードの国籍） */
-  nationality: string;
-  /** 在留資格のコード（参考資料４） */
-  status: string;
-  /** 在留資格がコード「30」（不明）のときの在留資格か理由（20字まで） */
-  statusText: string;
-  /** 在留期間（満了日。YYYY-MM-DD） */
-  periodEnd: string;
-  /** 資格外活動許可の有無 */
-  permission: "" | "有" | "無";
-  /** 在留カード番号（英字2・数字8・英字2の12字） */
-  card: string;
-  /** 派遣・請負就労区分（派遣・請負で、主としてほかの事業所で働く） */
-  dispatch: "" | "該当" | "非該当";
-}
 
 /** 離職の情報（資格喪失届・離職証明書に書く） */
 export interface KoyoLoss {
@@ -98,7 +78,6 @@ export interface KoyoInfo {
   contract: { has: boolean; start: string; end: string; renewal: "" | "有" | "無" };
   /** 資格取得届の備考（被保険者となったことの原因が「その他」のときは書く） */
   remarks: string;
-  foreign: KoyoForeign | null;
   /** ハローワークに届けている氏名・フリガナ（いまの氏名と違うとき）と、氏名を変えた日 */
   registeredName: string;
   registeredKana: string;
@@ -118,13 +97,9 @@ export const emptyKoyoLoss = (): KoyoLoss => ({
 
 export const emptyKoyoInfo = (): KoyoInfo => ({
   acquiredOn: "", acquireKind: "", cause: "", employmentForm: "", occupation: "", route: "", weeklyMinutes: null, wageMonthly: null,
-  contract: { has: false, start: "", end: "", renewal: "" }, remarks: "", foreign: null,
+  contract: { has: false, start: "", end: "", renewal: "" }, remarks: "",
   registeredName: "", registeredKana: "", nameChangedOn: "", numberReported: false,
   loss: emptyKoyoLoss(), transfers: [], reported: {},
-});
-
-export const emptyKoyoForeign = (): KoyoForeign => ({
-  romaji: "", nationality: "", status: "", statusText: "", periodEnd: "", permission: "", card: "", dispatch: "",
 });
 
 const str = (v: unknown): string => (typeof v === "string" ? v : v === null || v === undefined ? "" : String(v));
@@ -143,7 +118,6 @@ export const parseKoyoInfo = (json: unknown): KoyoInfo => {
   const base = emptyKoyoInfo();
   if (!v || typeof v !== "object") return base;
   const c = v.contract ?? {};
-  const f = v.foreign;
   const l = v.loss ?? {};
   return {
     acquiredOn: date(v.acquiredOn),
@@ -156,11 +130,6 @@ export const parseKoyoInfo = (json: unknown): KoyoInfo => {
     wageMonthly: num(v.wageMonthly),
     contract: { has: !!c.has, start: date(c.start), end: date(c.end), renewal: pick(c.renewal, ["", "有", "無"] as const, "") },
     remarks: str(v.remarks),
-    foreign: f && typeof f === "object" ? {
-      romaji: str(f.romaji), nationality: str(f.nationality), status: str(f.status), statusText: str(f.statusText),
-      periodEnd: date(f.periodEnd), permission: pick(f.permission, ["", "有", "無"] as const, ""), card: str(f.card),
-      dispatch: pick(f.dispatch, ["", "該当", "非該当"] as const, ""),
-    } : null,
     registeredName: str(v.registeredName),
     registeredKana: str(v.registeredKana),
     nameChangedOn: date(v.nameChangedOn),
@@ -205,10 +174,6 @@ export const OCCUPATION_OPTIONS = optionsOf("職種");
 export const ROUTE_OPTIONS = optionsOf("就職経路");
 export const LOSS_CAUSE_OPTIONS = optionsOf("喪失原因");
 export const ACQUIRE_KIND_OPTIONS = optionsOf("取得区分");
-/** 国籍・地域（参考資料３） */
-export const NATIONALITY_OPTIONS = KOYO_NATIONALITIES;
-/** 在留資格（参考資料４。廃止済の在留資格は、資格喪失届・転勤届のためだけに残す） */
-export const RESIDENCE_STATUS_OPTIONS = KOYO_RESIDENCE_STATUSES;
 
 // ── 初めの値 ───────────────────────────────────────────
 
@@ -279,16 +244,6 @@ export const employmentFormOf = (staff: any, info = parseKoyoInfo(staff?.koyo_in
 
 /** 被保険者となったことの原因の初めの値（2：新規雇用（その他）） */
 export const causeOf = (info: KoyoInfo): string => info.cause || KOYO_CODES["被保険者となったことの原因"]["新規雇用(その他)"];
-
-/** 国籍・地域のコード（参考資料３。なければ空） */
-export const nationalityCodeOf = (name: string): string => KOYO_NATIONALITIES.find(([n]) => n === name)?.[1] ?? "";
-
-/** 在留資格（コード → ファイルに書く値。不明（30）は入れた在留資格か理由） */
-export const residenceStatusOf = (foreign: KoyoForeign): { code: string; csv: string; name: string } | null => {
-  const s = KOYO_RESIDENCE_STATUSES.find((x) => x.code === foreign.status);
-  if (!s) return null;
-  return { code: s.code, csv: s.free ? [...foreign.statusText.trim()].slice(0, 20).join("") : s.csv, name: s.free ? foreign.statusText.trim() : s.name };
-};
 
 /** 離職票の交付が要るか（離職日に59歳以上なら、希望にかかわらず交付する。雇用保険事務手続きの手引き）。年齢は誕生日の前日に1つ増える */
 export const certificateRequired = (staff: any, lossDate: string): boolean => {

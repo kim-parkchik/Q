@@ -26,8 +26,8 @@ const header = (db: Database) => ({
 describe("会社ファイルの形式（2026-11-14 の形を v1 とする。印は \"QP02\"）", () => {
     test("v1 から始めて、v2 から積み重ねる（前に積み重ねた更新 v2〜v21 は、v1 の表の定義にまとめた）", () => {
         expect(BASE_DB_VERSION).toBe(1);
-        expect(LATEST_DB_VERSION).toBe(8);
-        expect(MIGRATIONS.map((m) => m.version)).toEqual([2, 3, 4, 5, 6, 7, 8]);
+        expect(LATEST_DB_VERSION).toBe(9);
+        expect(MIGRATIONS.map((m) => m.version)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
         expect(String.fromCharCode(Q_FILE_ID >>> 24, (Q_FILE_ID >>> 16) & 0xff, (Q_FILE_ID >>> 8) & 0xff, Q_FILE_ID & 0xff)).toBe("QP02");
     });
     test("新しいファイル：表を作り、Q の印と最新の番号を付ける（更新は実行しない）。前の更新で足した列も、はじめからある", async () => {
@@ -76,8 +76,9 @@ const V5 = "v5: 後期高齢者医療の障害認定の日と、健康保険の�
 const V6 = "v6: 雇用保険の届書（雇用保険適用事業所番号・ハローワーク・ＦＤ通番・従業員の雇用保険の情報）と、年度更新（労災保険の事業の種類と率・入れたもの）の列を足す";
 const V7 = "v7: 源泉所得税の納付書（納期の特例・手で入れた額）と、住民税の給与所得者異動届出書に書くことの列を足す";
 const V8 = "v8: 従業員の部門、仕訳データの設定、住民税の市区町村の送付先の列を足す";
+const V9 = "v9: 労働条件通知書・36協定・雇用状況報告の設定、従業員の介護保険の適用除外・障害者雇用・在留資格の情報の列を足す（在留資格の情報は雇用保険の欄から移す）";
 
-describe("更新（v2〜v8）", () => {
+describe("更新（v2〜v9）", () => {
     test("v1 のファイルに、v2 の列（会社の賞与支払予定月）を足して v2 にする（入れたデータはそのまま）", async () => {
         const db = new Database(":memory:");
         db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT)");
@@ -92,9 +93,10 @@ describe("更新（v2〜v8）", () => {
             V6,
             V7,
             V8,
+            V9,
         ]);
         expect(columns(db, "company")).toContain("bonus_plan_months");
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, bonus_plan_months FROM company").get()).toEqual({ name: "テスト株式会社", bonus_plan_months: null });
     });
     test("v2 のファイルに、v3 の列（従業員の住所のフリガナ・健康保険組合の事業所番号と媒体通番）を足して v3 にする（入れたデータはそのまま）", async () => {
@@ -112,10 +114,11 @@ describe("更新（v2〜v8）", () => {
             V6,
             V7,
             V8,
+            V9,
         ]);
         expect(columns(db, "staff")).toContain("address_kana");
         expect(columns(db, "social_insurance_groups")).toEqual(expect.arrayContaining(["union_office_number", "union_media_seq"]));
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, address, address_kana FROM staff").get()).toEqual({ name: "山田　太郎", address: "東京都千代田区", address_kana: null });
         expect(db.query("SELECT name, type, union_office_number, union_media_seq FROM social_insurance_groups").get())
             .toEqual({ name: "〇〇健康保険組合", type: "union", union_office_number: null, union_media_seq: 0 });
@@ -132,8 +135,8 @@ describe("更新（v2〜v8）", () => {
         db.exec("INSERT INTO bonus_results (bonus_setting_id, staff_id, total_earnings) VALUES (1, '1001', 500000)");
         db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
         db.exec("PRAGMA user_version = 3");
-        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V4, V5, V6, V7, V8]);
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V4, V5, V6, V7, V8, V9]);
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, in_kind FROM staff").get()).toEqual({ name: "山田　太郎", in_kind: null });
         expect(db.query("SELECT total_earnings, in_kind, in_kind_taxable, in_kind_emp, in_kind_detail FROM salary_results").get())
             .toEqual({ total_earnings: 300000, in_kind: 0, in_kind_taxable: 0, in_kind_emp: 0, in_kind_detail: null });
@@ -146,8 +149,8 @@ describe("更新（v2〜v8）", () => {
         db.exec("INSERT INTO staff (id, name, in_kind) VALUES ('1001', '山田　太郎', '[]')");
         db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
         db.exec("PRAGMA user_version = 4");
-        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V5, V6, V7, V8]);
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V5, V6, V7, V8, V9]);
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, in_kind, kouki_date, health_dependents FROM staff").get())
             .toEqual({ name: "山田　太郎", in_kind: "[]", kouki_date: null, health_dependents: null });
     });
@@ -161,8 +164,8 @@ describe("更新（v2〜v8）", () => {
         db.exec("INSERT INTO staff (id, name, health_dependents) VALUES ('1001', '山田　太郎', '[]')");
         db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
         db.exec("PRAGMA user_version = 5");
-        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V6, V7, V8]);
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V6, V7, V8, V9]);
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, labor_ins_num, koyo_office_number, koyo_hello_work, koyo_media_seq, rousai_business, rousai_rate, nendo_koshin FROM company").get())
             .toEqual({ name: "テスト株式会社", labor_ins_num: "13101123456000", koyo_office_number: null, koyo_hello_work: null, koyo_media_seq: 0, rousai_business: null, rousai_rate: null, nendo_koshin: null });
         expect(db.query("SELECT name, koyo_office_number, koyo_hello_work, rousai_business, rousai_rate FROM branches").get())
@@ -177,8 +180,8 @@ describe("更新（v2〜v8）", () => {
         db.exec("INSERT INTO staff (id, name, koyo_info) VALUES ('1001', '山田　太郎', '{}')");
         db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
         db.exec("PRAGMA user_version = 6");
-        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V7, V8]);
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V7, V8, V9]);
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, nendo_koshin, gensen_nofu FROM company").get()).toEqual({ name: "テスト株式会社", nendo_koshin: "{}", gensen_nofu: null });
         expect(db.query("SELECT name, koyo_info, resident_tax_idou FROM staff").get()).toEqual({ name: "山田　太郎", koyo_info: "{}", resident_tax_idou: null });
     });
@@ -192,14 +195,14 @@ describe("更新（v2〜v8）", () => {
         db.exec("INSERT INTO resident_tax_municipalities (code, designation_number) VALUES ('131016', '1234567890')");
         db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
         db.exec("PRAGMA user_version = 7");
-        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V8]);
-        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 8 });
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V8, V9]);
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
         expect(db.query("SELECT name, gensen_nofu, journal_settings FROM company").get()).toEqual({ name: "テスト株式会社", gensen_nofu: "{}", journal_settings: null });
         expect(db.query("SELECT name, resident_tax_idou, department FROM staff").get()).toEqual({ name: "山田　太郎", resident_tax_idou: "{}", department: null });
         expect(db.query("SELECT code, designation_number, mail_zip, mail_address, mail_name FROM resident_tax_municipalities").get())
             .toEqual({ code: "131016", designation_number: "1234567890", mail_zip: null, mail_address: null, mail_name: null });
     });
-    test("新しいファイルには、はじめから v2〜v8 の列がある", async () => {
+    test("新しいファイルには、はじめから v2〜v9 の列がある", async () => {
         const db = new Database(":memory:");
         await prepareCompanyFile(wrap(db), DB_SCHEMAS);
         expect(columns(db, "company")).toContain("bonus_plan_months");
@@ -210,6 +213,33 @@ describe("更新（v2〜v8）", () => {
         expect(columns(db, "salary_results")).toEqual(expect.arrayContaining(["in_kind", "in_kind_taxable", "in_kind_emp", "in_kind_detail"]));
         expect(columns(db, "bonus_item_master")).toContain("in_kind");
         expect(columns(db, "bonus_results")).toContain("in_kind");
+        expect(columns(db, "company")).toEqual(expect.arrayContaining(["labor_conditions", "kyotei36", "employment_report"]));
+        expect(columns(db, "staff")).toEqual(expect.arrayContaining(["labor_conditions", "kaigo_exempt", "disability_employment", "foreign_info"]));
+    });
+    test("v8 のファイルに、v9 の列（労働条件通知書・36協定・雇用状況報告・介護保険の適用除外・障害者雇用）を足して v9 にする（入れたデータはそのまま）", async () => {
+        const db = new Database(":memory:");
+        db.exec("CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT, journal_settings TEXT)");
+        db.exec("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT NOT NULL, department TEXT, koyo_info TEXT)");
+        db.exec("INSERT INTO company (id, name, journal_settings) VALUES (1, 'テスト株式会社', '{}')");
+        db.exec("INSERT INTO staff (id, name, department, koyo_info) VALUES ('1001', '山田　太郎', '営業部', NULL)");
+        const foreign = { romaji: "NGUYEN VAN AN", nationality: "ベトナム", status: "35", statusText: "", periodEnd: "2029-03-31", permission: "無", card: "AB12345678CD", dispatch: "非該当" };
+        db.exec(`INSERT INTO staff (id, name, department, koyo_info) VALUES ('1002', 'グエン', NULL, '${JSON.stringify({ occupation: "02", foreign })}')`);
+        db.exec("INSERT INTO staff (id, name, department, koyo_info) VALUES ('1003', '日本　花子', NULL, '{\"occupation\":\"01\",\"foreign\":null}')");
+        db.exec("INSERT INTO staff (id, name, department, koyo_info) VALUES ('1004', '壊れた', NULL, '{こわれた')");
+        db.exec(`PRAGMA application_id = ${Q_FILE_ID}`);
+        db.exec("PRAGMA user_version = 8");
+        expect(await prepareCompanyFile(wrap(db), DB_SCHEMAS)).toEqual([V9]);
+        expect(header(db)).toEqual({ id: Q_FILE_ID, version: 9 });
+        expect(db.query("SELECT name, journal_settings, labor_conditions, kyotei36, employment_report FROM company").get())
+            .toEqual({ name: "テスト株式会社", journal_settings: "{}", labor_conditions: null, kyotei36: null, employment_report: null });
+        expect(db.query("SELECT name, department, labor_conditions, kaigo_exempt, disability_employment, foreign_info FROM staff WHERE id = '1001'").get())
+            .toEqual({ name: "山田　太郎", department: "営業部", labor_conditions: null, kaigo_exempt: null, disability_employment: null, foreign_info: null });
+        // 在留資格の情報は、雇用保険の欄（koyo_info の foreign）から foreign_info に移す（確かめた日は空）
+        const moved = db.query("SELECT koyo_info, foreign_info FROM staff WHERE id = '1002'").get() as { koyo_info: string; foreign_info: string };
+        expect(JSON.parse(moved.foreign_info)).toEqual({ ...foreign, checkedOn: "" });
+        expect(JSON.parse(moved.koyo_info)).toEqual({ occupation: "02" });
+        expect(db.query("SELECT koyo_info, foreign_info FROM staff WHERE id = '1003'").get()).toEqual({ koyo_info: JSON.stringify({ occupation: "01" }), foreign_info: null });
+        expect(db.query("SELECT koyo_info, foreign_info FROM staff WHERE id = '1004'").get()).toEqual({ koyo_info: "{こわれた", foreign_info: null });
     });
 });
 

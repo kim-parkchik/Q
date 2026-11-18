@@ -9,7 +9,7 @@ export function PrintFormSheet({ form, office }: { form: PrintForm; office: stri
   return (
     <div style={{ marginBottom: 16, breakInside: "avoid" }}>
       <div style={{ fontSize: 14, fontWeight: "bold", margin: "0 0 4px" }}>{form.title}（{form.who}）</div>
-      <ShahoOfficeTable office={office} />
+      {office.length > 0 && <ShahoOfficeTable office={office} />}
       <table style={table}>
         <tbody>
           {form.items.map((it) => (

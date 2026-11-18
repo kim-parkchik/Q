@@ -73,7 +73,7 @@ export const remunerationNotices = (staffList: any[], ym: string, ctx: NoticeCon
     if (idx < 0) continue;
     const entry = history[idx];
     const prev = idx > 0 ? history[idx - 1] : null;
-    const byAge = getInsuranceByAge(String(s.birthday ?? ""), year, month, s.kouki_date);
+    const byAge = getInsuranceByAge(String(s.birthday ?? ""), year, month, s.kouki_date, s.kaigo_exempt);
     const notes: string[] = [];
     const health = entry.amount;
     const pension = byAge.pension ? pensionStandardOf(health, range) : null;

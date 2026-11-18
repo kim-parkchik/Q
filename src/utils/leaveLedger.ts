@@ -87,6 +87,39 @@ export const buildLeaveLedger = (summary: PaidLeaveSummary, fiveDays: FiveDaySta
   };
 };
 
+/**
+ * 年次有給休暇の付与通知書（1人1枚。従業員に渡す）に書くこと
+ * 法律で決まった書類ではないが、一般的な給与ソフトにあるもの。いちばん新しい付与（期限が切れていないもの）について、
+ * 付与日・付与日数・有効期限（付与日から2年。労働基準法115条）と、いま使える残り（前の付与から繰り越した分を含む）、
+ * 年5日の取得の期間（労働基準法39条7項）と取った日数、時間単位で取れる上限（1年に5日分。同39条4項）を出す。
+ */
+export interface GrantNotice {
+  grant: LeaveLedgerGrant;
+  /** ほかの付与（前の年の分）の、いま使える残り（分） */
+  carriedMinutes: number;
+  /** いま使える残りの合計（分。付与日の前なら、この付与の日数を足した数） */
+  totalMinutes: number;
+  /** 時間単位で取れるのは1年に何時間まで（5日分。時間単位の有給を使わない会社は null） */
+  hourlyLimitHours: number | null;
+}
+
+/** 時間単位の有給は、1年に5日分まで（労働基準法39条4項2号） */
+export const HOURLY_LEAVE_DAYS_LIMIT = 5;
+
+export const buildGrantNotice = (ledger: LeaveLedger, hourlyLeave: boolean): GrantNotice | null => {
+  const grant = ledger.grants.find((g) => g.state !== "expired");
+  if (!grant) return null;
+  const others = ledger.grants.filter((g) => g !== grant && g.state === "active");
+  const carriedMinutes = others.reduce((sum, g) => sum + g.remainingMinutes, 0);
+  const own = grant.state === "active" ? grant.remainingMinutes : grant.grantedDays * ledger.dayMinutes;
+  return {
+    grant,
+    carriedMinutes,
+    totalMinutes: carriedMinutes + own,
+    hourlyLimitHours: hourlyLeave ? HOURLY_LEAVE_DAYS_LIMIT * ledger.hoursPerDay : null,
+  };
+};
+
 /** 分を「3日」「2日と4時間」「4時間」にする */
 export const leaveAmountLabel = (minutes: number, dayMinutes: number): string => {
   if (minutes <= 0) return "0日";

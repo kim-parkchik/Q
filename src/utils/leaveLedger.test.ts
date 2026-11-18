@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { fiveDayStatuses } from "./annualLeaveGrant";
-import { buildLeaveLedger, leaveAmountLabel, leaveLedgerCsv, takenKindLabel } from "./leaveLedger";
+import { buildGrantNotice, buildLeaveLedger, leaveAmountLabel, leaveLedgerCsv, takenKindLabel } from "./leaveLedger";
 import { collectLeaveTaken, summarizePaidLeave, type LeaveGrantRow } from "./paidLeave";
 
 const grants: LeaveGrantRow[] = [
@@ -50,5 +50,35 @@ describe("年次有給休暇管理簿（労働基準法施行規則24条の7：�
     expect(lines[0]).toBe("社員番号,氏名,基準日（付与日）,有効期限,付与日数,取得日（時季）,取得の種類,この付与から引いた日数,取得日数の合計,期限で消えた日数,残日数,年5日の期間,年5日の取得日数,年5日の状況");
     expect(lines[1]).toBe("1001,山田　太郎,2026-10-01,2028-09-30,11,,,,0日,0日,11日,2026-10-01〜2027-09-30,1,あと4日");
     expect(lines[2]).toBe("1001,山田　太郎,2025-10-01,2027-09-30,10,2025-11-10,全休,1日,5日と6時間,0日,4日と2時間,2025-10-01〜2026-09-30,4.5,期間が過ぎて足りない");
+  });
+});
+
+describe("年次有給休暇の付与通知書", () => {
+  const grant = (grantDate: string, expiryDate: string, days: number, state: "upcoming" | "active" | "expired", remaining: number, taken = 0) => ({
+    grantDate, expiryDate, grantedDays: days, taken: [], takenMinutes: taken, expiredMinutes: 0, remainingMinutes: remaining, state, fiveDays: null,
+  });
+  const ledger = (grants: ReturnType<typeof grant>[]) => ({ hoursPerDay: 8, dayMinutes: 480, asOf: "2026-11-18", grants, beforeFirstGrant: [], shortage: [] });
+
+  test("いちばん新しい付与と、前の付与から繰り越した残り", () => {
+    const l = ledger([
+      grant("2026-10-01", "2028-09-30", 12, "active", 11 * 480, 480),
+      grant("2025-10-01", "2027-09-30", 11, "active", 3 * 480 + 240),
+      grant("2024-10-01", "2026-09-30", 10, "expired", 0),
+    ]);
+    const n = buildGrantNotice(l, true)!;
+    expect(n.grant.grantDate).toBe("2026-10-01");
+    expect(n.carriedMinutes).toBe(3 * 480 + 240);
+    expect(n.totalMinutes).toBe(14 * 480 + 240);
+    expect(leaveAmountLabel(n.totalMinutes, 480)).toBe("14.5日");
+    expect(n.hourlyLimitHours).toBe(40);
+    expect(buildGrantNotice(l, false)!.hourlyLimitHours).toBeNull();
+  });
+
+  test("付与日の前の付与は、付与日数を足した数にする。期限が切れた付与しかなければ作らない", () => {
+    const l = ledger([grant("2026-12-01", "2028-11-30", 10, "upcoming", 0), grant("2025-12-01", "2027-11-30", 10, "active", 2 * 480)]);
+    const n = buildGrantNotice(l, false)!;
+    expect(n.grant.grantDate).toBe("2026-12-01");
+    expect(n.totalMinutes).toBe(12 * 480);
+    expect(buildGrantNotice(ledger([grant("2023-04-01", "2025-03-31", 10, "expired", 0)]), false)).toBeNull();
   });
 });

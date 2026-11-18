@@ -105,6 +105,7 @@
  *  - 業務上の負傷・疾病による休業の最初の3日（待期）の休業補償（76条）：平均賃金 × 60%。賃金ではないので、所得税・社会保険・雇用保険の対象外
  *  - 平均賃金を出せないとき（確定していない給与がある・入社して間もないなど）は計算せず、給与明細は確定できない
  */
+import { kaigoExemptMonth } from './kaigoExempt';
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import { applyRounding } from './payrollUtils';
@@ -532,7 +533,13 @@ const monthReachingAge = (birthday: string, age: number) =>
  *      （「厚生年金保険は70歳（70歳の誕生日前日が属する月の前月まで）、健康保険は75歳まで（75歳誕生日当日が属する月の前月まで）」）
  *       賞与：https://www.nenkin.go.jp/service/kounen/hokenryo/hoshu/20141203.html （資格喪失月に支払われた賞与は保険料賦課の対象とならない）
  */
-export const getInsuranceByAge = (birthday: string, year: number, month: number, koukiDate?: string | null) => {
+export const getInsuranceByAge = (birthday: string, year: number, month: number, koukiDate?: string | null, kaigoExempt?: unknown) => {
+  const result = insuranceByAgeOnly(birthday, year, month, koukiDate);
+  // 介護保険の適用除外（国外居住・施設入所・在留資格3か月以下）の月の分は、介護保険料をかけない（utils/kaigoExempt.ts）
+  return kaigoExempt && result.nursing && kaigoExemptMonth(kaigoExempt, year, month) ? { ...result, nursing: false } : result;
+};
+
+const insuranceByAgeOnly = (birthday: string, year: number, month: number, koukiDate?: string | null) => {
   const target = dayjs(new Date(year, month - 1, 1));
   // 後期高齢者医療の障害認定を受けた日がある月の分からは、健康保険料がかからない（資格を失う月）
   const kouki = koukiDate && /^\d{4}-\d{2}-\d{2}$/.test(koukiDate) ? dayjs(koukiDate).startOf('month') : null;
@@ -903,7 +910,7 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
 
   // 2. 料率の取得と計算（本人負担分 = 標準報酬月額 × 料率 ÷ 2）
   // 年齢で、健康保険（75歳の誕生月から）・介護保険（40〜64歳）・厚生年金（70歳に達した月から）の対象が変わる
-  const byAge = getInsuranceByAge(staff.birthday || '', year, month, staff.kouki_date);
+  const byAge = getInsuranceByAge(staff.birthday || '', year, month, staff.kouki_date, staff.kaigo_exempt);
   // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
   const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
   // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）

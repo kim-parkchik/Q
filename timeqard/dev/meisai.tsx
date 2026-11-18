@@ -219,6 +219,7 @@ const fakeDb = {
   async select(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
     if (q.startsWith("SELECT name FROM company WHERE id = 1")) return [store.company];
+    if (q.startsWith("SELECT name, hourly_leave FROM company WHERE id = 1")) return [{ ...store.company, hourly_leave: 1 }];
     if (q.startsWith("SELECT name, journal_settings FROM company")) return [store.company];
     if (q.startsWith("SELECT round_social_ins FROM company")) return [store.company];
     if (q.startsWith("SELECT id, social_ins_collection FROM payroll_groups")) return [{ id: 1, social_ins_collection: "next" }];

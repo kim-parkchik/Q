@@ -43,6 +43,12 @@ import {
   PiggyBank,
   DoorOpen,
   Stethoscope,
+  FilePen,
+  AlarmClock,
+  FileStack,
+  Ambulance,
+  Accessibility,
+  ChartBar,
 } from 'lucide-react';
 import * as S from "./App.styles";
 
@@ -70,6 +76,12 @@ import ResidentTaxIdouManager from "./features/payroll/ResidentTaxIdouManager";
 import PremiumSummaryManager from "./features/payroll/PremiumSummaryManager";
 import RetirementManager from "./features/payroll/RetirementManager";
 import KenpoBenefitCertManager from "./features/payroll/KenpoBenefitCertManager";
+import LaborConditionsManager from "./features/settings/LaborConditionsManager";
+import Kyotei36Manager from "./features/attendance/Kyotei36Manager";
+import ShahoOtherManager from "./features/payroll/ShahoOtherManager";
+import RousaiManager from "./features/payroll/RousaiManager";
+import EmploymentStatusManager from "./features/payroll/EmploymentStatusManager";
+import MaikinManager from "./features/payroll/MaikinManager";
 import SanteiManager from "./features/payroll/SanteiManager";
 import ZuijiManager from "./features/payroll/ZuijiManager";
 import BonusReportManager from "./features/payroll/BonusReportManager";
@@ -104,18 +116,22 @@ const TAB_NAMES: Record<string, string> = {
   company: "会社設定",
   calendar: "会社カレンダー",
   staff: "従業員詳細管理",
+  rouken: "労働条件通知書",
   paid_leave: "有給休暇管理",
   custom_items: "給与項目設定",
   attendance: "勤怠・月次給与",
   timeqard: "TimeQard（打刻）",
+  kyotei36: "36協定",
   bonus: "賞与計算",
   heikin: "平均賃金",
+  rousai: "労災の書類",
   santei: "算定基礎（定時決定）",
   zuiji: "月変（随時改定）",
   shoyotodoke: "賞与支払届",
   shikaku: "資格取得・喪失届",
   fuyou: "被扶養者（異動）届",
   henko: "住所・氏名の変更届",
+  shahosonota: "社会保険のそのほかの届書",
   menjo: "産休・育休の申出書",
   kyugyo: "休業終了時改定",
   youiku: "養育期間の特例",
@@ -123,6 +139,7 @@ const TAB_NAMES: Record<string, string> = {
   koyo: "雇用保険の届書",
   koyokyufu: "雇用保険の給付の書類",
   nendo: "労働保険の年度更新",
+  koyoujoukyou: "高年齢者・障害者の雇用状況報告",
   hokenryo: "保険料の集計表",
   nencho: "年末調整",
   gensen: "源泉徴収票",
@@ -138,6 +155,7 @@ const TAB_NAMES: Record<string, string> = {
   meisai: "明細書・一覧表",
   furikomi: "振込データ",
   choubo: "法定三帳簿",
+  maikin: "毎月勤労統計調査",
   user_management: "システム設定"
 };
 
@@ -162,6 +180,12 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   kyugyo: <Baby size={18} />,
   youiku: <HeartHandshake size={18} />,
   kenpokyufu: <Stethoscope size={18} />,
+  rouken: <FilePen size={18} />,
+  kyotei36: <AlarmClock size={18} />,
+  shahosonota: <FileStack size={18} />,
+  rousai: <Ambulance size={18} />,
+  koyoujoukyou: <Accessibility size={18} />,
+  maikin: <ChartBar size={18} />,
   koyo: <Briefcase size={18} />,
   koyokyufu: <HandCoins size={18} />,
   nendo: <ScrollText size={18} />,
@@ -335,18 +359,22 @@ function App() {
           {isSetupComplete && [
             "calendar", 
             "staff", 
+            "rouken",
             "paid_leave", 
             "custom_items", 
             "attendance", 
             "timeqard",
+            "kyotei36",
             "bonus", 
             "heikin",
+            "rousai",
             "santei",
             "zuiji",
             "shoyotodoke",
             "shikaku",
             "fuyou",
             "henko",
+            "shahosonota",
             "menjo",
             "kyugyo",
             "youiku",
@@ -354,6 +382,7 @@ function App() {
             "koyo",
             "koyokyufu",
             "nendo",
+            "koyoujoukyou",
             "hokenryo",
             "nencho",
             "gensen",
@@ -368,10 +397,11 @@ function App() {
             "payslip",
             "meisai",
             "furikomi",
-            "choubo"
+            "choubo",
+            "maikin"
           ].map((tabKey) => {
             // 💡 スタッフ登録が必要なタブかどうかを判定
-            const needsStaff = ["paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "kenpokyufu", "koyo", "koyokyufu", "nendo", "hokenryo", "nencho", "gensen", "gensenbo", "taishoku", "gensennofu", "kyuho", "juminzei", "nonyu", "idou", "mynumber", "payslip", "meisai", "furikomi", "choubo"].includes(tabKey);
+            const needsStaff = ["rouken", "kyotei36", "shahosonota", "rousai", "koyoujoukyou", "maikin", "paid_leave", "custom_items", "attendance", "timeqard", "bonus", "heikin", "santei", "zuiji", "shoyotodoke", "shikaku", "fuyou", "henko", "menjo", "kyugyo", "youiku", "kenpokyufu", "koyo", "koyokyufu", "nendo", "hokenryo", "nencho", "gensen", "gensenbo", "taishoku", "gensennofu", "kyuho", "juminzei", "nonyu", "idou", "mynumber", "payslip", "meisai", "furikomi", "choubo"].includes(tabKey);
             const isDisabled = needsStaff && !isStaffReady;
 
             return (
@@ -545,6 +575,24 @@ function App() {
               )}
               {activeTab === "gensennofu" && db && (
                 <WithholdingPaymentManager db={db} />
+              )}
+              {activeTab === "koyoujoukyou" && db && (
+                <EmploymentStatusManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "maikin" && db && (
+                <MaikinManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "rousai" && db && (
+                <RousaiManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "shahosonota" && db && (
+                <ShahoOtherManager db={db} staffList={staffList} />
+              )}
+              {activeTab === "kyotei36" && db && (
+                <Kyotei36Manager db={db} staffList={staffList} />
+              )}
+              {activeTab === "rouken" && db && (
+                <LaborConditionsManager db={db} staffList={staffList} />
               )}
               {activeTab === "kenpokyufu" && db && (
                 <KenpoBenefitCertManager db={db} staffList={staffList} />
