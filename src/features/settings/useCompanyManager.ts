@@ -18,6 +18,8 @@ import {
 } from "../../utils/calcSalary";
 import { parseFixedBreak, stringifyFixedBreak, type FixedBreakRule } from "../../utils/fixedBreak";
 import { DEFAULT_FLEX_RULE, parseFlexRule, stringifyFlexRule, type FlexRule } from "../../utils/flexTime";
+import { LEGAL_PREMIUM_RATES, parsePremiumRates, premiumRateProblems, stringifyPremiumRates, type PremiumRates } from "../../utils/premiumRates";
+import { parseKyotei36Settings, type Kyotei36Settings } from "../../utils/kyotei36";
 import { toLeaveProrationMethod, type LeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { SHUTDOWN_ALLOWANCE_MIN_RATE, toShutdownRate } from "../../utils/averageWage";
 
@@ -77,6 +79,10 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [pgTardyDeductionMethod, setPgTardyDeductionMethod] = useState<TardyDeductionMethod>("none"); // 月給制・日給制の人の遅刻・早退・中抜けの控除
     const [pgFixedBreak, setPgFixedBreak] = useState<FixedBreakRule | null>(null); // 決まった休憩（null は使わない。utils/fixedBreak.ts）
     const [pgFlexRule, setPgFlexRule] = useState<FlexRule>(DEFAULT_FLEX_RULE); // フレックスタイム制の決まり（utils/flexTime.ts）
+    // 残業代の割増率（%。就業規則・36協定で決めた率。法律の率より低くはできない。utils/premiumRates.ts）
+    const [pgPremiumRates, setPgPremiumRates] = useState<PremiumRates>(LEGAL_PREMIUM_RATES);
+    // 拠点ごとの36協定（給与規定グループの割増率と、協定の「限度時間を超えた労働の割増率」を照らす。utils/kyotei36.ts）
+    const [kyotei36Settings, setKyotei36Settings] = useState<Kyotei36Settings>({});
     const [editingPgId, setEditingPgId] = useState<number | null>(null);
     const [deletingPgId, setDeletingPgId] = useState<number | null>(null);
 
@@ -215,6 +221,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setRoundOvertime(c.round_overtime || "round");
                 setRoundSocialIns(c.round_social_ins || "currency_law");
                 setRoundEmpIns(c.round_emp_ins || "currency_law");
+                setKyotei36Settings(parseKyotei36Settings(c.kyotei36));
                 if (c.name) setHasSavedOnce(true);
             }
             const resB = await db.select<any[]>("SELECT * FROM branches ORDER BY id ASC");
@@ -345,6 +352,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTardyDeductionMethod(toTardyDeductionMethod(pg.tardy_deduction_method));
         setPgFixedBreak(parseFixedBreak(pg.fixed_break));
         setPgFlexRule(parseFlexRule(pg.flex_rule));
+        setPgPremiumRates(parsePremiumRates(pg.premium_rates));
     };
 
     // フォームのリセット（キャンセル時）
@@ -363,6 +371,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgTardyDeductionMethod("none");
         setPgFixedBreak(null);
         setPgFlexRule(DEFAULT_FLEX_RULE);
+        setPgPremiumRates(LEGAL_PREMIUM_RATES);
     };
 
     // 保存処理（新規登録・更新兼用）
@@ -373,6 +382,10 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         if (pgFixedBreak && !parseFixedBreak(fixedBreak)) {
             return dialog.warning("決まった休憩の時刻（始めと終わりが違うこと）か、長さ（休憩が1分以上）を確かめてください。");
         }
+        // 残業代の割増率：法律の率より低い・数でない欄があれば保存しない
+        const rateProblems = premiumRateProblems(pgPremiumRates);
+        if (rateProblems.length > 0) return dialog.warning(rateProblems.join("\n"));
+        const premiumRates = stringifyPremiumRates(parsePremiumRates(pgPremiumRates));
 
         const isEdit = editingPgId !== null;
         const savedName = pgName;
@@ -380,14 +393,14 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             if (editingPgId !== null) {
                 // 更新
                 await db.execute(
-                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, leave_proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=?, flex_rule=?, shutdown_allowance_rate=? WHERE id=?`,
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgLeaveProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), toShutdownRate(pgShutdownRate), editingPgId]
+                    `UPDATE payroll_groups SET name=?, closing_day=?, is_next_month=?, payment_day=?, tax_calc_method=?, social_ins_collection=?, proration_method=?, leave_proration_method=?, absence_deduction_method=?, tardy_deduction_method=?, fixed_break=?, flex_rule=?, shutdown_allowance_rate=?, premium_rates=? WHERE id=?`,
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgLeaveProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), toShutdownRate(pgShutdownRate), premiumRates, editingPgId]
                 );
             } else {
                 // 新規
                 await db.execute(
-                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, fixed_break, flex_rule, shutdown_allowance_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgLeaveProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), toShutdownRate(pgShutdownRate)]
+                    "INSERT INTO payroll_groups (name, closing_day, is_next_month, payment_day, tax_calc_method, social_ins_collection, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, fixed_break, flex_rule, shutdown_allowance_rate, premium_rates) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [pgName, pgClosingDay, pgIsNextMonth, pgPaymentDay, pgTaxMethod, pgSocialInsCollection, pgProrationMethod, pgLeaveProrationMethod, pgAbsenceDeductionMethod, pgTardyDeductionMethod, fixedBreak || null, stringifyFlexRule(pgFlexRule), toShutdownRate(pgShutdownRate), premiumRates]
                 );
             }
             resetPgForm();
@@ -712,6 +725,9 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setPgFixedBreak,
         pgFlexRule,
         setPgFlexRule,
+        pgPremiumRates,
+        setPgPremiumRates,
+        kyotei36Settings,
         setPgPaymentDay,
         editingPgId,
         setEditingPgId,

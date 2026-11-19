@@ -6,6 +6,7 @@ import { describeFlexSettlement, flexHoursLabel } from '../../utils/flexTime';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
 import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
+import { premiumLineNames } from "../../utils/premiumRates";
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
 import { describeUnionRate, INSURER_TYPE_LABELS } from '../../utils/healthInsurer';
 import { describeFlatTaxPayment } from '../../utils/flatTaxReduction';
@@ -126,6 +127,13 @@ export default function PayStubModal(props: Props) {
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               ⚠ この給与より後に払う給与・賞与（{flatTaxLaterUsed.map(describeFlatTaxPayment).join("・")}）で、先に定額減税を引いて確定しています。
               定額減税は払う日の順に引くので、この給与を確定したあと、後の給与・賞与を確定し直してください（減税額の合計を超えて引かないよう、この給与で引く額は減らしてあります）。
+            </div>
+          )}
+          {salary.overtimeYearBefore === null && salary.premiumRates.overLimitYear > salary.premiumRates.overtime
+            && salary.standardPremiumHours + salary.highPremiumHours > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b45309", lineHeight: 1.6 }}>
+              ⚠ 給与規定グループで、1年の時間外労働が360時間を超えた分の割増率を{salary.premiumRates.overLimitYear}%と決めていますが、
+              この人の拠点の36協定に起算日が入っていないので、1年の時間外労働を数えられず、その率は使っていません。36協定の画面で起算日を入れてください。
             </div>
           )}
           {salary.paidAfterDeath && (
@@ -408,6 +416,17 @@ export default function PayStubModal(props: Props) {
                       {Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超: {fmtH(salary.highPremiumHours)}
                     </div>
                   )}
+                  {/* 1か月45時間（限度時間）・36協定の年360時間を超えた時間（給与規定グループで、その分の率を高く決めたときだけ出す） */}
+                  {salary.overLimitMonthHours > 0 && salary.premiumRates.overLimitMonth > salary.premiumRates.overtime && (
+                    <div style={{ fontSize: '10px', color: '#7c3aed', marginTop: 2, borderTop: '1px dotted #ccc' }}>
+                      月45h超: {fmtH(salary.overLimitMonthHours)}
+                    </div>
+                  )}
+                  {salary.overLimitYearHours > 0 && salary.premiumRates.overLimitYear > salary.premiumRates.overtime && (
+                    <div style={{ fontSize: '10px', color: '#7c3aed', marginTop: 2, borderTop: '1px dotted #ccc' }}>
+                      年360h超: {fmtH(salary.overLimitYearHours)}
+                    </div>
+                  )}
                   {/* 中小企業の猶予（2023年3月まで）で、60時間超も25%で計算した分 */}
                   {salary.deferredHighPremiumHours > 0 && (
                     <div style={{ fontSize: '10px', color: '#7f8c8d', marginTop: 2, borderTop: '1px dotted #ccc' }}>
@@ -465,15 +484,15 @@ export default function PayStubModal(props: Props) {
                   ) : (
                     <>
                       {salary.standardOvertimePay > 0 && (
-                        <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.standardOvertimePay.toLocaleString()}</td></tr>
+                        <tr><td style={S.tdS}>{premiumLineNames(salary.premiumRates).standard}</td><td style={S.rtdS}>¥{salary.standardOvertimePay.toLocaleString()}</td></tr>
                       )}
                       {salary.highOvertimePay > 0 && (
-                        <tr><td style={S.tdS}>時間外手当({Math.round((Master.OVERTIME_PREMIUM_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
+                        <tr><td style={S.tdS}>{premiumLineNames(salary.premiumRates).high}</td><td style={S.rtdS}>¥{salary.highOvertimePay.toLocaleString()}</td></tr>
                       )}
                     </>
                   )}
                   {salary.holidayWorkPay > 0 && (
-                    <tr><td style={S.tdS}>休日出勤手当({Math.round((Master.HOLIDAY_WORK_RATE - 1) * 100)}%割増)</td><td style={S.rtdS}>¥{salary.holidayWorkPay.toLocaleString()}</td></tr>
+                    <tr><td style={S.tdS}>{premiumLineNames(salary.premiumRates).holiday}</td><td style={S.rtdS}>¥{salary.holidayWorkPay.toLocaleString()}</td></tr>
                   )}
                   {salary.paidLeavePay > 0 && (
                     <tr><td style={S.tdS}>有給休暇手当({fmtH(salary.paidLeaveHours)})</td><td style={S.rtdS}>¥{salary.paidLeavePay.toLocaleString()}</td></tr>
@@ -483,7 +502,7 @@ export default function PayStubModal(props: Props) {
                     <tr><td style={S.tdS}>特別休暇手当({fmtH(salary.specialLeaveHours)})</td><td style={S.rtdS}>¥{salary.specialLeavePay.toLocaleString()}</td></tr>
                   )}
 
-                  <tr><td style={S.tdS}>深夜手当</td><td style={S.rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
+                  <tr><td style={S.tdS}>{premiumLineNames(salary.premiumRates).night}</td><td style={S.rtdS}>¥{salary.nightPay.toLocaleString()}</td></tr>
                   {salary.commuteInKind ? (
                     <tr title="定期券などを現物で渡しているので、支給合計・差引支払額には入れていません（下の「現物で払った報酬」）">
                       <td style={S.tdS}>通勤手当(現物)</td><td style={{ ...S.rtdS, color: "#64748b" }}>(¥{salary.commutePay.toLocaleString()})</td>

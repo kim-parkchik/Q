@@ -13,7 +13,7 @@
  * 書面で明示しなければならない事項（記載要領3）が空なら「直すところ」にする。
  */
 import dayjs from "dayjs";
-import { HOLIDAY_WORK_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_RATE, OVERTIME_RATE } from "../constants/labor";
+import { parsePremiumRates } from "./premiumRates";
 import { grantDaysFor, workScaleOf } from "./annualLeaveGrant";
 import { parseWorkDays } from "./annualWorkDays";
 import { parseFixedBreak } from "./fixedBreak";
@@ -201,7 +201,7 @@ export interface LaborContext {
   /** 就業の場所（拠点。なければ会社） */
   branch: { name?: string; address?: string } | null;
   /** 給与規定グループ（締め日・支払日・決まった休憩） */
-  group: { closing_day?: number; is_next_month?: number; payment_day?: number; fixed_break?: string | null } | null;
+  group: { closing_day?: number; is_next_month?: number; payment_day?: number; fixed_break?: string | null; premium_rates?: string | null } | null;
   /** 支給の固定の項目（従業員ごとの額が 0 でないもの） */
   allowances: { name: string; amount: number }[];
   /** 特別休暇の種類（使うもの） */
@@ -226,7 +226,6 @@ const toMinutes = (t: unknown): number | null => {
   const m = /^(\d{1,2}):(\d{2})/.exec(typeof t === "string" ? t.trim() : "");
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
-const pct = (rate: number) => Math.round((rate >= 1 ? rate - 1 : rate) * 100);
 const dayLabel = (d: number | undefined) => (Number(d) === 99 ? "末日" : `${Number(d)}日`);
 
 /** 決まった休憩の分（1日の所定労働時間の人に使うもの。わからなければ null） */
@@ -322,10 +321,16 @@ export const laborDefaults = (ctx: LaborContext): Record<string, string> => {
     lines.push(`固定残業代 ${Number(s.fixed_overtime_allowance).toLocaleString()}円（時間外労働 ${Number(s.fixed_overtime_hours) || 0}時間分。超えた分は別に支払う）`);
   }
   if (lines.length > 0) out.allowances = lines.join("\n");
+  // 割増賃金率は、その人の給与規定グループの率（就業規則・36協定で決めた率。入れていなければ法律の率。utils/premiumRates.ts）
+  const rates = parsePremiumRates(ctx.group?.premium_rates);
+  const overLimitMonth = Math.max(rates.overtime, rates.overLimitMonth);
+  const overLimitYear = Math.max(rates.overtime, rates.overLimitYear);
   out.premiumRates = [
-    `所定時間外、法定超 月６０時間以内（${pct(OVERTIME_RATE)}）％　月６０時間超（${pct(OVERTIME_PREMIUM_RATE)}）％　所定超（0）％`,
-    `休日 法定休日（${pct(HOLIDAY_WORK_RATE)}）％、法定外休日（${pct(OVERTIME_RATE)}）％`,
-    `深夜（${pct(NIGHT_SHIFT_RATE)}）％`,
+    `所定時間外、法定超 月６０時間以内（${rates.overtime}）％　月６０時間超（${Math.max(rates.over60, overLimitMonth)}）％　所定超（${rates.statutory}）％`,
+    ...(overLimitMonth > rates.overtime || overLimitYear > rates.overtime
+      ? [`限度時間を超えた時間外労働 月４５時間超（${overLimitMonth}）％　年３６０時間超（${overLimitYear}）％`] : []),
+    `休日 法定休日（${rates.holiday}）％、法定外休日（${rates.overtime}）％`,
+    `深夜（${rates.night}）％`,
   ].join("\n");
   if (ctx.group) {
     out.closingDay = `毎月 ${dayLabel(ctx.group.closing_day)}`;

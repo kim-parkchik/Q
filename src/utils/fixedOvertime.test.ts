@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { fixedOvertimeCoverageHours, overtimeHourlyRateOf, overtimePayFor } from "./fixedOvertime";
+import { LEGAL_PREMIUM_RATES } from "./premiumRates";
 
 describe("残業代の時給", () => {
   test("（月給 ＋ 残業代の時給に入れる手当）÷ 月平均所定労働時間", () => {
@@ -37,3 +38,14 @@ describe("固定残業代の時間", () => {
     expect(fixedOvertimeCoverageHours(50000, 0)).toBeNull();
   });
 });
+
+describe("給与規定グループの割増率で見た目安（utils/premiumRates.ts）", () => {
+  test("時間外労働30%・月45時間を超えた分40%：50時間分は 時給 ×（1.3 × 45時間 ＋ 1.4 × 5時間）。その額は50時間分に当たる", () => {
+    const rates = { ...LEGAL_PREMIUM_RATES, overtime: 30, overLimitMonth: 40 };
+    const rate = 2000;
+    expect(overtimePayFor(50, rate, rates)).toBe(2000 * (1.3 * 45 + 1.4 * 5));
+    expect(fixedOvertimeCoverageHours(2000 * (1.3 * 45 + 1.4 * 5), rate, rates)).toBeCloseTo(50, 9);
+    expect(fixedOvertimeCoverageHours(2000 * 1.3 * 20, rate, rates)).toBeCloseTo(20, 9);
+  });
+});
+

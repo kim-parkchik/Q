@@ -156,6 +156,13 @@ export const MIGRATIONS: Migration[] = [
       for (const column of ["company_health_rate", "company_care_rate", "company_child_support_rate"]) await addColumnIfMissing(db, "social_insurance_group_rates", column, "REAL");
     },
   },
+  {
+    version: 11,
+    description: "給与規定グループに、残業代の割増率（就業規則・36協定で決めた率）の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "premium_rates", "TEXT");
+    },
+  },
 ];
 
 /**

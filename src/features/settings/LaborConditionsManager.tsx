@@ -59,7 +59,7 @@ export default function LaborConditionsManager({ db, staffList }: Props) {
     (async () => {
       try {
         const [branch] = await db.select<any[]>("SELECT name, address FROM branches WHERE id = ?", [Number(staff.branch_id ?? 1)]);
-        const [group] = await db.select<any[]>("SELECT closing_day, is_next_month, payment_day, fixed_break FROM payroll_groups WHERE id = ?", [Number(staff.payroll_group_id ?? 1)]);
+        const [group] = await db.select<any[]>("SELECT closing_day, is_next_month, payment_day, fixed_break, premium_rates FROM payroll_groups WHERE id = ?", [Number(staff.payroll_group_id ?? 1)]);
         const items = await db.select<any[]>(
           `SELECT m.name, v.amount FROM staff_salary_values v JOIN salary_item_master m ON m.id = v.item_id
            WHERE v.staff_id = ? AND m.type = 'earning' AND m.category = 'fixed' AND v.amount <> 0 ORDER BY m.display_order, m.id`,

@@ -16,7 +16,7 @@ import type { SalaryResult } from "./calcSalary";
 import type { AverageWageKind } from "./averageWage";
 import type { LeavePeriod } from "./leaveExemption";
 import { hasWorkRecord, leaveOn, LEAVE_TYPE_NAMES } from "./leaveOfAbsence";
-import { OVERTIME_PREMIUM_RATE, OVERTIME_RATE, HOLIDAY_WORK_RATE } from "../constants";
+import { LEGAL_PREMIUM_RATES, premiumLineNames } from "./premiumRates";
 
 // ── 賃金台帳の内訳（確定するときに残す） ─────────────────────────────
 
@@ -67,7 +67,6 @@ export interface PayLedger {
   shutdownWorkedPay?: number;
 }
 
-const pct = (rate: number) => Math.round((rate - 1) * 100);
 
 /**
  * 給与の計算結果から、賃金台帳の内訳を作る（給与明細の支給・控除の行と同じ。0円の行は入れない。基本給はいつも入れる）
@@ -83,9 +82,11 @@ export const salaryLedgerOf = (
   const monthly = opts.wageType !== "daily" && opts.wageType !== "hourly";
   // 月給から引く額は月で決まる賃金の、日給から引く額は日で決まる賃金のマイナス
   const adjust: AverageWageKind = monthly ? "month" : "time";
+  // 行の名前は、使った割増率（給与規定グループの決まり。utils/premiumRates.ts）で書く。法律の率なら「時間外手当(25%割増)」など
+  const names = premiumLineNames(r.premiumRates ?? LEGAL_PREMIUM_RATES);
   const overtimeLines: LedgerLine[] = r.fixedOvertimeAllowance > 0
     ? [{ name: "固定残業代", amount: r.fixedOvertimeAllowance, avg: "month" }, { name: "時間外手当(固定残業代の超過分)", amount: r.fixedOvertimeExcess, avg: "time" }]
-    : [{ name: `時間外手当(${pct(OVERTIME_RATE)}%割増)`, amount: r.standardOvertimePay, avg: "time" }, { name: `時間外手当(${pct(OVERTIME_PREMIUM_RATE)}%割増)`, amount: r.highOvertimePay, avg: "time" }];
+    : [{ name: names.standard, amount: r.standardOvertimePay, avg: "time" }, { name: names.high, amount: r.highOvertimePay, avg: "time" }];
   const allEarnings: LedgerLine[] = [
     { name: opts.wageType === "daily" ? "日給" : opts.wageType === "hourly" ? "時給分" : "基本給", amount: r.basePay, avg: monthly ? "month" : "time" },
     { name: "欠勤控除", amount: -r.absenceDeduction, avg: adjust },
@@ -93,12 +94,12 @@ export const salaryLedgerOf = (
     { name: "フレックス不足時間控除", amount: -r.flexShortageDeduction, avg: adjust },
     { name: "遅刻早退控除", amount: -r.tardyDeduction, avg: adjust },
     { name: "休業の日の控除", amount: -(r.shutdown?.deduction ?? 0), avg: adjust },
-    { name: "時間外手当(法定内)", amount: r.statutoryOvertimePay, avg: "time" },
+    { name: names.statutory, amount: r.statutoryOvertimePay, avg: "time" },
     ...overtimeLines,
-    { name: `休日出勤手当(${pct(HOLIDAY_WORK_RATE)}%割増)`, amount: r.holidayWorkPay, avg: "time" },
+    { name: names.holiday, amount: r.holidayWorkPay, avg: "time" },
     { name: "有給休暇手当", amount: r.paidLeavePay, avg: "time" },
     { name: "特別休暇手当", amount: r.specialLeavePay, avg: "time" },
-    { name: "深夜手当", amount: r.nightPay, avg: "time" },
+    { name: names.night, amount: r.nightPay, avg: "time" },
     // 定期券などを現物で渡した通勤手当は、現物の行（inKind）に入れる
     { name: "通勤手当", amount: r.commuteInKind ? 0 : r.commutePay, avg: opts.commuteType === "daily" ? "time" : "month" },
     { name: (opts.allowanceName || "").trim() || "任意手当", amount: r.allowanceAmount, avg: "month" },

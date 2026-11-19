@@ -17,6 +17,8 @@ import { calcDailyHeiTaxByTable, calcMonthlyOtsuTaxByTable, calcWithholdingTax }
 import { INSURANCE_2026 } from "../constants/insurance";
 import { TAX_2026 } from "../constants/tax";
 import { DB_SCHEMAS } from "../types/dbSchema";
+import { LEGAL_PREMIUM_RATES } from "./premiumRates";
+import { salaryLedgerOf } from "./legalBooks";
 import type { AverageWagePay } from "./averageWage";
 import { DEFAULT_FLEX_RULE, flexPositionOf, parseFlexMonthRecord, type FlexMonthRecord, type FlexPeriodContext } from "./flexTime";
 
@@ -206,6 +208,47 @@ describe("雇用保険料の率は、賃金締切日（給与の計算期間の�
         const aprilWork = april({ start: "2026-04-01", end: "2026-04-30" });
         expect(aprilWork.empInsRateMonth).toEqual({ year: 2026, month: 4 });
         expect(aprilWork.empInsurance).toBe(1500); // 300,000円 × 5/1,000
+    });
+});
+
+describe("残業代の割増率（給与規定グループの決まり。utils/premiumRates.ts。入れていなければ法律の率）", () => {
+    // 6月1日(月)〜5日・8日〜12日・15日・16日の12日に12時間ずつ：1日8時間を超えた4時間ずつで、時間外労働は月48時間（週40時間ではふえない）
+    const long12 = ["01", "02", "03", "04", "05", "08", "09", "10", "11", "12", "15", "16"].map((d) => day(d, 12));
+    test("時給1,200円：1か月45時間を超えた3時間は、限度時間を超えた分の率（35%）。法律の率なら48時間とも25%", () => {
+        const legal = calc(hourly, long12);
+        expect(legal.standardOvertimePay).toBe(14400); // 1,200円 × 25% × 48時間
+        const r = calc(hourly, long12, { premiumRates: { ...LEGAL_PREMIUM_RATES, overLimitMonth: 35 } });
+        expect(r.standardOvertimePay).toBe(14760); // 1,200円 ×（25% × 45時間 ＋ 35% × 3時間）
+        expect([r.overLimitMonthHours, r.overLimitYearHours]).toEqual([3, 0]);
+        expect(r.premiumRates.overLimitMonth).toBe(35);
+    });
+    test("36協定の年のそれまでの時間外労働が350時間なら、11時間目から年360時間を超えた分の率（40%）。わからなければ使わない", () => {
+        const rates = { ...LEGAL_PREMIUM_RATES, overLimitYear: 40 };
+        const r = calc(hourly, long12, { premiumRates: rates, overtimeYearBefore: 350 });
+        expect(r.standardOvertimePay).toBe(21240); // 1,200円 ×（25% × 10時間 ＋ 40% × 38時間）
+        expect(r.overLimitYearHours).toBe(38);
+        expect(calc(hourly, long12, { premiumRates: rates, overtimeYearBefore: null }).standardOvertimePay).toBe(14400);
+    });
+    test("法定休日40%・深夜30%・法定内残業25%（1日6時間の時給の人が8時間働いた日の2時間）", () => {
+        const sixHours = { ...hourly, scheduled_work_hours: 6 };
+        const rows = [day("01", 8), day("07", 8, "statutory_holiday", { night_hours: 2 })];
+        const legal = calc(sixHours, rows);
+        expect([legal.statutoryOvertimePay, legal.holidayWorkPay, legal.nightPay]).toEqual([0, 3360, 600]);
+        expect(legal.totalStatutoryOvertimeHours).toBe(2);
+        const r = calc(sixHours, rows, { premiumRates: { ...LEGAL_PREMIUM_RATES, holiday: 40, night: 30, statutory: 25 } });
+        expect(r.statutoryOvertimePay).toBe(600); // 1,200円 × 25% × 2時間
+        expect(r.holidayWorkPay).toBe(3840);      // 1,200円 × 40% × 8時間
+        expect(r.nightPay).toBe(720);             // 1,200円 × 30% × 2時間
+    });
+    test("月給の人：時間外労働30%なら、2時間の時間外手当は 残業代の時給 × 1.30 × 2時間。賃金台帳の行の名前も30%", () => {
+        const rows = [...weekdays().slice(0, 4), day("12", 10)];
+        const legal = calc(monthly, rows);
+        const r = calc(monthly, rows, { premiumRates: { ...LEGAL_PREMIUM_RATES, overtime: 30 } });
+        expect(r.standardOvertimePay).toBe(Math.round(r.overtimeHourlyRate * 1.3 * 2));
+        expect(legal.standardOvertimePay).toBe(Math.round(legal.overtimeHourlyRate * 1.25 * 2));
+        const names = salaryLedgerOf(r, { wageType: "monthly" }).earnings.map((l) => l.name);
+        expect(names).toContain("時間外手当(30%割増)");
+        expect(salaryLedgerOf(legal, { wageType: "monthly" }).earnings.map((l) => l.name)).toContain("時間外手当(25%割増)");
     });
 });
 

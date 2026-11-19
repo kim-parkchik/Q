@@ -7,6 +7,9 @@
  *  - 所定時間超〜8時間 → 法定内残業（割増義務なし、基本単価のみ）
  *  - 上記どちらかで月60時間超の分 → 割増50%必須
  *    （中小企業は2023年3月31日までに働いた分は猶予され25%。会社設定の「中小企業」で切り替える）
+ *  - 割増率は給与規定グループで決めた率（就業規則でこれより高く決めた会社。法律の率より低くはできない）。
+ *    36協定の限度時間（月45時間・年360時間）を超えた時間外労働の率も、給与規定グループに入れる（utils/premiumRates.ts。extras.premiumRates）。
+ *    下の説明の 25%・50%・35%・1.25倍・1.5倍 は、入れていないとき（法律の率）の数
  *
  * 週40時間の数え方:
  *  - 1週間は、会社設定の週の起算曜日から7日（就業規則に定めがなければ日曜日から土曜日まで。昭和63年1月1日基発第1号）。
@@ -107,6 +110,7 @@
  */
 import { kaigoExemptMonth } from './kaigoExempt';
 import { shahoLossOnMonth } from "./shahoLoss";
+import { LEGAL_PREMIUM_RATES, overtimeSegments, type PremiumRates } from "./premiumRates";
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import { applyRounding } from './payrollUtils';
@@ -163,6 +167,13 @@ export interface SalaryExtras {
   flatTaxReductionRemaining?: number;
   /** この給与を支払う日（給与規定グループの支払日。死亡した後に支払う給与かを見る。なければ見ない） */
   payDate?: string;
+  /** 残業代の割増率（給与規定グループの決まり。utils/premiumRates.ts。なければ法律の率） */
+  premiumRates?: PremiumRates | null;
+  /**
+   * 36協定の年（起算日から1年）のうち、この給与の計算期間より前の時間外労働の時間（年の限度時間を超えた分の率に使う。
+   * 協定・起算日がなくてわからなければ null か省略。utils/premiumRates.ts の sumYearOvertime）
+   */
+  overtimeYearBefore?: number | null;
   /** この給与で精算する年末調整の過不足額（＋なら還付、−なら徴収。なければ 0） */
   yearEndSettlement?: number;
   /** 1年間の所定労働日数（残業代の時給を出す「1年間における1か月平均所定労働時間」に使う。なければその月の所定労働日数で割る） */
@@ -228,6 +239,14 @@ export interface SalaryResult {
   standardPremiumHours: number; // ★追加：標準割増（25%）の対象時間
   highPremiumHours: number;     // ★追加：高率割増（50%）の対象時間
   deferredHighPremiumHours: number; // 月60時間超のうち、中小企業の猶予（2023年3月まで）で25%にした時間（standardPremiumHours の内数）
+  /** 使った残業代の割増率（給与規定グループの決まり。入れていなければ法律の率） */
+  premiumRates: PremiumRates;
+  /** 時間外労働のうち、1か月の限度時間（45時間）を超えた時間（60時間を超えた時間も含む） */
+  overLimitMonthHours: number;
+  /** 時間外労働のうち、36協定の年の限度時間（360時間）を超えた時間 */
+  overLimitYearHours: number;
+  /** 36協定の年のうち、この計算期間より前の時間外労働（わからなければ null） */
+  overtimeYearBefore: number | null;
   /**
    * 法定外残業のうち、所定労働時間の中の時間（standardPremiumHours・highPremiumHours の内数）。
    * 通常の賃金は月給・日給（と月額の手当）で払っているので、割増分（25%・50%）だけを払った時間
@@ -466,48 +485,16 @@ const paidLeaveHoursOf = (type: string, scheduledHours: number, paidLeaveHours: 
 };
 
 /**
- * その日の法定外残業を「25%の時間」と「50%の時間（月60時間超）」に分ける
- * ・60時間の累計（hoursSoFar）には、猶予の有無にかかわらず、その月のそれまでの法定外残業をすべて数える
- *   （「起算日からの時間外労働時間数を累計して60時間を超えた時点から」50%）
- * ・中小企業が2023年3月31日までに働かせた分は、60時間を超えても25%（deferred に数える）
- */
-export const splitOvertimeHours = (
-  todayHours: number,
-  hoursSoFar: number,
-  workDate: string,
-  isSmallBusiness: boolean
-) => {
-  const over60 = Math.max(0, todayHours - Math.max(0, Master.OVERTIME_PREMIUM_LIMIT_HOURS - hoursSoFar));
-  if (isSmallBusiness && workDate < Master.SME_OVERTIME_PREMIUM_FROM) {
-    return { standard: todayHours, high: 0, deferred: over60 };
-  }
-  return { standard: todayHours - over60, high: over60, deferred: 0 };
-};
-
-/**
  * その日の働いた時間を、所定労働時間の外の時間で分ける
- * ・beyond：法定外残業のうち、所定労働時間の外の時間（通常の賃金も払っていないので、1.25倍・1.5倍で払う）
- * ・statutory：所定労働時間の外の時間のうち、法定外残業でない時間（法定内残業。1.0倍）
- * 法定外残業のうち beyond を除いた時間は、所定労働時間の中の時間（通常の賃金は月給・日給で払っているので、割増分だけ）
+ * ・beyond：法定外残業のうち、所定労働時間の外の時間（通常の賃金も払っていないので、1.0倍 ＋ 割増率で払う）
+ * ・statutory：所定労働時間の外の時間のうち、法定外残業でない時間（法定内残業。1.0倍。会社が割増を決めていれば、その率を足す）
+ * 法定外残業のうち beyond を除いた時間は、所定労働時間の中の時間（通常の賃金は月給・日給で払っているので、割増分だけ。
+ * 段ごとの率は utils/premiumRates.ts の overtimeSegments）
  */
 export const splitBySchedule = (workHours: number, scheduled: number, legalOvertime: number) => {
   const outside = Math.max(0, workHours - scheduled);
   const beyond = Math.min(legalOvertime, outside);
   return { beyond, statutory: outside - beyond };
-};
-
-/**
- * 法定外残業のうち、所定労働時間の中の時間を、25%の時間と50%の時間（月60時間超）に分ける
- * 法定外残業（1日8時間・週40時間を超えた時間）も、所定労働時間の外の時間も、月60時間を超えた時間も、どれもその日の終わりのほうの
- * 時間なので、月60時間を超えた時間は、所定労働時間の外の時間から先に当たる
- * @param legalOvertime その日の法定外残業
- * @param beyond 法定外残業のうち、所定労働時間の外の時間（splitBySchedule）
- * @param high 法定外残業のうち、月60時間を超えた時間（splitOvertimeHours）
- */
-export const withinScheduleSplit = (legalOvertime: number, beyond: number, high: number) => {
-  const within = Math.max(0, legalOvertime - beyond);
-  const withinHigh = Math.min(within, Math.max(0, high - beyond));
-  return { standard: within - withinHigh, high: withinHigh };
 };
 
 export const PREFECTURES = Object.keys(Master.INSURANCE_2026.KENPO_RATES);
@@ -1424,6 +1411,35 @@ export const calculateSalary = (
   let highPremiumHours = 0;     // ★追加
   let deferredHighPremiumHours = 0;
   let overtimeWithinScheduleHours = 0; // 法定外残業のうち、所定労働時間の中の時間（割増分だけを払う）
+  // 残業代の割増率（給与規定グループの決まり。入れていなければ法律の率。utils/premiumRates.ts）
+  const rates: PremiumRates = extras.premiumRates ?? LEGAL_PREMIUM_RATES;
+  // 36協定の年のうち、この計算期間より前の時間外労働（年の限度時間を超えた分の率に使う。わからなければ null）
+  const yearBefore: number | null = typeof extras.overtimeYearBefore === 'number' && Number.isFinite(extras.overtimeYearBefore)
+    ? Math.max(0, extras.overtimeYearBefore) : null;
+  let overLimitMonthHours = 0;  // 1か月の限度時間（45時間）を超えた時間外労働
+  let overLimitYearHours = 0;   // 36協定の年の限度時間（360時間）を超えた時間外労働
+  /**
+   * 時間外労働の段（utils/premiumRates.ts の overtimeSegments）ごとに払う額を足し、時間を数える
+   * @param payOf その段の1時間に払う額（所定労働時間の中の時間は、割増分だけ）
+   */
+  const addOvertimeSegments = (
+    hours: number, within: number, workDate: string,
+    payOf: (s: { within: boolean; rate: number }) => number,
+  ) => {
+    for (const s of overtimeSegments({
+      hours, within, monthSoFar: totalOvertimeHours, yearSoFar: yearBefore === null ? null : yearBefore + totalOvertimeHours,
+      workDate, isSmallBusiness, rates,
+    })) {
+      const pay = payOf(s) * s.hours;
+      if (s.high) { highOvertimePay += pay; highPremiumHours += s.hours; }
+      else { standardOvertimePay += pay; standardPremiumHours += s.hours; }
+      if (s.deferred) deferredHighPremiumHours += s.hours;
+      if (s.within) overtimeWithinScheduleHours += s.hours;
+      if (s.overLimitMonth) overLimitMonthHours += s.hours;
+      if (s.overLimitYear) overLimitYearHours += s.hours;
+    }
+    totalOvertimeHours += hours;
+  };
   let holidayWorkHours = 0;
   let paidLeaveHours = 0;
   let dailyWageDays = 0;        // 日給制で日給を払った日数
@@ -1627,8 +1643,8 @@ export const calculateSalary = (
 
       if (type === 'statutory_holiday') {
         // ── 【法定休日】（日曜日など） ──────────────────────
-        // 1. 休日出勤手当 (1.35倍) ※60h超のカウントには含めない
-        holidayWorkPay += rate * Master.HOLIDAY_WORK_RATE * h;
+        // 1. 休日出勤手当（1.35倍。会社の率があればその率） ※60h超のカウントには含めない
+        holidayWorkPay += rate * (1 + rates.holiday / 100) * h;
         holidayWorkHours += h;
 
         // 2. 休日深夜割増 (+0.25倍加算 = 計1.60倍)
@@ -1650,25 +1666,15 @@ export const calculateSalary = (
         const { beyond, statutory: effectiveStatutoryOvertime } = splitBySchedule(h, currentScheduled, legalOvertimeToday);
 
         totalStatutoryOvertimeHours += effectiveStatutoryOvertime;
-        statutoryOvertimePay += rate * effectiveStatutoryOvertime;
+        // 法定内残業は1.0倍（会社が法定内残業にも割増を決めていれば、その率を足す）
+        statutoryOvertimePay += rate * (1 + rates.statutory / 100) * effectiveStatutoryOvertime;
 
         // 3. 法定外残業代（1.25倍 / 1.5倍）の累積
         if (legalOvertimeToday > 0) {
-          // 月60時間（Master.OVERTIME_PREMIUM_LIMIT_HOURS）を超えているか判定
-          const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
-          // 所定労働時間の中の法定外残業は、通常の賃金（1.0倍）を月給・日給で払っているので、割増分だけを足す
-          const within = withinScheduleSplit(legalOvertimeToday, beyond, split.high);
-
-          // 1.25倍（所定の中の時間は25%増の分だけ）の計算
-          standardOvertimePay += rate * (Master.OVERTIME_RATE * split.standard - within.standard);
-          // 1.50倍（所定の中の時間は50%増の分だけ）の計算
-          highOvertimePay += rate * (Master.OVERTIME_PREMIUM_RATE * split.high - within.high);
-
-          standardPremiumHours += split.standard;
-          highPremiumHours += split.high;
-          deferredHighPremiumHours += split.deferred;
-          overtimeWithinScheduleHours += within.standard + within.high;
-          totalOvertimeHours += legalOvertimeToday; // ここで60hカウントを蓄積
+          // 時間外労働を、率の違う段（月45時間・60時間・年360時間で分かれる）に分けて払う（utils/premiumRates.ts の overtimeSegments）
+          // 所定労働時間の中の時間外労働は、通常の賃金（1.0倍）を月給・日給で払っているので、割増分だけを足す
+          addOvertimeSegments(legalOvertimeToday, legalOvertimeToday - beyond, row.work_date,
+            (s) => rate * ((s.within ? 0 : 1) + s.rate / 100));
         }
       }
 
@@ -1677,7 +1683,7 @@ export const calculateSalary = (
       // 法定休日の場合：1.35 + 0.25 = 1.60
       // 平日残業(60h内)の場合：1.25 + 0.25 = 1.50
       // 平日残業(60h超)の場合：1.50 + 0.25 = 1.75
-      nightPay += rate * Master.NIGHT_SHIFT_RATE * n;
+      nightPay += rate * (rates.night / 100) * n;
       addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
     }
 
@@ -1711,11 +1717,11 @@ export const calculateSalary = (
         specialLeavePay += wage * specialHours;
       }
 
-      nightPay += (wage + allowancePerHour) * Master.NIGHT_SHIFT_RATE * n;
+      nightPay += (wage + allowancePerHour) * (rates.night / 100) * n;
 
       if (type === 'statutory_holiday') {
         // 法定休日の労働：基本の時給分は basePay に入っているので、35%の割増分だけを足す（60h超のカウントには含めない）
-        holidayWorkPay += (wage * (Master.HOLIDAY_WORK_RATE - 1) + allowancePerHour * Master.HOLIDAY_WORK_RATE) * h;
+        holidayWorkPay += (wage * (rates.holiday / 100) + allowancePerHour * (1 + rates.holiday / 100)) * h;
         holidayWorkHours += h;
         addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
         continue;
@@ -1733,26 +1739,18 @@ export const calculateSalary = (
       const weekOnlyOvertime = weeklyOvertimeByDate[row.work_date] ?? 0;
       const legalOvertimeToday = legalOvertimeFromDay + weekOnlyOvertime;
 
+      // 所定労働時間の外の時間のうち、時間外労働でない時間（法定内残業）。時給の1.0倍分は働いた時間の賃金で払っているので、
+      // 会社が法定内残業にも割増を決めていれば、その割増分だけを足す
+      const currentScheduled = scheduledHoursOf(type, scheduledHours, (Number(row.paid_leave_hours) || 0) + specialLeaveHoursOf(row));
+      const { beyond, statutory: hourlyStatutory } = splitBySchedule(h, currentScheduled, legalOvertimeToday);
+      totalStatutoryOvertimeHours += hourlyStatutory;
+      statutoryOvertimePay += (wage + allowancePerHour) * (rates.statutory / 100) * hourlyStatutory;
+
       if (legalOvertimeToday > 0) {
-        // ★ 1. 「今日（その行）の時間」を25%と50%（月60時間超）に分ける
-        const split = splitOvertimeHours(legalOvertimeToday, totalOvertimeHours, row.work_date, isSmallBusiness);
+        // 時間外労働を、率の違う段に分けて払う。時給の1.0倍分は basePay で払っているので割増分だけ、手当の分は払っていないので率をそのまま掛ける
         // 所定労働時間の中の時間は、手当の通常の分（1.0倍）を月額の手当で払っているので、手当の分も割増分だけを足す（月給制・日給制と同じ）
-        const currentScheduled = scheduledHoursOf(type, scheduledHours, (Number(row.paid_leave_hours) || 0) + specialLeaveHoursOf(row));
-        const { beyond } = splitBySchedule(h, currentScheduled, legalOvertimeToday);
-        const within = withinScheduleSplit(legalOvertimeToday, beyond, split.high);
-
-        // ★ 2. 金額を累積
-        standardOvertimePay += (wage * (Master.OVERTIME_RATE - 1) + allowancePerHour * Master.OVERTIME_RATE) * split.standard
-          - allowancePerHour * within.standard;
-        highOvertimePay += (wage * (Master.OVERTIME_PREMIUM_RATE - 1) + allowancePerHour * Master.OVERTIME_PREMIUM_RATE) * split.high
-          - allowancePerHour * within.high;
-
-        // ★ 3. 外側の変数（合計時間）に足し込む
-        standardPremiumHours += split.standard;
-        highPremiumHours += split.high;
-        deferredHighPremiumHours += split.deferred;
-        overtimeWithinScheduleHours += within.standard + within.high;
-        totalOvertimeHours += legalOvertimeToday;
+        addOvertimeSegments(legalOvertimeToday, legalOvertimeToday - beyond, row.work_date,
+          (s) => wage * (s.rate / 100) + allowancePerHour * ((s.within ? 0 : 1) + s.rate / 100));
       }
       addDayPay(row.work_date, payTotal() - pay0, overtimeTotal() - overtime0);
     }
@@ -1815,21 +1813,17 @@ export const calculateSalary = (
     flexSettlement = staff.wage_type === 'hourly' ? { ...settled, carryOutHours: 0, deductHours: 0 } : settled;
     const fs = flexSettlement;
     const overtime0 = overtimeTotal();
-    // 月60時間を超えた時間（50%）は、あとのほうの時間なので、総労働時間を超えた時間から先に当たる
-    const split = splitOvertimeHours(fs.overtimeHours, 0, to || '9999-12-31', isSmallBusiness);
-    const highFull = Math.min(fs.fullOvertimeHours, split.high);
-    const highOnly = split.high - highFull;
-    const stdFull = fs.fullOvertimeHours - highFull;
-    const stdOnly = Math.max(0, fs.premiumOnlyHours - highOnly);
+    // 時間外労働を、率の違う段（月45時間・60時間・年360時間）に分ける。限度時間・60時間を超えた時間は、あとのほうの時間なので、
+    // 総労働時間を超えた時間（通常の賃金も払う時間）から先に当たる。総労働時間の中の時間外（premiumOnlyHours）は、はじめの方の時間
+    const flexDate = to || '9999-12-31';
     if (staff.wage_type === 'monthly' || isDaily) {
       // 月給制は (月給 ＋ 手当) ÷ 1か月平均所定労働時間、日給制は 日給 ÷ 1日の所定労働時間 ＋ 手当を時間あたりにした額
       const rate = overtimeHourlyRate;
-      // 総労働時間を超えた時間：法定内は1.0倍、時間外は1.25倍・1.5倍。総労働時間の中の時間外（繰り越しで総枠を超えたとき）は割増分だけ
-      // 清算期間が2・3か月の途中の月は、週平均50時間を超えた時間を1.25倍・1.5倍で払う
-      statutoryOvertimePay += rate * fs.innerHours;
+      // 総労働時間を超えた時間：法定内は1.0倍（会社の率があれば足す）、時間外は段ごとの率。総労働時間の中の時間外（繰り越しで総枠を超えたとき）は割増分だけ
+      // 清算期間が2・3か月の途中の月は、週平均50時間を超えた時間を段ごとの率で払う
+      statutoryOvertimePay += rate * (1 + rates.statutory / 100) * fs.innerHours;
       totalStatutoryOvertimeHours += fs.innerHours;
-      standardOvertimePay += rate * (Master.OVERTIME_RATE * stdFull + (Master.OVERTIME_RATE - 1) * stdOnly);
-      highOvertimePay += rate * (Master.OVERTIME_PREMIUM_RATE * highFull + (Master.OVERTIME_PREMIUM_RATE - 1) * highOnly);
+      addOvertimeSegments(fs.overtimeHours, fs.premiumOnlyHours, flexDate, (s) => rate * ((s.within ? 0 : 1) + s.rate / 100));
       if (isDaily && fs.deductHours > 0) {
         // 日給制の不足時間：日給 × 時間 ÷ 1日の所定労働時間（遅刻・早退・中抜けの控除と同じ1時間あたりの額。引く額は、その月に払う日給の合計まで）
         const dayWage = Number(staff.base_wage) || 0;
@@ -1855,16 +1849,12 @@ export const calculateSalary = (
       // 時給制：時給の1.0倍分は働いた時間の賃金で払っているので、時間外労働の割増分だけを足す（手当の分は割増率をそのまま掛ける。
       // 総労働時間の中の時間外は、手当の1.0倍分も月額の手当で払っているので、手当の分も割増分だけ）
       const wage = Number(staff.base_wage) || 0;
-      standardOvertimePay += (wage * (Master.OVERTIME_RATE - 1) + allowancePerHour * Master.OVERTIME_RATE) * split.standard
-        - allowancePerHour * stdOnly;
-      highOvertimePay += (wage * (Master.OVERTIME_PREMIUM_RATE - 1) + allowancePerHour * Master.OVERTIME_PREMIUM_RATE) * split.high
-        - allowancePerHour * highOnly;
+      // 法定内の時間（総労働時間を超えて法定の総枠までの時間）は、会社が割増を決めていれば、その割増分だけを足す
+      statutoryOvertimePay += (wage + allowancePerHour) * (rates.statutory / 100) * fs.innerHours;
+      totalStatutoryOvertimeHours += fs.innerHours;
+      addOvertimeSegments(fs.overtimeHours, fs.premiumOnlyHours, flexDate,
+        (s) => wage * (s.rate / 100) + allowancePerHour * ((s.within ? 0 : 1) + s.rate / 100));
     }
-    standardPremiumHours += split.standard;
-    highPremiumHours += split.high;
-    deferredHighPremiumHours += split.deferred;
-    overtimeWithinScheduleHours += fs.premiumOnlyHours;
-    totalOvertimeHours += fs.overtimeHours;
     // 丙欄の日ごとの給与：清算した残業代は、計算期間の最後の日に入れる
     const lastDate = sorted[sorted.length - 1]?.work_date;
     if (lastDate) addDayPay(lastDate, 0, overtimeTotal() - overtime0);
@@ -2181,6 +2171,10 @@ export const calculateSalary = (
     totalNightHours,
     totalStatutoryOvertimeHours,
     standardPremiumHours,
+    premiumRates: rates,
+    overLimitMonthHours,
+    overLimitYearHours,
+    overtimeYearBefore: yearBefore,
     highPremiumHours,
     deferredHighPremiumHours,
     overtimeWithinScheduleHours,

@@ -42,6 +42,7 @@ export default function WorkPatternSection({ cm }: Props) {
         hourlyConversion,
         overtimeBaseAllowances,
         overtimeHourlyRate,
+        targetPremiumRates,
     } = cm;
 
     return (
@@ -377,15 +378,15 @@ export default function WorkPatternSection({ cm }: Props) {
                     )}
                     {targetFixedOvertimeAmount > 0 && targetWageType === "monthly" && (() => {
                         // 給与計算と同じ「残業代の時給」で見た目安（utils/fixedOvertime.ts）
-                        const hours = fixedOvertimeCoverageHours(targetFixedOvertimeAmount, overtimeHourlyRate);
+                        const hours = fixedOvertimeCoverageHours(targetFixedOvertimeAmount, overtimeHourlyRate, targetPremiumRates);
                         if (hours === null) return null;
-                        const needed = targetFixedOvertimeHours > 0 ? Math.ceil(overtimePayFor(targetFixedOvertimeHours, overtimeHourlyRate)) : 0;
+                        const needed = targetFixedOvertimeHours > 0 ? Math.ceil(overtimePayFor(targetFixedOvertimeHours, overtimeHourlyRate, targetPremiumRates)) : 0;
                         const short = targetFixedOvertimeHours > 0 && targetFixedOvertimeAmount < needed;
                         return (
                             <p style={{ fontSize: "10px", color: short ? "#b45309" : "#64748b", marginTop: "4px", lineHeight: 1.5 }}>
                                 {short ? "⚠ " : ""}{targetFixedOvertimeAmount.toLocaleString()}円は、時間外労働 約{hours.toFixed(1)}時間分の割増賃金に当たります
                                 （残業代の時給 約{Math.round(overtimeHourlyRate).toLocaleString()}円 ＝（基本給{overtimeBaseAllowances > 0 ? ` ＋ 残業代の時給に入れる手当 ${overtimeBaseAllowances.toLocaleString()}円` : ""}）÷ 月平均所定労働時間 {monthlyAverageHours.toFixed(1)}時間。
-                                25%増し、月60時間を超えた分は50%増し。給与明細で入れる役職手当は入れていない目安です）。
+                                割増率は給与規定グループの率で{targetPremiumRates.overtime}%増し、月60時間を超えた分は{Math.max(targetPremiumRates.over60, targetPremiumRates.overLimitMonth)}%増し{Math.max(targetPremiumRates.overtime, targetPremiumRates.overLimitMonth) > targetPremiumRates.overtime ? `（月45時間を超えた分は${Math.max(targetPremiumRates.overtime, targetPremiumRates.overLimitMonth)}%増し）` : ""}。給与明細で入れる役職手当は入れていない目安です）。
                                 {targetFixedOvertimeHours > 0 && `設定した${targetFixedOvertimeHours}時間分の割増賃金は 約${needed.toLocaleString()}円です。`}
                                 {short && `固定残業代が約${(needed - targetFixedOvertimeAmount).toLocaleString()}円足りないため、${targetFixedOvertimeHours}時間に届く前から超過分を払うことになります。金額か時間を見直してください。`}
                             </p>

@@ -27,6 +27,7 @@ import {
 import { residentTaxScheduleOf, stringifyResidentTaxSchedule, type ResidentTaxYear } from "../../utils/residentTax";
 import { loadCustomItems } from "../../utils/calcSalary";
 import { overtimeHourlyRateOf } from "../../utils/fixedOvertime";
+import { parsePremiumRates } from "../../utils/premiumRates";
 import { DEFAULT_COMMUTE_SETTING, parseCommuteSetting, stringifyCommuteSetting, type CommuteSetting } from "../../utils/commuteAllowance";
 import { fromStaffAccountForm, loadStaffBankAccounts, staffBankAccountStatements, toStaffAccountForm, type StaffAccountForm } from "../../utils/bankAccounts";
 import { bankAccountProblems } from "../../utils/zengin";
@@ -811,6 +812,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const hourlyConversion = targetWageType === "monthly" ? (targetWage / monthlyAverageHours) : targetWage;
     // 残業代の時給（給与計算と同じ：(月給 ＋ 残業代の時給に入れる手当) ÷ 月平均所定労働時間。月給制の人だけ）
     const overtimeHourlyRate = targetWageType === "monthly" ? overtimeHourlyRateOf(targetWage, overtimeBaseAllowances, monthlyAverageHours) : 0;
+    // 選んでいる給与規定グループの残業代の割増率（固定残業代の目安に使う。utils/premiumRates.ts）
+    const targetPremiumRates = parsePremiumRates(payrollGroups.find(g => Number(g.id) === (Number(targetPayrollGroupId) || 1))?.premium_rates);
 
     const branchMap = Object.fromEntries(branches.map(b => [b.id, b.name]));
 
@@ -982,6 +985,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         annualWorkDays,
         setAnnualWorkDays,
         payrollGroups,
+        targetPremiumRates,
         setPayrollGroups,
         targetPayrollGroupId,
         setTargetPayrollGroupId,

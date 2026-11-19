@@ -42,6 +42,17 @@ describe("労働条件通知書", () => {
     expect(d.employmentInsurance).toBe("有");
     expect(defaultFormType(staff)).toBe("general");
   });
+  test("割増賃金率は、その人の給与規定グループの率（就業規則・36協定で決めた率）", () => {
+    const staff = { id: "1", join_date: "2026-04-01", scheduled_work_hours: 8, wage_type: "monthly", base_wage: 250000, is_overtime_eligible: 1 };
+    const group = { closing_day: 99, is_next_month: 1, payment_day: 25, fixed_break: null,
+      premium_rates: JSON.stringify({ overtime: 30, overLimitMonth: 35, over60: 50, overLimitYear: 35, holiday: 40, night: 30, statutory: 25 }) };
+    expect(laborDefaults(base(staff, { group })).premiumRates.split("\n")).toEqual([
+      "所定時間外、法定超 月６０時間以内（30）％　月６０時間超（50）％　所定超（25）％",
+      "限度時間を超えた時間外労働 月４５時間超（35）％　年３６０時間超（35）％",
+      "休日 法定休日（40）％、法定外休日（30）％",
+      "深夜（30）％",
+    ]);
+  });
 
   test("パート（有期・曜日で決める・週15時間）：短時間労働者用で、勤務日・比例付与・更新の明示事項", () => {
     const staff = {

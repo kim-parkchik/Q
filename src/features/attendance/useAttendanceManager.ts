@@ -15,6 +15,7 @@ import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 import { breakShortage, calcDayHours, describeCombine, describeFixedBreak, fixedBreakRuleFor, leaveMinutesOf, recordedRestMinutes, specialLeaveMinutesOf, type DayTimes } from "../../utils/fixedBreak";
 import { effectiveBreaks, parseBreaksJson, stringifyBreaks } from "../../utils/breaks";
 import { branchPrefectureOf, kenpoPrefectureOf } from "../../utils/branchPrefecture";
+import { parsePremiumRates, type PremiumRates } from "../../utils/premiumRates";
 import {
   collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, hourlyLeaveByGrantYear, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
   type AttendanceLeaveRow, type LeaveGrantRow, type ManualLeaveRecord,
@@ -470,7 +471,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           stringifyBreaks(row.breaks ?? null),
           total, night,
           isMonthly ? 0 : selectedStaff.base_wage, 
-          Master.OVERTIME_RATE, Master.NIGHT_SHIFT_RATE,
+          // 確定したときの割増率（倍率。給与規定グループの決まり。記録のため残す）
+          1 + parsePremiumRates(currentGroup?.premium_rates).overtime / 100, parsePremiumRates(currentGroup?.premium_rates).night / 100,
           row.workType, leaveTypeId, leavePaid, specialHours, Number(row.paidHours)||0, row.memo||"",
           1, now, row.breakNone ? 1 : 0, day.autoBreak || null
         ]
@@ -635,6 +637,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       tardyDeduction: 0,
       commutePay: 0,
       totalEarnings: 0,
+      // 残業代の割増率（給与規定グループの決まり。入れていなければ法律の率）
+      premiumRates: parsePremiumRates(currentGroup?.premium_rates) as PremiumRates | undefined,
     };
 
     if (!selectedStaff || !companySettings) {
@@ -674,6 +678,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         residentTax: 0, 
         prefecture: branchPrefecture, 
         workPrefecture,
+        // 残業代の割増率（給与規定グループの決まり。utils/premiumRates.ts）。36協定の年の時間外労働は、給与明細で読む（ここでは見込み）
+        premiumRates: parsePremiumRates(currentGroup?.premium_rates),
         dependents: Number(selectedStaff.dependents) || 0, 
         customItems,
         taxMethod: currentGroup?.tax_calc_method,

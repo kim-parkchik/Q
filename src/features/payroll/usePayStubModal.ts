@@ -10,6 +10,8 @@ import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
 import { insurerOf, loadHealthInsurers } from '../../utils/healthInsurer';
 import { flatTaxRemainingFor, loadFlatTaxPayments, salaryPayDate, type FlatTaxPayment } from '../../utils/flatTaxReduction';
+import { parsePremiumRates } from '../../utils/premiumRates';
+import { loadOvertimeYearBefore } from '../../utils/premiumRatesStore';
 import { countNonLeaveWorkDays, toLeaveProrationMethod } from '../../utils/leaveOfAbsence';
 import { useAverageWagePay } from './useAverageWagePay';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -128,11 +130,12 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, flex_rule, payment_day FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, flex_rule, payment_day, premium_rates FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
         ) as {
           tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; leave_proration_method?: string;
           absence_deduction_method?: string; tardy_deduction_method?: string; flex_rule?: string | null; payment_day?: number | null;
+          premium_rates?: string | null;
         }[];
         if (cancelled) return;
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
@@ -150,6 +153,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           flexRule: parseFlexRule(rows?.[0]?.flex_rule),
           // この給与を支払う日（死亡した後に支払う給与には所得税をかけない。utils/calcSalary.ts の paidAfterDeath）
           payDate: salaryPayDate(year, month, rows?.[0]?.payment_day ?? 25),
+          // 残業代の割増率（給与規定グループの決まり。入れていなければ法律の率。utils/premiumRates.ts）
+          premiumRates: parsePremiumRates(rows?.[0]?.premium_rates),
         }));
         markLoad("group", "ok");
       } catch (e) {
@@ -297,6 +302,24 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     return () => { cancelled = true; };
   }, [db, staff.id, periodStart, weekStartDay]);
 
+  // 36協定の年（起算日から1年）のうち、この計算期間より前の時間外労働（1年の限度時間を超えた分の割増率に使う。utils/premiumRatesStore.ts）
+  // undefined：読み込み中（この間は確定しない）／ null：拠点の36協定に起算日がなくて、わからない
+  useEffect(() => {
+    let cancelled = false;
+    setExtras(p => ({ ...p, overtimeYearBefore: undefined }));
+    (async () => {
+      if (!db) return;
+      let hours: number | null = null;
+      try {
+        hours = await loadOvertimeYearBefore(db, staff.id, staff.branch_id, companySettings?.kyotei36, periodEnd);
+      } catch (e) {
+        console.error("36協定の年の時間外労働の読み込みエラー:", e);
+      }
+      if (!cancelled) setExtras(p => ({ ...p, overtimeYearBefore: hours }));
+    })();
+    return () => { cancelled = true; };
+  }, [db, staff.id, staff.branch_id, companySettings?.kyotei36, periodEnd]);
+
   // フレックスタイム制の人：清算期間の位置・同じ清算期間の前の月の記録・前の清算期間から繰り越した不足時間
   // （確定した給与から読む。undefined は読み込み中で、この間は確定しない。給与規定グループの決まりを読み込んでから読む。utils/flexTime.ts）
   const flexStaff = isFlexStaff(staff);
@@ -385,6 +408,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   const loadingParts = [
     ...(extras.annualWorkDays === undefined ? ["1年間の所定労働日数"] : []),
     ...(extras.weekCarryOver === undefined ? ["前の計算期間の勤怠（週40時間）"] : []),
+    ...(extras.overtimeYearBefore === undefined ? ["36協定の年の時間外労働（確定した給与）"] : []),
     ...(flexStaff && extras.flexPeriod === undefined ? ["フレックスタイム制の清算期間（前の月の確定した給与）"] : []),
     ...(salary.averageWageLoading ? ["平均賃金（休業手当・休業補償）"] : []),
     ...LOAD_PARTS.filter(part => loadStatus[part] === "loading").map(part => LOAD_PART_LABELS[part]),

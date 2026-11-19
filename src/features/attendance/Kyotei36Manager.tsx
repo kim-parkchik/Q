@@ -15,6 +15,7 @@ import {
   check36, emptyHolidayRow, emptyKyotei36, emptyOvertimeRow, emptySpecialRow, kyotei36Problems, limitsOf, parseKyotei36Settings,
   stringifyKyotei36Settings, warningsOf, type HolidayRow, type Kyotei36, type Kyotei36Settings, type MonthHours, type OvertimeRow, type SpecialRow,
 } from "../../utils/kyotei36";
+import { kyoteiRateGaps, parsePremiumRates } from "../../utils/premiumRates";
 import { parseLedger } from "../../utils/legalBooks";
 import { formatWareki } from "../../utils/wareki";
 import * as S from "../payroll/reportStyles";
@@ -46,6 +47,8 @@ export default function Kyotei36Manager({ db, staffList }: Props) {
   const [placeId, setPlaceId] = useState("1");
   const [draft, setDraft] = useState<Kyotei36>(emptyKyotei36());
   const [dirty, setDirty] = useState(false);
+  // 給与規定グループ（残業代の割増率を、協定の「限度時間を超えた労働の割増率」と照らす。utils/premiumRates.ts）
+  const [groups, setGroups] = useState<{ id: number; name: string; premium_rates: string | null }[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -55,6 +58,7 @@ export default function Kyotei36Manager({ db, staffList }: Props) {
         setBranches(b ?? []);
         setCompany(c?.[0] ?? {});
         setSettings(parseKyotei36Settings(c?.[0]?.kyotei36));
+        setGroups((await db.select<any[]>("SELECT id, name, premium_rates FROM payroll_groups ORDER BY id")) ?? []);
         if ((b ?? []).length > 0) setPlaceId(String(b[0].id));
       } catch (e) {
         console.error("36協定の読み込みエラー:", e);
@@ -105,6 +109,13 @@ export default function Kyotei36Manager({ db, staffList }: Props) {
   };
   const set = (patch: Partial<Kyotei36>) => { setDraft({ ...draft, ...patch }); setDirty(true); };
   const problems = kyotei36Problems(draft);
+  // この事業場で働く人の給与規定グループの割増率が、協定の「限度時間を超えた労働の割増率」より低いところ
+  const rateGaps = [...new Set(placeStaff.map((s) => Number(s.payroll_group_id) || 1))]
+    .flatMap((gid) => {
+      const g = groups.find((x) => Number(x.id) === gid);
+      return kyoteiRateGaps(parsePremiumRates(g?.premium_rates), draft, "この協定")
+        .map((m) => `${m}（給与規定グループ「${g?.name ?? `番号 ${gid}`}」。会社設定の給与規定グループで、協定の率以上にしてください）`);
+    });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1200, margin: "0 auto" }}>
@@ -136,6 +147,7 @@ export default function Kyotei36Manager({ db, staffList }: Props) {
           <div className="no-print" style={S.card}>
             <Editor k={draft} set={set} />
             {problems.length > 0 && <div style={{ ...S.warnBox, marginTop: 10 }}>{problems.map((p, i) => <div key={i}>・{p}</div>)}</div>}
+            {rateGaps.length > 0 && <div style={{ ...S.warnBox, marginTop: 10 }}>{rateGaps.map((p, i) => <div key={i}>・{p}</div>)}</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <button onClick={save} disabled={!dirty} style={S.button("#16a085", !dirty)}>保存する</button>
               <button onClick={() => window.print()} style={S.button("#2563eb")}>🖨 届の内容を印刷（{draft.special ? "様式第9号の2" : "様式第9号"}）</button>

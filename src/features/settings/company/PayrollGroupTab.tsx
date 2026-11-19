@@ -24,6 +24,7 @@ import {
     editingBadgeStyle
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
+import { describePremiumRates, kyoteiRateGaps, LEGAL_PREMIUM_RATES, parsePremiumRates, PREMIUM_RATE_KEYS, PREMIUM_RATE_LABELS, premiumRateProblems } from '../../../utils/premiumRates';
 import { TAX_CALC_METHOD_LABELS, type TaxCalcMethod } from '../../../utils/incomeTax';
 import {
     ABSENCE_DEDUCTION_METHOD_LABELS, PRORATION_METHOD_LABELS, SOCIAL_INS_COLLECTION_LABELS, TARDY_DEDUCTION_METHOD_LABELS,
@@ -71,6 +72,10 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgFixedBreak,
         pgFlexRule,
         setPgFlexRule,
+        pgPremiumRates,
+        setPgPremiumRates,
+        kyotei36Settings,
+        branches,
         editingPgId,
         deletingPgId,
         setDeletingPgId,
@@ -116,6 +121,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 遅刻・早退・中抜け: {TARDY_DEDUCTION_METHOD_LABELS[toTardyDeductionMethod(pg.tardy_deduction_method)]}
                                         / 決まった休憩: {describeFixedBreak(parseFixedBreak(pg.fixed_break))}{parseFixedBreak(pg.fixed_break) ? `（${describeCombine(parseFixedBreak(pg.fixed_break))}）` : ""}
                                         / フレックスタイム制: {describeFlexRule(parseFlexRule(pg.flex_rule))}
+                                        / 残業代の割増率: {describePremiumRates(parsePremiumRates(pg.premium_rates))}
                                     </span>
                                 </div>
                             </div>
@@ -268,6 +274,40 @@ export default function PayrollGroupTab({ cm }: Props) {
                         計算期間がまるごと休業の月は、この設定にかかわらず、月給・固定の支給項目・固定残業代・通勤手当（月額）を払いません。
                         途中で始まる・終わる月は、月給と固定の支給項目を、ここで選んだしかたで日割りします（1円未満は切り上げ。入社・退職の月と同じく、固定残業代・通勤手当は日割りしません）。
                         日割りした日数は、算定・月変の支払基礎日数にもなります。
+                    </p>
+
+                    {/* 残業代の割増率（就業規則・36協定で決めた率。法律の率より低くはできない。utils/premiumRates.ts） */}
+                    <label style={miniLabelStyle}>残業代の割増率（就業規則・賃金規程・36協定で決めた率）</label>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px", marginBottom: "6px" }}>
+                        {PREMIUM_RATE_KEYS.map(k => (
+                            <div key={k} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
+                                <span style={{ fontSize: "12px", flex: "1 1 300px" }}>{PREMIUM_RATE_LABELS[k]}</span>
+                                <input
+                                    type="number" min={LEGAL_PREMIUM_RATES[k]} max={200} step={0.1}
+                                    data-rate={k}
+                                    value={Number.isFinite(pgPremiumRates[k]) ? pgPremiumRates[k] : ""}
+                                    onChange={e => setPgPremiumRates({ ...pgPremiumRates, [k]: e.target.value === "" ? NaN : Number(e.target.value) })}
+                                    style={{ ...inputStyle, width: "90px", marginBottom: 0 }}
+                                />
+                                <span style={{ fontSize: "12px" }}>%</span>
+                                <span style={{ fontSize: "11px", color: "#94a3b8" }}>法律の率 {LEGAL_PREMIUM_RATES[k]}%</span>
+                            </div>
+                        ))}
+                        {premiumRateProblems(pgPremiumRates).map(m => (
+                            <div key={m} style={{ fontSize: "12px", color: "#b91c1c" }}>⚠ {m}</div>
+                        ))}
+                        {premiumRateProblems(pgPremiumRates).length === 0 && branches
+                            .flatMap((b: any) => kyoteiRateGaps(parsePremiumRates(pgPremiumRates), kyotei36Settings[String(b.id)], `拠点「${b.name}」`))
+                            .map((m: string) => (
+                                <div key={m} style={{ fontSize: "12px", color: "#b45309" }}>⚠ {m}。この給与規定グループの人がその拠点で働くなら、協定の率以上にしてください。</div>
+                            ))}
+                    </div>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        残業代は、法律の率（時間外労働25%・1か月60時間を超えた分50%・法定休日35%・深夜25%）以上で払います（労働基準法37条）。
+                        就業規則・賃金規程でこれより高い率を決めているときは、その率を入れます（法律の率より低くはできません）。
+                        36協定の特別条項で「限度時間を超えた労働に係る割増賃金率」を決めたときは、1か月45時間・1年360時間を超えた分の欄に入れます
+                        （1年は36協定の起算日から数えます。協定の率より低いと、ここと36協定の画面で知らせます）。
+                        率が重なる時間は高い方の率、深夜は時間外・休日の率に足します。入れていない欄は法律の率です。
                     </p>
 
                     <label style={miniLabelStyle}>会社都合で休ませた日の休業手当（平均賃金の何%）</label>

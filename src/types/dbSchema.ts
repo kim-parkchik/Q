@@ -440,6 +440,7 @@ export const DB_SCHEMAS = [
     tardy_deduction_method TEXT DEFAULT 'none',       -- 月給制・日給制の人の遅刻・早退・中抜けの控除 'none':しない / 'annual':1か月平均所定労働時間で割る / 'period':計算期間の所定労働時間で割る
     flex_rule TEXT,                                   -- フレックスタイム制の決まり（JSON。総労働時間・法定の総枠・不足時間。NULL は初めの決まり。utils/flexTime.ts）
     fixed_break TEXT,                -- 決まった休憩（休憩の時刻が入っていない日に引く。JSON。空なら使わない。utils/fixedBreak.ts）
+    premium_rates TEXT,              -- 残業代の割増率（JSON。時間外・月45時間超・月60時間超・年360時間超・休日・深夜・法定内残業の%。NULL は法律の率。utils/premiumRates.ts）
     is_active INTEGER DEFAULT 1      -- 1:有効, 0:廃止
   );`,
 
