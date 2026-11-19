@@ -14,12 +14,15 @@ import { writeLog } from "../../utils/logUtils";
 import { buildShahoLines, buildUnionShahoLines, encodeShahoFile, nextMediaNumber, shahoOfficeValues, unionOfficeValues } from "../../utils/shahoCsv";
 import type { HealthInsurer } from "../../utils/healthInsurer";
 import { SHAHO_FILE_NAME, SHAHO_UNION_FILE_NAME } from "../../constants/shahoTodoke";
+import { isSeparateShahoOffice, type BranchLike } from "../../utils/branchPrefecture";
 
 export function useShahoFile(db: any) {
   const dialog = useMessageDialog();
   const toast = useToast();
   const [company, setCompany] = useState<any | null>(null);
   const [headPrefecture, setHeadPrefecture] = useState("");
+  /** 本店とは別の適用事業所の拠点（社会保険番号が入っている支店）。届書のファイルは本店の事業所で作るので、画面で知らせる */
+  const [separateOffices, setSeparateOffices] = useState<BranchLike[]>([]);
   const [mediaNumber, setMediaNumber] = useState(1);
   const [createdOn, setCreatedOn] = useState(dayjs().format("YYYY-MM-DD"));
   const [reloadKey, setReloadKey] = useState(0);
@@ -32,11 +35,12 @@ export function useShahoFile(db: any) {
       try {
         const [c, b] = await Promise.all([
           db.select("SELECT * FROM company WHERE id = 1") as Promise<any[]>,
-          db.select("SELECT prefecture FROM branches WHERE id = 1") as Promise<{ prefecture: string | null }[]>,
+          db.select("SELECT id, name, prefecture, health_ins_num FROM branches ORDER BY id") as Promise<BranchLike[]>,
         ]);
         if (cancelled) return;
         setCompany(c?.[0] ?? null);
-        setHeadPrefecture(b?.[0]?.prefecture ?? "");
+        setHeadPrefecture((b ?? []).find((x) => Number(x.id) === 1)?.prefecture ?? "");
+        setSeparateOffices((b ?? []).filter(isSeparateShahoOffice));
         setMediaNumber(nextMediaNumber(c?.[0]?.shaho_media_seq));
         setLoadError(null);
       } catch (e) {
@@ -143,7 +147,7 @@ export function useShahoFile(db: any) {
   }, [unionProblems, unionLinesFor, db, dialog, toast]);
 
   return {
-    company, office, mediaNumber, setMediaNumber, createdOn, setCreatedOn, fileProblems, linesFor, exportFile, loadError,
+    company, office, mediaNumber, setMediaNumber, createdOn, setCreatedOn, fileProblems, linesFor, exportFile, loadError, separateOffices,
     unionProblems, unionLinesFor, exportUnionFile,
     reload: () => setReloadKey((k) => k + 1),
   };

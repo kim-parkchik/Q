@@ -153,6 +153,7 @@ const fakeDb = {
   async select(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
     if (q.startsWith("SELECT * FROM company WHERE id = 1")) return [store.company];
+    if (q.startsWith("SELECT id, name, prefecture, health_ins_num FROM branches")) return [{ id: 1, name: "本店", prefecture: "東京都", health_ins_num: "" }];
     if (q.startsWith("SELECT prefecture FROM branches WHERE id = 1")) return [{ prefecture: "東京都" }];
     if (q.startsWith("SELECT * FROM payroll_groups")) return [{ id: 1, name: "本社", closing_day: 99, is_next_month: 1, payment_day: 25 }];
     if (q.startsWith("SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups")) {

@@ -10,8 +10,8 @@ import { describe, expect, test } from "bun:test";
 import { NENCHO_2026 } from "../constants/nencho";
 import { calcNencho } from "./nencho";
 import {
-    ageAtYearEnd, buildNenchoInput, classifyDependent, dependentIncomeLimit, emptyDeclaration, nenchoExclusion, parseDeclaration, settlementStatusOf,
-    sumYearTotals, validateDeclaration, type DeclaredDependent, type NenchoDeclaration,
+    ageAtYearEnd, ageOn, buildNenchoInput, classifyDependent, dependentIncomeLimit, emptyDeclaration, judgeDateOf, MID_YEAR_EXCLUSION, midYearAdjustmentNote,
+    nenchoExclusion, parseDeclaration, settlementStatusOf, sumYearTotals, validateDeclaration, type DeclaredDependent, type NenchoDeclaration,
 } from "./nenchoDeclaration";
 
 const m = NENCHO_2026;
@@ -159,7 +159,62 @@ describe("年末調整の対象", () => {
     test("乙欄の人・11月までに退職した人は対象外", () => {
         expect(nenchoExclusion({ tax_column: "otsu" }, 2026)).toContain("乙欄");
         expect(nenchoExclusion({ tax_column: "hei" }, 2026)).toContain("丙欄");
-        expect(nenchoExclusion({ retirement_date: "2026-11-30" }, 2026)).toContain("退職");
+        expect(nenchoExclusion({ retirement_date: "2026-11-30" }, 2026)).toBe(MID_YEAR_EXCLUSION);
+    });
+    test("年の途中で退職した人でも、死亡退職と、選んだ理由（心身の障害・給与の総額が少ない）の人は、退職のときに年末調整をする（所得税法190条）", () => {
+        expect(nenchoExclusion({ retirement_date: "2026-08-31", death_date: "2026-08-31" }, 2026)).toBeNull();
+        expect(nenchoExclusion({ retirement_date: "2026-06-30" }, 2026, { midYearReason: "disability" })).toBeNull();
+        expect(nenchoExclusion({ retirement_date: "2026-06-30" }, 2026, { midYearReason: "smallTotal" })).toBeNull();
+        expect(nenchoExclusion({ retirement_date: "2026-06-30" }, 2026, { midYearReason: "" })).toBe(MID_YEAR_EXCLUSION);
+        // 前の年に死亡した人の死亡日では決めない・乙欄の人は理由を選んでもしない
+        expect(nenchoExclusion({ retirement_date: "2026-06-30", death_date: "2025-12-31" }, 2026)).toBe(MID_YEAR_EXCLUSION);
+        expect(nenchoExclusion({ tax_column: "otsu", retirement_date: "2026-06-30" }, 2026, { midYearReason: "disability" })).toContain("乙欄");
+        expect(midYearAdjustmentNote({ retirement_date: "2026-08-31", death_date: "2026-08-31" }, 2026, null)).toContain("死亡の日（2026-08-31）の現況");
+        expect(midYearAdjustmentNote({ retirement_date: "2026-06-30" }, 2026, { midYearReason: "disability" })).toContain("著しい心身の障害");
+        expect(midYearAdjustmentNote({ retirement_date: "2026-06-30" }, 2026, { midYearReason: "" })).toBeNull();
+        // 申告書に残した理由を読む（知らない値は空）
+        expect(parseDeclaration(JSON.stringify({ midYearReason: "disability" })).midYearReason).toBe("disability");
+        expect(parseDeclaration(JSON.stringify({ midYearReason: "x" })).midYearReason).toBe("");
+    });
+});
+
+describe("その年の途中で死亡した人は、死亡の日の現況で配偶者・扶養親族を決める（所得税法85条）", () => {
+    test("その日の年齢（誕生日の前日に上がる。1月1日生まれは前の年の12月31日、2月29日生まれはうるう年でない年は2月28日）", () => {
+        expect(ageOn("1956-09-01", "2026-08-30")).toBe(69);
+        expect(ageOn("1956-09-01", "2026-08-31")).toBe(70);
+        expect(ageOn("2008-01-01", "2026-12-31")).toBe(19);
+        expect(ageOn("2008-01-02", "2026-12-31")).toBe(18);
+        expect(ageOn("2004-02-29", "2027-02-27")).toBe(22);
+        expect(ageOn("2004-02-29", "2027-02-28")).toBe(23);
+        expect(ageOn("2004-02-29", "2028-02-28")).toBe(24);
+        expect(ageOn("", "2026-12-31")).toBeNull();
+        // 12月31日の年齢は、いままでの ageAtYearEnd と同じ
+        for (const b of ["2008-01-01", "2008-01-02", "1956-12-31", "2004-02-29", "1990-06-15"]) {
+            expect(ageOn(b, "2026-12-31")).toBe(ageAtYearEnd(b, 2026));
+        }
+    });
+    test("判定の日：その年に死亡した人は死亡の日、ほかは12月31日", () => {
+        expect(judgeDateOf({ death_date: "2026-08-31" }, 2026)).toBe("2026-08-31");
+        expect(judgeDateOf({ death_date: "2027-01-10" }, 2026)).toBe("2026-12-31");
+        expect(judgeDateOf({}, 2026)).toBe("2026-12-31");
+    });
+    test("8月31日に死亡：12月31日なら70歳の父（9月2日生まれ。9月1日に70歳）は、死亡の日は69歳なので老人扶養親族ではない。19歳になる前の子は特定扶養親族ではない", () => {
+        const decl: NenchoDeclaration = {
+            ...emptyDeclaration(),
+            spouse: { name: "", birthday: "1956-09-02", totalIncome: 0, disability: "none", livingTogether: true },
+            dependents: [
+                person("1956-09-02", { relation: "父", linealAscendant: true }),
+                person("2007-12-01", { relation: "子" }),
+            ],
+        };
+        const totals = { salary: 8000000, socialInsurance: 1200000, withheldTax: 400000, salaryMonths: [], bonusCount: 0 };
+        const atYearEnd = buildNenchoInput(decl, totals, 2026, m);
+        expect(atYearEnd.dependents).toEqual({ general: 0, specific: 1, elderlyLivingTogether: 1, elderlyOther: 0 });
+        expect(atYearEnd.spouse?.elderly).toBe(true);
+        const atDeath = buildNenchoInput(decl, totals, 2026, m, "2026-08-31");
+        expect(atDeath.dependents).toEqual({ general: 2, specific: 0, elderlyLivingTogether: 0, elderlyOther: 0 });
+        expect(atDeath.spouse?.elderly).toBe(false);
+        expect(calcNencho(atDeath, m).difference).not.toBe(calcNencho(atYearEnd, m).difference);
     });
 });
 

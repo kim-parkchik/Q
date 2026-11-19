@@ -8,7 +8,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { getProvisionalSlipMaster, getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
 import {
-  DEPENDENT_KIND_LABELS, ageAtYearEnd, classifyDependent,
+  DEPENDENT_KIND_LABELS, ageAtYearEnd, ageOn, classifyDependent,
   type DeclaredDependent, type DisabilityKind, type DependentKind, type HousingLoan, type NenchoDeclaration, type YearTotals,
 } from "../../utils/nenchoDeclaration";
 import { specificRelativeDeduction } from "../../utils/nencho";
@@ -25,6 +25,13 @@ interface Props {
   sourceOnly?: boolean;
   /** 乙欄の人の、従たる給与についての扶養控除等申告書（本人の欄はない） */
   secondary?: boolean;
+  /**
+   * 配偶者・扶養親族を決める日（なければその年の12月31日。その年の途中で死亡した人は死亡の日。所得税法85条。
+   * utils/nenchoDeclaration.ts の judgeDateOf）
+   */
+  judgeDate?: string;
+  /** 確定していれば年末調整に入る給与の最後の月（精算する給与の月。なければ12月）。それより後の月の給与は「まだ確定していない」と知らせない */
+  expectedLastMonth?: number;
 }
 
 const section: React.CSSProperties = { borderTop: "1px solid #e2e8f0", paddingTop: 12, marginTop: 12 };
@@ -67,7 +74,9 @@ const kindAmount = (kind: DependentKind, d: DeclaredDependent, m: NenchoMaster):
   }
 };
 
-export default function NenchoDeclarationForm({ year, master, draft, setDraft, totals, sourceOnly: sourceOnlyProp = false, secondary = false }: Props) {
+export default function NenchoDeclarationForm({
+  year, master, draft, setDraft, totals, sourceOnly: sourceOnlyProp = false, secondary = false, judgeDate, expectedLastMonth = 12,
+}: Props) {
   const sourceOnly = sourceOnlyProp || secondary;
   const set = (patch: Partial<NenchoDeclaration>) => setDraft({ ...draft, ...patch });
   const setSelf = (patch: Partial<NenchoDeclaration["self"]>) => set({ self: { ...draft.self, ...patch } });
@@ -83,8 +92,13 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
   const w = slipMaster?.withoutAdjustment;
   /** 扶養親族の分け方（年末調整をしない人は、源泉控除対象親族かどうか） */
   const kindOf = (d: DeclaredDependent): DependentKind =>
-    sourceOnly && slipMaster ? classifySourceDependent(d, year, slipMaster) : master ? classifyDependent(d, year, master) : "none";
-  const missingMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter((mo) => !totals.salaryMonths.includes(mo));
+    sourceOnly && slipMaster ? classifySourceDependent(d, year, slipMaster) : master ? classifyDependent(d, year, master, undefined, judgeDate) : "none";
+  /** 年齢を決める日（その年の12月31日。その年の途中で死亡した人は死亡の日） */
+  const judgeOn = !sourceOnly && judgeDate ? judgeDate : `${year}-12-31`;
+  const judgeLabel = judgeOn === `${year}-12-31` ? `${year}年12月31日` : `死亡の日（${judgeOn}）`;
+  const ageAtJudge = (birthday: string) => (judgeOn === `${year}-12-31` ? ageAtYearEnd(birthday, year) : ageOn(birthday, judgeOn));
+  const lastMonth = Math.min(12, Math.max(1, Math.floor(expectedLastMonth)));
+  const missingMonths = Array.from({ length: lastMonth }, (_, i) => i + 1).filter((mo) => !totals.salaryMonths.includes(mo));
   const reiwa = year - 2018;
 
   return (
@@ -177,8 +191,8 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
             </div>
           </div>
         )}
-        {draft.spouse && (ageAtYearEnd(draft.spouse.birthday, year) ?? 0) >= 70 && (
-          <p style={note}>{year}年12月31日に70歳以上なので、老人控除対象配偶者です。</p>
+        {draft.spouse && (ageAtJudge(draft.spouse.birthday) ?? 0) >= 70 && (
+          <p style={note}>{judgeLabel}に70歳以上なので、老人控除対象配偶者です。</p>
         )}
         {sourceOnly && w && draft.spouse && draft.spouse.totalIncome > w.spouseIncomeLimit && (
           <p style={{ ...note, color: "#b45309" }}>所得の見積額が{yen(w.spouseIncomeLimit)}を超えるので、源泉控除対象配偶者にはなりません。</p>
@@ -191,7 +205,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
         {draft.dependents.map((d, i) => {
           const kind = kindOf(d);
           const amount = sourceOnly || !master ? null : kindAmount(kind, d, master);
-          const age = ageAtYearEnd(d.birthday, year);
+          const age = ageAtJudge(d.birthday);
           return (
             <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginBottom: 8 }}>
               <div style={{ ...grid(5) }}>
@@ -210,7 +224,7 @@ export default function NenchoDeclarationForm({ year, master, draft, setDraft, t
                   <input type="checkbox" checked={d.linealAscendant} onChange={(e) => setDependent(i, { linealAscendant: e.target.checked })} />本人・配偶者の父母・祖父母
                 </label>
                 <div style={{ flex: 1, fontSize: 12, color: kind === "none" ? "#b45309" : "#2563eb", textAlign: "right" }}>
-                  {age !== null && `${year}年12月31日に${age}歳：`}{sourceOnly && kind === "specificRelative" ? "特定親族（源泉控除対象親族）" : DEPENDENT_KIND_LABELS[kind]}{amount !== null && ` ${yen(amount)}`}
+                  {age !== null && `${judgeLabel}に${age}歳：`}{sourceOnly && kind === "specificRelative" ? "特定親族（源泉控除対象親族）" : DEPENDENT_KIND_LABELS[kind]}{amount !== null && ` ${yen(amount)}`}
                 </div>
                 <button
                   type="button" title="この人を消す"

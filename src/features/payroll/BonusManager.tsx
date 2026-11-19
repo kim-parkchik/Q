@@ -847,7 +847,12 @@ export default function BonusManager({ db, staffList }: Props) {
                               ⚠ 後の給与・賞与で先に減税
                             </div>
                           )}
-                          {calc.totalEarnings > 0 && calc.prevSalaryStatus === "unconfirmed" && (
+                          {calc.totalEarnings > 0 && calc.paidAfterDeath && (
+                            <div style={{ fontSize: 10, color: "#475569" }} title="死亡した後に支払う賞与は相続税の対象（相続財産）で、所得税の対象ではありません（所得税基本通達9-17）。源泉徴収票・年末調整にも入れません">
+                              死亡後の支払なので所得税なし
+                            </div>
+                          )}
+                          {calc.totalEarnings > 0 && !calc.paidAfterDeath && calc.prevSalaryStatus === "unconfirmed" && (
                             <div style={{ fontSize: 10, color: "#b45309" }}>⚠ 前月の給与が未確定</div>
                           )}
                           {calc.totalEarnings > 0 && calc.prevSalaryStatus !== "unconfirmed" && calc.taxByMonthlyTable && (

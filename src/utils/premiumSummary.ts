@@ -18,6 +18,7 @@
 import * as Master from "../constants";
 import { checkInsuredMonth, checkSocialInsEnrolled, getInsuranceByAge } from "./calcSalary";
 import { insurerOf, unionRateFor, type HealthInsurer } from "./healthInsurer";
+import { salaryClosingDate } from "./payrollPeriod";
 import { checkLeaveExemptMonth, exemptLeavePeriodsOf } from "./leaveExemption";
 import { pensionStandardOf } from "./remunerationReport";
 import { getStandardRemuneration } from "./standardRemuneration";
@@ -35,6 +36,8 @@ export interface PremiumSalary {
   total_earnings: number;
   non_remuneration: number;
   in_kind_emp: number;
+  /** 確定したときの内訳（JSON。賃金締切日 periodEnd を読む。なければ closingOf か支給月） */
+  ledger?: string | null;
 }
 
 export interface PremiumBonus {
@@ -63,6 +66,11 @@ export interface PremiumInput {
   collectionOf: (groupId: unknown) => string;
   /** その人の拠点の労災保険率（1,000分の。わからなければ null） */
   rousaiRateOf: (staff: any) => number | null;
+  /**
+   * 給与の賃金締切日（雇用保険料の率を選ぶ月。utils/payrollPeriod.ts の salaryClosingDate）。
+   * なければ内訳（ledger）の periodEnd、それもなければ支給月
+   */
+  closingOf?: (salary: PremiumSalary, staff: any) => string | null;
 }
 
 export interface PremiumLine {
@@ -218,11 +226,17 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
   let rousaiWages = 0;
   let rousaiPremium = 0;
   let rousaiUnknown = false;
+  // 雇用保険の率は、給与は賃金締切日がある月、賞与は支払った月のもの（月々の控除・年度更新と同じ。utils/calcSalary.ts の empInsRateMonthOf）
+  const closingYm = (x: PremiumSalary): { year: number; month: number } => {
+    const s = p.staffList.find((y) => String(y.id) === String(x.staff_id));
+    const end = p.closingOf?.(x, s) ?? salaryClosingDate(x.ledger, undefined, Number(x.target_year), Number(x.target_month));
+    return end ? { year: Number(end.slice(0, 4)), month: Number(end.slice(5, 7)) } : { year, month };
+  };
   const paidThisMonth = [
     ...p.salaries.filter((x) => Number(x.target_year) === year && Number(x.target_month) === month)
-      .map((x) => ({ staffId: String(x.staff_id), wage: n(x.total_earnings) - n(x.non_remuneration) + n(x.in_kind_emp), emp: n(x.emp_insurance) })),
+      .map((x) => ({ staffId: String(x.staff_id), wage: n(x.total_earnings) - n(x.non_remuneration) + n(x.in_kind_emp), emp: n(x.emp_insurance), rateYm: closingYm(x) })),
     ...p.bonuses.filter((b) => b.payment_date.slice(0, 7) === monthKey)
-      .map((b) => ({ staffId: String(b.staff_id), wage: n(b.total_earnings), emp: n(b.emp_insurance) })),
+      .map((b) => ({ staffId: String(b.staff_id), wage: n(b.total_earnings), emp: n(b.emp_insurance), rateYm: { year, month } })),
   ];
   for (const x of paidThisMonth) {
     const s = p.staffList.find((y) => String(y.id) === x.staffId);
@@ -231,7 +245,8 @@ export const premiumSummary = (p: PremiumInput): PremiumSummary => {
     const executiveOut = Number(s.is_executive) === 1 && !koyoInsured;
     if (koyoInsured) {
       const type = (s.employment_insurance_type || "general") as Master.EmpInsType;
-      const rates = ins.LABOR_INSURANCE_RATES[type] ?? ins.LABOR_INSURANCE_RATES.general;
+      const koyoIns = Master.getInsuranceMaster(x.rateYm.year, x.rateYm.month);
+      const rates = koyoIns.LABOR_INSURANCE_RATES[type] ?? koyoIns.LABOR_INSURANCE_RATES.general;
       koyoWages += x.wage;
       koyoEmp += x.emp;
       // 率は小数（0.0135 など）なので、10万倍の整数にして掛ける

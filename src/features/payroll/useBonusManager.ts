@@ -8,7 +8,7 @@ import { describeFlatTaxPayment, flatTaxRemainingFor, loadFlatTaxPayments, type 
 import { bonusLedgerOf } from '../../utils/legalBooks';
 import { staffAsOf } from '../../utils/staffHistory';
 import { calcPremium } from '../../utils/socialInsurance';
-import { branchPrefectureOf } from '../../utils/branchPrefecture';
+import { kenpoPrefectureOf } from '../../utils/branchPrefecture';
 import { healthPremiumsOf, insurerOf, loadHealthInsurers, type HealthInsurer } from '../../utils/healthInsurer';
 import { checkEmploymentInsEnrolled, checkInsuredOnBonusDate, checkSocialInsEnrolled, getInsuranceByAge } from '../../utils/calcSalary';
 import { checkLeaveExemptBonus, exemptLeavePeriodsOf } from '../../utils/leaveExemption';
@@ -389,9 +389,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const inKind = inKindItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
     const hyojunBonus = Math.floor(totalEarnings / 1000) * 1000;
 
-    // 健康保険料率は、拠点の都道府県（協会けんぽの支部）ごと。拠点を選んでいない人は本店（給与明細と同じ）
+    // 健康保険料率は、その人が入っている社会保険の適用事業所の都道府県（協会けんぽの支部）ごと。支店が本店の適用事業所に
+    // まとめて入っていれば本店の都道府県。拠点を選んでいない人は本店（給与明細と同じ。utils/branchPrefecture.ts の kenpoPrefectureOf）
     // わからなければ健康保険料・介護保険料は計算せず、画面で知らせて確定できないようにする（京都などで仮に計算しない）
-    const branchPref = branchPrefectureOf(branches, staff.branch_id);
+    const branchPref = kenpoPrefectureOf(branches, staff.branch_id);
     // 賞与を支給する月の料率を使う（健康保険は3月分から、雇用保険は4月から新年度）
     const payYear = selectedSetting.target_year;
     const payMonth = selectedSetting.target_month;
@@ -451,7 +452,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const dependents = staffAsOf(staff, payYear, payMonth).dependents;
     const prevMonthTaxBase = prevMonthTaxBases[String(staff.id)] ?? 0;
     const bonusAfterSocial = Math.max(0, totalEarnings - socialTotal);
-    const incomeTaxBeforeReduction = calcBonusWithholdingTax(bonusAfterSocial, prevMonthTaxBase, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
+    // 死亡した後に支払う賞与は、相続税の対象（相続財産）で、所得税の対象ではない（所得税基本通達9-17）。所得税を引かない
+    const paidAfterDeath = !!staff.death_date && !!selectedSetting.payment_date && String(selectedSetting.payment_date) > String(staff.death_date);
+    const incomeTaxBeforeReduction = paidAfterDeath ? 0
+      : calcBonusWithholdingTax(bonusAfterSocial, prevMonthTaxBase, Number(dependents) || 0, payYear, 6, toTaxColumn(staff.tax_column));
     // 令和6年分の定額減税（月次減税）：令和6年6月1日以後に支払う賞与からも、残りの減税額を所得税から引く（国税庁「定額減税について」）。
     // 残りは、減税額の合計から、この賞与より前に支払った給与・賞与（確定したもの）で引いた額を引いた額（utils/flatTaxReduction.ts）
     const flatTaxTotal = flatTaxReductionTotal(staff.flat_tax_reduction_persons, staff.join_date, payYear, payMonth, toTaxColumn(staff.tax_column));
@@ -487,6 +491,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       /** この賞与より前に支払った賞与の健康保険の標準賞与額の累計と、この賞与の健康保険・厚生年金の標準賞与額（上限で切った額） */
       earlierHealthTotal: earlier.health, healthHyojun, pensionHyojun,
       prevSalaryStatus, taxByMonthlyTable,
+      /** 死亡した後に支払う賞与（所得税を引かない。相続税の対象） */
+      paidAfterDeath,
       /** 健康保険料がかかるのに、拠点の都道府県がわからないので、健康保険料・介護保険料を計算していない（確定できない） */
       prefectureUnknown, prefectureProblem: branchPref.problem,
       /** 健康保険組合の人で、賞与を支給する月の分の組合の料率を入れていないので、健康保険料・介護保険料を計算していない（確定できない） */

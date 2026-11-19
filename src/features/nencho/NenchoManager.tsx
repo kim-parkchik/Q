@@ -4,13 +4,14 @@
  */
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { NENCHO_SCREEN_YEARS, NENCHO_YEARS, settleOptions, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
+import { NENCHO_SCREEN_YEARS, NENCHO_YEARS, useNenchoManager, type NenchoStaffRow } from "./useNenchoManager";
 import NenchoDeclarationForm from "./NenchoDeclarationForm";
 import NenchoResultPanel from "./NenchoResultPanel";
 import NenchoListView from "./NenchoListView";
 import FuyouDraftView from "./FuyouDraftView";
 import { useState } from "react";
 import { toTaxColumn } from "../../utils/incomeTax";
+import { diedInYear, judgeDateOf, MID_YEAR_REASONS, type MidYearReason, type NenchoDeclaration } from "../../utils/nenchoDeclaration";
 
 interface Props {
   db: Database;
@@ -19,6 +20,33 @@ interface Props {
 
 const card: React.CSSProperties = { backgroundColor: "white", padding: 16, borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", marginBottom: 16 };
 const yen = (n: number) => `${n.toLocaleString()}円`;
+
+/**
+ * 年の途中で退職した人を、退職のとき（その年最後に給与を支払うとき）に年末調整するか（所得税法190条。utils/nenchoDeclaration.ts の MID_YEAR_REASONS）
+ * 死亡により退職した人は、死亡日から決めるので出さない
+ */
+function MidYearReasonField({ staff, year, draft, setDraft }: {
+  staff: any; year: number; draft: NenchoDeclaration; setDraft: (d: NenchoDeclaration) => void;
+}) {
+  if (!(staff.retirement_date && staff.retirement_date < `${year}-12-01`) || diedInYear(staff, year)) return null;
+  return (
+    <div style={{ border: "1px solid #fde68a", backgroundColor: "#fffbeb", borderRadius: 8, padding: 10, margin: "0 0 10px 0" }}>
+      <label style={{ fontSize: 12, fontWeight: "bold", display: "block", marginBottom: 4 }}>年の途中で退職した人の年末調整</label>
+      <select
+        value={draft.midYearReason}
+        onChange={(e) => setDraft({ ...draft, midYearReason: e.target.value as MidYearReason })}
+        style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 12 }}
+      >
+        <option value="">しない（次の勤め先で年末調整をするか、本人が確定申告をする）</option>
+        {MID_YEAR_REASONS.map((r) => <option key={r.value} value={r.value}>退職のときにする：{r.label}</option>)}
+      </select>
+      <div style={{ fontSize: 11, color: "#64748b", marginTop: 4, lineHeight: 1.6 }}>
+        その年のうちに、ほかの勤め先に扶養控除等申告書を出す見込みがない人だけです（所得税法190条）。「給与の総額が少ない」の額は、
+        国税庁「年末調整のしかた」の「年末調整の対象となる人」で確かめてください。選んで保存すると、年末調整の計算ができるようになります。
+      </div>
+    </div>
+  );
+}
 
 export default function NenchoManager({ db, staffList }: Props) {
   const z = useNenchoManager(db, staffList);
@@ -119,6 +147,9 @@ export default function NenchoManager({ db, staffList }: Props) {
                 </p>
               </>
             )}
+            {toTaxColumn(z.selected.staff.tax_column) === "kou" && (
+              <MidYearReasonField staff={z.selected.staff} year={z.year} draft={z.draft} setDraft={z.setDraft} />
+            )}
             <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} sourceOnly
               secondary={toTaxColumn(z.selected.staff.tax_column) === "otsu"} />
             {z.errors.map((e) => <div key={e} style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{e}</div>)}
@@ -147,7 +178,9 @@ export default function NenchoManager({ db, staffList }: Props) {
             <div style={card}>
               <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 10 }}>{z.selected.staff.name}さん（{z.year}年分）</div>
               {z.selected.note && <p style={{ fontSize: 12, color: "#b45309", margin: "0 0 10px 0" }}>※ {z.selected.note}</p>}
-              <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} />
+              <MidYearReasonField staff={z.selected.staff} year={z.year} draft={z.draft} setDraft={z.setDraft} />
+              <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals}
+                judgeDate={judgeDateOf(z.selected.staff, z.year)} expectedLastMonth={z.settle.year === z.year ? z.settle.month : 12} />
             </div>
             <div style={{ ...card, position: "sticky", top: 16 }}>
               {z.result && <NenchoResultPanel r={z.result} />}
@@ -158,7 +191,7 @@ export default function NenchoManager({ db, staffList }: Props) {
                   onChange={(e) => { const [y, m] = e.target.value.split("-").map(Number); z.setSettle({ year: y, month: m }); }}
                   style={{ width: "100%", padding: "6px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}
                 >
-                  {settleOptions(z.year).map((o) => <option key={`${o.year}-${o.month}`} value={`${o.year}-${o.month}`}>{o.year}年{o.month}月に支払う給与</option>)}
+                  {z.settleChoices.map((o) => <option key={`${o.year}-${o.month}`} value={`${o.year}-${o.month}`}>{o.year}年{o.month}月に支払う給与</option>)}
                 </select>
               </div>
               {z.selected.saved && (

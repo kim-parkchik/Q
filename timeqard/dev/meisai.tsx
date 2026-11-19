@@ -227,7 +227,7 @@ const fakeDb = {
     if (q.startsWith("SELECT id, social_ins_collection FROM payroll_groups")) return [{ id: 1, social_ins_collection: "next" }];
     if (q.startsWith("SELECT id, name, type, union_office_number, union_media_seq FROM social_insurance_groups")) return [{ id: 1, name: "協会けんぽ", type: "kyokai", union_office_number: null, union_media_seq: 0 }];
     if (q.startsWith("SELECT group_id, from_month, health_rate")) return [];
-    if (q.startsWith("SELECT id, name, prefecture FROM branches")) return store.branches;
+    if (q.startsWith("SELECT id, name, prefecture FROM branches") || q.startsWith("SELECT id, name, prefecture, health_ins_num FROM branches")) return store.branches;
     if (q.startsWith("SELECT gensen_nofu FROM company")) return [store.company];
     if (q.startsWith("SELECT name, address, corporate_number, phone FROM company")) return [store.company];
     if (q.startsWith("SELECT annual_leave_rule, half_day_leave FROM company")) return [store.company];

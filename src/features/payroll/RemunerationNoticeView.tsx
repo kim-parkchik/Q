@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import { loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
-import { branchPrefectureOf, type BranchLike } from "../../utils/branchPrefecture";
+import { kenpoPrefectureOf, type BranchLike } from "../../utils/branchPrefecture";
 import { noticeMonths, remunerationNotices, type RemunerationNotice } from "../../utils/remunerationNotice";
 import { formatWareki } from "../../utils/wareki";
 import * as S from "./reportStyles";
@@ -41,7 +41,7 @@ export default function RemunerationNoticeView({ db, staffList, companyName }: P
     (async () => {
       try {
         const insurers = await loadHealthInsurers(db);
-        const b = await db.select<BranchLike[]>("SELECT id, name, prefecture FROM branches");
+        const b = await db.select<BranchLike[]>("SELECT id, name, prefecture, health_ins_num FROM branches");
         const c = await db.select<{ round_social_ins: string | null }[]>("SELECT round_social_ins FROM company WHERE id = 1");
         const g = await db.select<{ id: number; social_ins_collection: string | null }[]>("SELECT id, social_ins_collection FROM payroll_groups");
         setCtx({
@@ -60,7 +60,8 @@ export default function RemunerationNoticeView({ db, staffList, companyName }: P
     if (!ctx || !ym) return [];
     return remunerationNotices(staffList, ym, {
       insurers: ctx.insurers, rounding: ctx.rounding,
-      prefectureOf: (id) => branchPrefectureOf(ctx.branches, id).prefecture,
+      // 協会けんぽの料率は、その人が入っている適用事業所の都道府県（支店が本店にまとめて入っていれば本店。utils/branchPrefecture.ts）
+      prefectureOf: (id) => kenpoPrefectureOf(ctx.branches, id).prefecture,
     });
   }, [ctx, ym, staffList]);
 

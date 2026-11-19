@@ -63,6 +63,14 @@ export function ShahoFilePanel({ file, dataLines, blocked, label, count, onPrint
         </pre>
       )}
       {file.loadError && <div style={{ color: "#b91c1c", fontSize: 12 }}>⚠ 読み込めませんでした：{file.loadError}</div>}
+      {file.separateOffices.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12, color: "#b45309", lineHeight: 1.6 }}>
+          ⚠ このファイルは、本店の事業所（会社設定の事業所整理記号）の届書です。
+          {file.separateOffices.map((b) => `「${b.name || `拠点 ${b.id}`}」`).join("・")}は、社会保険番号が入っている本店とは別の適用事業所なので、
+          そこで働く人の届書は、その事業所の事業所整理記号で別に出してください（Q は、拠点ごとの事業所のファイルをまだ作れません。
+          入れた人がいれば、このファイルから外すか、e-Gov の画面で入れ直してください）。
+        </div>
+      )}
       {all.length > 0 && (
         <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c", lineHeight: 1.6 }}>
           <b>電子申請用のファイルを作る前に、直すところがあります：</b>

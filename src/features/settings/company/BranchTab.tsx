@@ -202,13 +202,19 @@ export default function BranchTab({ cm }: Props) {
                         style={{ ...inputStyle, ...inputBottomSpace }} 
                     />
 
-                    <label style={miniLabelStyle}>社会保険番号 (支店固有の場合)</label>
+                    <label style={miniLabelStyle}>社会保険番号（この支店が本店とは別の適用事業所のとき）</label>
                     <input 
                         value={bHealth} 
                         onChange={e => setBHealth(e.target.value)} 
-                        placeholder="未入力なら本店と同じ"
-                        style={{ ...inputStyle, ...inputBottomSpace }} 
+                        placeholder="未入力なら本店と同じ（本店の適用事業所）"
+                        style={{ ...inputStyle, marginBottom: "4px" }} 
                     />
+                    <div style={{ fontSize: "11px", color: "#64748b", lineHeight: 1.5, marginBottom: "12px" }}>
+                        空なら、この支店の人は本店の適用事業所に入っている人として、協会けんぽの健康保険料率は本店の都道府県で計算します
+                        （健康保険法160条。支店を本店にまとめて届けている会社）。入れると、この支店の都道府県の料率で計算します。
+                        社会保険の届書の電子申請用のファイルは本店の事業所で作るので、別の適用事業所の人の届書は、その事業所で別に出してください。
+                        最低賃金と現物給与の価額は、どちらでも支店の都道府県です。
+                    </div>
 
                     <label style={miniLabelStyle}>労働保険番号 (支店固有の場合)</label>
                     <input 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
-import { branchPrefectureOf } from "../../utils/branchPrefecture";
+import { branchPrefectureOf, kenpoPrefectureOf } from "../../utils/branchPrefecture";
 
 export function usePaySlipManager(db: any, staffList: any[], initialYear: number, initialMonth: number) {
   const [year, setYear] = useState(initialYear);
@@ -95,9 +95,14 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
         [staff.id, period.startStr, period.endStr]
       );
       setAttendanceData(res || []);
-      // 拠点の都道府県（健康保険料率・最低賃金に使う）。わからなければ空にして、明細の画面で知らせる（京都などで仮に計算しない）
+      // 拠点の都道府県（最低賃金・現物給与の価額に使う）と、協会けんぽの健康保険料率の都道府県（入っている適用事業所。支店が本店にまとめて
+      // 入っていれば本店の都道府県）。わからなければ空にして、明細の画面で知らせる（京都などで仮に計算しない）
       const { prefecture, problem } = branchPrefectureOf(branches, staff.branch_id);
-      setSelectedStaff({ ...staff, prefecture: prefecture ?? "", prefectureProblem: problem, periodLabel: period.displayRange, periodStart: period.startStr, periodEnd: period.endStr });
+      const kenpo = kenpoPrefectureOf(branches, staff.branch_id);
+      setSelectedStaff({
+        ...staff, prefecture: prefecture ?? "", prefectureProblem: problem,
+        kenpoPrefecture: kenpo.prefecture ?? "", kenpoPrefectureProblem: kenpo.problem, kenpoOfficeBranchId: kenpo.officeBranchId,
+        periodLabel: period.displayRange, periodStart: period.startStr, periodEnd: period.endStr });
       setShowModal(true);
     } catch (err) {
       console.error("勤怠詳細のロードに失敗しました:", err);

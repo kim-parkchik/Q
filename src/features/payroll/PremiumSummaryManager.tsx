@@ -8,10 +8,11 @@ import { useEffect, useMemo, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
-import { branchPrefectureOf, type BranchLike } from "../../utils/branchPrefecture";
+import { kenpoPrefectureOf, type BranchLike } from "../../utils/branchPrefecture";
 import { saveBinaryFile, saveCsvFile } from "../../utils/fileSaveUtils";
 import { buildWelfareJournal, journalBytes, parseJournalSettings, type JournalSettings } from "../../utils/payJournal";
 import { loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
+import { salaryClosingDate, type PayrollGroupForPeriod } from "../../utils/payrollPeriod";
 import { rousaiRateOf } from "../../utils/nendoKoshin";
 import { premiumSummary, type PremiumBonus, type PremiumSalary } from "../../utils/premiumSummary";
 import * as S from "./reportStyles";
@@ -26,6 +27,8 @@ interface Ctx {
   branches: (BranchLike & { rousai_business?: string | null; rousai_rate?: number | null })[];
   company: { rousai_business?: string | null; rousai_rate?: number | null };
   collection: Map<number, string>;
+  /** 給与規定グループの締日（賃金締切日を決める。内訳に残していない給与のため） */
+  groups: Map<number, PayrollGroupForPeriod>;
 }
 
 const today = new Date();
@@ -47,13 +50,16 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
     (async () => {
       try {
         const insurers = await loadHealthInsurers(db);
-        const branches = await db.select<any[]>("SELECT id, name, prefecture, rousai_business, rousai_rate FROM branches ORDER BY id");
+        const branches = await db.select<any[]>("SELECT id, name, prefecture, health_ins_num, rousai_business, rousai_rate FROM branches ORDER BY id");
         const c = await db.select<any[]>("SELECT rousai_business, rousai_rate, journal_settings FROM company WHERE id = 1");
         setJournalSettings(parseJournalSettings(c?.[0]?.journal_settings));
-        const g = await db.select<{ id: number; social_ins_collection: string | null }[]>("SELECT id, social_ins_collection FROM payroll_groups");
+        const g = await db.select<{ id: number; social_ins_collection: string | null; closing_day: number; is_next_month: number }[]>(
+          "SELECT id, social_ins_collection, closing_day, is_next_month FROM payroll_groups",
+        );
         setCtx({
           insurers, branches: branches ?? [], company: c?.[0] ?? {},
           collection: new Map((g ?? []).map((x) => [Number(x.id), String(x.social_ins_collection || "current")])),
+          groups: new Map((g ?? []).map((x) => [Number(x.id), { closing_day: Number(x.closing_day), is_next_month: Number(x.is_next_month) }])),
         });
       } catch (e) {
         console.error("保険料の集計表の読み込みエラー:", e);
@@ -69,7 +75,7 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
         const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
         const rows = await db.select<PremiumSalary[]>(
           `SELECT staff_id, target_year, target_month, health_insurance, nursing_insurance, child_support, welfare_pension, kokuho_premium,
-                  emp_insurance, total_earnings, non_remuneration, in_kind_emp
+                  emp_insurance, total_earnings, non_remuneration, in_kind_emp, ledger
            FROM salary_results WHERE (target_year * 100 + target_month) IN (?, ?)`,
           [year * 100 + month, next.y * 100 + next.m],
         );
@@ -101,8 +107,11 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
     };
     return premiumSummary({
       year, month, staffList, salaries, bonuses, insurers: ctx.insurers,
-      prefectureOf: (id) => branchPrefectureOf(ctx.branches, id).prefecture,
+      // 協会けんぽの料率は、その人が入っている適用事業所の都道府県（支店が本店にまとめて入っていれば本店。utils/branchPrefecture.ts）
+      prefectureOf: (id) => kenpoPrefectureOf(ctx.branches, id).prefecture,
       collectionOf: (g) => ctx.collection.get(Number(g || 1)) ?? "current",
+      // 雇用保険料の率を選ぶ賃金締切日（内訳に残した日。なければ給与規定グループの締日から）
+      closingOf: (x, s) => salaryClosingDate(x.ledger, ctx.groups.get(Number(s?.payroll_group_id || 1)), Number(x.target_year), Number(x.target_month)),
       rousaiRateOf: (s) => {
         const b = ctx.branches.find((x) => Number(x.id) === (Number(s.branch_id) || 1));
         return rateOf(b?.rousai_business, b?.rousai_rate) ?? rateOf(ctx.company.rousai_business, ctx.company.rousai_rate);

@@ -44,6 +44,16 @@ describe("社会保険料・労働保険料の集計表（日本年金機構「�
     const r = premiumSummary(input([sal({ staff_id: "A", target_year: 2026, target_month: 11, health_insurance: 14775 })]));
     expect(r.notes[0]).toContain("翌月　徴収");
   });
+  test("雇用保険の会社負担は、給与の賃金締切日がある月の率（2026年4月払いでも、3月31日締めの分は令和7年度の 14.5 − 5.5 ＝ 9/1,000）", () => {
+    const april = (ledger: string | null, closingOf?: () => string | null) => premiumSummary({
+      ...input([sal({ staff_id: "A", target_year: 2026, target_month: 4, emp_insurance: 1650, total_earnings: 300000, ledger })]),
+      month: 4, ...(closingOf ? { closingOf } : {}),
+    }).labor[0];
+    expect(april(JSON.stringify({ periodEnd: "2026-03-31" })).company).toBe(2700); // 300,000円 × 9/1,000
+    expect(april(JSON.stringify({ periodEnd: "2026-04-30" })).company).toBe(2550); // 300,000円 × 8.5/1,000
+    // 内訳に締切日がなければ、渡された締切日（給与規定グループの締日から）で決める
+    expect(april(null, () => "2026-03-31").company).toBe(2700);
+  });
 });
 
 describe("健康保険組合の会社負担と法定福利費の仕訳", () => {

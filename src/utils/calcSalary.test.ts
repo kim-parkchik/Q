@@ -9,7 +9,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
-    calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, prorate, prorationOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled,
+    calculateSalary, loadCustomItems, saveSalaryResult, socialInsMonthsOf, prorate, prorationOf, checkEmploymentInsEnrolled, checkInsuredMonth, checkInsuredOnBonusDate, checkNursingCare, checkSocialInsEnrolled, empInsRateMonthOf,
     getInsuranceByAge, splitByWeights, splitRoundedTotal, heiLimitDate, loadWeekCarryOver, weekCarryOverRange, type SalaryExtras,
 } from "./calcSalary";
 import { calcPremium } from "./socialInsurance";
@@ -188,6 +188,39 @@ describe("雇用保険料（本人負担分）の端数処理（厚生労働省�
         const pay = { ...monthly, base_wage: 300100, standard_remuneration: 0 };
         expect(calc(pay, [], {}, { week_start_day: 0, round_overtime: "round" }).empInsurance).toBe(1500);
         expect(calc(pay, [], {}, { ...company, round_emp_ins: "round" }).empInsurance).toBe(1501);
+    });
+});
+
+describe("雇用保険料の率は、賃金締切日（給与の計算期間の終わりの日）がある月のもの（保険年度に入る賃金は賃金締切日で決める。年度更新と同じ）", () => {
+    test("empInsRateMonthOf：計算期間の終わりの日の月。計算期間がわからなければ支給月", () => {
+        expect(empInsRateMonthOf({ start: "2026-03-01", end: "2026-03-31" }, 2026, 4)).toEqual({ year: 2026, month: 3 });
+        expect(empInsRateMonthOf({ start: "2026-03-16", end: "2026-04-15" }, 2026, 4)).toEqual({ year: 2026, month: 4 });
+        expect(empInsRateMonthOf(null, 2026, 4)).toEqual({ year: 2026, month: 4 });
+    });
+    test("末締め翌月払いの2026年4月払い（3月1日〜31日の分）は、令和7年度の率（一般の事業 5.5/1,000）。4月締めの分から令和8年度の率（5/1,000）", () => {
+        const pay = { ...monthly, standard_remuneration: 0 };
+        const april = (period: { start: string; end: string }) => calculateSalary(pay, [], extras({ period }), 2026, 4, company);
+        const march = april({ start: "2026-03-01", end: "2026-03-31" });
+        expect(march.empInsRateMonth).toEqual({ year: 2026, month: 3 });
+        expect(march.empInsurance).toBe(1650); // 300,000円 × 5.5/1,000
+        const aprilWork = april({ start: "2026-04-01", end: "2026-04-30" });
+        expect(aprilWork.empInsRateMonth).toEqual({ year: 2026, month: 4 });
+        expect(aprilWork.empInsurance).toBe(1500); // 300,000円 × 5/1,000
+    });
+});
+
+describe("死亡した後に支払日が来る給与（相続税の対象で、所得税の対象ではない。所得税基本通達9-17）", () => {
+    test("6月10日に死亡した人の6月25日払いの給与は、所得税を引かず、課税対象額を0にする。6月5日払いなら、いつもどおり", () => {
+        const died = { ...monthly, death_date: "2026-06-10", retirement_date: "2026-06-10" };
+        const after = calc(died, [], { payDate: "2026-06-25" });
+        expect(after.paidAfterDeath).toBe(true);
+        expect([after.incomeTax, after.taxableAmount]).toEqual([0, 0]);
+        expect(after.totalEarnings).toBeGreaterThan(0);
+        const before = calc(died, [], { payDate: "2026-06-05" });
+        expect(before.paidAfterDeath).toBe(false);
+        expect(before.incomeTax).toBeGreaterThan(0);
+        // 支払う日がわからなければ、いままでどおり
+        expect(calc(died, []).paidAfterDeath).toBe(false);
     });
 });
 
@@ -1211,6 +1244,16 @@ describe("現物で払った報酬（食事・住宅・定期券など。utils/g
         expect([r.totalEarnings, r.netPay, r.taxableAmount, r.empInsurance, r.incomeTax])
             .toEqual([base.totalEarnings, base.netPay, base.taxableAmount, base.empInsurance, base.incomeTax]);
         expect(base.inKind).toBeNull();
+    });
+    test("現物給与の価額は働く場所（拠点）の都道府県、健康保険料率は入っている適用事業所の都道府県（本店にまとめて入っている大阪の支店の人）", () => {
+        const tokyoOnly = calc({ ...monthly, in_kind: shataku }, []);
+        const osakaBranch = calc({ ...monthly, in_kind: shataku }, [], { prefecture: "東京", workPrefecture: "大阪" });
+        const osakaRates = calc({ ...monthly, in_kind: shataku }, [], { prefecture: "大阪", workPrefecture: "大阪" });
+        // 価額は大阪の表（東京の 25,280円と違う）。健康保険料は東京の料率のまま
+        expect(osakaBranch.inKind!.amount).toBe(osakaRates.inKind!.amount);
+        expect(osakaBranch.inKind!.amount).not.toBe(tokyoOnly.inKind!.amount);
+        expect(osakaBranch.healthInsurance).toBe(tokyoOnly.healthInsurance);
+        expect(osakaRates.healthInsurance).not.toBe(tokyoOnly.healthInsurance);
     });
     test("社宅で所得税がかかる額を入れた人は、その額を課税対象額に足す（振り込む額は、所得税が増えた分だけ減る）", () => {
         const base = calc(monthly, []);

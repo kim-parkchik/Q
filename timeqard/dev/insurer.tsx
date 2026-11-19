@@ -95,6 +95,7 @@ const fakeDb = {
     if (q.startsWith("SELECT COUNT(*) AS n FROM staff WHERE social_insurance_group_id = ?")) {
       return [{ n: store.staff.filter((s) => s.social_insurance_group_id === Number(params[0])).length }];
     }
+    if (q.startsWith("SELECT id, name, prefecture, health_ins_num FROM branches")) return [{ id: 1, name: "本店", prefecture: "東京都", health_ins_num: "" }];
     if (q.startsWith("SELECT prefecture FROM branches")) return [{ prefecture: "東京都" }];
     console.warn("fakeDb: 知らない SELECT", q, params);
     return [];

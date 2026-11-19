@@ -139,8 +139,13 @@ export interface SalaryExtras {
   allowanceName: string;
   allowanceAmount: number;
   residentTax: number;
-  /** 協会けんぽの健康保険料率に使う都道府県（拠点の都道府県） */
+  /**
+   * 協会けんぽの健康保険料率に使う都道府県：その人が入っている社会保険の適用事業所の都道府県
+   * （支店が本店の適用事業所にまとめて入っていれば本店の都道府県。utils/branchPrefecture.ts の kenpoPrefectureOf）
+   */
   prefecture: string;
+  /** 働く場所（拠点）の都道府県（現物給与の価額に使う。被保険者の勤務地の都道府県の価額。なければ prefecture） */
+  workPrefecture?: string;
   /**
    * 従業員の社会保険規定（健康保険の保険者。utils/healthInsurer.ts の loadHealthInsurers・insurerOf で読む）
    * 健康保険組合は組合の料率、国保組合は健康保険料をかけずに従業員ごとの月額を引く。null・省略は協会けんぽ
@@ -156,6 +161,8 @@ export interface SalaryExtras {
   taxMethod?: TaxCalcMethod;
   /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
   flatTaxReductionRemaining?: number;
+  /** この給与を支払う日（給与規定グループの支払日。死亡した後に支払う給与かを見る。なければ見ない） */
+  payDate?: string;
   /** この給与で精算する年末調整の過不足額（＋なら還付、−なら徴収。なければ 0） */
   yearEndSettlement?: number;
   /** 1年間の所定労働日数（残業代の時給を出す「1年間における1か月平均所定労働時間」に使う。なければその月の所定労働日数で割る） */
@@ -368,6 +375,8 @@ export interface SalaryResult {
   childSupport: number;
   welfarePension: number;
   empInsurance: number;
+  /** 雇用保険料の率を使った月（賃金締切日がある月。empInsRateMonthOf） */
+  empInsRateMonth: { year: number; month: number };
   /** 国民健康保険組合の保険料（国保組合の人だけ。従業員ごとの月額。社会保険料として所得税の計算で引く） */
   kokuhoPremium: number;
   /** 健康保険の保険者（社会保険規定。協会けんぽなら name は空） */
@@ -378,6 +387,11 @@ export interface SalaryResult {
   insurerRateMissing: boolean;
   /** 源泉所得税（定額減税を引いた後の、実際に控除する額） */
   incomeTax: number;
+  /**
+   * 死亡した後に支払日が来る給与（相続税の対象で、所得税の対象ではない。所得税基本通達9-17）。
+   * 所得税を引かず、課税対象額（源泉徴収簿・源泉徴収票・年末調整・納付書に入る額）を0にする
+   */
+  paidAfterDeath: boolean;
   /** 定額減税を引く前の源泉所得税 */
   incomeTaxBeforeReduction: number;
   /** 源泉所得税の欄（甲欄・乙欄・丙欄） */
@@ -578,6 +592,22 @@ export const checkSocialInsEnrolled = (staff: any, year: number, month: number):
 /** 雇用保険に加入しているか（従業員画面の「雇用保険加入」を外した人＝役員など は加入していない） */
 export const checkEmploymentInsEnrolled = (staff: any): boolean =>
   Number(staff.is_employment_ins_eligible ?? 1) !== 0;
+
+/**
+ * 雇用保険料の率を使う月：賃金締切日（給与の計算期間の終わりの日）がある月。計算期間がわからなければ支給月
+ * 労働保険料は、保険年度（4月〜翌年3月）に入る賃金にその年度の率をかける。保険年度に入るかは、賃金締切日で決める
+ * （厚生労働省「労働保険年度更新申告書の書き方」。年度更新の集計 utils/nendoKoshin.ts も同じ月で数える）。
+ * 例：末締め翌月払いの4月払い（3月1日〜31日の分）は、3月の率（前の年度の率）。15日締め当月払いの4月払い（3月16日〜4月15日）は、4月の率
+ */
+export const empInsRateMonthOf = (
+  period: { start: string; end: string } | null | undefined,
+  payYear: number,
+  payMonth: number,
+): { year: number; month: number } => {
+  const end = period?.end;
+  if (end && /^\d{4}-\d{2}-\d{2}$/.test(end)) return { year: Number(end.slice(0, 4)), month: Number(end.slice(5, 7)) };
+  return { year: payYear, month: payMonth };
+};
 
 /** 資格喪失日（退職日の翌日）。退職日が空なら null */
 const lossDateOf = (retirementDate?: string | null) =>
@@ -1994,7 +2024,7 @@ export const calculateSalary = (
   const inKindEntries = parseInKind(staff.in_kind);
   const inKindBase = inKindEntries.length > 0 || commuteInKind
     ? inKindOfMonth(
-      inKindEntries, inKindMonthOf(extras.period, targetYear, targetMonth), extras.prefecture,
+      inKindEntries, inKindMonthOf(extras.period, targetYear, targetMonth), extras.workPrefecture || extras.prefecture,
       attendanceData.filter(row => (Number(row.work_hours) || 0) > 0).map(row => String(row.work_date)),
       { executive: Number(staff.is_executive) === 1 },
     )
@@ -2098,15 +2128,16 @@ export const calculateSalary = (
   const welfarePension = perMonth.reduce((sum, p) => sum + p.welfarePension, 0);
   const kokuhoPremium = perMonth.reduce((sum, p) => sum + p.kokuhoPremium, 0);
 
-  // 雇用保険の料率は、賃金を支払った月のもの（社会保険料の徴収月とは関係ない）
-  const ins = Master.getInsuranceMaster(targetYear, targetMonth);
+  // 雇用保険の料率は、賃金締切日（給与の計算期間の終わりの日）がある月のもの（社会保険料の徴収月・給与の支給月とは関係ない。empInsRateMonthOf）
+  const empInsRateMonth = empInsRateMonthOf(extras.period, targetYear, targetMonth);
+  const empIns = Master.getInsuranceMaster(empInsRateMonth.year, empInsRateMonth.month);
 
   // 雇用保険（賃金総額 × 本人負担率）
   // 従業員画面の「雇用保険加入」を外した人（役員など）からは控除しない
   // 区分は 従業員の設定 → 会社の設定 → 「一般の事業」 の順に決める
   const isEmploymentInsEnrolled = checkEmploymentInsEnrolled(staff);
   const empInsKey = (staff.employment_insurance_type || companySettings?.default_emp_ins_type || 'general') as Master.EmpInsType;
-  const empRates = ins.LABOR_INSURANCE_RATES[empInsKey] || ins.LABOR_INSURANCE_RATES.general;
+  const empRates = empIns.LABOR_INSURANCE_RATES[empInsKey] || empIns.LABOR_INSURANCE_RATES.general;
   const empInsurance = isEmploymentInsEnrolled
     // 端数：会社の設定（なければ、賃金から引くときの原則の50銭以下切り捨て・50銭1厘以上切り上げ。厚生労働省「雇用保険被保険者からの雇用保険料の控除方法」）
     // 現物で払った報酬のうち、雇用保険の賃金に入れる額（定期券など・自社製品など。食事・住宅は入れない）も足す
@@ -2118,17 +2149,19 @@ export const calculateSalary = (
   const socialTotal = healthInsurance + nursingInsurance + childSupport + welfarePension + empInsurance + kokuhoPremium;
   // 通勤手当は非課税限度額まで所得税がかからない（上の nonTaxableCommute）。労災の待期の休業補償は非課税（所得税法9条1項3号・所得税法施行令20条1項2号）
   // 現物で払った報酬のうち所得税がかかる額（定期券などで渡した通勤手当は、非課税限度額を超えた分）は足す
-  const taxableAmount = totalEarnings - (commuteInKind ? 0 : nonTaxableCommute) - nonRemuneration + (inKind?.taxable ?? 0);
+  // 死亡した後に支払日が来る給与は、相続税の対象（相続財産）で、所得税の対象ではない（所得税基本通達9-17）。所得税を引かず、課税対象額にも入れない
+  const paidAfterDeath = !!staff.death_date && !!extras.payDate && String(extras.payDate) > String(staff.death_date);
+  const taxableAmount = paidAfterDeath ? 0 : totalEarnings - (commuteInKind ? 0 : nonTaxableCommute) - nonRemuneration + (inKind?.taxable ?? 0);
   // targetYear は支給年（源泉所得税は支払った年の税額表を使う）
   // 扶養控除等申告書を出していない人は乙欄（扶養人数は「従たる給与についての扶養控除等申告書」の人数）
   // 日雇賃金は丙欄で、働いた日ごとに計算する（下の heiDaysOf）
   const taxColumn = toTaxColumn(staff.tax_column);
   const taxBase = Math.max(0, taxableAmount - socialTotal);
   const isHei = taxColumn === 'hei';
-  const { days: heiDays, warnings: heiWarnings } = isHei
+  const { days: heiDays, warnings: heiWarnings } = isHei && !paidAfterDeath
     ? heiDaysOf(staff, sorted, dayPays, isOvertimeEligible, taxBase, targetYear)
     : { days: [], warnings: [] };
-  const incomeTaxBeforeReduction = isHei
+  const incomeTaxBeforeReduction = paidAfterDeath ? 0 : isHei
     ? heiDays.reduce((sum, d) => sum + d.tax, 0)
     : getGensenTax(taxBase, Number(extras.dependents) || 0, targetYear, extras.taxMethod, taxColumn);
   // 定額減税（令和6年6月〜）：残っている減税額を、源泉所得税を上限に差し引く
@@ -2231,11 +2264,13 @@ export const calculateSalary = (
     childSupport,
     welfarePension,
     empInsurance,
+    empInsRateMonth,
     kokuhoPremium,
     insurer: { type: insurer?.type ?? 'kyokai', name: insurer && insurer.type !== 'kyokai' ? insurer.name : '' },
     unionRate: main.unionRate,
     insurerRateMissing: perMonth.some((p) => p.healthRateMissing === 'unionRate'),
     incomeTax,
+    paidAfterDeath,
     incomeTaxBeforeReduction,
     taxColumn,
     heiDays,

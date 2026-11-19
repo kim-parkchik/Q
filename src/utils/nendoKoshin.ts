@@ -25,7 +25,7 @@ import { TOKUBETSU_TABLE } from "../constants/tokubetsuKanyu";
 import dayjs from "dayjs";
 import { LABOR_INSURANCE_PERIODS, type EmpInsType } from "../constants/insurance/laborInsuranceRates";
 import { GENERAL_CONTRIBUTION_RATE, ROUSAI_RATE_PERIODS, type RousaiRateRow } from "../constants/insurance/rousaiRates";
-import { getPeriodForPayMonth, type PayrollGroupForPeriod } from "./payrollPeriod";
+import { salaryClosingDate, type PayrollGroupForPeriod } from "./payrollPeriod";
 
 /** 集計表の人の区分（regular：常用労働者・officer：役員で労働者扱いの人・temporary：臨時労働者） */
 export type NendoCategory = "regular" | "officer" | "temporary";
@@ -153,15 +153,8 @@ const employedOn = (s: NendoStaff, date: string): boolean => {
 };
 
 /** 確定した給与の計算期間の終わりの日（賃金締切日） */
-const closingOf = (s: NendoSalary, group: PayrollGroupForPeriod | undefined): string | null => {
-  try {
-    const l = s.ledger ? JSON.parse(s.ledger) : null;
-    if (l?.periodEnd) return String(l.periodEnd);
-  } catch {
-    // 内訳を読めなければ締日から
-  }
-  return group ? getPeriodForPayMonth(group, Number(s.target_year), Number(s.target_month)).endStr : null;
-};
+const closingOf = (s: NendoSalary, group: PayrollGroupForPeriod | undefined): string | null =>
+  salaryClosingDate(s.ledger, group, Number(s.target_year), Number(s.target_month));
 
 /**
  * 集計表を作る

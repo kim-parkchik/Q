@@ -103,6 +103,7 @@ const fakeDb = {
     const q = sql.replace(/\s+/g, " ").trim();
     if (q.startsWith("SELECT * FROM company WHERE id = 1") || q.includes("FROM company WHERE id = 1")) return [store.company];
     if (q.startsWith("SELECT * FROM branches") || q.startsWith("SELECT id, name, address, phone, labor_ins_num, rousai_business FROM branches") || q.startsWith("SELECT id, name FROM branches")) return store.branches;
+    if (q.startsWith("SELECT id, name, prefecture, health_ins_num FROM branches")) return store.branches;
     if (q.startsWith("SELECT prefecture FROM branches WHERE id = 1")) return [store.branches[0]];
     if (q.startsWith("SELECT name, address FROM branches WHERE id = ?")) return store.branches.filter((b: any) => b.id === params[0]);
     if (q.startsWith("SELECT closing_day, is_next_month, payment_day, fixed_break FROM payroll_groups")) {

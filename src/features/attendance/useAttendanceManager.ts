@@ -14,7 +14,7 @@ import { useMessageDialog } from "../../components/MessageDialog";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 import { breakShortage, calcDayHours, describeCombine, describeFixedBreak, fixedBreakRuleFor, leaveMinutesOf, recordedRestMinutes, specialLeaveMinutesOf, type DayTimes } from "../../utils/fixedBreak";
 import { effectiveBreaks, parseBreaksJson, stringifyBreaks } from "../../utils/breaks";
-import { branchPrefectureOf } from "../../utils/branchPrefecture";
+import { branchPrefectureOf, kenpoPrefectureOf } from "../../utils/branchPrefecture";
 import {
   collectLeaveTaken, formatLeaveMinutes, formatTakenAmount, hourlyLeaveByGrantYear, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave,
   type AttendanceLeaveRow, type LeaveGrantRow, type ManualLeaveRecord,
@@ -49,7 +49,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   const [monthlyWorkData, setMonthlyWorkData] = useState<Record<string, any>>({});
   const [companySettings, setCompanySettings] = useState<any>(null);
   // 拠点の都道府県（健康保険料率に使う）。わからなければ空（京都などで仮に計算しない。この画面には社会保険料を出していない）
+  // 協会けんぽの健康保険料率の都道府県（入っている適用事業所）と、働く拠点の都道府県（現物給与の価額）
   const [branchPrefecture, setBranchPrefecture] = useState<string>("");
+  const [workPrefecture, setWorkPrefecture] = useState<string>("");
   // 有給の付与・確定した勤怠・前の記録（有給の残りを数える。有給の画面と同じ読み方）
   const [paidLeaveData, setPaidLeaveData] = useState<{
     staffId: string; grants: LeaveGrantRow[]; attendance: AttendanceLeaveRow[]; manual: ManualLeaveRecord[];
@@ -671,6 +673,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         allowanceAmount: 0, 
         residentTax: 0, 
         prefecture: branchPrefecture, 
+        workPrefecture,
         dependents: Number(selectedStaff.dependents) || 0, 
         customItems,
         taxMethod: currentGroup?.tax_calc_method,
@@ -705,7 +708,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexPeriod, averageWagePay]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, workPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexPeriod, averageWagePay]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {
@@ -832,11 +835,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
       if (selectedStaff) {
         // 拠点を選んでいない人は本店（給与明細と同じ）。前に選んでいた人の都道府県が残らないように、毎回決め直す
         const branchId = Number(selectedStaff.branch_id) || 1;
+        // 支店が本店の適用事業所にまとめて入っていれば、健康保険料率は本店の都道府県（utils/branchPrefecture.ts）
         const branchData = await db.select(
-          "SELECT id, name, prefecture FROM branches WHERE id = ?",
+          "SELECT id, name, prefecture, health_ins_num FROM branches WHERE id IN (?, 1)",
           [branchId]
         ) as any[];
-        setBranchPrefecture(branchPrefectureOf(branchData ?? [], branchId).prefecture ?? "");
+        setBranchPrefecture(kenpoPrefectureOf(branchData ?? [], branchId).prefecture ?? "");
+        setWorkPrefecture(branchPrefectureOf(branchData ?? [], branchId).prefecture ?? "");
       }
     } catch (e) {
       console.error("Company/branch load error:", e);

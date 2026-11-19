@@ -20,7 +20,8 @@
  */
 import type { NenchoMaster } from "../constants/nencho";
 import { calcNencho, type NenchoResult } from "./nencho";
-import { buildNenchoInput, sumYearTotals, type NenchoDeclaration } from "./nenchoDeclaration";
+import { buildNenchoInput, diedInYear, judgeDateOf, sumYearTotals, type NenchoDeclaration } from "./nenchoDeclaration";
+import { salaryPayDate } from "./flatTaxReduction";
 import { bonusTaxRateUsed, toTaxColumn, type TaxColumn } from "./incomeTax";
 import { staffAsOf } from "./staffHistory";
 
@@ -227,8 +228,15 @@ export const buildWithholdingLedger = (src: LedgerSource, m: NenchoMaster | null
   let dependentLines: LedgerDependentLine[] | null = null;
   if (src.adjustment && m) {
     const decl = src.adjustment.declaration;
-    const totals = sumYearTotals(thisYear, src.bonuses);
-    const input = buildNenchoInput(decl, totals, year, m);
+    // その年の途中で死亡した人：死亡した日より後に支払日が来る給与・賞与は相続税の対象なので入れず（所得税基本通達9-17）、
+    // 配偶者・扶養親族は死亡の日の現況で決める（所得税法85条。年末調整の画面と同じ）
+    const died = diedInYear(src.staff, year);
+    const beforeDeath = (date: string) => !died || !date || date <= String(src.staff?.death_date);
+    const totals = sumYearTotals(
+      thisYear.filter((r) => beforeDeath(salaryPayDate(year, n(r.target_month), src.paymentDay ?? 25))),
+      src.bonuses.filter((b) => beforeDeath(String(b.payment_date ?? ""))),
+    );
+    const input = buildNenchoInput(decl, totals, year, m, judgeDateOf(src.staff, year));
     const result = calcNencho(input, m);
     const pj = decl.previousJob;
     const hasPrevious = n(pj.salary) > 0 || n(pj.withheldTax) > 0 || n(pj.socialInsurance) > 0;

@@ -11,6 +11,7 @@
  *   ・19歳以上23歳未満で、合計所得金額が62万円を超え123万円以下の親族は、特定親族（特定親族特別控除）
  *   ・配偶者：70歳以上なら老人控除対象配偶者。合計所得金額で配偶者控除か配偶者特別控除かが決まる（utils/nencho.ts）
  *   ・障害者控除は、本人・同一生計配偶者・扶養親族（年少も含む）ごと。同一生計配偶者・扶養親族が特別障害者で同居なら同居特別障害者
+ * ■ その年の途中で死亡した人は、死亡の時の現況で決める（所得税法85条1項・3項。nencho-tables/shotokuzei-85.xml。judgeDateOf）
  * 出典：国税庁 タックスアンサー No.1180（扶養控除。令和8年分の所得要件は62万円以下）
  *       https://www.nta.go.jp/taxes/shiraberu/taxanswer/shotoku/1180.htm
  *       「令和8年分 年末調整のしかた」の扶養控除額等の表（特定扶養親族は平成16年1月2日〜平成20年1月1日生など）
@@ -74,7 +75,27 @@ export interface NenchoDeclaration {
   housingLoans: HousingLoan[];
   /** 前の勤め先の給与（その年に転職した人。前の勤め先の源泉徴収票の金額と、源泉徴収票の摘要欄に書く支払者・退職日） */
   previousJob: { salary: number; socialInsurance: number; withheldTax: number; payerName: string; payerAddress: string; retiredOn: string };
+  /** 年の途中で退職した人を、退職のときに年末調整する理由（死亡退職は死亡日から決めるので入れない。MID_YEAR_REASONS） */
+  midYearReason: MidYearReason;
 }
+
+/**
+ * 年の途中で退職した人を、退職のとき（その年最後に給与を支払うとき）に年末調整する理由
+ * 年末調整は、その年のうちにほかの勤め先に扶養控除等申告書を出すと見込まれる人を除き、その年最後に給与を支払うときにする
+ * （所得税法190条。nencho-tables/shotokuzei-190.xml）。年の途中で退職した人は、ふつうは次の勤め先で年末調整をするか、本人が確定申告をするが、
+ * 次の人は、退職のときに年末調整をする（国税庁「年末調整のしかた」の「年末調整の対象となる人」・タックスアンサー No.2665）。
+ * ・死亡により退職した人（従業員の画面の死亡日から決める）
+ * ・著しい心身の障害のため退職した人で、その年に再就職ができないと見込まれ、退職後その年に給与を受け取らない人（disability）
+ * ・パートタイマーなどが退職した場合で、その年に受け取る給与の総額が少なく、退職後その年にほかから給与を受け取らない人（smallTotal。
+ *   総額の線は「年末調整のしかた」に書いてある額。Q は法令から読める額がないので、担当者が確かめて選ぶ）
+ * ・12月中に支払期の来る給与を受け取った後に退職した人（Q では、12月に退職した人はいつもどおり対象）
+ */
+export type MidYearReason = "" | "disability" | "smallTotal";
+
+export const MID_YEAR_REASONS: { value: Exclude<MidYearReason, "">; label: string }[] = [
+  { value: "disability", label: "著しい心身の障害のため退職し、その年に再就職できず、ほかから給与を受け取らない" },
+  { value: "smallTotal", label: "パートタイマーなどが退職し、その年の給与の総額が少なく（年末調整のしかたの額以下）、ほかから給与を受け取らない" },
+];
 
 export interface HousingLoan {
   /** 居住開始年月日（YYYY-MM-DD） */
@@ -96,6 +117,7 @@ export const emptyDeclaration = (): NenchoDeclaration => ({
   housingLoanCredit: 0,
   housingLoans: [],
   previousJob: { salary: 0, socialInsurance: 0, withheldTax: 0, payerName: "", payerAddress: "", retiredOn: "" },
+  midYearReason: "",
 });
 
 /** 保存した申告書（JSON）を読む。足りない項目は空の値で埋める */
@@ -112,10 +134,29 @@ export const parseDeclaration = (json: unknown): NenchoDeclaration => {
       housingLoanCredit: Number(d?.housingLoanCredit) || 0,
       housingLoans: Array.isArray(d?.housingLoans) ? d.housingLoans : [],
       previousJob: { ...base.previousJob, ...(d?.previousJob ?? {}) },
+      midYearReason: MID_YEAR_REASONS.some((r) => r.value === d?.midYearReason) ? d.midYearReason : "",
     };
   } catch {
     return base;
   }
+};
+
+/**
+ * その日の年齢（年齢は誕生日の前日に1つ上がる。2月29日生まれは、うるう年でない年は2月28日に上がる）。生年月日・日付がなければ null
+ */
+export const ageOn = (birthday: string, date: string): number | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birthday || "");
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || "");
+  if (!m || !d) return null;
+  const [by, bm, bd] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const y = Number(d[1]);
+  const day = Date.UTC(y, Number(d[2]) - 1, Number(d[3]));
+  const leap = (yy: number) => (yy % 4 === 0 && yy % 100 !== 0) || yy % 400 === 0;
+  /** yy 年の誕生日の前日（この日に yy − 生まれた年 の年齢になる。うるう年でない年の2月29日生まれは、3月1日の前日） */
+  const turns = (yy: number) => (bm === 2 && bd === 29 && !leap(yy) ? Date.UTC(yy, 2, 1) : Date.UTC(yy, bm - 1, bd)) - 24 * 60 * 60 * 1000;
+  // 1月1日生まれは、前の年の12月31日に年齢が上がる
+  if (turns(y + 1) <= day) return y + 1 - by;
+  return turns(y) <= day ? y - by : y - by - 1;
 };
 
 /**
@@ -127,6 +168,21 @@ export const ageAtYearEnd = (birthday: string, year: number): number | null => {
   if (!m) return null;
   const [by, bm, bd] = [Number(m[1]), Number(m[2]), Number(m[3])];
   return year - by + (bm === 1 && bd === 1 ? 1 : 0);
+};
+
+/**
+ * 扶養親族・配偶者・障害者などを決める日：その年の12月31日。その年の途中で死亡した人は、死亡の日（所得税法85条1項の括弧書き。
+ * 「以下この条において同じ」なので、配偶者・扶養親族の判定（3項）も死亡の時の現況）
+ */
+export const judgeDateOf = (staff: { death_date?: string | null } | null | undefined, year: number): string => {
+  const death = String(staff?.death_date ?? "");
+  return death >= `${year}-01-01` && death <= `${year}-12-31` ? death : `${year}-12-31`;
+};
+
+/** その年に死亡した人か */
+export const diedInYear = (staff: { death_date?: string | null } | null | undefined, year: number): boolean => {
+  const death = String(staff?.death_date ?? "");
+  return death >= `${year}-01-01` && death <= `${year}-12-31`;
 };
 
 /** 扶養親族の区分 */
@@ -160,20 +216,22 @@ const specificRelativeLimit = (m: NenchoMaster) => m.specificRelative[m.specific
 
 /**
  * @param limits 扶養親族の合計所得の線と、特定親族の上の線（年末調整をしない人の源泉徴収票では、手引の別の線を使う。utils/withholdingSlip.ts）
+ * @param on 判定の日（なければその年の12月31日。その年の途中で死亡した人は死亡の日。judgeDateOf）
  */
 export const classifyDependent = (
   d: DeclaredDependent, year: number, m: NenchoMaster,
   limits: { income: number; specificRelative: number } = { income: dependentIncomeLimit(m), specificRelative: specificRelativeLimit(m) },
-): DependentKind => classifyDependentByLimits(d, year, limits);
+  on?: string,
+): DependentKind => classifyDependentByLimits(d, year, limits, on);
 
 /**
- * 扶養親族の区分を、その年の12月31日の年齢と、所得の線で決める
+ * 扶養親族の区分を、その年の12月31日（その年の途中で死亡した人は死亡の日。on）の年齢と、所得の線で決める
  * （年末調整の表がない年分の、年末調整をしない人の源泉徴収票でも使う。utils/withholdingSlip.ts の classifySourceDependent）
  */
 export const classifyDependentByLimits = (
-  d: DeclaredDependent, year: number, limits: { income: number; specificRelative: number },
+  d: DeclaredDependent, year: number, limits: { income: number; specificRelative: number }, on?: string,
 ): DependentKind => {
-  const age = ageAtYearEnd(d.birthday, year);
+  const age = on ? ageOn(d.birthday, on) : ageAtYearEnd(d.birthday, year);
   if (age === null) return "none";
   const income = Math.max(0, Number(d.totalIncome) || 0);
   if (income > limits.income) {
@@ -218,8 +276,12 @@ export const sumYearTotals = (
   };
 };
 
-/** 申告書の内容と1年分の集計から、年税額の計算に渡す値を作る */
-export const buildNenchoInput = (decl: NenchoDeclaration, totals: YearTotals, year: number, m: NenchoMaster): NenchoInput => {
+/**
+ * 申告書の内容と1年分の集計から、年税額の計算に渡す値を作る
+ * @param on 配偶者・扶養親族の年齢を決める日（なければその年の12月31日。その年の途中で死亡した人は死亡の日。judgeDateOf）
+ */
+export const buildNenchoInput = (decl: NenchoDeclaration, totals: YearTotals, year: number, m: NenchoMaster, on?: string): NenchoInput => {
+  const ageOf = (birthday: string) => (on ? ageOn(birthday, on) : ageAtYearEnd(birthday, year));
   const dependents = { general: 0, specific: 0, elderlyLivingTogether: 0, elderlyOther: 0 };
   const disability = { general: 0, special: 0, specialLivingTogether: 0 };
   const specificRelativeIncomes: number[] = [];
@@ -241,7 +303,7 @@ export const buildNenchoInput = (decl: NenchoDeclaration, totals: YearTotals, ye
   // 配偶者（障害者控除は、合計所得金額が上限以下の同一生計配偶者だけ）
   let spouse: NenchoInput["spouse"] = null;
   if (decl.spouse) {
-    const age = ageAtYearEnd(decl.spouse.birthday, year);
+    const age = ageOf(decl.spouse.birthday);
     const income = Math.max(0, Number(decl.spouse.totalIncome) || 0);
     spouse = { totalIncome: income, elderly: age !== null && age >= 70 };
     if (income <= dependentIncomeLimit(m)) addDisability(decl.spouse, true);
@@ -249,7 +311,7 @@ export const buildNenchoInput = (decl: NenchoDeclaration, totals: YearTotals, ye
 
   // 扶養親族・特定親族
   for (const d of decl.dependents) {
-    const kind = classifyDependent(d, year, m);
+    const kind = classifyDependent(d, year, m, undefined, on);
     if (kind === "none") continue;
     if (kind === "specificRelative") {
       specificRelativeIncomes.push(Math.max(0, Number(d.totalIncome) || 0));
@@ -259,7 +321,7 @@ export const buildNenchoInput = (decl: NenchoDeclaration, totals: YearTotals, ye
     if (kind === "specific") dependents.specific++;
     if (kind === "elderlyTogether") dependents.elderlyLivingTogether++;
     if (kind === "elderlyOther") dependents.elderlyOther++;
-    const age = ageAtYearEnd(d.birthday, year);
+    const age = ageOf(d.birthday);
     if (age !== null && age < 23) hasDependentUnder23 = true;
     addDisability(d, true);
   }
@@ -308,18 +370,50 @@ export const validateDeclaration = (decl: NenchoDeclaration): string[] => {
   return errors;
 };
 
+/** 年の途中で退職した人で、年末調整をしないときの理由（MID_YEAR_REASONS を選べば、退職のときに年末調整をする） */
+export const MID_YEAR_EXCLUSION =
+  "年の途中で退職した人は、原則として年末調整をしません（次の勤め先で年末調整をするか、本人が確定申告をします）。"
+  + "著しい心身の障害のため退職した人や、パートタイマーなどで給与の総額が少なく、その年にほかから給与を受け取らない人は、"
+  + "退職のときに年末調整をします（下の「年の途中で退職した人の年末調整」で選びます）";
+
 /**
  * 年末調整の対象かどうか（対象でなければ理由）
  * ・乙欄・丙欄の人（扶養控除等申告書を出していない）はしない（所得税法190条）
- * ・年の途中で退職した人は、原則としてしない（12月中に退職した人は、その年最後の給与を支払った後なら対象）
- * 出典：国税庁「令和8年分 年末調整のしかた」（年末調整の対象となる人）
+ * ・年の途中で退職した人は、原則としてしない（その年のうちに、ほかの勤め先に扶養控除等申告書を出すと見込まれるため。所得税法190条の括弧書き）。
+ *   ただし、死亡により退職した人（死亡日がその年）と、MID_YEAR_REASONS の人は、退職のとき（その年最後に給与を支払うとき）にする
+ * ・12月中に退職した人は、その年最後の給与を支払った後なら対象
+ * 出典：所得税法190条（nencho-tables/shotokuzei-190.xml）、国税庁「令和8年分 年末調整のしかた」（年末調整の対象となる人）
+ * @param decl 保存した申告書（年の途中で退職した人を年末調整する理由を読む）
  */
-export const nenchoExclusion = (staff: { tax_column?: unknown; retirement_date?: string | null }, year: number): string | null => {
+export const nenchoExclusion = (
+  staff: { tax_column?: unknown; retirement_date?: string | null; death_date?: string | null },
+  year: number,
+  decl?: Pick<NenchoDeclaration, "midYearReason"> | null,
+): string | null => {
   const column = toTaxColumn(staff.tax_column);
   if (column === "otsu") return "乙欄の人は年末調整をしません（本人が確定申告します）";
   if (column === "hei") return "丙欄（日雇賃金）の人は年末調整をしません（扶養控除等申告書を出していないため）";
-  if (staff.retirement_date && staff.retirement_date < `${year}-12-01`) return "年の途中で退職した人は、年末調整をしません（本人が確定申告します）";
+  if (staff.retirement_date && staff.retirement_date < `${year}-12-01`) {
+    if (diedInYear(staff, year)) return null;
+    if (decl?.midYearReason) return null;
+    return MID_YEAR_EXCLUSION;
+  }
   return null;
+};
+
+/** 年の途中で退職した人を、退職のときに年末調整するときの説明（しないときは null） */
+export const midYearAdjustmentNote = (
+  staff: { retirement_date?: string | null; death_date?: string | null },
+  year: number,
+  decl?: Pick<NenchoDeclaration, "midYearReason"> | null,
+): string | null => {
+  if (diedInYear(staff, year)) {
+    return `死亡により退職した人なので、退職のときに年末調整をします。配偶者・扶養親族などは、死亡の日（${staff.death_date}）の現況で決めます（所得税法85条）。`
+      + "死亡した日より後に支払日が来る給与・賞与は、相続税の対象になるので、所得税を引かず、年末調整にも入れません（所得税基本通達9-17）。";
+  }
+  if (!(staff.retirement_date && staff.retirement_date < `${year}-12-01`) || !decl?.midYearReason) return null;
+  const reason = MID_YEAR_REASONS.find((r) => r.value === decl.midYearReason)?.label ?? "";
+  return `年の途中で退職した人ですが、「${reason}」ので、退職のとき（その年最後に給与を支払うとき）に年末調整をします。`;
 };
 
 /**

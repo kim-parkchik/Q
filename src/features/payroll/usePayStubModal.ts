@@ -61,8 +61,11 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     allowanceName: "役職手当",
     allowanceAmount: 0,
     residentTax: residentTaxFor(staff, year, month), // この月に支給する給与の分（年度ごとの額。utils/residentTax.ts）
-    // 健康保険料率に使う都道府県：拠点の都道府県（わからなければ空。明細の画面で知らせ、選んでもらうまで健康保険料を計算しない）
-    prefecture: Master.toKenpoPrefName(staff.prefecture) ?? "",
+    // 健康保険料率に使う都道府県：その人が入っている社会保険の適用事業所の都道府県（支店が本店にまとめて入っていれば本店の都道府県。
+    // utils/branchPrefecture.ts の kenpoPrefectureOf）。わからなければ空（明細の画面で知らせ、選んでもらうまで健康保険料を計算しない）
+    prefecture: Master.toKenpoPrefName(staff.kenpoPrefecture ?? staff.prefecture) ?? "",
+    // 現物給与の価額は、働く場所（拠点）の都道府県
+    workPrefecture: Master.toKenpoPrefName(staff.prefecture) ?? "",
     dependents: Number(staff.dependents) || 0,
     customItems: [],
   });
@@ -125,11 +128,11 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, flex_rule FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, flex_rule, payment_day FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
         ) as {
           tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; leave_proration_method?: string;
-          absence_deduction_method?: string; tardy_deduction_method?: string; flex_rule?: string | null;
+          absence_deduction_method?: string; tardy_deduction_method?: string; flex_rule?: string | null; payment_day?: number | null;
         }[];
         if (cancelled) return;
         const method = rows?.[0]?.tax_calc_method === "densanki" ? "densanki" : "table";
@@ -145,6 +148,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           tardyDeductionMethod: toTardyDeductionMethod(rows?.[0]?.tardy_deduction_method),
           // フレックスタイム制の決まり（utils/flexTime.ts）
           flexRule: parseFlexRule(rows?.[0]?.flex_rule),
+          // この給与を支払う日（死亡した後に支払う給与には所得税をかけない。utils/calcSalary.ts の paidAfterDeath）
+          payDate: salaryPayDate(year, month, rows?.[0]?.payment_day ?? 25),
         }));
         markLoad("group", "ok");
       } catch (e) {
@@ -153,7 +158,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       }
     })();
     return () => { cancelled = true; };
-  }, [db, staff.payroll_group_id]);
+  }, [db, staff.payroll_group_id, year, month]);
 
   // 定額減税（令和6年6月〜）：その人の減税額の合計から、この給与より前に払った給与・賞与（確定したもの）で差し引いた額を引いた残り
   // （賞与からも引くので、前に払った賞与も数える。同じ日に払う賞与より給与が先。utils/flatTaxReduction.ts）
@@ -350,8 +355,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   // 明細の注記に出す料率の年度（この給与から引いた社会保険料の月のもの。翌月徴収なら前月の分）
   const [insYear, insMonth] = (salary.socialInsMonths[0] ?? `${year}-${month}`).split('-').map(Number);
   const insMaster = Master.getInsuranceMaster(insYear, insMonth);
-  // 雇用保険の料率は、支払った月のもの
-  const empInsMaster = Master.getInsuranceMaster(year, month);
+  // 雇用保険の料率は、賃金締切日（計算期間の終わりの日）がある月のもの（utils/calcSalary.ts の empInsRateMonthOf）
+  const empInsMaster = Master.getInsuranceMaster(salary.empInsRateMonth.year, salary.empInsRateMonth.month);
   // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
   const rateWarnings = [...new Set([...insMaster.WARNINGS, ...empInsMaster.WARNINGS, ...Master.getTaxMasterWarnings(year)])];
 
@@ -464,10 +469,23 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     ? null
     : (staff.prefectureProblem ?? "この人の拠点の都道府県がわかりません。会社の設定で、拠点の都道府県を登録してください。");
 
+  // 協会けんぽの健康保険料率の都道府県（入っている適用事業所の拠点の都道府県）がわからないとき、その理由と直し方
+  const kenpoPrefectureProblem: string | null = Master.toKenpoPrefName(staff.kenpoPrefecture ?? staff.prefecture)
+    ? null
+    : (staff.kenpoPrefectureProblem ?? staff.prefectureProblem ?? "この人が入っている社会保険の適用事業所の都道府県がわかりません。会社の設定で、拠点の都道府県を登録してください。");
+  // 働く拠点の都道府県と、健康保険料率の都道府県（本店の適用事業所）が違うときの説明
+  const workPref = Master.toKenpoPrefName(staff.prefecture);
+  const kenpoPref = Master.toKenpoPrefName(staff.kenpoPrefecture);
+  const kenpoOfficeNote: string | null = workPref && kenpoPref && workPref !== kenpoPref
+    ? `この人は${workPref}の拠点で働いていますが、拠点に「社会保険番号（支店固有の場合）」が入っていないので、本店の適用事業所に入っている人として、健康保険料は本店の都道府県（${kenpoPref}）の料率で計算します（健康保険法160条）。拠点が別の適用事業所なら、会社の設定の拠点に社会保険番号を入れてください。最低賃金と現物給与の価額は、働く拠点の都道府県（${workPref}）です。`
+    : null;
+
   return {
     monthStaff: staff,
     wageMismatchDays,
     branchPrefectureProblem,
+    kenpoPrefectureProblem,
+    kenpoOfficeNote,
     salary,
     extras,
     setExtras,

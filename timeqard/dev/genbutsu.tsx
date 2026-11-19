@@ -10,6 +10,8 @@
  *   佐藤さん：寮の食事（毎日3食。食費1万円。所得税がかかる額 3千円）→ 25,500円 − 10,000円 ＝ 15,500円
  *   鈴木さん：自社製品（時価1万円）＋ 社員食堂の昼食（出勤した日ごと。本人1日100円）→ 10,000円 ＋ 300円 × 20日 − 2,000円
  *   田中さん：北海道の支店の社宅（総面積51平方メートル）→ 530円 × 51㎡ ＝ 27,030円（一覧表の Q&A の例）
+ *            健康保険料は、札幌支店が本店の適用事業所にまとめて入っているので東京の料率（「札幌支店を別の適用事業所にする」に印を
+ *            付けると、拠点に社会保険番号が入り、北海道の料率になる）。現物の価額は、どちらでも働く場所（北海道）の価額
  *   高橋さん：社宅の畳数だけ入れて、総面積がない（令和8年10月分からの価額を出せないので、確定できない）
  * ・賞与の画面（src/features/payroll/BonusManager.tsx）：2026年12月10日の冬季賞与。支給項目「自社製品」を現物で渡す項目にしてある
  *   山田さん：基本賞与40万円＋自社製品3万円 → 標準賞与額 43万円・差引支給額は自社製品を除いた額。「確定」で残す列を window.__bonusSaved に入れる
@@ -28,6 +30,7 @@ import { parseCommuteSetting, stringifyCommuteSetting, type CommuteSetting } fro
 import { parseInKind, stringifyInKind, type InKindEntry } from "../../src/utils/genbutsu";
 import { salaryLedgerOf, wageLedgerRows } from "../../src/utils/legalBooks";
 import { toKenpoPrefName } from "../../src/constants/prefectures";
+import { kenpoPrefectureOf } from "../../src/utils/branchPrefecture";
 
 // ── Tauri の代わり（確かめを出す画面は、いつも「はい」にする） ──
 (window as any).__TAURI_INTERNALS__ = {
@@ -157,6 +160,11 @@ function Page() {
   const s = staff.find((x) => x.id === selected)!;
   const patch = (p: Record<string, unknown>) => setStaff((list) => list.map((x) => (x.id === selected ? { ...x, ...p } : x)));
   const prefOf = (x: any) => branches.find((b) => b.id === x.branch_id)?.prefecture ?? "";
+  // 札幌支店を、本店とは別の社会保険の適用事業所にする（拠点の「社会保険番号（支店固有の場合）」を入れる）
+  const [separate, setSeparate] = useState(false);
+  const branchList = useMemo(() => branches.map((b) => (b.id === 2 && separate ? { ...b, health_ins_num: "01-サツ" } : b)), [separate]);
+  // 協会けんぽの健康保険料率の都道府県（給与明細の一覧と同じ決め方。utils/branchPrefecture.ts）
+  const kenpoOf = (x: any) => kenpoPrefectureOf(branchList, x.branch_id).prefecture ?? "";
 
   // 従業員の画面の欄（現物で払う報酬・通勤手当）に渡すもの
   const cm: any = {
@@ -175,10 +183,11 @@ function Page() {
   const results = useMemo(() => staff.map((x) => ({
     x,
     r: calculateSalary(x, attendanceOf(), {
-      allowanceName: "", allowanceAmount: 0, residentTax: 0, prefecture: toKenpoPrefName(prefOf(x)) ?? "",
+      allowanceName: "", allowanceAmount: 0, residentTax: 0, prefecture: kenpoOf(x), workPrefecture: toKenpoPrefName(prefOf(x)) ?? "",
       dependents: 0, customItems: [], period: { start: "2026-11-01", end: "2026-11-30" }, periodWorkDays: 20, employedWorkDays: 20,
     }, 2026, 11, company),
-  })), [staff]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  })), [staff, branchList]);
   const ledgerRows = useMemo(() => {
     const { x, r } = results.find((v) => v.x.id === selected)!;
     return wageLedgerRows([{ label: "11月", kind: "salary", ledger: salaryLedgerOf(r, { wageType: x.wage_type, commuteType: x.commute_type, period: { start: "2026-11-01", end: "2026-11-30" } }) }]);
@@ -191,6 +200,10 @@ function Page() {
         人：<select id="who" value={selected} onChange={(e) => { setSelected(e.target.value); setOpen(true); }}>
           {staff.map((x) => <option key={x.id} value={x.id}>{x.name}（{prefOf(x)}）</option>)}
         </select>
+        <label style={{ marginLeft: 16 }}>
+          <input id="separate" type="checkbox" checked={separate} onChange={(e) => setSeparate(e.target.checked)} />
+          札幌支店を本店とは別の適用事業所にする（拠点に社会保険番号を入れる）
+        </label>
       </div>
 
       <section>
@@ -205,7 +218,7 @@ function Page() {
         <h2 style={{ fontSize: 16 }}>2. 5人の給与（11月支給。支給合計・課税対象額・雇用保険料と現物）</h2>
         <table id="salary-table" style={{ background: "white", borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
           <thead>
-            <tr>{["", "支給合計", "現物（社会保険）", "うち課税", "うち雇用保険", "課税対象額", "雇用保険料", "所得税", "差引支給額", "価額を出せない理由"].map((h) => (
+            <tr>{["", "支給合計", "現物（社会保険）", "うち課税", "うち雇用保険", "課税対象額", "雇用保険料", "健康保険料", "所得税", "差引支給額", "価額を出せない理由"].map((h) => (
               <th key={h} style={{ border: "1px solid #cbd5e1", padding: 4, background: "#f1f5f9" }}>{h}</th>
             ))}</tr>
           </thead>
@@ -213,7 +226,7 @@ function Page() {
             {results.map(({ x, r }) => (
               <tr key={x.id} data-id={x.id}>
                 <td style={{ border: "1px solid #e2e8f0", padding: 4 }}>{x.name}</td>
-                {[r.totalEarnings, r.inKind?.amount ?? 0, r.inKind?.taxable ?? 0, r.inKind?.emp ?? 0, r.taxableAmount, r.empInsurance, r.incomeTax, r.netPay].map((v, i) => (
+                {[r.totalEarnings, r.inKind?.amount ?? 0, r.inKind?.taxable ?? 0, r.inKind?.emp ?? 0, r.taxableAmount, r.empInsurance, r.healthInsurance, r.incomeTax, r.netPay].map((v, i) => (
                   <td key={i} style={{ border: "1px solid #e2e8f0", padding: 4, textAlign: "right" }}>{yen(v)}</td>
                 ))}
                 <td style={{ border: "1px solid #e2e8f0", padding: 4, color: "#b91c1c" }}>{r.inKind?.problems.join("・") || "-"}</td>
@@ -248,9 +261,9 @@ function Page() {
         <div style={{ position: "relative", transform: "translateZ(0)", height: 1500, overflow: "hidden", borderRadius: 8 }}>
           {open && (
             <PayStubModal
-              key={`${s.id}:${s.in_kind}:${s.commute_setting}:${s.commute_amount}:${s.branch_id}`}
+              key={`${s.id}:${s.in_kind}:${s.commute_setting}:${s.commute_amount}:${s.branch_id}:${separate}`}
               db={fakeDb} year={2026} month={11} companySettings={company} onClose={() => setOpen(false)}
-              staff={{ ...s, prefecture: prefOf(s), periodStart: "2026-11-01", periodEnd: "2026-11-30", periodLabel: "11/1〜11/30" }}
+              staff={{ ...s, prefecture: prefOf(s), kenpoPrefecture: kenpoOf(s), periodStart: "2026-11-01", periodEnd: "2026-11-30", periodLabel: "11/1〜11/30" }}
               attendanceData={attendanceOf()}
             />
           )}

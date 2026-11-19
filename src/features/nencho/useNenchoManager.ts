@@ -8,9 +8,10 @@ import Database from "@tauri-apps/plugin-sql";
 import { PROVISIONAL_SLIP_YEAR, getNenchoMaster, getProvisionalSlipMaster, getWithholdingSlipMaster, type NenchoMaster } from "../../constants/nencho";
 import { calcNencho, type NenchoResult } from "../../utils/nencho";
 import {
-  buildNenchoInput, nenchoExclusion, parseDeclaration, settlementStatusOf, sumYearTotals, validateDeclaration,
-  type NenchoDeclaration, type SettlementStatus, type YearTotals,
+  buildNenchoInput, diedInYear, judgeDateOf, midYearAdjustmentNote, nenchoExclusion, parseDeclaration, settlementStatusOf, sumYearTotals,
+  validateDeclaration, type NenchoDeclaration, type SettlementStatus, type YearTotals,
 } from "../../utils/nenchoDeclaration";
+import { salaryPayDate } from "../../utils/flatTaxReduction";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 
@@ -41,18 +42,45 @@ export interface NenchoStaffRow {
 /** 精算する給与の候補：その年の12月、または翌年1月に支払う給与 */
 export const settleOptions = (year: number) => [{ year, month: 12 }, { year: year + 1, month: 1 }];
 
+/** 年の途中で退職して年末調整をする人か（12月より前に退職し、対象外でない人） */
+const isMidYearAdjusted = (row: Pick<NenchoStaffRow, "staff" | "exclusion">, year: number) =>
+  !row.exclusion && !!row.staff.retirement_date && row.staff.retirement_date < `${year}-12-01`;
+
+/**
+ * 精算する給与の候補（行ごと）
+ * ・年の途中で退職して年末調整をする人：退職した月からその年の12月までと翌年1月に支払う給与（その年最後に支払う給与で精算する）
+ * ・ほかの人：その年の12月・翌年1月
+ */
+export const settleOptionsFor = (row: Pick<NenchoStaffRow, "staff" | "exclusion"> | null, year: number) => {
+  if (!row || !isMidYearAdjusted(row, year)) return settleOptions(year);
+  const from = Number(String(row.staff.retirement_date).slice(5, 7)) || 12;
+  return [...Array.from({ length: 13 - from }, (_, i) => ({ year, month: from + i })), { year: year + 1, month: 1 }];
+};
+
+/** 精算する給与の初めの値：年の途中で退職して年末調整をする人は、その年に確定した最後の給与の月（なければ退職した月）。ほかは12月 */
+export const defaultSettleFor = (row: Pick<NenchoStaffRow, "staff" | "exclusion" | "totals"> | null, year: number) => {
+  if (!row || !isMidYearAdjusted(row, year)) return { year, month: 12 };
+  const last = row.totals.salaryMonths[row.totals.salaryMonths.length - 1];
+  return { year, month: last ?? (Number(String(row.staff.retirement_date).slice(5, 7)) || 12) };
+};
+
 /** 年末調整・源泉徴収票の画面で使う、その年の確定した給与・賞与と保存した年末調整 */
 export interface NenchoData { salaries: any[]; bonuses: any[]; saved: any[]; settled: any[] }
 
 export const EMPTY_NENCHO_DATA: NenchoData = { salaries: [], bonuses: [], saved: [], settled: [] };
 
 export async function loadNenchoData(db: Database, year: number): Promise<NenchoData> {
+  // 給与を支払った日（給与規定グループの支払日。死亡した後に支払日が来る給与を年末調整に入れないために使う）
   const salaries = await db.select<any[]>(
-    "SELECT staff_id, target_month, taxable_amount, social_ins_total, income_tax FROM salary_results WHERE target_year = ?",
+    `SELECT r.staff_id, r.target_month, r.taxable_amount, r.social_ins_total, r.income_tax, g.payment_day
+     FROM salary_results r
+     LEFT JOIN staff st ON st.id = r.staff_id
+     LEFT JOIN payroll_groups g ON g.id = COALESCE(NULLIF(st.payroll_group_id, 0), 1)
+     WHERE r.target_year = ?`,
     [year]
   );
   const bonuses = await db.select<any[]>(
-    `SELECT r.* FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id WHERE s.target_year = ?`,
+    `SELECT r.*, s.payment_date AS payment_date FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id WHERE s.target_year = ?`,
     [year]
   );
   const saved = await db.select<any[]>("SELECT * FROM year_end_adjustments WHERE year = ?", [year]);
@@ -75,26 +103,32 @@ export const buildNenchoRows = (staffList: any[], data: NenchoData, year: number
     const savedRow = data.saved.find((r) => String(r.staff_id) === sid);
     let result: NenchoResult | null = null;
     try { result = savedRow?.result ? JSON.parse(savedRow.result) : null; } catch { result = null; }
+    // 死亡した人は、死亡した日より後に支払日が来る給与・賞与を入れない（相続税の対象で、所得税の対象ではない。所得税基本通達9-17）
+    const beforeDeath = (payDate: string) => !diedInYear(staff, year) || !payDate || payDate <= String(staff.death_date);
     const totals = sumYearTotals(
-      data.salaries.filter((r) => String(r.staff_id) === sid),
-      data.bonuses.filter((r) => String(r.staff_id) === sid),
+      data.salaries.filter((r) => String(r.staff_id) === sid && beforeDeath(salaryPayDate(year, Number(r.target_month), r.payment_day ?? 25))),
+      data.bonuses.filter((r) => String(r.staff_id) === sid && beforeDeath(String(r.payment_date ?? ""))),
     );
     const declaration = parseDeclaration(savedRow?.declaration);
-    const settleYear = Number(savedRow?.settle_year) || year;
-    const settleMonth = Number(savedRow?.settle_month) || 12;
+    const exclusion = nenchoExclusion(staff, year, declaration);
+    const settleDefault = defaultSettleFor({ staff, exclusion, totals }, year);
+    const settleYear = Number(savedRow?.settle_year) || settleDefault.year;
+    const settleMonth = Number(savedRow?.settle_month) || settleDefault.month;
+    const on = judgeDateOf(staff, year);
     // 保存した申告書のまま、いまの給与・賞与で計算し直すと過不足額が変わるか
     const stale = !!(savedRow && result && master
-      && calcNencho(buildNenchoInput(declaration, totals, year, master), master).difference !== result.difference);
+      && calcNencho(buildNenchoInput(declaration, totals, year, master, on), master).difference !== result.difference);
     const settledRow = data.settled.find((r) =>
       String(r.staff_id) === sid && Number(r.target_year) === settleYear && Number(r.target_month) === settleMonth);
     const settlement: SettlementStatus | null = !savedRow || !result ? null
       : settlementStatusOf(result.difference, settledRow ? Number(settledRow.year_end_adjustment) || 0 : null);
     return {
       staff,
-      exclusion: nenchoExclusion(staff, year),
-      note: staff.retirement_date && staff.retirement_date <= `${year}-12-31`
-        ? "12月中に退職する人は、その年最後の給与を支払った後に年末調整をします"
-        : null,
+      exclusion,
+      note: midYearAdjustmentNote(staff, year, declaration)
+        ?? (staff.retirement_date && staff.retirement_date <= `${year}-12-31` && !exclusion
+          ? "12月中に退職する人は、その年最後の給与を支払った後に年末調整をします"
+          : null),
       totals,
       saved: savedRow ? { declaration, result, updatedAt: savedRow.updated_at, settleYear, settleMonth } : null,
       stale,
@@ -143,12 +177,14 @@ export function useNenchoManager(db: Database, staffList: any[]) {
     const row = rows.find((r) => String(r.staff.id) === staffId);
     setSelectedId(staffId);
     setDraft(row?.saved?.declaration ?? parseDeclaration(null));
-    setSettle(row?.saved ? { year: row.saved.settleYear, month: row.saved.settleMonth } : { year, month: 12 });
+    setSettle(row?.saved ? { year: row.saved.settleYear, month: row.saved.settleMonth } : defaultSettleFor(row ?? null, year));
   };
 
   const errors = draft ? validateDeclaration(draft) : [];
   const result: NenchoResult | null = useMemo(
-    () => (master && selected && draft ? calcNencho(buildNenchoInput(draft, selected.totals, year, master), master) : null),
+    () => (master && selected && draft
+      ? calcNencho(buildNenchoInput(draft, selected.totals, year, master, judgeDateOf(selected.staff, year)), master)
+      : null),
     [master, selected, draft, year]
   );
 
@@ -203,5 +239,6 @@ export function useNenchoManager(db: Database, staffList: any[]) {
   return {
     year, setYear, master, sourceFormAvailable, isLoading, isSaving,
     rows, selected, select, draft, setDraft, errors, result, save, saveSource, settle, setSettle,
+    settleChoices: settleOptionsFor(selected, year),
   };
 }

@@ -26,7 +26,7 @@ export default function PayStubModal(props: Props) {
     salary, extras, setExtras, isSaved, loadingParts, loadErrors, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
-    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem,
+    monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem, kenpoPrefectureProblem, kenpoOfficeNote,
   } = usePayStubModal(props);
   /** "2026-11-29" → "11月29日" */
   const md = (date: string) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日`;
@@ -58,7 +58,7 @@ export default function PayStubModal(props: Props) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
             {salary.insurer.type === "kyokai" ? (
               <div>
-                <label style={S.labelS}>都道府県</label>
+                <label style={S.labelS} title="協会けんぽの健康保険料率に使う都道府県（その人が入っている社会保険の適用事業所の都道府県）">都道府県（健康保険料率）</label>
                 <select value={extras.prefecture} onChange={e => setExtras(p => ({ ...p, prefecture: e.target.value }))} style={S.inputS}>
                   {!extras.prefecture && <option value="">（選んでください）</option>}
                   {PREFECTURES.map(p => <option key={p} value={p}>{p}</option>)}
@@ -128,10 +128,17 @@ export default function PayStubModal(props: Props) {
               定額減税は払う日の順に引くので、この給与を確定したあと、後の給与・賞与を確定し直してください（減税額の合計を超えて引かないよう、この給与で引く額は減らしてあります）。
             </div>
           )}
+          {salary.paidAfterDeath && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+              ℹ 死亡した日（{monthStaff.death_date}）より後に支払う給与なので、所得税を引いていません。この給与は相続税の対象（相続財産）で、
+              所得税の対象ではないので、源泉徴収簿・源泉徴収票・年末調整にも入れません（所得税基本通達9-17）。
+              相続人などに払うときは、支払調書などを確かめてください。
+            </div>
+          )}
           {salary.prefectureUnknown && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               ⚠ {PREFECTURE_UNKNOWN_EFFECT}「都道府県」で、健康保険料率に使う都道府県を選んでください。選ぶまで確定できません。
-              {branchPrefectureProblem && <div style={{ fontWeight: "normal" }}>{branchPrefectureProblem}</div>}
+              {kenpoPrefectureProblem && <div style={{ fontWeight: "normal" }}>{kenpoPrefectureProblem}</div>}
             </div>
           )}
           {salary.insurerRateMissing && (
@@ -159,6 +166,9 @@ export default function PayStubModal(props: Props) {
               ⚠ 現物で払う報酬の価額を出せないので、確定できません（社会保険の報酬・所得税・雇用保険料に入れていません）。
               {inKindProblems.map((m) => <div key={m} style={{ fontWeight: "normal" }}>・{m}</div>)}
             </div>
+          )}
+          {salary.insurer.type === "kyokai" && !salary.prefectureUnknown && kenpoOfficeNote && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#475569" }}>ℹ {kenpoOfficeNote}</div>
           )}
           {salary.insurer.type === "kyokai" && !salary.prefectureUnknown && branchPrefectureProblem && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
@@ -650,7 +660,7 @@ export default function PayStubModal(props: Props) {
               : salary.prefectureUnknown
               ? "健康保険料・介護保険料は、都道府県がわからないため計算していません。"
               : `健康保険料は協会けんぽ${extras.prefecture}支部の${insMaster.MASTER_YEAR}年${insMaster.MASTER_MONTH}月分からの料率、`}
-            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月からの料率で計算。
+            厚生年金は{insMaster.PENSION_RATE[1]}%（折半）、雇用保険は賃金締切日の月（{salary.empInsRateMonth.year}年{salary.empInsRateMonth.month}月）の料率（{empInsMaster.LABOR_FROM.year}年{empInsMaster.LABOR_FROM.month}月から）で計算。
             健康保険・介護保険・子ども・子育て支援金・厚生年金は{insMonthLabel}（{salary.socialInsCollection === "next" ? "翌月徴収" : "当月徴収"}）。
             所得税は{props.year}年分の{salary.taxColumn === "otsu" ? "月額表（乙欄）" : salary.taxColumn === "hei" ? "日額表（丙欄。働いた日ごと）" : `${TAX_CALC_METHOD_LABELS[extras.taxMethod ?? "table"]}（甲欄）`}、通勤手当は非課税限度額（{COMMUTE_METHOD_LABELS[salary.commuteMethod]}・1か月 ¥{salary.commuteTaxFreeLimit.toLocaleString()}）まで課税対象外。住民税は手入力値。
           </div>

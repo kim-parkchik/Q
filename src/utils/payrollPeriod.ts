@@ -65,3 +65,23 @@ export const getPeriodForPayMonth = (
   const baseDate = dayjs(`${payYear}-${payMonth}-01`).subtract(shiftAmount, 'month');
   return getPayrollPeriod(baseDate.year(), baseDate.month() + 1, Number(group.closing_day));
 };
+
+/**
+ * 確定した給与の賃金締切日（給与の計算期間の終わりの日）
+ * ・確定したときに内訳（salary_results.ledger の periodEnd）に残した日。内訳を読めなければ、給与規定グループの締日から決める
+ * ・雇用保険料の率と、年度更新で賃金を入れる保険年度は、この日がある月で決める（utils/calcSalary.ts の empInsRateMonthOf・utils/nendoKoshin.ts）
+ */
+export const salaryClosingDate = (
+  ledger: unknown,
+  group: PayrollGroupForPeriod | undefined,
+  payYear: number,
+  payMonth: number,
+): string | null => {
+  try {
+    const l = typeof ledger === "string" && ledger ? JSON.parse(ledger) : null;
+    if (l?.periodEnd && /^\d{4}-\d{2}-\d{2}$/.test(String(l.periodEnd))) return String(l.periodEnd);
+  } catch {
+    // 内訳を読めなければ締日から
+  }
+  return group ? getPeriodForPayMonth(group, payYear, payMonth).endStr : null;
+};

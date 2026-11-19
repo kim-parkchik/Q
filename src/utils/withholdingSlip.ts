@@ -22,7 +22,7 @@
 import type { NenchoMaster, WithholdingSlipMaster } from "../constants/nencho";
 import { calcNencho, specificRelativeDeduction, type NenchoInput, type NenchoResult } from "./nencho";
 import {
-  ageAtYearEnd, buildNenchoInput, classifyDependent, classifyDependentByLimits, dependentIncomeLimit,
+  ageAtYearEnd, ageOn, buildNenchoInput, classifyDependent, classifyDependentByLimits, dependentIncomeLimit, judgeDateOf,
   type DeclaredDependent, type DeclaredPerson, type DependentKind, type NenchoDeclaration, type YearTotals,
 } from "./nenchoDeclaration";
 import { toTaxColumn } from "./incomeTax";
@@ -124,6 +124,8 @@ export interface SlipSource {
   staff: {
     name?: string | null; furigana?: string | null; address?: string | null; birthday?: string | null;
     join_date?: string | null; retirement_date?: string | null; tax_column?: unknown;
+    /** 死亡の年月日（その年の途中で死亡した人の年末調整は、死亡の日の現況で配偶者・扶養親族を決める。所得税法85条） */
+    death_date?: string | null;
     /** 税額の計算に使う扶養人数（乙欄の人は、従たる給与についての扶養控除等申告書の扶養親族等の数） */
     dependents?: unknown;
   };
@@ -263,7 +265,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster | null, g
   let sourceDecl = src.sourceDeclaration ?? null;
   if (decl) {
     if (!nm) throw new Error(`${year}年分の年末調整の表がないので、年末調整をした人の源泉徴収票は作れません`);
-    input = buildNenchoInput(decl, totals, year, nm);
+    input = buildNenchoInput(decl, totals, year, nm, judgeDateOf(staff, year));
     result = calcNencho(input, nm);
     if (!result.eligible) {
       warnings.push(`${result.ineligibleReason}。年末調整をしない人として作ります。`);
@@ -372,7 +374,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster | null, g
       if (d.spouse + d.spouseSpecial > 0) {
         slip.spouse = person(s, gm.residentCode);
         slip.spouseTotalIncome = Math.max(0, Number(s.totalIncome) || 0);
-        slip.spouseMark = { has: d.spouse > 0, secondary: false, elderly: d.spouse > 0 && (ageAtYearEnd(s.birthday, year) ?? 0) >= 70 };
+        slip.spouseMark = { has: d.spouse > 0, secondary: false, elderly: d.spouse > 0 && (ageOn(s.birthday, judgeDateOf(staff, year)) ?? 0) >= 70 };
       } else if (sameLivelihood && s.disability !== "none") {
         // 控除対象配偶者ではない同一生計配偶者が障害者（所得金額調整控除の要件になる特別障害者も、同じ書き方）
         note(`${str(s.name)}（同配）`);
@@ -381,7 +383,7 @@ export const buildWithholdingSlip = (src: SlipSource, nm: NenchoMaster | null, g
     }
 
     // 扶養親族・特定親族（申告書に入れた順。特定親族は、特定親族特別控除を受けた人だけ）
-    fillDependents(slip, decl.dependents, gm, (dep) => classifyDependent(dep, year, nm), (dep) => {
+    fillDependents(slip, decl.dependents, gm, (dep) => classifyDependent(dep, year, nm, undefined, judgeDateOf(staff, year)), (dep) => {
       const amount = specificRelativeDeduction([Math.max(0, Number(dep.totalIncome) || 0)], nm);
       return amount > 0 ? specificRelativeCode(amount, gm) : null;
     }, disabled, overflow);
