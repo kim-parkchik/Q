@@ -20,6 +20,7 @@ export default function WageSection({ cm }: Props) {
         targetWage,
         setTargetWage,
         targetDailyHours,
+        dailyAverageHours,
         annualWorkDays,
         monthlyAverageHours,
         branches,
@@ -30,7 +31,8 @@ export default function WageSection({ cm }: Props) {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const prefecture = Master.toKenpoPrefName(branches.find(b => b.id === targetBranchId)?.prefecture);
-    const perHour = baseWagePerHour(targetWageType, targetWage, targetDailyHours, annualWorkDays > 0 ? monthlyAverageHours : null);
+    // 日給は 1日の所定労働時間（曜日で違う人は1週間の1日平均。最低賃金法施行規則2条）で割る
+    const perHour = baseWagePerHour(targetWageType, targetWage, dailyAverageHours || targetDailyHours, annualWorkDays > 0 ? monthlyAverageHours : null);
     const minimumCheck = checkMinimumWage(prefecture, today, perHour);
     const next = nextMinimumWage(prefecture, today);
     const belowNext = perHour !== null && next !== null && perHour < next.amount;

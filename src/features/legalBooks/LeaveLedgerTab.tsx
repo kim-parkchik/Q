@@ -10,6 +10,7 @@ import { fiveDaysOf, loadAnnualLeaveSettings } from "../../utils/annualLeaveOver
 import { buildGrantNotice, buildLeaveLedger, leaveAmountLabel, leaveLedgerCsv, takenKindLabel, type LeaveLedger } from "../../utils/leaveLedger";
 import { formatWareki } from "../../utils/wareki";
 import { collectLeaveTaken, leaveHoursPerDay, loadPaidLeaveData, summarizePaidLeave } from "../../utils/paidLeave";
+import { averageDailyHoursOf } from "../../utils/scheduledHours";
 
 interface Props {
   db: Database;
@@ -51,7 +52,8 @@ export default function LeaveLedgerTab({ db, staffList, saveCsv }: Props) {
         for (const s of targets) {
           const { grants, attendance, manual } = await loadPaidLeaveData(db, String(s.id));
           const { taken } = collectLeaveTaken(attendance, manual);
-          const { hours, assumed } = leaveHoursPerDay(s.scheduled_work_hours);
+          // 時間単位の有給の1日の時間数（曜日で時間が違う人は1日平均。労基則24条の4）
+          const { hours, assumed } = leaveHoursPerDay(averageDailyHoursOf(s));
           const summary = summarizePaidLeave(grants, taken, hours, today);
           const ledger = buildLeaveLedger(summary, fiveDaysOf(s, grants, taken, today, settings));
           if (who === "all" && ledger.grants.length === 0) continue;

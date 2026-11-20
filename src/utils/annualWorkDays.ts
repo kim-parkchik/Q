@@ -5,9 +5,10 @@
  */
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-/** 従業員の work_days（"mon,tue,..."）を曜日ごとの出勤するかにする */
-export const parseWorkDays = (workDays: string | null | undefined): Record<string, boolean> => {
-  const days = new Set((workDays || "").split(",").filter(Boolean));
+/** 従業員の work_days（"mon,tue,..."。画面のチェックの形 {mon: true, ...} も読む）を曜日ごとの出勤するかにする */
+export const parseWorkDays = (workDays: string | Record<string, boolean> | null | undefined): Record<string, boolean> => {
+  if (workDays && typeof workDays === "object") return Object.fromEntries(DAY_KEYS.map((k) => [k, !!workDays[k]]));
+  const days = new Set(String(workDays || "").split(",").filter(Boolean));
   return Object.fromEntries(DAY_KEYS.map((k) => [k, days.has(k)]));
 };
 

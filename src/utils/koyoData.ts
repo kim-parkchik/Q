@@ -52,7 +52,7 @@ export const loadWageData = async (db: SelectDb, staff: any, from: string, to: s
     [staff.id],
   );
   const attendance = await db.select<WageCertDay[]>(
-    `SELECT work_date, work_type, work_hours, leave_paid, paid_leave_hours, special_leave_hours
+    `SELECT work_date, work_type, work_hours, leave_paid, paid_leave_hours, special_leave_hours, scheduled_hours
      FROM attendance WHERE staff_id = ? AND work_date >= ? AND work_date <= ? AND is_finalized = 1`,
     [staff.id, from, to],
   );

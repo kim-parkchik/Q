@@ -19,6 +19,7 @@ import { parseWorkDays } from "./annualWorkDays";
 import { parseFixedBreak } from "./fixedBreak";
 import { parseKoyoInfo, weeklyMinutesOf } from "./koyoInfo";
 import { formatWareki } from "./wareki";
+import { hasWeekdayHours, weekdayScheduledHours, type WeekdayKey } from "./scheduledHours";
 
 export type LaborFormType = "general" | "parttime";
 export const LABOR_FORM_LABELS: Record<LaborFormType, string> = {
@@ -276,15 +277,39 @@ export const laborDefaults = (ctx: LaborContext): Record<string, string> => {
   const workMinutes = Math.round((Number(s.scheduled_work_hours) || 0) * 60);
   const breakMinutes = breakMinutesFor(ctx.group?.fixed_break, workMinutes);
   const start = toMinutes(s.scheduled_in);
+  const byWeekday = Number(s.is_flex) !== 1 && start !== null && workMinutes > 0 && hasWeekdayHours(s);
   if (Number(s.is_flex) === 1) {
     const cs = toMinutes(s.core_start);
     const ce = toMinutes(s.core_end);
     out.workHours = "フレックスタイム制；始業及び終業の時刻は労働者の決定に委ねる。"
       + (cs !== null && ce !== null ? `（コアタイム ${hm(cs)}から${hm(ce)}）` : "");
+  } else if (byWeekday && start !== null) {
+    // 曜日で所定労働時間が違う人：時間ごとに曜日をまとめて書く（出勤する曜日。会社カレンダーの人は、時間を入れた曜日と月〜金）
+    // 「始業（9時00分） 終業（13時00分）（月・金）、始業（9時00分） 終業（15時45分）（水）」。休憩も時間ごとに決まった休憩で出す
+    const days = parseWorkDays(s.work_days);
+    const calendar = Number(s.calendar_pattern_id ?? 1) !== 0;
+    const groups: { minutes: number; breakMinutes: number | null; days: string[] }[] = [];
+    for (const d of DAY_ORDER) {
+      if (!days[d] && !(calendar && ["mon", "tue", "wed", "thu", "fri"].includes(d))) continue;
+      const h = weekdayScheduledHours(s, d as WeekdayKey);
+      if (h === null) continue;
+      const minutes = Math.round(h * 60);
+      const g = groups.find((x) => x.minutes === minutes);
+      if (g) g.days.push(DAY_NAMES[d]);
+      else groups.push({ minutes, breakMinutes: breakMinutesFor(ctx.group?.fixed_break, minutes), days: [DAY_NAMES[d]] });
+    }
+    out.workHours = groups.map((g) => `始業（${hm(start)}） 終業（${hm(start + g.minutes + (g.breakMinutes ?? 0))}）（${g.days.join("・")}）`).join("、");
+    // 休憩がある曜日だけ書く（どの曜日も同じ長さなら「45分」だけ）
+    const withBreak = groups.filter((g) => (g.breakMinutes ?? 0) > 0);
+    if (withBreak.length > 0) {
+      out.breakTime = withBreak.length === groups.length && new Set(withBreak.map((g) => g.breakMinutes)).size === 1
+        ? `${withBreak[0].breakMinutes}分`
+        : withBreak.map((g) => `${g.breakMinutes}分（${g.days.join("・")}）`).join("、");
+    }
   } else if (start !== null && workMinutes > 0) {
     out.workHours = `始業（${hm(start)}） 終業（${hm(start + workMinutes + (breakMinutes ?? 0))}）`;
   }
-  if (breakMinutes !== null && breakMinutes > 0) out.breakTime = `${breakMinutes}分`;
+  if (!byWeekday && breakMinutes !== null && breakMinutes > 0) out.breakTime = `${breakMinutes}分`;
   out.overtime = Number(s.is_overtime_eligible ?? 1) === 0 ? "無" : "有";
 
   // 休日・勤務日

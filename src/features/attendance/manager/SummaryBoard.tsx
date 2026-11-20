@@ -133,6 +133,12 @@ export default function SummaryBoard({ am }: Props) {
           <div style={{ fontSize: "10px", color: "#95a5a6" }}>※残業・深夜・交通費・手当・欠勤控除・遅刻早退控除・休業手当を反映済</div>
         </div>
       </div>
+      {/* 1日の所定労働時間を入れていない人（8時間として見込みを出している。給与明細では確定できない。utils/scheduledHours.ts） */}
+      {calcResult && (calcResult as any).scheduledHoursMissing && (
+        <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c", fontWeight: "bold", padding: "6px 12px", borderRadius: 6, backgroundColor: "#fef2f2" }}>
+          ⚠ この人の「1日の所定労働時間」が入っていないので、8時間として見込みを出しています。従業員の画面の「所属・給与」で入れてください（入れるまで給与を確定できません）。
+        </div>
+      )}
     </>
   );
 }

@@ -15,7 +15,8 @@ import { emptyKoyoInfo, parseKoyoInfo, stringifyKoyoInfo, type KoyoInfo } from "
 import { parseForeignInfo, stringifyForeignInfo, type ForeignInfo } from "../../utils/foreignInfo";
 import { parseShahoLoss, stringifyShahoLoss, type ShahoLoss } from '../../utils/shahoLoss';
 import { toTaxColumn, type TaxColumn } from "../../utils/incomeTax";
-import { countAnnualWorkDays } from "../../utils/annualWorkDays";
+import { countAnnualWorkDays, type CalendarContext } from "../../utils/annualWorkDays";
+import { averageDailyHoursOf, parseWeekdayHours, stringifyWeekdayHours, sumScheduledHours, toHours, WEEKDAY_KEYS, type WeekdayHours } from "../../utils/scheduledHours";
 import {
     latestStandardRemuneration, remunerationHistoryOf, stringifyRemunerationHistory, validateRemunerationHistory,
     type RemunerationEntry,
@@ -215,6 +216,10 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [branchFilters, setBranchFilters] = useState<string[]>(branches.map(b => b.name));
     const [calendarPatterns, setCalendarPatterns] = useState<CalendarPattern[]>([]);
     const [annualWorkDays, setAnnualWorkDays] = useState(245); // 計算結果（統計用）
+    // 曜日ごとの所定労働時間（契約曜日の横に入れる。曜日で時間が違う人だけ。utils/scheduledHours.ts）
+    const [targetWeekdayHours, setTargetWeekdayHours] = useState<WeekdayHours>({});
+    // 1年間の所定労働日を数えたカレンダー（曜日の時間を足して、1年間の所定労働時間を出す）
+    const [annualCtx, setAnnualCtx] = useState<{ ctx: CalendarContext; year: number } | null>(null);
     const [payrollGroups, setPayrollGroups] = useState<any[]>([]);
     const [targetPayrollGroupId, setTargetPayrollGroupId] = useState(1);
     
@@ -266,6 +271,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 resCompany.forEach(c => { companyCalendar[c.work_date] = c.is_holiday; });
             }
             setAnnualWorkDays(countAnnualWorkDays(year, patternId, currentWorkDays, holidays, companyCalendar));
+            setAnnualCtx({ ctx: { patternId, workDays: currentWorkDays, holidays, companyCalendar }, year });
         } catch (e) {
             console.error("日数計算エラー:", e);
         }
@@ -354,7 +360,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetZip(""); setTargetAddress(""); setTargetAddressKana(""); setTargetPhone(""); setTargetMobile("");
         setTargetBranchId(1); setTargetPayrollGroupId(1); setTargetPatternId(1);
         setTargetWorkDays({ mon: false, tue: false, wed: false, thu: false, fri: false, sat: false, sun: false });
-        setTargetScheduledIn(""); setTargetHours(8); setTargetMinutes(0);
+        // 1日の所定労働時間は空から（入れるまで給与を確定できない。黙って8時間にしない）
+        setTargetScheduledIn(""); setTargetHours(0); setTargetMinutes(0); setTargetWeekdayHours({});
         setTargetIsFlex(false); setTargetCoreStart(""); setTargetCoreEnd("");
         setTargetWageType("hourly"); setTargetWage(1200); setTargetIsOvertimeEligible(1);
         setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
@@ -424,13 +431,16 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteSetting(parseCommuteSetting(s.commute_setting));
         setTargetFixedBreakApply(Number(s.fixed_break_apply ?? 1) !== 0);
         setTargetWageType(latestWage.wageType);
-        setTargetPatternId(s.calendar_pattern_id || 1);
+        // 0 は「カレンダーを使わない（契約曜日で決める）」。0 を 1 にすると、保存し直したときに会社カレンダーの人に変わってしまう
+        setTargetPatternId(Number(s.calendar_pattern_id ?? 1));
         setTargetPayrollGroupId(s.payroll_group_id || 1);
         setTargetScheduledIn(s.scheduled_in || "");
         setTargetIsFlex(Number(s.is_flex) === 1);
         setTargetCoreStart(s.core_start || "");
         setTargetCoreEnd(s.core_end || "");
-        const hoursVal = s.scheduled_work_hours || 8;
+        // 1日の所定労働時間（入れていなければ空。utils/scheduledHours.ts）と曜日ごとの時間
+        const hoursVal = toHours(s.scheduled_work_hours) ?? 0;
+        setTargetWeekdayHours(parseWeekdayHours(s.weekday_hours));
         const h = Math.floor(hoursVal);
         const m = Math.round((hoursVal - h) * 60);
         setTargetHours(h);
@@ -536,7 +546,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetResidentTax) !== Number(original.resident_tax || 0) ||
             stringifyResidentTaxSchedule(targetResidentTaxSchedule) !== stringifyResidentTaxSchedule(residentTaxScheduleOf(original)) ||
             String(targetResidentTaxMunicipality) !== String(original.resident_tax_municipality || "") ||
-            Number(targetDailyHours) !== Number(original.scheduled_work_hours || 8) ||
+            Math.round(Number(targetDailyHours) * 60) !== Math.round((toHours(original.scheduled_work_hours) ?? 0) * 60) ||
+            stringifyWeekdayHours(effectiveWeekdayHours) !== stringifyWeekdayHours(parseWeekdayHours(original.weekday_hours)) ||
             stringifyRemunerationHistory(targetRemunerationHistory) !== stringifyRemunerationHistory(remunerationHistoryOf(original)) ||
             stringifyWageHistory(targetWageHistory) !== stringifyWageHistory(wageHistoryOf(original)) ||
             stringifyDependentsHistory(targetDependentsHistory) !== stringifyDependentsHistory(dependentsHistoryOf(original)) ||
@@ -608,7 +619,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetCommuteType, Number(targetCommuteAmount), Number(targetBranchId), 
                 Number(targetDependents), Number(targetResidentTax), 
                 Number(targetPatternId),
-                Number(targetDailyHours),
+                // 1日の所定労働時間（入れていなければ NULL。給与を確定できない）
+                toHours(targetDailyHours),
                 Number(targetStandardRemuneration),
                 workDaysString,
                 Number(targetIsExecutive), 
@@ -656,6 +668,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 targetDepartment.trim() || null,
                 // 在職中に退職以外で社会保険の資格を失う日（社会保障協定・特定減額特例対象者の任意喪失）
                 stringifyShahoLoss(targetShahoLoss),
+                // 曜日ごとの所定労働時間（契約曜日にチェックした曜日だけ）
+                stringifyWeekdayHours(effectiveWeekdayHours),
             ];
 
             if (editingId) {
@@ -678,7 +692,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         resident_tax_schedule=?, resident_tax_municipality=?, commute_setting=?, fixed_break_apply=?,
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
                         probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?, in_kind=?,
-                        health_dependents=?, kouki_date=?, koyo_info=?, foreign_info=?, department=?, shaho_loss=?
+                        health_dependents=?, kouki_date=?, koyo_info=?, foreign_info=?, department=?, shaho_loss=?,
+                        weekday_hours=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -703,6 +718,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         job_type, career_history, retirement_reason, death_date, death_cause,
                         probation_end, basic_pension_number, multi_office, address_kana, in_kind,
                         health_dependents, kouki_date, koyo_info, foreign_info, department, shaho_loss,
+                        weekday_hours,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -807,7 +823,22 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     }, [db, editingId]);
 
     // --- 計算用の変数（レンダリング時に算出） ---
-    const annualTotalHours = annualWorkDays * targetDailyHours;
+    // 曜日ごとの時間を、契約曜日にチェックした曜日だけにしたもの（保存する値）
+    const effectiveWeekdayHours: WeekdayHours = Object.fromEntries(
+        WEEKDAY_KEYS.filter(k => targetWorkDays[k] && targetWeekdayHours[k] !== undefined).map(k => [k, targetWeekdayHours[k]])
+    );
+    // いま画面で入れている所定労働時間（曜日の時間・1日平均・1年間の合計を出す。utils/scheduledHours.ts）
+    const hoursStaff = {
+        scheduled_work_hours: targetDailyHours, weekday_hours: effectiveWeekdayHours, is_flex: targetIsFlex ? 1 : 0,
+        calendar_pattern_id: targetPatternId,
+        work_days: WEEKDAY_KEYS.filter(k => targetWorkDays[k]).join(','),
+        is_executive: targetIsExecutive,
+    };
+    // 1日平均所定労働時間（曜日で時間が違う人。日給の時給換算・時間単位の有給の1日に使う）
+    const dailyAverageHours = averageDailyHoursOf(hoursStaff) ?? 0;
+    // 1年間の所定労働時間（会社カレンダー・契約曜日の所定労働日ごとに、その曜日の時間を足す）
+    const annualTotalHours = (annualCtx ? sumScheduledHours(annualCtx.ctx, hoursStaff, `${annualCtx.year}-01-01`, `${annualCtx.year}-12-31`) : null)
+        ?? annualWorkDays * targetDailyHours;
     const monthlyAverageHours = annualTotalHours / 12;
     const hourlyConversion = targetWageType === "monthly" ? (targetWage / monthlyAverageHours) : targetWage;
     // 残業代の時給（給与計算と同じ：(月給 ＋ 残業代の時給に入れる手当) ÷ 月平均所定労働時間。月給制の人だけ）
@@ -883,6 +914,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetScheduledIn,
         targetDailyHours,
         setTargetDailyHours,
+        targetWeekdayHours,
+        setTargetWeekdayHours,
+        dailyAverageHours,
         targetHours,
         setTargetHours,
         targetMinutes,

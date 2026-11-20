@@ -33,6 +33,7 @@ import {
   type LeaveGrantRow,
   type ManualLeaveRecord,
 } from "../../utils/paidLeave";
+import { averageDailyHoursOf, hasWeekdayHours } from "../../utils/scheduledHours";
 import {
   dueGrants,
   formatLeaveDays,
@@ -167,7 +168,9 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
 
   const staff = staffList.find(s => String(s.id) === String(selectedStaffId));
   const staffLabel = staff ? `${staff.name}さん（${staff.id}）` : `従業員（${selectedStaffId}）`;
-  const hoursInfo = leaveHoursPerDay(staff?.scheduled_work_hours);
+  // 時間単位の有給の1日の時間数（1日の所定労働時間。曜日で違う人は1日平均。労基則24条の4。utils/scheduledHours.ts）
+  const averageHours = averageDailyHoursOf(staff);
+  const hoursInfo = leaveHoursPerDay(averageHours);
   const H = hoursInfo.hours;
 
   const view = useMemo(() => {
@@ -626,7 +629,9 @@ const PaidLeaveManager: React.FC<Props> = ({ db, staffList }) => {
                   時間単位の有給は、1日＝{H}時間で数えます
                   {hoursInfo.assumed
                     ? "（1日の所定労働時間が入っていないので、8時間）。"
-                    : `（1日の所定労働時間 ${formatScheduledHours(staff?.scheduled_work_hours)} を、1時間に満たない端数を切り上げた時間。労働基準法施行規則24条の4）。`}
+                    : hasWeekdayHours(staff)
+                      ? `（曜日で所定労働時間が違うので、1週間の所定労働日の1日平均 ${formatScheduledHours(averageHours)} を、1時間に満たない端数を切り上げた時間。労働基準法施行規則24条の4）。`
+                      : `（1日の所定労働時間 ${formatScheduledHours(staff?.scheduled_work_hours)} を、1時間に満たない端数を切り上げた時間。労働基準法施行規則24条の4）。`}
                 </li>
                 <li>期限の早い付与（ふつうは古い付与）から先に引きます。</li>
                 <li>有効期限が過ぎた分は、自動で残りから外し、「期限で消えた」に出します。</li>

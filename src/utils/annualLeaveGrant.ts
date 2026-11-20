@@ -36,6 +36,7 @@ import { isPrescribedWorkDay, parseWorkDays, type CalendarContext } from "./annu
 import { dateInYear } from "./specialLeave";
 import type { LeavePeriod } from "./leaveExemption";
 import { DEEMED_PRESENT_LEAVE_TYPES, leaveOn } from "./leaveOfAbsence";
+import { weeklyScheduledHoursOf } from "./scheduledHours";
 
 const fmt = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
 
@@ -121,13 +122,14 @@ export interface WorkScale {
 
 /** 従業員の設定から、週・1年の所定労働日数と1週間の所定労働時間を出す */
 export const workScaleOf = (
-  staff: { calendar_pattern_id?: unknown; work_days?: string | null; scheduled_work_hours?: unknown },
+  staff: { calendar_pattern_id?: unknown; work_days?: string | null; scheduled_work_hours?: unknown; weekday_hours?: unknown; is_flex?: unknown },
   annualDays: number | null,
 ): WorkScale => {
   const hours = Number(staff.scheduled_work_hours) || 0;
   if (Number(staff.calendar_pattern_id ?? 1) === 0) {
     const weeklyDays = Object.values(parseWorkDays(staff.work_days)).filter(Boolean).length;
-    return { weeklyDays, weeklyHours: hours > 0 ? weeklyDays * hours : null, annualDays };
+    // 1週間の所定労働時間：出勤する曜日の時間の合計（曜日で時間が違う人は、その曜日の時間。utils/scheduledHours.ts）
+    return { weeklyDays, weeklyHours: hours > 0 && weeklyDays > 0 ? weeklyScheduledHoursOf(staff) : null, annualDays };
   }
   // 会社カレンダーで決めている人：1週間あたりの平均（1年間の所定労働日数 ÷ 52週）
   return { weeklyDays: null, weeklyHours: hours > 0 && annualDays ? (annualDays / 52) * hours : null, annualDays };

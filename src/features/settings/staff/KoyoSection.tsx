@@ -43,6 +43,8 @@ export default function KoyoSection({ cm }: Props) {
     // 初めの値（入れていないとき）を出すための、いま入っている従業員の値
     const staffNow: any = {
         wage_type: cm.targetWageType, base_wage: Number(cm.targetWage) || 0, scheduled_work_hours: Number(cm.targetDailyHours) || 0,
+        // 曜日ごとの所定労働時間（1週間の所定労働時間に使う。utils/scheduledHours.ts）
+        weekday_hours: cm.targetWeekdayHours, is_flex: cm.targetIsFlex ? 1 : 0,
         work_days: cm.targetWorkDays, calendar_pattern_id: cm.targetPatternId, commute_type: cm.targetCommuteType,
         commute_amount: cm.targetCommuteAmount, koyo_info: info,
     };

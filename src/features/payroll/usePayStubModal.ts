@@ -4,6 +4,7 @@ import { calculateSalary, loadCustomItems, loadWeekCarryOver, saveSalaryResult, 
 import { isFlexStaff, loadFlexPeriod, parseFlexRule, stringifyFlexRule } from '../../utils/flexTime';
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
+import { averageDailyHoursOf, hasWeekdayHours, sumScheduledHours } from '../../utils/scheduledHours';
 import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
@@ -249,7 +250,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
   // 給与の計算期間（給与一覧から開いたときは締日で区切った期間。わからなければその月の1日〜末日）
   const periodEnd: string = staff.periodEnd || `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
   const periodStart: string = staff.periodStart || `${year}-${String(month).padStart(2, '0')}-01`;
-  const dailyHours = Number(staff.scheduled_work_hours) || 0;
+  // 1日の所定労働時間（曜日で時間が違う人は1週間の1日平均。最低賃金の日給の時間あたりの額に使う。utils/scheduledHours.ts）
+  const dailyHours = averageDailyHoursOf(staff) ?? 0;
   // 会社カレンダーから、1年間の所定労働日数と、計算期間の所定労働日数・そのうち在籍した日の所定労働日数（日割り）を数える
   const [calendarCtx, setCalendarCtx] = useState<CalendarContext | null>(null);
   useEffect(() => {
@@ -261,6 +263,9 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       let periodWorkDays: number | null = null;
       let employedWorkDays: number | null = null;
       let nonLeaveWorkDays: number | null = null;
+      // 曜日で所定労働時間が違う人の、1年間・計算期間の所定労働時間の合計（残業代の時給・遅刻早退の控除。utils/scheduledHours.ts）
+      let annualWorkHours: number | null = null;
+      let periodWorkHours: number | null = null;
       let ctx: CalendarContext | null = null;
       try {
         ctx = await loadCalendarContext(db, staff);
@@ -272,16 +277,18 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
         employedWorkDays = countPrescribedWorkDays(ctx, from, to);
         // 在籍していて休業していない日の所定労働日数（休業の月の日割り。utils/leaveOfAbsence.ts）
         nonLeaveWorkDays = countNonLeaveWorkDays(ctx, staff, { start: periodStart, end: periodEnd });
+        annualWorkHours = sumScheduledHours(ctx, staff, `${y}-01-01`, `${y}-12-31`);
+        periodWorkHours = sumScheduledHours(ctx, staff, periodStart, periodEnd);
       } catch (e) {
         console.error("会社カレンダー（所定労働日数）の読み込みエラー:", e);
       }
       if (!cancelled) {
         setCalendarCtx(ctx);
-        setExtras(p => ({ ...p, annualWorkDays: days, period: { start: periodStart, end: periodEnd }, periodWorkDays, employedWorkDays, nonLeaveWorkDays }));
+        setExtras(p => ({ ...p, annualWorkDays: days, annualWorkHours, period: { start: periodStart, end: periodEnd }, periodWorkDays, periodWorkHours, employedWorkDays, nonLeaveWorkDays }));
       }
     })();
     return () => { cancelled = true; };
-  }, [db, staff.calendar_pattern_id, staff.work_days, staff.join_date, staff.retirement_date, staff.leave_periods, periodStart, periodEnd]);
+  }, [db, staff.calendar_pattern_id, staff.work_days, staff.weekday_hours, staff.scheduled_work_hours, staff.join_date, staff.retirement_date, staff.leave_periods, periodStart, periodEnd]);
 
   // 週40時間の累計に足す、前の計算期間の日（計算期間の初めの日がある週のうち、初めの日より前の日）の確定した勤怠
   // undefined：読み込み中（この間は確定しない）
@@ -361,8 +368,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     .sort(), [attendanceData, calendarCtx, staff.wage_type, salary.absenceDeductionMethod]);
 
   // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
-  // 月給は「1年間における1月平均所定労働時間」で割る
-  const monthlyAverageHours = extras.annualWorkDays ? extras.annualWorkDays * dailyHours / 12 : null;
+  // 月給は「1年間における1月平均所定労働時間」で割る（曜日で時間が違う人は、1年間の所定労働時間の合計 ÷ 12。最低賃金法施行規則2条）
+  const monthlyAverageHours = hasWeekdayHours(staff) && extras.annualWorkHours
+    ? extras.annualWorkHours / 12
+    : extras.annualWorkDays ? extras.annualWorkDays * dailyHours / 12 : null;
   const minimumWageCheck = checkMinimumWage(
     Master.toKenpoPrefName(staff.prefecture),
     periodEnd,
@@ -424,6 +433,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     }
     if (loadingParts.length > 0) {
       alert(`${loadingParts.join("・")}を読み込んでいます。少し待ってから、もう一度確定してください。`);
+      return;
+    }
+    if (salary.scheduledHoursMissing) {
+      alert(`${staff.name}さんの「1日の所定労働時間」が入っていないため、8時間として計算しています。\n従業員の画面の「所属・給与」で入れてから、確定してください。`);
       return;
     }
     if (salary.prefectureUnknown) {

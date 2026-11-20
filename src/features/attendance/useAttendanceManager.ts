@@ -4,6 +4,7 @@ import { generateAttendanceCSV } from "../../utils/csvUtils";
 import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeductionMethod, toProrationMethod, toSocialInsCollection, toTardyDeductionMethod, type SalaryExtras } from "../../utils/calcSalary";
 import { isFlexStaff, loadFlexPeriod, parseFlexRule, type FlexPeriodContext } from "../../utils/flexTime";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
+import { averageDailyHoursOf, dayScheduledHours, sumScheduledHours, toHours } from "../../utils/scheduledHours";
 import { countNonLeaveWorkDays, leaveByDate, toLeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { useAverageWagePay } from "../payroll/useAverageWagePay";
 import { staffAsOf } from "../../utils/staffHistory";
@@ -164,7 +165,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   // 計算期間の終わりの日の時点の残りと、この期間に残りが足りない有給の日
   const paidLeave = useMemo(() => {
     if (!paidLeaveData || paidLeaveData.staffId !== selectedStaffId) return null;
-    const { hours, assumed } = leaveHoursPerDay(selectedStaff?.scheduled_work_hours);
+    // 時間単位の有給の1日の時間数（1日の所定労働時間。曜日で違う人は1日平均。労基則24条の4。utils/scheduledHours.ts）
+    const { hours, assumed } = leaveHoursPerDay(averageDailyHoursOf(selectedStaff));
     const { taken } = collectLeaveTaken(paidLeaveData.attendance, paidLeaveData.manual);
     const asOf = payrollPeriod?.endStr ?? dayjs().format("YYYY-MM-DD");
     const summary = summarizePaidLeave(paidLeaveData.grants, taken, hours, asOf);
@@ -211,7 +213,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         .map(([date, row]) => ({ work_date: date, work_type: row.workType, leave_type_id: row.leaveTypeId, special_leave_hours: row.specialHours })),
     ];
     // 時間単位の休暇の1日分は、1日の所定労働時間（1時間に満たない端数は切り上げ。年次有給休暇の時間単位と同じ）
-    const { hours } = leaveHoursPerDay(selectedStaff?.scheduled_work_hours);
+    const { hours } = leaveHoursPerDay(averageDailyHoursOf(selectedStaff));
     const asOf = payrollPeriod.endStr;
     const inPeriod = (date: string) => date >= payrollPeriod.startStr && date <= payrollPeriod.endStr;
     const summaries = leaveTypes
@@ -317,6 +319,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           // 休憩の一覧：breaks は手入力（null なら打刻を使う）、csvBreaks は打刻（utils/breaks.ts）
           breaks: null, csvBreaks: [],
           is_finalized: 0, workType: "normal", leaveTypeId: null, leavePaid: null, specialHours: 0, paidHours: 0, memo: "",
+          // その日だけ直した所定労働時間（シフト。null なら曜日の時間・1日の所定労働時間。utils/scheduledHours.ts）
+          scheduledHours: null,
           savedHours: 0, nightHours: 0, breakNone: false, autoBreak: "",
           csv_entry_time: "",
           csv_exit_time: "",
@@ -340,6 +344,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
             leavePaid: row.leave_paid ?? null,
             specialHours: Number(row.special_leave_hours) || 0, // 時間単位の特別休暇の時間（時間休）
             paidHours: row.paid_leave_hours || 0, 
+            scheduledHours: toHours(row.scheduled_hours),
             memo: row.memo || "",
             breakNone: Number(row.break_none) === 1, // その日は休憩を取らなかった（決まった休憩を引かない）
             autoBreak: row.auto_break || "",          // 確定したときに引いた決まった休憩
@@ -388,6 +393,18 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     });
   };
 
+  /**
+   * その日だけ直した所定労働時間（勤怠の画面の「所定」。フレックスタイム制の人は使わない）。
+   * 入れていない・使えない値・曜日の時間（1日の所定労働時間）と同じなら null（残さない）
+   */
+  const scheduledOverrideOf = (date: string, row: any): number | null => {
+    if (!selectedStaff || Number(selectedStaff.is_flex) === 1) return null;
+    const h = toHours(row?.scheduledHours);
+    if (h === null) return null;
+    const usual = dayScheduledHours(selectedStaff, date, null);
+    return usual !== null && Math.round(usual * 60) === Math.round(h * 60) ? null : h;
+  };
+
   const handleCellChange = (date: string, field: string, value: any) => {
     if (monthlyWorkData[date][field] === value) return;
     setMonthlyWorkData(prev => ({
@@ -416,9 +433,10 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     const isSpecial = isSpecialLeaveWorkType(row.workType);
     const specialHours = isSpecial ? 0 : Math.max(0, Number(row.specialHours) || 0);
     if (specialHours > 0) {
-      const max = maxHourlyLeave(selectedStaff.scheduled_work_hours);
+      // その日の所定労働時間に満たない時間（曜日・その日で時間が違う人は、その日の時間。utils/scheduledHours.ts）
+      const max = maxHourlyLeave(dayScheduledHours(selectedStaff, date, row.scheduledHours));
       if (!Number.isInteger(specialHours) || specialHours > max) {
-        if (!quiet) dialog.warning(`${date} の時間休は、1時間単位で、1日の所定労働時間に満たない時間（${max}時間まで）にしてください。1日休むときは、区分で休暇を選んでください。`);
+        if (!quiet) dialog.warning(`${date} の時間休は、1時間単位で、その日の所定労働時間に満たない時間（${max}時間まで）にしてください。1日休むときは、区分で休暇を選んでください。`);
         return false;
       }
     }
@@ -447,8 +465,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           work_hours, night_hours,
           actual_base_wage, overtime_rate, night_rate,
           work_type, leave_type_id, leave_paid, special_leave_hours, paid_leave_hours, memo,
-          is_finalized, finalized_at, break_none, auto_break
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_finalized, finalized_at, break_none, auto_break, scheduled_hours
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(staff_id, work_date) DO UPDATE SET
           entry_time = excluded.entry_time,
           exit_time = excluded.exit_time,
@@ -465,7 +483,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           is_finalized = excluded.is_finalized,
           finalized_at = excluded.finalized_at,
           break_none = excluded.break_none,
-          auto_break = excluded.auto_break`,
+          auto_break = excluded.auto_break,
+          scheduled_hours = excluded.scheduled_hours`,
         [
           selectedStaffId, date, row.in||"", row.out||"",
           stringifyBreaks(row.breaks ?? null),
@@ -474,7 +493,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           // 確定したときの割増率（倍率。給与規定グループの決まり。記録のため残す）
           1 + parsePremiumRates(currentGroup?.premium_rates).overtime / 100, parsePremiumRates(currentGroup?.premium_rates).night / 100,
           row.workType, leaveTypeId, leavePaid, specialHours, Number(row.paidHours)||0, row.memo||"",
-          1, now, row.breakNone ? 1 : 0, day.autoBreak || null
+          1, now, row.breakNone ? 1 : 0, day.autoBreak || null,
+          // その日だけ直した所定労働時間（曜日の時間・1日の所定労働時間と同じなら残さない）
+          scheduledOverrideOf(date, row),
         ]
       );
 
@@ -558,13 +579,13 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
   // --- 給与集計に使う、給与項目と所定労働日数（残業代の時給・日割り。給与明細と同じ読み方） ---
   const [customItems, setCustomItems] = useState<SalaryExtras['customItems']>([]);
-  const [workDays, setWorkDays] = useState<{ annual: number | null; period: number | null; employed: number | null; nonLeave: number | null }>({ annual: null, period: null, employed: null, nonLeave: null });
+  const [workDays, setWorkDays] = useState<{ annual: number | null; period: number | null; employed: number | null; nonLeave: number | null; annualHours: number | null; periodHours: number | null }>({ annual: null, period: null, employed: null, nonLeave: null, annualHours: null, periodHours: null });
   const periodStart = payrollPeriod?.startStr ?? "";
   const periodEnd = payrollPeriod?.endStr ?? "";
   useEffect(() => {
     let cancelled = false;
     setCustomItems([]);
-    setWorkDays({ annual: null, period: null, employed: null, nonLeave: null });
+    setWorkDays({ annual: null, period: null, employed: null, nonLeave: null, annualHours: null, periodHours: null });
     if (!db || !selectedStaff) return;
     (async () => {
       try {
@@ -580,6 +601,9 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
           employed: periodStart ? countPrescribedWorkDays(ctx, from, to) : null,
           // 在籍していて休業していない日の所定労働日数（休業の月の日割り。utils/leaveOfAbsence.ts）
           nonLeave: periodStart ? countNonLeaveWorkDays(ctx, selectedStaff, { start: periodStart, end: periodEnd }) : null,
+          // 曜日で所定労働時間が違う人の、1年間・計算期間の所定労働時間の合計（残業代の時給・遅刻早退の控除。utils/scheduledHours.ts）
+          annualHours: sumScheduledHours(ctx, selectedStaff, `${y}-01-01`, `${y}-12-31`),
+          periodHours: periodStart ? sumScheduledHours(ctx, selectedStaff, periodStart, periodEnd) : null,
         });
       } catch (e) {
         console.error("給与項目・所定労働日数の読み込みエラー:", e);
@@ -661,6 +685,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         is_late: Number(row.is_late) || 0,
         is_early: Number(row.is_early) || 0,
         paid_leave_hours: Number(row.paidHours) || 0,
+        scheduled_hours: scheduledOverrideOf(date, row),
       }));
 
     // 条件を緩めたのは正解です！
@@ -684,6 +709,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         customItems,
         taxMethod: currentGroup?.tax_calc_method,
         annualWorkDays: workDays.annual,
+        annualWorkHours: workDays.annualHours,
         // 計算期間の途中で入社・退職した月給制の人の日割り（給与規定グループの設定）
         prorationMethod: toProrationMethod(currentGroup?.proration_method),
         // 休業の月の日割り（給与規定グループの設定。初めは所定労働日数で日割り）
@@ -694,6 +720,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         tardyDeductionMethod: toTardyDeductionMethod(currentGroup?.tardy_deduction_method),
         period: periodStart ? { start: periodStart, end: periodEnd } : null,
         periodWorkDays: workDays.period,
+        periodWorkHours: workDays.periodHours,
         employedWorkDays: workDays.employed,
         nonLeaveWorkDays: workDays.nonLeave,
         // 週40時間の累計に、前の計算期間の日も足す

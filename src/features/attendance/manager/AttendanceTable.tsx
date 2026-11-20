@@ -16,6 +16,9 @@ import { durationLabel } from '../../../utils/fixedBreak';
 import { effectiveBreaks, isCompleteSpan, spanLabel, type BreakSpan } from '../../../utils/breaks';
 import { SPECIAL_LEAVE_FULL, SPECIAL_LEAVE_HALF, isSpecialLeaveWorkType, leaveOptionValue, specialLeaveLabel } from '../../../utils/specialLeave';
 import { describeLeave, LEAVE_TYPE_SHORT_NAMES } from '../../../utils/leaveOfAbsence';
+import { dayScheduledHours } from '../../../utils/scheduledHours';
+import { isPrescribedWorkDay, parseWorkDays, type CalendarContext } from '../../../utils/annualWorkDays';
+import ScheduledHoursInput from './ScheduledHoursInput';
 
 interface Props {
   am: AttendanceViewModel;
@@ -53,7 +56,18 @@ export default function AttendanceTable({ am }: Props) {
     halfDayLeaveEnabled,
     leaveTypes,
     leaveDays,
+    selectedStaff,
   } = am;
+  // フレックスタイム制の人は、日ごとの所定労働時間がない（1日の所定労働時間だけ）
+  const flexStaff = Number(selectedStaff?.is_flex) === 1;
+  // 所定労働日か（契約曜日・会社カレンダー。「所定」の欄を、勤怠のない所定休日には出さない）
+  const workdayCtx: CalendarContext = {
+    patternId: Number(selectedStaff?.calendar_pattern_id ?? 1),
+    workDays: parseWorkDays(selectedStaff?.work_days ?? null),
+    holidays: new Set(Object.keys(holidays ?? {}).map((d) => d.replace(/\//g, "-"))),
+    companyCalendar: companyHolidays ?? {},
+  };
+  const isWorkday = (dateStr: string) => isPrescribedWorkDay(new Date(`${dateStr}T00:00:00`), workdayCtx);
   // 休憩の一覧の画面を開いている日
   const [breakDialogDate, setBreakDialogDate] = useState<string | null>(null);
 
@@ -334,6 +348,16 @@ export default function AttendanceTable({ am }: Props) {
                       {/* 会社の都合で休ませた日（休業手当を払う。少し働いた日は出退勤も入れる。utils/averageWage.ts） */}
                       <option value="company_leave" style={{ color: "#7c3aed" }}>休業（会社都合）</option>
                     </select>
+                    {/* その日の所定労働時間（シフトで毎週同じでない日だけ直す。公休・休日出勤の日は所定労働時間がない） */}
+                    {!flexStaff && !["holiday", "holiday_work", "statutory_holiday"].includes(row.workType)
+                      && (isWorkday(dateStr) || isFinalized || !!row.in || !!row.out || row.workType !== "normal" || rowData.scheduledHours != null) && (
+                      <ScheduledHoursInput
+                        value={rowData.scheduledHours ?? null}
+                        usual={dayScheduledHours(selectedStaff, dateStr, null)}
+                        onChange={(h) => handleCellChange(dateStr, 'scheduledHours', h)}
+                        disabled={isFinalized || isClosed}
+                      />
+                    )}
                   </div>
                 </td>
 

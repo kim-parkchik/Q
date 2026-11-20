@@ -110,7 +110,7 @@ export default function RousaiManager({ db, staffList }: { db: Database; staffLi
     setLeaveRows([]);
     if (!staff || !/^\d{4}-\d{2}-\d{2}$/.test(v.leaveFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(v.leaveTo)) return;
     let cancelled = false;
-    db.select<any[]>("SELECT work_date, work_type, work_hours FROM attendance WHERE staff_id = ? AND work_date BETWEEN ? AND ?", [String(staff.id), v.leaveFrom, v.leaveTo])
+    db.select<any[]>("SELECT work_date, work_type, work_hours, scheduled_hours FROM attendance WHERE staff_id = ? AND work_date BETWEEN ? AND ?", [String(staff.id), v.leaveFrom, v.leaveTo])
       .then((rows) => { if (!cancelled) setLeaveRows(rows ?? []); })
       .catch((e) => console.error("勤怠の読み込みエラー:", e));
     return () => { cancelled = true; };

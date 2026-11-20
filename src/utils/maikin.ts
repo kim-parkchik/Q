@@ -16,6 +16,7 @@
 import dayjs from "dayjs";
 import { parseLedger } from "./legalBooks";
 import { weeklyWorkDaysOf } from "./koyoInfo";
+import { averageDailyHoursOf } from "./scheduledHours";
 
 /** 調査月の調査期間（closingDay は 1〜28・99：末日） */
 export const maikinPeriod = (year: number, month: number, closingDay: number): { from: string; to: string } => {
@@ -77,19 +78,23 @@ export interface MaikinBonus {
 /** 超過労働給与の行（残業・休日出勤・深夜の手当と固定残業代） */
 const OVERTIME_LINE = /時間外|休日出勤|深夜|固定残業/;
 
-/** 一般の労働者の1日の所定労働時間（月給の人に多い時間。なければ、いちばん長い時間） */
+/**
+ * 一般の労働者の1日の所定労働時間（月給の人に多い時間。なければ、いちばん長い時間）
+ * 曜日で時間が違う人（土曜は半日など）は、1週間の1日平均で比べる（utils/scheduledHours.ts）
+ */
 export const standardDailyHours = (staff: any[]): number => {
   const count = new Map<number, number>();
   for (const s of staff.filter((x) => x.wage_type === "monthly")) {
-    const h = Number(s.scheduled_work_hours) || 0;
+    const h = averageDailyHoursOf(s) ?? 0;
     if (h > 0) count.set(h, (count.get(h) ?? 0) + 1);
   }
   if (count.size > 0) return [...count.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
-  return Math.max(0, ...staff.map((s) => Number(s.scheduled_work_hours) || 0));
+  return Math.max(0, ...staff.map((s) => averageDailyHoursOf(s) ?? 0));
 };
 
+// 1日の所定労働時間は、曜日で時間が違う人は1週間の1日平均（utils/scheduledHours.ts）
 export const isPartTime = (s: any, standardHours: number): boolean =>
-  (Number(s.scheduled_work_hours) || 0) < standardHours || weeklyWorkDaysOf(s) < 5;
+  (averageDailyHoursOf(s) ?? 0) < standardHours || weeklyWorkDaysOf(s) < 5;
 
 const employedOn = (s: any, date: string) => {
   const join = String(s?.join_date ?? "");

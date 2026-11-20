@@ -142,7 +142,8 @@ export const DB_SCHEMAS = [
     calendar_pattern_id INTEGER DEFAULT 1,
     work_days TEXT,
     scheduled_in TEXT DEFAULT '',
-    scheduled_work_hours REAL DEFAULT 8.0,
+    scheduled_work_hours REAL,           -- 1日の所定労働時間（時間。役員でない人は入れる。入れていなければ給与を確定しない。utils/scheduledHours.ts）
+    weekday_hours TEXT,                  -- 曜日ごとの所定労働時間（JSON。{"mon":4,"wed":6}。入れていない曜日は1日の所定労働時間）
     is_flex INTEGER DEFAULT 0,
     core_start TEXT DEFAULT '',
     core_end TEXT DEFAULT '',
@@ -207,6 +208,7 @@ export const DB_SCHEMAS = [
     leave_paid INTEGER,              -- 特別休暇が有給か（確定したときの休暇の種類の設定。1: 有給 / 0: 無給。utils/specialLeave.ts）
     special_leave_hours REAL DEFAULT 0, -- 時間単位の特別休暇の時間（時間休。休暇の種類は leave_type_id。区分が special・special_half の日は使わない）
     paid_leave_hours REAL DEFAULT 0,
+    scheduled_hours REAL,            -- その日だけ直した所定労働時間（シフト。NULL なら曜日の時間・1日の所定労働時間。utils/scheduledHours.ts）
     memo TEXT,
     is_finalized INTEGER DEFAULT 0,  -- 0: 未確定, 1: 確定済み
     finalized_at TEXT,               -- 確定された日時

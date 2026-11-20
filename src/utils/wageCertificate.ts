@@ -37,6 +37,7 @@ import { parseLeavePeriods, type LeavePeriod } from "./leaveExemption";
 import { leaveOn, LEAVE_TYPE_NAMES } from "./leaveOfAbsence";
 import { isSpecialLeaveWorkType, SPECIAL_LEAVE_FULL, SPECIAL_LEAVE_HALF, specialLeaveOfRow } from "./specialLeave";
 import { staffAsOf } from "./staffHistory";
+import { dayScheduledHours, scheduledHoursMissing } from "./scheduledHours";
 
 /** 確定した勤怠（基礎日数・時間数を数えるのに使う項目） */
 export interface WageCertDay {
@@ -46,6 +47,8 @@ export interface WageCertDay {
   leave_paid?: number | string | null;
   paid_leave_hours?: number | string | null;
   special_leave_hours?: number | string | null;
+  /** その日だけ直した所定労働時間（シフト。utils/scheduledHours.ts） */
+  scheduled_hours?: number | string | null;
 }
 
 /** 確定した給与（支払った年月ごと） */
@@ -152,7 +155,7 @@ const isPaidDay = (r: WageCertDay | undefined): boolean =>
 const isAbsentDay = (r: WageCertDay | undefined): boolean =>
   !!r && (r.work_type === "absent" || (r.work_type === SPECIAL_LEAVE_FULL && !specialLeaveOfRow(r).paid));
 
-/** その日の、賃金支払の基礎となった時間数（働いた時間・有給休暇の時間（1日は所定労働時間、半日はその半分）） */
+/** その日の、賃金支払の基礎となった時間数（働いた時間・有給休暇の時間（1日はその日の所定労働時間、半日はその半分）） */
 const hoursOf = (r: WageCertDay | undefined, scheduled: number): number => {
   if (!r) return 0;
   let h = Number(r.work_hours) || 0;
@@ -170,7 +173,7 @@ const hoursOf = (r: WageCertDay | undefined, scheduled: number): number => {
  */
 const daysIn = (
   from: string, to: string, byDate: Map<string, WageCertDay>, leaves: LeavePeriod[], monthly: boolean, fullMonthly: boolean,
-  scheduled: number, isWorkDay: (date: string) => boolean,
+  scheduled: (date: string, r: WageCertDay | undefined) => number, isWorkDay: (date: string) => boolean,
 ): { days: number; hours: number; leaveDays: number; absentDays: number; shutdownDays: number } => {
   let days = 0;
   let hours = 0;
@@ -186,7 +189,7 @@ const daysIn = (
       leaveDays++;
       return;
     }
-    hours += hoursOf(r, scheduled);
+    hours += hoursOf(r, scheduled(d, r));
     if (r?.work_type === SHUTDOWN_WORK_TYPE) shutdownDays++;
     if (isAbsentDay(r)) absentDays++;
     if (monthly && fullMonthly) {
@@ -288,7 +291,11 @@ export const buildWageCertificate = (input: WageCertInput): WageCertResult => {
   const nextDay = addDays(endDate, 1);
   const leaves = parseLeavePeriods(staff?.leave_periods);
   const byDate = new Map(input.attendance.map((r) => [r.work_date, r]));
-  const scheduled = Number(staff?.scheduled_work_hours) || 8;
+  // その日の所定労働時間（勤怠で直した時間 → 曜日の時間 → 1日の所定労働時間。入れていなければ8時間として数えて知らせる。utils/scheduledHours.ts）
+  const scheduled = (date: string, r: WageCertDay | undefined) => dayScheduledHours(staff, date, r?.scheduled_hours) ?? 8;
+  if (scheduledHoursMissing(staff) && String(staff?.wage_type ?? "") !== "monthly") {
+    notes.push("1日の所定労働時間が入っていないので、有給休暇の日の時間は8時間として数えています（従業員の画面で入れてください）。");
+  }
   const fullMonthly = String(group.absence_deduction_method ?? "workdays") === "none";
   const isWorkDay = input.isWorkDay ?? isWeekday;
   const wageTypeOn = (date: string) => String(staffAsOf(staff, Number(date.slice(0, 4)), Number(date.slice(5, 7))).wage_type ?? staff?.wage_type ?? "");

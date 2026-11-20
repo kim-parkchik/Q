@@ -9,6 +9,7 @@ import Database from "@tauri-apps/plugin-sql";
 import dayjs from "dayjs";
 import { buildBenefitCert, CERT_KIND_LABELS, defaultCertPeriod, type CertAttendance, type CertKind, type CertPayRow, type CertSalary } from "../../utils/kenpoBenefitCert";
 import { parseLeavePeriods } from "../../utils/leaveExemption";
+import { baseHoursOf, dayScheduledHours } from "../../utils/scheduledHours";
 import { parseLedger } from "../../utils/legalBooks";
 import { formatWareki } from "../../utils/wareki";
 import * as S from "./reportStyles";
@@ -77,7 +78,7 @@ export default function KenpoBenefitCertManager({ db, staffList }: Props) {
       try {
         // 計算期間は前後にずれるので、申請期間の前後1か月の勤怠と、前後2か月に支給した給与を読む
         const a = await db.select<any[]>(
-          `SELECT work_date, work_type, work_hours, paid_leave_hours, special_leave_hours, leave_paid FROM attendance
+          `SELECT work_date, work_type, work_hours, paid_leave_hours, special_leave_hours, leave_paid, scheduled_hours FROM attendance
            WHERE staff_id = ? AND work_date BETWEEN ? AND ?`,
           [staff.id, dayjs(from).subtract(1, "month").format("YYYY-MM-DD"), dayjs(to).add(1, "month").format("YYYY-MM-DD")],
         );
@@ -104,6 +105,8 @@ export default function KenpoBenefitCertManager({ db, staffList }: Props) {
           attendance: (a ?? []).map((x) => ({
             date: String(x.work_date), workType: String(x.work_type ?? ""), workHours: Number(x.work_hours) || 0,
             paidLeaveHours: Number(x.paid_leave_hours) || 0, specialLeaveHours: Number(x.special_leave_hours) || 0, leavePaid: Number(x.leave_paid) === 1,
+            // その日の所定労働時間（勤怠で直した時間 → 曜日の時間 → 1日の所定労働時間。utils/scheduledHours.ts）
+            scheduledHours: dayScheduledHours(staff, String(x.work_date), x.scheduled_hours),
           })),
           salaries,
           leaveProration: String(g?.[0]?.leave_proration_method ?? "workdays"),
@@ -118,7 +121,7 @@ export default function KenpoBenefitCertManager({ db, staffList }: Props) {
   }, [db, staff, from, to]);
 
   const cert = useMemo(() => (loaded && staff && from && to && from <= to ? buildBenefitCert({
-    from, to, wageType: String(staff.wage_type ?? "monthly"), scheduledHours: Number(staff.scheduled_work_hours) || 8,
+    from, to, wageType: String(staff.wage_type ?? "monthly"), scheduledHours: baseHoursOf(staff) ?? 8,
     ...loaded, leavePeriods: periods,
   }) : null), [loaded, staff, from, to, periods]);
 

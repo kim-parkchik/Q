@@ -15,6 +15,7 @@
  */
 import { KOYO_CODES, KOYO_REASON_CODES, KOYO_REASON_TITLES } from "../constants/koyoTodoke";
 import { parseWorkDays } from "./annualWorkDays";
+import { weeklyScheduledHoursOf } from "./scheduledHours";
 import { birthdayAt } from "./calcSalary";
 
 
@@ -217,11 +218,16 @@ export const weeklyWorkDaysOf = (staff: any): number => {
 
 /**
  * 1週間の所定労働時間（分）：入れていればその値、なければ出勤する日数 × 1日の所定労働時間
+ * （契約曜日で決めている人は、出勤する曜日の時間の合計。曜日で時間が違う人は、その曜日の時間。utils/scheduledHours.ts）
  * （雇用保険事務手続きの手引き：被保険者の種類を問わず書く。資格喪失届は離職したときの時間）
  */
 export const weeklyMinutesOf = (staff: any, info = parseKoyoInfo(staff?.koyo_info)): number => {
   if (info.weeklyMinutes !== null && info.weeklyMinutes > 0) return Math.round(info.weeklyMinutes);
   const hours = Number(staff?.scheduled_work_hours) || 0;
+  if (hours > 0 && Number(staff?.calendar_pattern_id ?? 1) === 0) {
+    const weekly = weeklyScheduledHoursOf(staff);
+    if (weekly !== null) return Math.round(weekly * 60);
+  }
   return Math.round(weeklyWorkDaysOf(staff) * hours * 60);
 };
 

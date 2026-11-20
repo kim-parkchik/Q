@@ -20,6 +20,7 @@ import { foreignOf } from "./foreignInfo";
 import { KOYO_RESIDENCE_STATUSES } from "../constants/koyoTodoke";
 import type { PrintForm, PrintItem } from "./printForms";
 import { formatWareki } from "./wareki";
+import { baseHoursOf, dayScheduledHours, describeWeekdayHours, hasWeekdayHours } from "./scheduledHours";
 
 const w = (d: string | null | undefined) => (d ? formatWareki(d) : "");
 const md = (d: string) => `${Number(d.slice(5, 7))}月${Number(d.slice(8, 10))}日`;
@@ -116,19 +117,20 @@ export interface Besshi2Day {
  * ・賃金の額の初めの値：時給は 働いた時間 × 時給（有給休暇は所定労働時間分）、日給は日給、月給は 月額 ÷ 30
  */
 export const besshi2Of = (
-  from: string, to: string, rows: { work_date: string; work_type?: string | null; work_hours?: number | string | null }[],
+  from: string, to: string, rows: { work_date: string; work_type?: string | null; work_hours?: number | string | null; scheduled_hours?: number | string | null }[],
   staff: any, monthlyPaid = false,
 ): { days: Besshi2Day[]; whole: number; partial: number; worked: number } => {
   const byDate = new Map(rows.map((r) => [String(r.work_date), r]));
   const wageType = String(staff?.wage_type ?? "");
   const base = Number(staff?.base_wage) || 0;
-  const scheduled = Number(staff?.scheduled_work_hours) || 8;
   const out: Besshi2Day[] = [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return { days: out, whole: 0, partial: 0, worked: 0 };
   for (let d = dayjs(from); !d.isAfter(dayjs(to), "day"); d = d.add(1, "day")) {
     const date = d.format("YYYY-MM-DD");
     const r = byDate.get(date);
     const hours = Number(r?.work_hours) || 0;
+    // その日の所定労働時間（勤怠で直した時間 → 曜日の時間 → 1日の所定労働時間。入っていなければ8時間。utils/scheduledHours.ts）
+    const scheduled = dayScheduledHours(staff, date, r?.scheduled_hours) ?? baseHoursOf(staff) ?? 8;
     const paidLeave = r?.work_type === "paid_full" || r?.work_type === "paid_half";
     const perDay = wageType === "monthly" ? Math.floor(base / 30) : wageType === "daily" ? base : Math.floor(base * scheduled);
     if (hours >= scheduled) {
@@ -197,7 +199,9 @@ const jobOf = (staff: any) => String(staff?.job_type ?? "");
 const prescribedHours = (staff: any) => {
   const h = Number(staff?.scheduled_work_hours) || 0;
   const start = /^(\d{1,2}):(\d{2})/.exec(String(staff?.scheduled_in ?? ""));
-  return start ? `${Number(start[1])}時${start[2]}分から（1日 ${h}時間）` : h > 0 ? `1日 ${h}時間` : "";
+  // 曜日で所定労働時間が違う人は、違う曜日の時間も書く（「1日 4時間。水6時間」。utils/scheduledHours.ts）
+  const day = `1日 ${h}時間${hasWeekdayHours(staff) ? `。${describeWeekdayHours(staff)}` : ""}`;
+  return start ? `${Number(start[1])}時${start[2]}分から（${day}）` : h > 0 ? day : "";
 };
 
 export const youshiki8Form = (i: AccidentInput, besshi: Besshi1 | null): PrintForm => {

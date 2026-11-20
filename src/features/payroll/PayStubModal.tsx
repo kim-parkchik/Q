@@ -84,8 +84,10 @@ export default function PayStubModal(props: Props) {
             <button onClick={() => window.print()} style={{ ...S.printBtnS, flex: 1 }}>🖨 印刷・PDF保存</button>
             <button
               onClick={handleSaveResult}
-              disabled={salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
-              title={salary.prefectureUnknown
+              disabled={salary.scheduledHoursMissing || salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0}
+              title={salary.scheduledHoursMissing
+                ? "1日の所定労働時間が入っていないため、8時間として計算しています。従業員の画面で入れてから確定してください"
+                : salary.prefectureUnknown
                 ? "都道府県がわからないため、健康保険料を計算していません。「都道府県」を選んでから確定してください"
                 : salary.insurerRateMissing ? `${salary.insurer.name}の、この月の分の料率が入っていないため、健康保険料を計算していません。会社設定の「社会保険規定」で料率を入れてから確定してください`
                 : salary.averageWageMissing.length > 0 ? "平均賃金を出せないため、休業手当・休業補償を計算していません。メニューの「平均賃金」で確かめてから確定してください"
@@ -96,8 +98,8 @@ export default function PayStubModal(props: Props) {
                 : isSaved ? "確定済みです。押すと、いまの計算で確定し直します（年末調整の過不足額を載せるときなど）" : undefined}
               style={{
                 ...S.printBtnS, flex: 1,
-                backgroundColor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
-                cursor: salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
+                backgroundColor: salary.scheduledHoursMissing || salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "#bdc3c7" : isSaved ? "#27ae60" : "#8e44ad",
+                cursor: salary.scheduledHoursMissing || salary.prefectureUnknown || salary.insurerRateMissing || salary.averageWageMissing.length > 0 || salary.flexMissing.length > 0 || inKindProblems.length > 0 || loadingParts.length > 0 || loadErrors.length > 0 ? "not-allowed" : "pointer",
               }}
             >
               {loadingParts.length > 0 && loadErrors.length === 0 ? "読み込んでいます…" : isSaved ? "✅ 確定済み（確定し直す）" : "💾 給与確定"}
@@ -141,6 +143,12 @@ export default function PayStubModal(props: Props) {
               ℹ 死亡した日（{monthStaff.death_date}）より後に支払う給与なので、所得税を引いていません。この給与は相続税の対象（相続財産）で、
               所得税の対象ではないので、源泉徴収簿・源泉徴収票・年末調整にも入れません（所得税基本通達9-17）。
               相続人などに払うときは、支払調書などを確かめてください。
+            </div>
+          )}
+          {salary.scheduledHoursMissing && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
+              ⚠ この人の「1日の所定労働時間」が入っていないので、8時間として計算しています（有給の日の賃金・残業代の時給・遅刻早退・法定内残業）。
+              従業員の画面の「所属・給与」で入れてください。入れるまで確定できません。
             </div>
           )}
           {salary.prefectureUnknown && (
@@ -595,7 +603,7 @@ export default function PayStubModal(props: Props) {
             const detail = staff.wage_type === "monthly"
               ? `（(基本給 ¥${wage}${salary.overtimeBaseAllowances > 0 ? ` ＋ 手当 ¥${salary.overtimeBaseAllowances.toLocaleString()}` : ""}) ÷ ${hoursLabel}）`
               : staff.wage_type === "daily"
-                ? `（日給 ¥${wage} ÷ 1日の所定労働時間 ${fmtH(Number(staff.scheduled_work_hours) || 8)}${allowance}）`
+                ? `（日給 ¥${wage} ÷ ${salary.scheduledHoursVary && salary.dailyRateHours !== (Number(staff.scheduled_work_hours) || 0) ? "1週間の1日平均所定労働時間" : "1日の所定労働時間"} ${fmtH(salary.dailyRateHours)}${allowance}）`
                 : `（時給 ¥${wage}${allowance}）`;
             return (
               <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
@@ -609,6 +617,14 @@ export default function PayStubModal(props: Props) {
               </div>
             );
           })()}
+
+          {/* 有給休暇の日ごとの時間（曜日・その日で所定労働時間が違う人。その日の所定労働時間で払う。労基則25条1項1号） */}
+          {salary.paidLeavePay > 0 && salary.scheduledHoursVary && salary.paidLeaveDays.length > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              有給休暇の時間：{salary.paidLeaveDays.map(d => `${Number(d.date.slice(5, 7))}月${Number(d.date.slice(8, 10))}日 ${fmtH(d.hours)}`).join("・")}
+              <span style={{ color: "#666", marginLeft: 8 }}>（その日の所定労働時間で数えています。労働基準法施行規則25条1項）</span>
+            </div>
+          )}
 
           {/* 週40時間：前の計算期間の日も数えた・所定労働時間の中の時間外労働は割増分だけを払った */}
           {salary.isOvertimeEligible && (salary.weekCarryOver

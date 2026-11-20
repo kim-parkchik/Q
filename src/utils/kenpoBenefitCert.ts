@@ -44,6 +44,8 @@ export interface CertAttendance {
   specialLeaveHours: number;
   /** 特別休暇が有給か */
   leavePaid: boolean;
+  /** その日の所定労働時間（勤怠で直した時間・曜日の時間。わからなければ省略して、1日の所定労働時間を使う。utils/scheduledHours.ts） */
+  scheduledHours?: number | null;
 }
 
 export interface CertSalary {
@@ -60,7 +62,7 @@ export interface CertInput {
   from: string;
   to: string;
   wageType: string;
-  /** 1日の所定労働時間 */
+  /** 1日の所定労働時間（その日の所定労働時間がない日に使う） */
   scheduledHours: number;
   /** 申請期間にかかる計算期間の勤怠（申請期間の外の日も入れる。有給の時間で分けるため） */
   attendance: CertAttendance[];
@@ -108,8 +110,11 @@ const eachDay = (from: string, to: string): string[] => {
 };
 const inLeave = (date: string, periods: LeavePeriod[]) => periods.some((p) => date >= p.start && (!p.end || date <= p.end));
 const worked = (a: CertAttendance | undefined) => !!a && a.workHours > 0;
+/** その日の所定労働時間（勤怠にその日の時間があればその時間、なければ1日の所定労働時間） */
+const hoursAt = (a: CertAttendance | undefined, scheduledHours: number): number =>
+  a && typeof a.scheduledHours === "number" && a.scheduledHours > 0 ? a.scheduledHours : scheduledHours;
 
-/** 有給休暇（特別休暇の有給を含む）の時間（1日の所定労働時間で数える。働いた日は0） */
+/** 有給休暇（特別休暇の有給を含む）の時間（その日の所定労働時間で数える。働いた日は0） */
 const paidHoursOf = (a: CertAttendance | undefined, scheduled: number): { paid: number; special: number } => {
   if (!a || worked(a)) return { paid: 0, special: 0 };
   const paid = a.workType === "paid_full" ? scheduled : a.workType === "paid_half" ? scheduled / 2 : a.paidLeaveHours;
@@ -134,7 +139,8 @@ export const certMonths = (input: Pick<CertInput, "from" | "to" | "attendance" |
     const day = Number(date.slice(8, 10));
     cur.worked.push(day);
     const covered = a!.workHours + (a!.paidLeaveHours || 0) + (a!.leavePaid ? a!.specialLeaveHours || 0 : 0);
-    if (a!.workType !== "holiday" && input.scheduledHours > 0 && covered < input.scheduledHours - 1e-9) cur.short.push(day);
+    const scheduled = hoursAt(a, input.scheduledHours);
+    if (a!.workType !== "holiday" && scheduled > 0 && covered < scheduled - 1e-9) cur.short.push(day);
   }
   return months;
 };
@@ -168,7 +174,7 @@ export const buildBenefitCert = (input: CertInput): CertResult => {
 
     // 有給休暇の日：1日分の額で、続いている日をまとめる
     const all = eachDay(s.periodStart, s.periodEnd);
-    const hoursAll = all.reduce((t, d) => { const h = paidHoursOf(byDate.get(d), input.scheduledHours); return { paid: t.paid + h.paid, special: t.special + h.special }; }, { paid: 0, special: 0 });
+    const hoursAll = all.reduce((t, d) => { const h = paidHoursOf(byDate.get(d), hoursAt(byDate.get(d), input.scheduledHours)); return { paid: t.paid + h.paid, special: t.special + h.special }; }, { paid: 0, special: 0 });
     const paidPay = lineAmount(s.ledger, "有給休暇手当");
     const specialPay = lineAmount(s.ledger, "特別休暇手当");
     const basePay = lineAmount(s.ledger, "基本給");
@@ -177,11 +183,12 @@ export const buildBenefitCert = (input: CertInput): CertResult => {
       return days && days > 0 ? Math.floor(basePay / days) : null;
     })() : null;
     const dayAmount = (d: string): number | null => {
-      const h = paidHoursOf(byDate.get(d), input.scheduledHours);
+      const scheduled = hoursAt(byDate.get(d), input.scheduledHours);
+      const h = paidHoursOf(byDate.get(d), scheduled);
       if (h.paid + h.special <= 0) return 0;
       if (monthly) {
-        if (perDayMonthly === null || input.scheduledHours <= 0) return null;
-        return Math.floor((perDayMonthly * (h.paid + h.special)) / input.scheduledHours);
+        if (perDayMonthly === null || scheduled <= 0) return null;
+        return Math.floor((perDayMonthly * (h.paid + h.special)) / scheduled);
       }
       const p = hoursAll.paid > 0 ? Math.round((paidPay * h.paid) / hoursAll.paid) : 0;
       const q = hoursAll.special > 0 ? Math.round((specialPay * h.special) / hoursAll.special) : 0;

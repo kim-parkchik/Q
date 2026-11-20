@@ -5,6 +5,43 @@
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { fixedOvertimeCoverageHours, overtimePayFor } from '../../../utils/fixedOvertime';
+import { hoursText, parseHoursText, WEEKDAY_LABELS, type WeekdayKey } from '../../../utils/scheduledHours';
+import { useEffect, useState } from 'react';
+
+/** 曜日の所定労働時間の入力欄（"4:00"。空なら1日の所定労働時間） */
+function WeekdayHoursInput({ value, base, onChange, label }: {
+    value: number | undefined; base: number; onChange: (hours: number | undefined) => void; label: string;
+}) {
+    const [text, setText] = useState(hoursText(value));
+    const [bad, setBad] = useState(false);
+    useEffect(() => { setText(hoursText(value)); setBad(false); }, [value]);
+    const commit = () => {
+        const parsed = parseHoursText(text);
+        if (parsed === undefined) { setBad(true); return; }
+        setBad(false);
+        // 1日の所定労働時間と同じなら入れない（空と同じ）
+        const next = parsed === null || (base > 0 && Math.round(parsed * 60) === Math.round(base * 60)) ? undefined : parsed;
+        setText(hoursText(next));
+        if (next !== value) onChange(next);
+    };
+    return (
+        <input
+            type="text" inputMode="numeric" value={text}
+            placeholder={base > 0 ? hoursText(base) : "--:--"}
+            aria-label={`${label}曜日の所定労働時間`}
+            title={`${label}曜日の所定労働時間（その曜日だけ違うときに入れます。空なら1日の所定労働時間）`}
+            onChange={e => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            style={{
+                width: "40px", padding: "1px 3px", fontSize: "11px", textAlign: "right", borderRadius: "3px",
+                border: `1px solid ${bad ? "#e74c3c" : value !== undefined ? "#f59e0b" : "#d1d5db"}`,
+                backgroundColor: value !== undefined ? "#fffbeb" : "#fff", color: value !== undefined ? "#b45309" : "#334155",
+                fontWeight: value !== undefined ? "bold" : "normal",
+            }}
+        />
+    );
+}
 
 interface Props {
     cm: StaffManagerState;
@@ -19,7 +56,10 @@ export default function WorkPatternSection({ cm }: Props) {
         targetScheduledIn,
         setTargetScheduledIn,
         targetDailyHours,
-        setTargetDailyHours,
+        targetWeekdayHours,
+        setTargetWeekdayHours,
+        dailyAverageHours,
+        targetIsExecutive,
         targetHours,
         setTargetHours,
         targetMinutes,
@@ -151,35 +191,12 @@ export default function WorkPatternSection({ cm }: Props) {
                     paddingBottom: "15px", 
                     borderBottom: "1px solid #e2e8f0" // 👈 ここで契約曜日との間に横線を引いています
                 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "8px" }}>
-                        <input 
-                            type="checkbox" 
-                            id="useDailyHours"
-                            checked={targetDailyHours > 0 || targetScheduledIn !== ""} 
-                            onChange={(e) => {
-                                if (!e.target.checked) {
-                                    setTargetDailyHours(0);
-                                    setTargetHours(0);
-                                    setTargetMinutes(0);
-                                    setTargetScheduledIn("");
-                                } else {
-                                    setTargetHours(8);
-                                    setTargetMinutes(0);
-                                    setTargetDailyHours(8.0);
-                                    setTargetScheduledIn("09:00");
-                                }
-                            }}
-                        />
-                        <label htmlFor="useDailyHours" style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}>
-                            標準始業時間・所定労働時間の設定
-                        </label>
-                    </div>
-                    
+                    <div style={{ ...labelStyle, marginBottom: "8px" }}>標準始業時刻・所定労働時間</div>
+
                     <div style={{ 
                         display: "flex", 
                         gap: "20px", 
                         alignItems: "flex-end",
-                        opacity: (targetDailyHours === 0 && targetScheduledIn === "") ? 0.5 : 1 
                     }}>
                         {/* 🆕 標準始業時刻 */}
                         <div>
@@ -188,48 +205,45 @@ export default function WorkPatternSection({ cm }: Props) {
                                 type="time" 
                                 value={targetScheduledIn} 
                                 onChange={e => setTargetScheduledIn(e.target.value)}
-                                disabled={targetDailyHours === 0 && targetScheduledIn === ""}
                                 style={{ ...inputStyle, width: "110px" }}
                             />
                         </div>
 
                         {/* 1日の所定労働時間 */}
                         <div>
-                            <span style={{ fontSize: "10px", color: "#64748b", display: "block", marginBottom: "4px" }}>1日の所定労働時間</span>
+                            <span style={{ fontSize: "10px", color: "#64748b", display: "block", marginBottom: "4px" }}>1日の所定労働時間{Number(targetIsExecutive) === 1 ? "" : "（必ず入れる）"}</span>
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                 <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                                     <input 
                                         type="number" min="0" max="24" 
-                                        value={targetHours} 
-                                        onChange={e => {
-                                            const h = Number(e.target.value);
-                                            setTargetHours(h);
-                                            setTargetDailyHours(h + targetMinutes / 60);
-                                        }} 
-                                        disabled={targetDailyHours === 0 && targetScheduledIn === ""}
-                                        style={{ ...inputStyle, width: "70px", paddingRight: "25px", textAlign: "right", backgroundColor: targetDailyHours === 0 ? "#f1f5f9" : "#fff" }} 
+                                        value={targetDailyHours > 0 ? targetHours : ""} 
+                                        placeholder="--"
+                                        onChange={e => setTargetHours(Math.max(0, Math.min(24, Number(e.target.value) || 0)))} 
+                                        style={{ ...inputStyle, width: "70px", paddingRight: "25px", textAlign: "right", borderColor: targetDailyHours > 0 || Number(targetIsExecutive) === 1 ? undefined : "#e74c3c" }} 
                                     />
                                     <span style={{ position: "absolute", right: "6px", fontSize: "10px", color: "#7f8c8d" }}>時</span>
                                 </div>
                                 <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
                                     <input 
-                                        type="number" min="0" max="55" step="5" 
-                                        value={targetMinutes} 
-                                        onChange={e => {
-                                            const m = Number(e.target.value);
-                                            setTargetMinutes(m);
-                                            setTargetDailyHours(targetHours + m / 60);
-                                        }} 
-                                        disabled={targetDailyHours === 0 && targetScheduledIn === ""}
-                                        style={{ ...inputStyle, width: "70px", paddingRight: "25px", textAlign: "right", backgroundColor: targetDailyHours === 0 ? "#f1f5f9" : "#fff" }} 
+                                        type="number" min="0" max="59" step="5" 
+                                        value={targetDailyHours > 0 ? targetMinutes : ""} 
+                                        placeholder="--"
+                                        onChange={e => setTargetMinutes(Math.max(0, Math.min(59, Number(e.target.value) || 0)))} 
+                                        style={{ ...inputStyle, width: "70px", paddingRight: "25px", textAlign: "right", borderColor: targetDailyHours > 0 || Number(targetIsExecutive) === 1 ? undefined : "#e74c3c" }} 
                                     />
                                     <span style={{ position: "absolute", right: "6px", fontSize: "10px", color: "#7f8c8d" }}>分</span>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    {targetDailyHours <= 0 && Number(targetIsExecutive) !== 1 && (
+                        <p style={{ fontSize: "11px", color: "#b91c1c", fontWeight: "bold", marginTop: "6px", lineHeight: "1.5" }}>
+                            ⚠ 1日の所定労働時間を入れてください。入れるまで、給与を確定できません（役員の人は要りません）。
+                        </p>
+                    )}
                     <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "6px", lineHeight: "1.4" }}>
-                        ※始業時刻は一括反映ボタンの基準に使用します。所定時間は給与・有給計算の基礎となります。未設定の場合は、直近3ヶ月の平均賃金等から算出します。
+                        ※始業時刻は一括反映ボタンの基準に使います。1日の所定労働時間は、残業代の時給・有給の日の賃金・遅刻早退・時間単位の有給の1日の時間の基礎です。
+                        曜日で時間が違う人（月曜4時間・水曜6時間、土曜は半日など）は、下の契約曜日の横に、その曜日の時間を入れます。
                     </p>
                 </div>
 
@@ -277,12 +291,34 @@ export default function WorkPatternSection({ cm }: Props) {
                                     style={{ cursor: "pointer" }}
                                 />
                                 <span style={{ color: day.color || "#2c3e50", fontWeight: "bold" }}>{day.label}</span>
+                                {/* その曜日の所定労働時間（曜日で時間が違うときだけ。フレックスタイム制の人は使わない） */}
+                                {targetWorkDays[day.id] && !targetIsFlex && (
+                                    <WeekdayHoursInput
+                                        label={WEEKDAY_LABELS[day.id as WeekdayKey]}
+                                        value={targetWeekdayHours[day.id as WeekdayKey]}
+                                        base={targetDailyHours}
+                                        onChange={(h) => {
+                                            const next = { ...targetWeekdayHours };
+                                            if (h === undefined) delete next[day.id as WeekdayKey];
+                                            else next[day.id as WeekdayKey] = h;
+                                            setTargetWeekdayHours(next);
+                                        }}
+                                    />
+                                )}
                             </label>
                         ))}
                     </div>
-                    <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "4px" }}>
-                        ※有給休暇の「出勤率（分母）」および「比例付与日数」の判定に使用します。未設定の場合は実績から推計します。
+                    <p style={{ fontSize: "9px", color: "#94a3b8", marginTop: "4px", lineHeight: "1.4" }}>
+                        ※有給休暇の「出勤率（分母）」および「比例付与日数」の判定に使用します。
+                        曜日で所定労働時間が違うときは、チェックした曜日の横に、その曜日の時間を入れます（空なら1日の所定労働時間）。
+                        会社カレンダーの人も、土曜の半日など違う曜日にチェックを付けて時間を入れられます（出勤する日は会社カレンダーで決まります）。
+                        シフトで毎週同じでない日は、勤怠の画面の「所定」で、その日だけ直します。
                     </p>
+                    {dailyAverageHours > 0 && Math.round(dailyAverageHours * 60) !== Math.round(targetDailyHours * 60) && (
+                        <p style={{ fontSize: "11px", color: "#475569", marginTop: "4px" }}>
+                            1週間の1日平均所定労働時間：<b>{hoursText(dailyAverageHours)}</b>（日給の時給換算・時間単位の有給の1日の時間に使います）
+                        </p>
+                    )}
                 </div>
 
                 {/* 3. 固定残業代（みなし残業）の設定エリア */}
@@ -448,7 +484,7 @@ export default function WorkPatternSection({ cm }: Props) {
                                     <>
                                         約 {Math.round(
                                             targetWageType === "daily" 
-                                            ? (targetWage / targetDailyHours)  // 日給 ÷ 1日の所定時間
+                                            ? (targetWage / (dailyAverageHours || targetDailyHours))  // 日給 ÷ 1日の所定時間（曜日で違う人は1週間の1日平均）
                                             : hourlyConversion                 // 月給用の既存計算ロジック
                                         ).toLocaleString()} 
                                         <span style={{ fontSize: "12px" }}> 円</span>
