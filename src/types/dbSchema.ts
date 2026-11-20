@@ -54,6 +54,7 @@ export const DB_SCHEMAS = [
     labor_conditions TEXT,               -- 労働条件通知書の会社の初めの値（JSON。更新の判断の基準・定年・相談窓口など。utils/laborConditions.ts）
     kyotei36 TEXT,                       -- 36協定（JSON。拠点の番号ごとの協定の中身。様式第9号・第9号の2と上限の確認に使う。utils/kyotei36.ts）
     employment_report TEXT,              -- 高年齢者・障害者雇用状況報告の設定（JSON。除外率・障害者雇用推進者・高年齢者雇用等推進者・記入担当者。utils/employmentStatus.ts）
+    shoyo_houshu TEXT,                   -- 年4回以上払う賞与を、定時決定の年ごとに報酬として扱うかを画面で決めたもの（JSON。{"2027": true}。決めていない年は払った回数で決める。utils/shoyoHoushu.ts）
     round_overtime TEXT DEFAULT 'round',
     round_social_ins TEXT DEFAULT 'currency_law', -- 社会保険料（本人負担分）の端数：給与から引くときは50銭以下切り捨て・50銭超切り上げ（協会けんぽの保険料額表）。特約があれば floor など
     round_emp_ins TEXT DEFAULT 'currency_law', -- 雇用保険料（本人負担分）の端数：賃金から引くときは50銭以下切り捨て・50銭1厘以上切り上げ（厚生労働省）。特約があれば round など
@@ -366,7 +367,8 @@ export const DB_SCHEMAS = [
     target_year INTEGER NOT NULL,
     target_month INTEGER NOT NULL,
     payment_date TEXT,
-    is_closed INTEGER DEFAULT 0
+    is_closed INTEGER DEFAULT 0,
+    shaho_houshu INTEGER DEFAULT 0   -- 1なら、年4回以上払う賞与（同じ性質の賞与を年4回以上払う）の1回。報酬として扱う期間なら賞与の保険料をかけない（utils/shoyoHoushu.ts）
   );`,
 
   // 15. 賞与項目辞書
@@ -418,6 +420,7 @@ export const DB_SCHEMAS = [
     net_pay INTEGER,           -- 差引支給額
     is_nursing INTEGER,        -- 当時、介護保険対象者だったか（0 or 1）
     in_kind INTEGER DEFAULT 0, -- 総支給のうち、現物で渡した額（現物の支給項目。賞与支払届の「現物」。差引支給額には入れない）
+    shaho_houshu INTEGER DEFAULT 0, -- 1なら、確定したときに社会保険の報酬として扱った（年4回以上払う賞与。標準賞与額・社会保険料は0で、賞与支払届に書かない。utils/shoyoHoushu.ts）
     processed_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     PRIMARY KEY (bonus_setting_id, staff_id),
     FOREIGN KEY (bonus_setting_id) REFERENCES bonus_settings(id) ON DELETE CASCADE,

@@ -26,6 +26,9 @@
  *   被保険者整理番号は書かない
  * ・8月・9月に月変の予定がある人と7月改定の月変の人は、電子申請では算定基礎届に入れない（画面の対象外・チェックを外した人）ので、
  *   算定基礎届の備考の「月額変更予定」は使わない
+ * ・年4回以上払う賞与（賞与に係る報酬。utils/shoyoHoushu.ts）：各月の報酬に、1か月あたりの賞与（7月1日前の1年間に受けた額 ÷ 12）を
+ *   足した額を「通貨」に書き、備考の「9.その他」に、賞与を払った月と12で割った額を書く（ガイドブックのケース⑦：「賞与 9.12.3.6月 75,000円」）。
+ *   画面からは、足した後の報酬（months）と備考の文（houshu.remark）を受け取る。月額変更届も同じに書く（記入例はないので、算定基礎届に合わせた）
  */
 import {
   SHAHO_GEPPEN_FIELDS, SHAHO_GEPPEN_FORM_CODE, SHAHO_GEPPEN_UNION_FIELDS, SHAHO_MONTH_ERA_CODES, SHAHO_SANTEI_APPLY_MONTH, SHAHO_SANTEI_FIELDS,
@@ -229,6 +232,8 @@ export interface SanteiReportInput {
   remarks: string | null;
   /** 個人番号（マイナンバー）を書く（登録してあって、書くと選んだ人。70歳以上被用者だけに書く） */
   myNumber?: boolean;
+  /** 年4回以上払う賞与：各月の報酬（months）に足した1か月あたりの額と、備考に書く文（足していなければ省く） */
+  houshu?: { monthly: number; remark: string } | null;
 }
 
 export interface SanteiReportRow extends ReportRowBase {
@@ -313,6 +318,8 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
   if (partialJoin && modifiedAverage !== null && !annual) notes.push("途中入社で1か月分の給与を払っていない月を除いた平均を、修正平均額に書きます");
   if (input.retro && !annual) notes.push(`${input.retro.month}月に遡って支払った差額（${input.retro.amount.toLocaleString()}円）を、遡及支払額に書きます（修正平均額は、差額を除いた平均）`);
   if (annual) notes.push("年間報酬の平均で申し立てるので、年間平均額を修正平均額に書き、備考の「年間平均」に印を付けます（申立書と同意書を添えます）");
+  const houshu = input.houshu && input.houshu.monthly > 0 ? input.houshu : null;
+  if (houshu) notes.push(`年4回以上払う賞与の1か月あたりの額（${houshu.monthly.toLocaleString()}円）を、各月の報酬（通貨）に足し、備考の「その他」に賞与を払った月と額を書きます（ガイドブックのケース⑦）`);
 
   // 70歳算定基礎月：算定の期間の途中で70歳になった人は、70歳に達した日以後の期間の1か月分の給与を払った月
   let over70Months: number[] = [];
@@ -331,11 +338,12 @@ export const buildSanteiReportRow = (input: SanteiReportInput, office: string[])
     return first && last ? leaveRemark(staff, first, last) : "";
   })();
 
-  // 備考欄：途中入社（資格取得日と締め日・支払日）、70歳（締め日・支払日）、休業・休職
+  // 備考欄：途中入社（資格取得日と締め日・支払日）、70歳（締め日・支払日）、休業・休職、年4回以上払う賞与（払った月と1か月あたりの額）
   const autoRemarks = toShahoKanji([
     partialJoin && staff.join_date ? `${formatWareki(staff.join_date)}取得` : "",
     (partialJoin || over70Months.length > 0) && input.payRule ? input.payRule : "",
     leave,
+    houshu?.remark ?? "",
   ].filter(Boolean).join("　"));
   const remarks = input.remarks === null ? autoRemarks : toShahoKanji(input.remarks);
 
@@ -429,6 +437,8 @@ export interface GeppenReportInput {
   pensionRange: { min: number; max: number };
   /** 個人番号（マイナンバー）を書く（登録してあって、書くと選んだ人。70歳以上被用者だけに書く） */
   myNumber?: boolean;
+  /** 年4回以上払う賞与：3か月の報酬（months）に足した1か月あたりの額と、備考に書く文（足していなければ省く） */
+  houshu?: { monthly: number; remark: string } | null;
 }
 
 export interface GeppenReportRow extends ReportRowBase {
@@ -526,11 +536,13 @@ export const buildGeppenReportRow = (input: GeppenReportInput, office: string[])
   const retro = input.retro && input.retro.amount > 0 && months[input.retro.index] ? input.retro : null;
   if (retro && !annual) notes.push(`${months[retro.index].month}月に遡って支払った差額（${retro.amount.toLocaleString()}円）を、遡及支払額に書きます（修正平均額は、差額を除いた平均）`);
   if (annual) notes.push("年間報酬の平均で申し立てるので、年間平均額を修正平均額に、備考欄に「年間平均」と書きます（申立書と同意書を添えます）");
+  const houshu = input.houshu && input.houshu.monthly > 0 ? input.houshu : null;
+  if (houshu) notes.push(`年4回以上払う賞与の1か月あたりの額（${houshu.monthly.toLocaleString()}円）を、3か月の報酬（通貨）に足し、備考欄に書きます（算定基礎届のガイドブックのケース⑦に合わせた書き方）`);
 
   // 届書に書く文は全角にする（画面で直していないときは、自動で作った文。比べるので、自動の文も全角にしておく）
   const autoReason = toShahoKanji(input.autoReason);
   const reason = input.reason === null ? autoReason : toShahoKanji(input.reason);
-  const autoRemarks = annual ? "年間平均" : "";
+  const autoRemarks = toShahoKanji([annual ? "年間平均" : "", houshu?.remark ?? ""].filter(Boolean).join("　"));
   const remarks = input.remarks === null ? autoRemarks : toShahoKanji(input.remarks);
   const p = person;
   const values = [

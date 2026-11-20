@@ -259,7 +259,27 @@ function ZuijiTableRow({ r, z }: { r: ZuijiRow; z: ReturnType<typeof useZuijiMan
           ))}
         </div>
       </td>
-      <td style={{ ...td, whiteSpace: "nowrap" }}>{yen(j.average)}</td>
+      <td style={{ ...td, whiteSpace: "nowrap" }}>
+        {yen(j.average)}
+        {/* 年4回以上払う賞与（社会保険の報酬）の1か月あたりの額。足したあとの報酬で判定する（utils/shoyoHoushu.ts） */}
+        {(r.houshu.monthly > 0 || r.houshu.auto.monthly > 0 || r.houshu.overridden) && (
+          <label style={{ display: "block", fontSize: 11, color: "#6d28d9", marginTop: 4 }}
+            title={r.houshu.auto.source === "recalc"
+              ? "7・8・9月の改定なので、定時決定と同じく、7月1日の前の1年間に受けた年4回以上払う賞与の合計を12で割った額を、3か月の報酬に足しています"
+              : "7・8・9月以外の改定なので、計算し直さずに、いまの標準報酬月額を決めたときの賞与に係る報酬の額（標準報酬月額の履歴）を、3か月の報酬に足しています"}>
+            うち賞与（月額）
+            <input type="number" min={0} value={r.houshu.monthly}
+              onChange={(e) => z.setHoushu(r.key, e.target.value.trim() === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              style={{ ...numInput, width: 80, fontSize: 11, padding: "2px 4px", marginLeft: 4, display: "inline-block" }} />
+            {r.houshu.overridden && (
+              <button type="button" onClick={() => z.setHoushu(r.key, null)} style={{ marginLeft: 4, padding: 0, border: "none", background: "none", color: "#2563eb", fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>
+                戻す
+              </button>
+            )}
+            <div style={{ color: "#94a3b8" }}>{r.houshu.auto.source === "recalc" ? "7月1日前の1年間 ÷ 12" : "前に決めた額"}</div>
+          </label>
+        )}
+      </td>
       <td style={{ ...td, whiteSpace: "nowrap" }}>
         {r.decided.noRevision ? (
           <>

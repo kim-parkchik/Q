@@ -1,8 +1,9 @@
 /**
- * 標準報酬月額の履歴：何年何月分から・いくら・理由
+ * 標準報酬月額の履歴：何年何月分から・いくら・理由（年4回以上払う賞与がある会社では、うち賞与に係る報酬の額も）
  * 最初の1件は「入社したときから」。決定通知書が届いたら、その月の分からの行を足す。
- * 計算のきまりは utils/standardRemuneration.ts
+ * 計算のきまりは utils/standardRemuneration.ts（賞与に係る報酬は utils/shoyoHoushu.ts）
  */
+import { useState } from 'react';
 import { Banknote, Plus, Trash2 } from 'lucide-react';
 import { HYOJUN_OPTIONS } from './staffOptions';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
@@ -19,6 +20,9 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 export default function RemunerationHistory({ cm }: Props) {
     const { targetRemunerationHistory, setTargetRemunerationHistory, remunerationHistoryError } = cm;
+    // 年4回以上払う賞与の、うち賞与に係る報酬の額の欄（入っている行があるか、開いたときだけ出す）
+    const [showBonus, setShowBonus] = useState(false);
+    const bonusVisible = showBonus || targetRemunerationHistory.some(e => (e.bonus ?? 0) > 0);
 
     const update = (index: number, patch: Partial<RemunerationEntry>) =>
         setTargetRemunerationHistory(targetRemunerationHistory.map((e, i) => (i === index ? { ...e, ...patch } : e)));
@@ -68,6 +72,14 @@ export default function RemunerationHistory({ cm }: Props) {
                                 <option value={0}>0: 未加入・対象外</option>
                                 {HYOJUN_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                             </select>
+                            {bonusVisible && (
+                                <input
+                                    type="number" min={0} value={e.bonus || ''} placeholder="うち賞与"
+                                    title="この標準報酬月額を決めたときに報酬に足した、年4回以上払う賞与の1か月あたりの額（賞与に係る報酬）。7・8・9月以外の月変で、計算し直さずに足します"
+                                    onChange={ev => update(i, { bonus: Math.max(0, Math.floor(Number(ev.target.value) || 0)) || undefined })}
+                                    style={{ ...selectStyle, width: "90px", flexShrink: 0 }}
+                                />
+                            )}
                             <select value={e.reason} onChange={ev => update(i, { reason: ev.target.value as RemunerationReason })} style={{ ...selectStyle, width: "130px", flexShrink: 0, fontFamily: "inherit" }}>
                                 {(Object.keys(REMUNERATION_REASON_LABELS) as RemunerationReason[]).map(r => (
                                     <option key={r} value={r}>{REMUNERATION_REASON_LABELS[r]}</option>
@@ -98,6 +110,20 @@ export default function RemunerationHistory({ cm }: Props) {
                 決定通知書に書かれた等級の金額を選んでください。給与は、その月の分に当たる行の金額で計算します
                 （定時決定は9月分から、随時改定は変わった月から4か月目の分から）。過去の月を計算し直しても、その月の金額で計算します。
             </p>
+            {bonusVisible ? (
+                <p style={{ fontSize: "11px", color: "#6d28d9", margin: "4px 0 0 0", lineHeight: 1.6 }}>
+                    「うち賞与」：年4回以上払う賞与（社会保険の報酬）があるとき、その標準報酬月額を決めたときに報酬に足した1か月あたりの額です。
+                    算定基礎・月変の画面で登録すると入ります。入社したとき（資格取得時）は、同じような仕事をして同じような賞与を受ける人の、賞与に係る報酬の平均額を
+                    報酬月額に足して届け出て、ここにもその額を入れてください（7・8・9月以外の月変で、計算し直さずに足します）。
+                </p>
+            ) : (
+                <button
+                    type="button" onClick={() => setShowBonus(true)}
+                    style={{ marginTop: "4px", padding: 0, border: "none", background: "none", color: "#6d28d9", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}
+                >
+                    年4回以上払う賞与（社会保険の報酬）の額を入れる
+                </button>
+            )}
         </div>
     );
 }

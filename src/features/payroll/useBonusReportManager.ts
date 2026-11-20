@@ -27,11 +27,13 @@ export interface BonusSettingRow {
 
 const PAYMENTS_SQL =
   `SELECT r.bonus_setting_id AS settingId, s.name AS name, s.payment_date AS paymentDate, r.staff_id AS staffId, r.total_earnings AS totalEarnings,
-          r.in_kind AS inKind
+          r.in_kind AS inKind, r.shaho_houshu AS houshu
    FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id`;
+// houshu：年4回以上払う賞与で、確定したときに社会保険の報酬として扱った（賞与支払届に書かない。賞与不支給報告書では払っていない月。utils/shoyoHoushu.ts）
 const toPayments = (rows: BonusPayment[] | null | undefined): BonusPayment[] =>
   (rows ?? []).map((r) => ({
     ...r, staffId: String(r.staffId), totalEarnings: Number(r.totalEarnings) || 0, inKind: Number(r.inKind) || 0, settingId: Number(r.settingId),
+    houshu: Number(r.houshu) === 1,
   }));
 
 export function useBonusReportManager(db: any, user: MyNumberUser | null = null) {

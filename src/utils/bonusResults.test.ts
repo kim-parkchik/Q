@@ -90,6 +90,20 @@ describe("賞与を確定する・確定を取り消す", () => {
         expect(db.query("SELECT staff_id, total_earnings FROM bonus_results").all()).toEqual([{ staff_id: "S001", total_earnings: 500000 }]);
         expect(db.query("SELECT is_closed FROM bonus_settings WHERE id = ?").get(id)).toEqual({ is_closed: 1 });
     });
+    test("年4回以上払う賞与の印を付けて足し、社会保険の報酬として扱って確定すると、確定した賞与に残す（標準賞与額・社会保険料は0）", async () => {
+        const db = setup();
+        const id = (await executeBatch(batchDb(db), buildAddBonusSettingStatements("第2四半期賞与", "2026-09-25", true)))[0].lastInsertId;
+        expect(db.query("SELECT name, shaho_houshu FROM bonus_settings WHERE id = ?").get(id)).toEqual({ name: "第2四半期賞与", shaho_houshu: 1 });
+        const houshu: BonusResultCalc = { ...calc(120000), hyojunBonus: 0, healthInsurance: 0, childSupport: 0, welfarePension: 0, shahoHoushu: true };
+        await executeBatch(batchDb(db), buildFinalizeBonusStatements(id, [{ staff: { id: "S001" }, calc: houshu }, { staff: { id: "S002" }, calc: calc(100000) }]));
+        expect(db.query("SELECT staff_id, hyojun_bonus, health_insurance, emp_insurance, shaho_houshu FROM bonus_results ORDER BY staff_id").all()).toEqual([
+            { staff_id: "S001", hyojun_bonus: 0, health_insurance: 0, emp_insurance: 1000, shaho_houshu: 1 },
+            { staff_id: "S002", hyojun_bonus: 100000, health_insurance: 10000, emp_insurance: 1000, shaho_houshu: 0 },
+        ]);
+        // 印を付けずに足した賞与は 0
+        const plain = (await executeBatch(batchDb(db), buildAddBonusSettingStatements("夏季賞与", "2026-07-10")))[0].lastInsertId;
+        expect(db.query("SELECT shaho_houshu FROM bonus_settings WHERE id = ?").get(plain)).toEqual({ shaho_houshu: 0 });
+    });
     test("確定を取り消すと、確定結果を消して計算中に戻す（入れた金額は残す）", async () => {
         const db = setup();
         const id = (await executeBatch(batchDb(db), buildAddBonusSettingStatements("夏季賞与", "2026-07-10")))[0].lastInsertId;

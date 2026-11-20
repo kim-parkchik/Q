@@ -12,6 +12,7 @@ import { useLeaveEndRevisionManager, type LeaveEndRow } from "./useLeaveEndRevis
 import { groupOf } from "../../utils/santei";
 import { payRuleText } from "../../utils/remunerationReport";
 import { leaveEndForm } from "../../utils/printForms";
+import { withHoushu } from "../../utils/shoyoHoushu";
 import { useShahoFile } from "./useShahoFile";
 import { PrintFormSheet } from "./PrintFormSheet";
 import { shahoPrintStyle } from "./ShahoFilePanel";
@@ -71,10 +72,11 @@ export default function LeaveEndRevisionManager({ db, staffList, onDataChange }:
       row: r,
       form: leaveEndForm({
         staff: r.staff, type: r.leave.type, leaveEnd: r.leave.end, childName: e.childName, childBirthday: e.childBirthday,
-        months: r.months, usedIndexes: r.judgement.usedIndexes, average: r.judgement.average, previous: r.previous,
+        // 年4回以上払う賞与の1か月あたりの額を足した報酬（utils/shoyoHoushu.ts）
+        months: withHoushu(r.months, r.houshu), usedIndexes: r.judgement.usedIndexes, average: r.judgement.average, previous: r.previous,
         pensionRange: { min: master.PENSION_MIN_HYOJUN, max: master.PENSION_MAX_HYOJUN }, gradeDiff: r.judgement.gradeDiff,
         revisionFrom: r.revisionFrom, payRule: payRuleText(groupOf(r.staff, z.groups)), short: r.kind === "short", part: r.kind === "part",
-        submittedOn: e.submittedOn, appliedOn: e.appliedOn, myNumber: false,
+        submittedOn: e.submittedOn, appliedOn: e.appliedOn, myNumber: false, houshuRemark: r.houshu.remark,
       }),
     };
   });
@@ -197,6 +199,21 @@ function LeaveEndTableRow({ r, z, onReport }: { r: LeaveEndRow; z: ReturnType<ty
       <td style={{ ...td, whiteSpace: "nowrap" }}>
         {yen(j.average)}
         {j.method === "part15" && <div style={{ fontSize: 11, color: "#64748b" }}>15日以上の月で平均</div>}
+        {/* 年4回以上払う賞与（社会保険の報酬）の1か月あたりの額。足したあとの報酬で平均する（utils/shoyoHoushu.ts） */}
+        {(r.houshu.monthly > 0 || r.houshu.auto.monthly > 0 || r.houshu.overridden) && (
+          <label style={{ display: "block", fontSize: 11, color: "#6d28d9", marginTop: 4 }}
+            title="年4回以上払う賞与の1か月あたりの額を、3か月の報酬に足しています（通知に書かれていないので、随時改定と同じく、7・8・9月の改定は7月1日前の1年間に受けた額 ÷ 12、ほかの月の改定は前に決めた額）">
+            うち賞与（月額）
+            <input type="number" min={0} value={r.houshu.monthly}
+              onChange={(e) => z.setHoushu(r.key, e.target.value.trim() === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              style={{ width: 80, boxSizing: "border-box", padding: "2px 4px", border: "1px solid #ddd", borderRadius: 4, fontSize: 11, textAlign: "right", marginLeft: 4 }} />
+            {r.houshu.overridden && (
+              <button type="button" onClick={() => z.setHoushu(r.key, null)} style={{ marginLeft: 4, padding: 0, border: "none", background: "none", color: "#2563eb", fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>
+                戻す
+              </button>
+            )}
+          </label>
+        )}
       </td>
       <td style={{ ...td, whiteSpace: "nowrap" }}>
         {yen(r.previous)} → <b>{yen(j.standard)}</b>

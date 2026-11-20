@@ -91,6 +91,8 @@ export default function BonusManager({ db, staffList }: Props) {
     setSettingName, 
     newPaymentDate,
     setNewPaymentDate,
+    newShahoHoushu,
+    setNewShahoHoushu,
     // 編集・追加アクション
     editingSettingId,
     startSettingEdit,
@@ -128,7 +130,9 @@ export default function BonusManager({ db, staffList }: Props) {
     finalizeBonus,
     unfinalizeBonus,
     rateWarnings,
-    prevMonth
+    prevMonth,
+    houshuStatus,
+    houshuMismatch,
   } = useBonusManager(db, staffList);
   const selectedSetting = settings.find(s => s.id === selectedSettingId);
 
@@ -217,6 +221,18 @@ export default function BonusManager({ db, staffList }: Props) {
                   style={S.input} 
                 />
               </div>
+              {/* 年4回以上払う賞与（社会保険の「賞与に係る報酬」。utils/shoyoHoushu.ts） */}
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
+                <input type="checkbox" checked={newShahoHoushu} onChange={e => setNewShahoHoushu(e.target.checked)} style={{ marginTop: 4 }} />
+                <span>
+                  年4回以上払う賞与の1回
+                  <span style={{ display: "block", fontSize: 11, color: "#64748b" }}>
+                    同じ性質の賞与（四半期ごとの賞与など）を、給与規定で年4回以上払うと決めている、または7月1日の前の1年間に4回以上払ったときに付けます。
+                    社会保険では「報酬」になり、7月1日の前の1年間に払った額の12分の1を算定基礎届の報酬に足します。報酬として扱う期間（定時決定の9月〜翌年8月）に払う賞与には、
+                    賞与の社会保険料をかけず、賞与支払届にも書きません（所得税と雇用保険料は、いままでどおり）。名前が違っても同じ性質の賞与には付け、その年だけの特別な賞与には付けません。
+                  </span>
+                </span>
+              </label>
 
               {/* ボタンの切り替え */}
               {editingSettingId ? (
@@ -319,6 +335,12 @@ export default function BonusManager({ db, staffList }: Props) {
                               {s.is_closed ? <CheckCircle size={12} /> : <RefreshCw size={12} />}
                               {s.is_closed ? "確定済" : "計算中"}
                             </span>
+                            {Number(s.shaho_houshu) === 1 && (
+                              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, backgroundColor: "#ede9fe", color: "#6d28d9", border: "1px solid #ddd6fe" }}
+                                title="年4回以上払う賞与（社会保険では報酬になることがある賞与）の印">
+                                年4回以上
+                              </span>
+                            )}
                           </div>
                           
                           {/* 支給年月を下に配置 */}
@@ -665,6 +687,42 @@ export default function BonusManager({ db, staffList }: Props) {
             )}
           </div>
 
+          {/* 年4回以上払う賞与（社会保険の報酬として扱うか。utils/shoyoHoushu.ts） */}
+          {selectedSetting && houshuStatus.marked && houshuStatus.classification && (() => {
+            const c = houshuStatus.classification;
+            const y = houshuStatus.teijiYear!;
+            const counted = `${c.lookback.from.slice(0, 4)}年7月1日〜${c.lookback.to.slice(0, 4)}年6月30日に、印を付けた賞与を${c.months.length}回払っています${c.months.length > 0 ? `（${c.months.map(m => `${Number(m.slice(5, 7))}月`).join("・")}）` : ""}`;
+            return (
+              <div style={{ ...S.card, marginBottom: 16, fontSize: 13, lineHeight: 1.7, backgroundColor: houshuStatus.houshu ? "#f5f3ff" : "#f8fafc", border: `1px solid ${houshuStatus.houshu ? "#ddd6fe" : "#e2e8f0"}`, color: "#334155" }}>
+                {houshuStatus.houshu ? (
+                  <>
+                    <strong>年4回以上払う賞与：社会保険では報酬として扱います。</strong>
+                    この賞与は{y}年9月〜{y + 1}年8月の分（{y}年の定時決定）に払うので、賞与の健康保険料・介護保険料・子ども・子育て支援金・厚生年金保険料はかからず、賞与支払届にも書きません
+                    （毎月の標準報酬月額に、1か月あたりの額が入っています）。所得税と雇用保険料は、いままでどおり賞与として計算します。
+                    <div style={{ fontSize: 12, color: "#64748b" }}>
+                      {counted}。{c.override === true && !c.auto ? "4回より少ないですが、算定基礎の画面で「報酬として扱う」にしています。" : ""}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <strong>年4回以上払う賞与の印がありますが、この賞与はまだ賞与として扱います。</strong>
+                    この賞与を払う{y}年9月〜{y + 1}年8月の扱いは、{y}年の定時決定で決まり、{c.override === false ? "算定基礎の画面で「報酬として扱わない」にしています" : "7月1日の前の1年間に4回以上払っていないので、報酬ではありません"}。
+                    賞与の社会保険料をかけ、賞与支払届に書きます（払った額は、次の定時決定の12分の1に入れます）。
+                    <div style={{ fontSize: 12, color: "#64748b" }}>
+                      {counted}。給与規定で年4回以上払うと決めたばかりのときも、次の定時決定（7・8・9月の随時改定を含む）の標準報酬月額を使うまでは、賞与として扱います。
+                      Q を使い始める前から年4回以上払っていて、もう報酬として扱っているときは、算定基礎の画面で{y}年度を開き、「報酬として扱う」を選んでください。
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+          {selectedSetting && houshuMismatch && (
+            <div style={{ ...S.card, marginBottom: 16, backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13 }}>
+              ⚠ 確定したときは{houshuStatus.houshu ? "賞与として社会保険料をかけています" : "社会保険の報酬として扱っています"}が、いまの印と扱いでは{houshuStatus.houshu ? "報酬" : "賞与"}になります。確定し直してください。
+            </div>
+          )}
+
           {/* 料率・税額表が登録されていない年月の注意 */}
           {rateWarnings.length > 0 && (
             <div style={{ ...S.card, marginBottom: 16, backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13 }}>
@@ -818,6 +876,11 @@ export default function BonusManager({ db, staffList }: Props) {
                           )}
                           {calc.isHealthTarget && calc.healthHyojun < calc.hyojunBonus && (
                             <div style={{ fontSize: 10, color: "#b45309" }}>年度の上限（573万円）まで</div>
+                          )}
+                          {calc.shahoHoushu && calc.totalEarnings > 0 && (
+                            <div style={{ fontSize: 10, color: "#6d28d9" }} title="年4回以上払う賞与で、社会保険では報酬として扱うので、賞与の社会保険料はかかりません（標準報酬月額に入っています）">
+                              報酬なので0円
+                            </div>
                           )}
                         </td>
                         {/* 介護保険（条件付きで色変更） */}

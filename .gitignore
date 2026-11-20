@@ -60,3 +60,6 @@ taishoku-tables/source/
 
 # 労働条件通知書・36協定届・外国人雇用状況届出書・社会保険のほかの届書・労災・雇用状況報告・毎月勤労統計の様式と記入例（PDF・Word なので上げない。出どころと SHA-256 は roumu-forms/README.md）
 roumu-forms/source/
+
+# 年4回以上の賞与（賞与に係る報酬）の算定基礎届ガイドブック・Q&A・事例集（日本年金機構の PDF なので上げない。出どころと SHA-256 は shoyo-houshu/README.md）
+shoyo-houshu/source/

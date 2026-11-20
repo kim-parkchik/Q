@@ -17,6 +17,7 @@ import { cappedBonusStandard, earlierBonusTotals, prevSalaryStatusOf, type Other
 import { getPeriodForPayMonth, type PayrollGroupForPeriod } from '../../utils/payrollPeriod';
 import { groupOf } from '../../utils/santei';
 import { buildAddBonusSettingStatements, buildFinalizeBonusStatements, buildUnfinalizeBonusStatements } from '../../utils/bonusResults';
+import { bonusHoushuStatus, parseHoushuOverrides } from '../../utils/shoyoHoushu';
 import { useMessageDialog } from '../../components/MessageDialog';
 
 /** 前の月（賞与の所得税の「前月の給与」は、賞与を支払う月の前月中に支払った給与） */
@@ -30,6 +31,8 @@ interface BonusSetting {
   target_year: number;
   payment_date: string;
   is_closed: number;
+  /** 1なら、年4回以上払う賞与（同じ性質の賞与を年4回以上払う）の1回（utils/shoyoHoushu.ts） */
+  shaho_houshu?: number;
 }
 
 interface BonusItem {
@@ -65,6 +68,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
   const [settingName, setSettingName] = useState('夏季賞与');
   const [newPaymentDate, setNewPaymentDate] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-10`);
+  /** 年4回以上払う賞与の印（賞与を足す・直すときの欄） */
+  const [newShahoHoushu, setNewShahoHoushu] = useState(false);
+  /** 選んでいる賞与を確定したときに、社会保険の報酬として扱ったか（確定していなければ null） */
+  const [confirmedHoushu, setConfirmedHoushu] = useState<boolean | null>(null);
   const [newItemName, setNewItemName] = useState('');
   const [newItemType, setNewItemType] = useState<'earning' | 'deduction'>('earning');
   const [newItemIsDefault, setNewItemIsDefault] = useState(true);
@@ -74,6 +81,13 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
 
   const selectedSetting = settings.find(s => s.id === selectedSettingId) ?? null;
+  // 年4回以上払う賞与：印を付けていて、支給日の月が入る定時決定の期間（9月〜翌年8月）の扱いが「報酬」なら、
+  // 標準賞与額・健康保険料・介護保険料・子ども・子育て支援金・厚生年金保険料をかけない（utils/shoyoHoushu.ts）
+  const houshuOverrides = parseHoushuOverrides(companySettings.shoyo_houshu);
+  const houshuStatus = bonusHoushuStatus(selectedSetting, settings, houshuOverrides);
+  const isOtherHoushu = (settingId: number) => bonusHoushuStatus(settings.find(s => s.id === settingId), settings, houshuOverrides).houshu;
+  // 確定したときの扱いと、いまの印・年ごとの扱いで決まる扱いが違う（確定し直す）
+  const houshuMismatch = !!selectedSetting?.is_closed && confirmedHoushu !== null && confirmedHoushu !== houshuStatus.houshu;
   // 料率・税額表が登録されていない年月を、近いもので計算しているときの注意
   const rateWarnings = selectedSetting
     ? [
@@ -185,8 +199,18 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     db.select<any[]>("SELECT id, closing_day, is_next_month FROM payroll_groups ORDER BY id ASC").then(res => setPayrollGroups(res ?? []));
   }, [db, loadSettings, loadItems]);
 
+  /** 選んでいる賞与を確定したときに、社会保険の報酬として扱ったか */
+  const loadConfirmedHoushu = useCallback(async (settingId: number) => {
+    if (!db) return;
+    const res = await db.select<{ h: number | null; n: number }[]>(
+      "SELECT MAX(shaho_houshu) AS h, COUNT(*) AS n FROM bonus_results WHERE bonus_setting_id = ?", [settingId]
+    );
+    setConfirmedHoushu(Number(res?.[0]?.n) > 0 ? Number(res[0].h) === 1 : null);
+  }, [db]);
+
   useEffect(() => {
     if (selectedSettingId && selectedSetting) {
+      loadConfirmedHoushu(selectedSettingId).catch((e) => console.error("確定した賞与の扱いの読み込みエラー:", e));
       loadActiveItemIds(selectedSettingId); 
       loadStaffValues(selectedSettingId);
       const fiscalYear = selectedSetting.target_month >= 4 ? selectedSetting.target_year : selectedSetting.target_year - 1;
@@ -205,7 +229,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       // 何も選択されていないときは空にする
       setActiveItemIds([]);
     }
-  }, [selectedSettingId, selectedSetting, loadActiveItemIds, loadStaffValues, loadOtherBonuses, loadPrevMonthSalary, db]);
+  }, [selectedSettingId, selectedSetting, loadActiveItemIds, loadStaffValues, loadOtherBonuses, loadPrevMonthSalary, loadConfirmedHoushu, db]);
 
   // --- Actions ---
   // 🆕 賞与設定の編集を開始する
@@ -214,12 +238,14 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     setSettingName(setting.name);
     // payment_date を input[type="date"] に合う形式に調整
     setNewPaymentDate(setting.payment_date);
+    setNewShahoHoushu(Number(setting.shaho_houshu) === 1);
   };
 
   // 🆕 賞与設定の編集をキャンセルする
   const cancelSettingEdit = () => {
     setEditingSettingId(null);
     setSettingName('夏季賞与');
+    setNewShahoHoushu(false);
     // 今日、または元のデフォルト日付に戻す
     setNewPaymentDate(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-10`);
   };
@@ -238,13 +264,16 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     const year = dateObj.getFullYear();
     const month = dateObj.getMonth() + 1;
 
+    // 年4回以上払う賞与の印は、確定した賞与でも変えられる（7月1日前の1年間に払った回数を数え直すため）。
+    // 確定したときの扱い（報酬として扱ったか）は変わらないので、扱いが変わるときは画面で知らせ、確定し直してもらう
     await db.execute(
-      "UPDATE bonus_settings SET name = ?, target_year = ?, target_month = ?, payment_date = ? WHERE id = ?",
-      [settingName, year, month, newPaymentDate, editingSettingId]
+      "UPDATE bonus_settings SET name = ?, target_year = ?, target_month = ?, payment_date = ?, shaho_houshu = ? WHERE id = ?",
+      [settingName, year, month, newPaymentDate, newShahoHoushu ? 1 : 0, editingSettingId]
     );
 
     setEditingSettingId(null);
     setSettingName('夏季賞与'); // 初期値に戻す
+    setNewShahoHoushu(false);
     await loadSettings();
   };
 
@@ -326,7 +355,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
     try {
       // 賞与設定と、初めから有効にする項目の紐付けを、1つのトランザクションでまとめて保存する（utils/dbBatch.ts・bonusResults.ts）
-      const results = await executeBatch(db, buildAddBonusSettingStatements(settingName, newPaymentDate));
+      const results = await executeBatch(db, buildAddBonusSettingStatements(settingName, newPaymentDate, newShahoHoushu));
       const newId = Number(results[0].lastInsertId);
 
       // --- 成功後のUI処理 ---
@@ -335,6 +364,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       setActiveTab('calc');
       // フォームをリセット（お好みで）
       setSettingName('夏季賞与');
+      setNewShahoHoushu(false);
 
     } catch (e) {
       // どこかでエラーが起きたら、設定の保存も含めて取り消されている
@@ -387,7 +417,10 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     // （賞与支払届の「現物」。utils/bonusReport.ts）
     const inKindItems = earningItems.filter(item => Number(item.in_kind) === 1);
     const inKind = inKindItems.reduce((s, item) => s + (vals[item.id] ?? 0), 0);
-    const hyojunBonus = Math.floor(totalEarnings / 1000) * 1000;
+    // 年4回以上払う賞与で、社会保険の報酬として扱う期間なら、標準賞与額はなく、賞与からは社会保険料を引かない
+    // （標準報酬月額に1か月あたりの額が入っている。雇用保険料と所得税は、いままでどおり賞与として計算する。utils/shoyoHoushu.ts）
+    const shahoHoushu = houshuStatus.houshu;
+    const hyojunBonus = shahoHoushu ? 0 : Math.floor(totalEarnings / 1000) * 1000;
 
     // 健康保険料率は、その人が入っている社会保険の適用事業所の都道府県（協会けんぽの支部）ごと。支店が本店の適用事業所に
     // まとめて入っていれば本店の都道府県。拠点を選んでいない人は本店（給与明細と同じ。utils/branchPrefecture.ts の kenpoPrefectureOf）
@@ -416,7 +449,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
     const sInsType = companySettings.round_social_ins || 'currency_law';
     // この賞与より前に支払った賞与の標準賞与額の累計（後で支払う賞与は入れない。utils/bonusInsurance.ts）
-    const earlier = earlierBonusTotals(staff, otherBonuses[String(staff.id)] ?? [], { settingId: selectedSetting.id, paymentDate: payDate });
+    // （年4回以上払う賞与で報酬として扱うものは、標準賞与額がないので累計に入れない）
+    const earlier = earlierBonusTotals(staff, (otherBonuses[String(staff.id)] ?? []).filter(b => !isOtherHoushu(b.settingId)), { settingId: selectedSetting.id, paymentDate: payDate });
     // 健康保険・介護保険・子ども・子育て支援金の標準賞与額は、年度（4月〜翌3月）の累計で573万円まで
     const healthHyojun = cappedBonusStandard(hyojunBonus, earlier.health, ins.HEALTH_INS_ANNUAL_LIMIT);
 
@@ -424,7 +458,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     // 協会けんぽは都道府県の料率を折半、健康保険組合は組合の本人負担の料率（賞与を支給する月の分）。
     // 国保組合の人は、賞与からは何も引かない（国保組合の保険料は、毎月の給与で引く定額）
     const insurer = insurerOf(insurers, staff.social_insurance_group_id);
-    const health = isHealthTarget
+    const health = isHealthTarget && !shahoHoushu
       ? healthPremiumsOf({ base: healthHyojun, insurer, prefecture: branchPref.prefecture, year: payYear, month: payMonth, nursing: byAge.nursing, rounding: sInsType })
       : null;
     const prefectureUnknown = health?.missing === "prefecture";
@@ -435,7 +469,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
 
     // 厚生年金の標準賞与額は1か月150万円まで（同じ月に前にも支払っていれば、合わせて150万円まで）
     const pensionHyojun = cappedBonusStandard(hyojunBonus, earlier.pensionSameMonth, ins.PENSION_INS_SINGLE_LIMIT);
-    const welfarePension = isPensionTarget ? calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType) : 0;
+    const welfarePension = isPensionTarget && !shahoHoushu ? calcPremium(pensionHyojun, ins.PENSION_RATE[1], sInsType) : 0;
 
     const empInsType = staff.employment_insurance_type || companySettings.default_emp_ins_type || 'general';
     const empRate = ins.LABOR_INSURANCE_RATES[empInsType as Master.EmpInsType] || ins.LABOR_INSURANCE_RATES.general;
@@ -493,6 +527,8 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       prevSalaryStatus, taxByMonthlyTable,
       /** 死亡した後に支払う賞与（所得税を引かない。相続税の対象） */
       paidAfterDeath,
+      /** 年4回以上払う賞与で、社会保険の報酬として扱う（標準賞与額・社会保険料は 0。賞与支払届に書かない） */
+      shahoHoushu,
       /** 健康保険料がかかるのに、拠点の都道府県がわからないので、健康保険料・介護保険料を計算していない（確定できない） */
       prefectureUnknown, prefectureProblem: branchPref.problem,
       /** 健康保険組合の人で、賞与を支給する月の分の組合の料率を入れていないので、健康保険料・介護保険料を計算していない（確定できない） */
@@ -605,6 +641,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
       // 前の結果を消して保存し直すまでを、1つのトランザクションでまとめて行う（途中で失敗したら、前の結果のまま。utils/dbBatch.ts）
       await executeBatch(db, buildFinalizeBonusStatements(selectedSetting.id, rows));
       await loadSettings();
+      await loadConfirmedHoushu(selectedSetting.id);
     } catch (e) {
       console.error("賞与の確定に失敗しました:", e);
       dialog.error(`賞与を確定できませんでした（前の確定の状態のままです）。\n${e}`);
@@ -627,6 +664,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     try {
       await executeBatch(db, buildUnfinalizeBonusStatements(selectedSetting.id));
       await loadSettings();
+      await loadConfirmedHoushu(selectedSetting.id);
     } catch (e) {
       console.error("賞与の確定の取り消しに失敗しました:", e);
       dialog.error(`確定を取り消せませんでした（確定したままです）。\n${e}`);
@@ -642,6 +680,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     selectedSettingId, setSelectedSettingId, selectedSetting,
     settingName, setSettingName, 
     newPaymentDate, setNewPaymentDate,
+    newShahoHoushu, setNewShahoHoushu,
     editingSettingId, startSettingEdit, cancelSettingEdit, saveSettingEdit,
     addSetting, deleteSetting,
 
@@ -662,5 +701,7 @@ export const useBonusManager = (db: Database | null, staffList: any[]) => { // �
     unfinalizeBonus,
     rateWarnings,
     prevMonth,
+    /** 年4回以上払う賞与の扱い（選んでいる賞与）と、確定したときの扱いと違うか */
+    houshuStatus, houshuMismatch,
   };
 };

@@ -26,6 +26,11 @@ import { useToast } from "../../components/Toast";
 import { useShahoFile } from "./useShahoFile";
 import { useShahoMyNumbers } from "./useShahoMyNumbers";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
+import {
+  NO_HOUSHU, houshuAmountFor, houshuClassificationOf, houshuLookback, houshuMonthlyOf, houshuRemark, parseHoushuOverrides,
+  stringifyHoushuOverrides, unmarkedBonusMonths, withHoushu,
+  type HoushuAmount, type HoushuOverrides, type HoushuResult, type HoushuSetting,
+} from "../../utils/shoyoHoushu";
 
 /**
  * 画面で選ぶ値（区分・登録するか・年間平均で申し立てるか・遡って支払った差額・届書の備考）と、
@@ -41,6 +46,8 @@ type RowInput = SanteiInput & {
   retro: Record<number, number>;
   /** 届書の備考欄（画面で直した文。直していなければ null） */
   remarks: string | null;
+  /** 年4回以上払う賞与の、毎月の報酬に足す1か月あたりの額（画面で直した額。直していなければ null。utils/shoyoHoushu.ts） */
+  houshuOverride: number | null;
 };
 
 export interface SanteiRow extends RowInput {
@@ -51,6 +58,11 @@ export interface SanteiRow extends RowInput {
   annual: AnnualResult;
   /** 登録する標準報酬月額（年間平均で申し立てて、2等級以上の差があるときは年間平均で決めた額） */
   decided: { standard: number; grade: number | null; byAnnual: boolean };
+  /**
+   * 年4回以上払う賞与（報酬として扱う年だけ）：7月1日前の1年間に受けた額と12で割った額（auto）、毎月の報酬に足す額（monthly。画面で直した額）。
+   * 平均（result・annual）は、足したあとの報酬で決める
+   */
+  houshu: { auto: HoushuAmount; monthly: number; monthlyInKind: number };
 }
 
 /** 4月以後なら今年、1〜3月なら前の年の算定を初めに開く */
@@ -72,6 +84,10 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
   const [year, setYear] = useState(defaultYear());
   const [inputs, setInputs] = useState<RowInput[]>([]);
   const [data, setData] = useState<{ groups: any[]; salaries: SalaryRecord[]; insurers: Map<number, HealthInsurer> }>({ groups: [], salaries: [], insurers: new Map() });
+  // 年4回以上払う賞与：7月1日前の1年間に払った賞与（印のないものも。印の付け忘れを知らせる）と、印を付けた賞与の1人ずつの額、年ごとに決めた扱い
+  // markedAny：年4回以上払う賞与の印を付けた賞与が1つでもある（Q を使い始める前から払っている会社が、最初の年に「報酬として扱う」を選べるように）
+  const [houshuData, setHoushuData] = useState<{ settings: HoushuSetting[]; results: HoushuResult[]; markedAny: boolean }>({ settings: [], results: [], markedAny: false });
+  const [houshuOverrides, setHoushuOverrides] = useState<HoushuOverrides>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -105,10 +121,22 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
             )
           : [];
         const insurers = await loadHealthInsurers(db);
+        const lookback = houshuLookback(year);
+        const bonusSettings = await db.select<HoushuSetting[]>(
+          "SELECT id, name, payment_date, shaho_houshu, is_closed FROM bonus_settings WHERE payment_date BETWEEN ? AND ?", [lookback.from, lookback.to]
+        );
+        const bonusResults = await db.select<HoushuResult[]>(
+          `SELECT r.bonus_setting_id, r.staff_id, r.total_earnings, r.in_kind FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id
+            WHERE s.shaho_houshu = 1 AND s.payment_date BETWEEN ? AND ?`, [lookback.from, lookback.to]
+        );
+        const company = await db.select<{ shoyo_houshu: string | null }[]>("SELECT shoyo_houshu FROM company WHERE id = 1");
+        const marked = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM bonus_settings WHERE shaho_houshu = 1");
+        setHoushuData({ settings: bonusSettings ?? [], results: bonusResults ?? [], markedAny: Number(marked?.[0]?.n) > 0 });
+        setHoushuOverrides(parseHoushuOverrides(company?.[0]?.shoyo_houshu));
         setData({ groups, salaries, insurers });
         setInputs(buildSanteiInputs(staffList, year, groups, salaries, attendance)
           .map((r) => ({
-            ...r, kind: "general", selected: r.exclusion === null, annualRequested: false, retro: {}, remarks: null,
+            ...r, kind: "general", selected: r.exclusion === null, annualRequested: false, retro: {}, remarks: null, houshuOverride: null,
             earlierMonths: buildAnnualEarlierMonths(r.staff, year, groupOf(r.staff, groups), salaries, attendance),
           })));
       } catch (e) {
@@ -122,12 +150,21 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, staffList, year]);
 
+  // 年4回以上払う賞与を、この年の定時決定（9月分から）で報酬として扱うか（7月1日前の1年間に払った回数か、画面で決めた扱い）
+  const houshuClassification = useMemo(
+    () => houshuClassificationOf(year, houshuData.settings, houshuOverrides),
+    [year, houshuData, houshuOverrides]
+  );
+
   const rows: SanteiRow[] = useMemo(
     () => inputs.map((r) => {
+      // 年4回以上払う賞与を報酬として扱う年は、7月1日前の1年間に受けた額 ÷ 12 を、毎月の報酬に足す（画面で直せる。utils/shoyoHoushu.ts）
+      const auto = houshuClassification.houshu ? houshuAmountFor(r.staff.id, year, houshuData.settings, houshuData.results) : NO_HOUSHU;
+      const add = houshuClassification.houshu ? houshuMonthlyOf(auto, r.houshuOverride) : { monthly: 0, monthlyInKind: 0 };
       // 遡って払った差額は、平均から除く（届書には、支払った額と遡及支払額を書き、差額を除いた平均を修正平均額に書く）
-      const months = withoutRetro(r.months, r.retro);
+      const months = withoutRetro(withHoushu(r.months, add), r.retro);
       const result = decideTeiji(months, r.kind, r.previous, table);
-      const annual = decideTeijiAnnual(year, r.earlierMonths, months, r.kind, result, table);
+      const annual = decideTeijiAnnual(year, withHoushu(r.earlierMonths, add), months, r.kind, result, table);
       const byAnnual = r.annualRequested && annual.status === "target";
       return {
         ...r,
@@ -137,12 +174,13 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
         decided: byAnnual
           ? { standard: annual.standard!, grade: annual.grade, byAnnual }
           : { standard: result.standard, grade: result.grade, byAnnual },
+        houshu: { auto, ...add },
       };
     }),
-    [inputs, table, year]
+    [inputs, table, year, houshuClassification, houshuData]
   );
 
-  const updateRow = (staffId: string, patch: Partial<Pick<RowInput, "kind" | "selected" | "annualRequested" | "remarks">>) =>
+  const updateRow = (staffId: string, patch: Partial<Pick<RowInput, "kind" | "selected" | "annualRequested" | "remarks" | "houshuOverride">>) =>
     setInputs((prev) => prev.map((r) => (String(r.staff.id) === String(staffId) ? { ...r, ...patch } : r)));
 
   /** 支払基礎日数・報酬を手で直す（空にすると、その月は給与を支払っていない扱い） */
@@ -180,7 +218,8 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
       const retroMonths = SANTEI_MONTHS.filter((m) => (r.retro[m] ?? 0) > 0);
       return {
         staff: r.staff, year, previous: r.previous, previousFrom: remunerationFromAt(r.staff, year, 8),
-        months: r.months, kind: r.kind,
+        // 年4回以上払う賞与の1か月あたりの額を足した報酬（届書の「通貨」に書く。遡及支払額は含めたまま）
+        months: withHoushu(r.months, r.houshu), kind: r.kind,
         ordinaryAverage: r.result.average,
         annualAverage: r.decided.byAnnual ? r.annual.average : null,
         unfinalizedMonths: r.unfinalizedMonths,
@@ -192,6 +231,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
         pensionRange: { min: pensionMaster.PENSION_MIN_HYOJUN, max: pensionMaster.PENSION_MAX_HYOJUN },
         remarks: r.remarks,
         myNumber: my.writes(String(r.staff.id)),
+        houshu: r.houshu.monthly > 0 ? { monthly: r.houshu.monthly, remark: houshuRemark(r.houshu.auto.months, r.houshu.monthly) } : null,
       };
     });
     const built = buildSanteiReport(inputsForReport, file.office.values);
@@ -231,9 +271,10 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
     try {
       const from = `${year}-09`;
       for (const r of selectedRows) {
+        // 年4回以上払う賞与の1か月あたりの額も残す（7・8・9月以外の随時改定で、計算し直さずに足す。utils/shoyoHoushu.ts）
         const history = [
           ...remunerationHistoryOf(r.staff).filter((e) => e.from !== from),
-          { from, amount: r.decided.standard, reason: "teiji" as const },
+          { from, amount: r.decided.standard, reason: "teiji" as const, ...(r.houshu.monthly > 0 ? { bonus: r.houshu.monthly } : {}) },
         ];
         await db.execute(
           "UPDATE staff SET standard_remuneration_history = ?, standard_remuneration = ? WHERE id = ?",
@@ -250,9 +291,30 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
     }
   };
 
+  /**
+   * この年の定時決定で、年4回以上払う賞与を報酬として扱うかを決める（null は、払った回数で決める）。
+   * 賞与の画面の保険料にも使うので、すぐ会社ファイルに残す（company.shoyo_houshu）
+   */
+  const setHoushuOverride = async (value: boolean | null) => {
+    if (!db) return;
+    const next: HoushuOverrides = { ...houshuOverrides };
+    if (value === null) delete next[year];
+    else next[year] = value;
+    try {
+      await db.execute("UPDATE company SET shoyo_houshu = ? WHERE id = 1", [stringifyHoushuOverrides(next)]);
+      setHoushuOverrides(next);
+      toast.success(value === null ? `${year}年の扱いを、払った回数で決めるように戻しました` : `${year}年9月〜${year + 1}年8月は、年4回以上払う賞与を${value ? "報酬として扱います" : "報酬として扱いません"}`);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`保存できませんでした。\n${e}`);
+    }
+  };
+
   return {
     year, setYear, isLoading, isSaving,
     targets, excluded, selectedRows,
+    /** 年4回以上払う賞与：この年の扱い・印を付けていない賞与を払った月（4つ以上なら知らせる）・扱いを決める */
+    houshu: { classification: houshuClassification, unmarked: unmarkedBonusMonths(year, houshuData.settings), markedAny: houshuData.markedAny, setOverride: setHoushuOverride },
     updateRow, updateMonth, updateRetro, updateEarlierMonth, register,
     rateWarnings: ins.WARNINGS,
     file, report, reportBlocked, my, saveReport,

@@ -2,7 +2,8 @@
  * 健康保険・厚生年金保険 被保険者賞与支払届／厚生年金保険 70歳以上被用者賞与支払届（日本年金機構）
  *
  * 決まり（日本年金機構「従業員に賞与を支給したときの手続き」・届書の記入方法・「【ケース5-1、5-2】賞与を支給したとき」）:
- * ・賞与を支払った日から5日以内に、事務センター（年金事務所）に出す。年3回以下の賞与が対象（年4回以上の賞与は標準報酬月額に入れる）
+ * ・賞与を支払った日から5日以内に、事務センター（年金事務所）に出す。年3回以下の賞与が対象（年4回以上の賞与は標準報酬月額に入れる。
+ *   確定したときに社会保険の報酬として扱った賞与（BonusPayment.houshu。utils/shoyoHoushu.ts）は書かない）
  * ・届けるのは、支払った日に被保険者だった人（資格取得月に、取得した日以後に払った賞与。資格喪失月でも、退職した日（喪失日の前日）
  *   までに払った賞与は届け出る（保険料はかからない））。産前産後休業・育児休業等で保険料が免除される期間に払った賞与も届け出る
  *   （標準賞与額は年度の累計に入る）。賞与を払わなかった人は入れない（電子申請では設定しない）
@@ -45,6 +46,8 @@ export interface BonusPayment {
   totalEarnings: number;
   /** 総支給額のうち、現物で渡した額（現物で渡す支給項目。なければ 0） */
   inKind?: number;
+  /** 年4回以上払う賞与で、確定したときに社会保険の報酬として扱った（賞与支払届に書かない。utils/shoyoHoushu.ts） */
+  houshu?: boolean;
 }
 
 /** 届書の1人分 */
@@ -120,8 +123,14 @@ export const buildBonusReport = (
   const rows: BonusReportRow[] = [];
   const skipped: BonusReportSkipped[] = [];
   const byStaff = new Map<string, BonusPayment[]>();
+  // 年4回以上払う賞与で、社会保険の報酬として扱ったものは、賞与ではないので書かない（標準報酬月額に入っている。utils/shoyoHoushu.ts）
+  const houshuOnly = new Map<string, BonusPayment[]>();
   for (const p of payments) {
     if (!(p.totalEarnings > 0)) continue;
+    if (p.houshu) {
+      houshuOnly.set(p.staffId, [...(houshuOnly.get(p.staffId) ?? []), p]);
+      continue;
+    }
     const list = byStaff.get(p.staffId) ?? [];
     list.push(p);
     byStaff.set(p.staffId, list);
@@ -235,6 +244,14 @@ export const buildBonusReport = (
   }
   // 届書は被保険者整理番号の順にそろえる（70歳以上被用者届のみの人は後ろ）
   rows.sort((a, b) => (Number(a.pensionNumber) || Infinity) - (Number(b.pensionNumber) || Infinity) || a.staffId.localeCompare(b.staffId));
+  for (const [staffId, list] of houshuOnly) {
+    if (byStaff.has(staffId)) continue;
+    const staff = staffList.find((x) => String(x.id) === staffId);
+    skipped.push({
+      staffId, name: staff?.name ?? staffId,
+      reason: `年4回以上払う賞与（${[...new Set(list.map((p) => p.name))].join("・")}）で、社会保険では報酬として扱っているので、賞与支払届には書きません（標準報酬月額に入っています）`,
+    });
+  }
   return { rows, skipped };
 };
 

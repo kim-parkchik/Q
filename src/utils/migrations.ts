@@ -28,6 +28,11 @@
  *   ・v9: 会社に労働条件通知書の初めの値（labor_conditions）・36協定（kyotei36）・雇用状況報告の設定（employment_report）、
  *     従業員に労働条件通知書の値（labor_conditions）・介護保険の適用除外の期間（kaigo_exempt）・障害者雇用状況報告に数える障害の種類（disability_employment）・
  *     在留資格の情報（foreign_info）を足す。在留資格の情報は、雇用保険の届書に書くこと（koyo_info の foreign）から移す
+ *   ・v10: 従業員に在職中に退職以外で社会保険の資格を失う日と原因（shaho_loss）、健康保険組合の料率に会社負担の料率
+ *     （company_health_rate・company_care_rate・company_child_support_rate）を足す
+ *   ・v11: 給与規定グループに残業代の割増率（premium_rates）を足す
+ *   ・v12: 賞与に年4回以上払う賞与の印（bonus_settings.shaho_houshu）、確定した賞与に社会保険の報酬として扱ったか（bonus_results.shaho_houshu）、
+ *     会社に定時決定の年ごとの扱い（shoyo_houshu）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -161,6 +166,15 @@ export const MIGRATIONS: Migration[] = [
     description: "給与規定グループに、残業代の割増率（就業規則・36協定で決めた率）の列を足す",
     up: async (db) => {
       await addColumnIfMissing(db, "payroll_groups", "premium_rates", "TEXT");
+    },
+  },
+  {
+    version: 12,
+    description: "年4回以上払う賞与（社会保険の報酬になる賞与）の印を賞与に、報酬として扱ったかを確定した賞与に、定時決定の年ごとの扱いを会社に足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "bonus_settings", "shaho_houshu", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "bonus_results", "shaho_houshu", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "company", "shoyo_houshu", "TEXT");
     },
   },
 ];

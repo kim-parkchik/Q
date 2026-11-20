@@ -12,6 +12,7 @@ import { SANTEI_WORKER_KIND_LABELS, type SanteiWorkerKind } from "../../utils/sa
 import { ANNUAL_STATUS_LABELS, ymOf, type AnnualStatus } from "../../utils/santeiAnnual";
 import { santeiReportPeriod } from "../../utils/remunerationReport";
 import { formatWareki } from "../../utils/wareki";
+import { SHOYO_HOUSHU } from "../../constants/shoyoHoushu";
 import { RemunerationReportTable } from "./RemunerationReportTable";
 import { MyNumberToggle, ShahoFilePanel, ShahoOfficeTable, UnionFilePanel, shahoPrintStyle } from "./ShahoFilePanel";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
@@ -74,6 +75,8 @@ export default function SanteiManager({ db, staffList, onDataChange, currentUser
         {rateWarnings.map((w) => <div key={w} style={{ fontSize: 12, color: "#b45309", marginTop: 6 }}>⚠ {w}</div>)}
       </div>
 
+      <HoushuCard year={year} houshu={s.houshu} />
+
       <div style={card}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -93,7 +96,7 @@ export default function SanteiManager({ db, staffList, onDataChange, currentUser
                 <tr><td style={{ ...td, color: "#94a3b8" }} colSpan={9}>対象になる人がいません</td></tr>
               )}
               {targets.map((r) => (
-                <SanteiTableRow key={r.staff.id} r={r} year={year} updateRow={updateRow} updateMonth={updateMonth} updateRetro={updateRetro} updateEarlierMonth={updateEarlierMonth} />
+                <SanteiTableRow key={r.staff.id} r={r} year={year} houshuOn={s.houshu.classification.houshu} updateRow={updateRow} updateMonth={updateMonth} updateRetro={updateRetro} updateEarlierMonth={updateEarlierMonth} />
               ))}
             </tbody>
           </table>
@@ -165,9 +168,11 @@ export default function SanteiManager({ db, staffList, onDataChange, currentUser
   );
 }
 
-function SanteiTableRow({ r, year, updateRow, updateMonth, updateRetro, updateEarlierMonth }: {
+function SanteiTableRow({ r, year, houshuOn, updateRow, updateMonth, updateRetro, updateEarlierMonth }: {
   r: SanteiRow;
   year: number;
+  /** 年4回以上払う賞与を、この年の定時決定で報酬として扱う */
+  houshuOn: boolean;
   updateRow: ReturnType<typeof useSanteiManager>["updateRow"];
   updateMonth: ReturnType<typeof useSanteiManager>["updateMonth"];
   updateRetro: ReturnType<typeof useSanteiManager>["updateRetro"];
@@ -246,6 +251,22 @@ function SanteiTableRow({ r, year, updateRow, updateMonth, updateRetro, updateEa
             {yen(result.average)}
             {result.method === "part15" && <div style={{ fontSize: 11, color: "#64748b" }}>15日以上の月で計算</div>}
           </>
+        )}
+        {houshuOn && (
+          <label style={{ display: "block", fontSize: 11, color: r.houshu.monthly > 0 ? "#6d28d9" : "#94a3b8", marginTop: 4 }}
+            title={`年4回以上払う賞与の1か月あたりの額（7月1日の前の1年間に受けた ${r.houshu.auto.total.toLocaleString()}円 ÷ ${SHOYO_HOUSHU.divisor}）。各月の報酬に足して平均しています。入社して1年たたない人や、規定が変わったばかりのときは直せます`}>
+            うち賞与（月額）
+            <input
+              type="number" min={0} value={r.houshuOverride ?? r.houshu.auto.monthly}
+              onChange={(e) => updateRow(r.staff.id, { houshuOverride: e.target.value.trim() === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+              style={{ ...numInput, width: 90, fontSize: 11, padding: "2px 4px", marginLeft: 4, display: "inline-block" }}
+            />
+            {r.houshuOverride !== null && r.houshuOverride !== r.houshu.auto.monthly && (
+              <button type="button" onClick={() => updateRow(r.staff.id, { houshuOverride: null })} style={{ ...linkButton, marginLeft: 4 }}>
+                戻す（{yen(r.houshu.auto.monthly)}）
+              </button>
+            )}
+          </label>
         )}
       </td>
       <td style={{ ...td, whiteSpace: "nowrap" }}>
@@ -394,6 +415,67 @@ function AnnualPanel({ r, year, updateEarlierMonth }: {
           同意は毎年もらいます。
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * 年4回以上払う賞与（社会保険の「賞与に係る報酬」。utils/shoyoHoushu.ts）：7月1日前の1年間に、印を付けた賞与を何回払ったかと、
+ * この年の定時決定（9月〜翌年8月）での扱い。4回より少なくても、給与規定で年4回以上払うと決めているときなどは「報酬として扱う」を選ぶ
+ */
+function HoushuCard({ year, houshu }: { year: number; houshu: ReturnType<typeof useSanteiManager>["houshu"] }) {
+  const { classification: c, unmarked, markedAny, setOverride } = houshu;
+  const unmarkedMany = unmarked.months.length >= SHOYO_HOUSHU.minTimes && c.months.length === 0;
+  // 印を付けた賞与がどこかにあれば出す（Q を使い始める前から年4回以上払っている会社は、最初の年に「報酬として扱う」を選ぶ）
+  if (c.months.length === 0 && c.override === null && !unmarkedMany && !markedAny) return null;
+  const monthText = (list: string[]) => list.map((m) => `${Number(m.slice(0, 4))}年${Number(m.slice(5, 7))}月`).join("・");
+  return (
+    <div style={{ ...card, backgroundColor: c.houshu ? "#f5f3ff" : "#f8fafc", border: `1px solid ${c.houshu ? "#ddd6fe" : "#e2e8f0"}` }}>
+      <div style={{ fontSize: 14, fontWeight: "bold", color: "#334155", marginBottom: 6 }}>年4回以上払う賞与（社会保険の報酬になる賞与）</div>
+      {unmarkedMany ? (
+        <p style={{ fontSize: 12, color: "#b45309", margin: 0, lineHeight: 1.7 }}>
+          ⚠ {formatWareki(c.lookback.from)}〜{formatWareki(c.lookback.to)}に、賞与を{unmarked.months.length}つの月で払っています（{unmarked.names.join("・")}）。
+          同じ性質の賞与（名前が違っても中身が同じもの）を年{SHOYO_HOUSHU.minTimes}回以上払っているなら、社会保険では「報酬」になり、
+          その12分の1を報酬に足します。そのときは、賞与の画面で、その賞与に「年4回以上払う賞与の1回」の印を付けてください（夏と冬の賞与と決算賞与のように、性質の違う賞与なら、このままで構いません）。
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: 12, color: "#334155", margin: 0, lineHeight: 1.7 }}>
+            {formatWareki(c.lookback.from)}〜{formatWareki(c.lookback.to)}に、印を付けた賞与を<b>{c.months.length}回</b>払っています
+            {c.months.length > 0 && `（${monthText(c.months)}）`}。
+            {c.houshu ? (
+              <>
+                {" "}{year}年9月分からの標準報酬月額は、1人ずつ、この間に受けた賞与の合計の{SHOYO_HOUSHU.divisor}分の1を、4〜6月の報酬に足して決めます（表の「うち賞与（月額）」。直せます）。
+                算定基礎届には、足した額を「通貨」に書き、備考の「その他」に賞与を払った月と額を書きます。
+                {year}年9月〜{year + 1}年8月に払う、印を付けた賞与には、賞与の社会保険料をかけず、賞与支払届にも書きません。
+              </>
+            ) : (
+              <>
+                {" "}{c.override === false ? "「報酬として扱わない」にしているので" : `${SHOYO_HOUSHU.minTimes}回より少ないので`}、{year}年9月〜{year + 1}年8月も、印を付けた賞与は賞与として扱います（賞与支払届を出し、賞与の社会保険料をかけます）。
+              </>
+            )}
+          </p>
+          <p style={{ fontSize: 11, color: "#64748b", margin: "6px 0 0 0", lineHeight: 1.7 }}>
+            給与規定などで年{SHOYO_HOUSHU.minTimes}回以上払うと決めているときや、Q を使い始める前から年{SHOYO_HOUSHU.minTimes}回以上払っていたときは、
+            {SHOYO_HOUSHU.minTimes}回より少なくても下で「報酬として扱う」を選んでください。
+            ただし、7月2日以降に規定を新しく作ったときや回数を変えたときは、次の定時決定までは前の扱いのままです。
+            規定が変わって報酬になった年は、変わった後の規定で1年間に受けたであろう額の{SHOYO_HOUSHU.divisor}分の1を、1人ずつ「うち賞与（月額）」に入れてください。
+            その年だけ払ったことがはっきりしている賞与は回数に数えないので、印を外してください。
+          </p>
+        </>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8, fontSize: 12 }}>
+        <span style={{ color: "#475569" }}>{year}年の定時決定での扱い：</span>
+        <select
+          value={c.override === null ? "auto" : c.override ? "on" : "off"}
+          onChange={(e) => setOverride(e.target.value === "auto" ? null : e.target.value === "on")}
+          style={{ padding: "4px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 12 }}
+        >
+          <option value="auto">払った回数で決める（いまは{c.auto ? "報酬" : "賞与"}）</option>
+          <option value="on">報酬として扱う（規定で年{SHOYO_HOUSHU.minTimes}回以上と決めている）</option>
+          <option value="off">報酬として扱わない</option>
+        </select>
+      </div>
     </div>
   );
 }

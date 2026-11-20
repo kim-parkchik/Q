@@ -34,6 +34,11 @@ export interface RemunerationEntry {
   /** 標準報酬月額（0 は未加入） */
   amount: number;
   reason: RemunerationReason;
+  /**
+   * この標準報酬月額を決めたときに、毎月の報酬に足した「賞与に係る報酬」（年4回以上払う賞与の1か月あたりの額。なければ省く）。
+   * 7・8・9月以外の随時改定で、計算し直さずに足す（utils/shoyoHoushu.ts）
+   */
+  bonus?: number;
 }
 
 const REASONS = Object.keys(REMUNERATION_REASON_LABELS) as RemunerationReason[];
@@ -46,11 +51,15 @@ export const parseRemunerationHistory = (json: unknown): RemunerationEntry[] => 
     if (!Array.isArray(list)) return [];
     return list
       .filter((e) => typeof e?.from === 'string' && Number.isFinite(Number(e?.amount)))
-      .map((e) => ({
-        from: e.from,
-        amount: Math.max(0, Math.floor(Number(e.amount))),
-        reason: REASONS.includes(e.reason) ? e.reason : 'other',
-      }));
+      .map((e) => {
+        const bonus = Math.max(0, Math.floor(Number(e.bonus) || 0));
+        return {
+          from: e.from,
+          amount: Math.max(0, Math.floor(Number(e.amount))),
+          reason: REASONS.includes(e.reason) ? e.reason : 'other',
+          ...(bonus > 0 ? { bonus } : {}),
+        };
+      });
   } catch {
     return [];
   }
@@ -60,9 +69,12 @@ export const parseRemunerationHistory = (json: unknown): RemunerationEntry[] => 
 export const sortRemunerationHistory = (entries: RemunerationEntry[]): RemunerationEntry[] =>
   [...entries].sort((a, b) => a.from.localeCompare(b.from));
 
-/** 保存用の JSON（適用開始月の順に並べる） */
+/** 保存用の JSON（適用開始月の順に並べる。賞与に係る報酬は、あるときだけ書く） */
 export const stringifyRemunerationHistory = (entries: RemunerationEntry[]): string =>
-  JSON.stringify(sortRemunerationHistory(entries).map(({ from, amount, reason }) => ({ from, amount, reason })));
+  JSON.stringify(sortRemunerationHistory(entries).map(({ from, amount, reason, bonus }) => {
+    const b = Math.max(0, Math.floor(Number(bonus) || 0));
+    return b > 0 ? { from, amount, reason, bonus: b } : { from, amount, reason };
+  }));
 
 /**
  * 従業員の履歴。まだ履歴がない人は、今の標準報酬月額を入社したときから使う1件として返す

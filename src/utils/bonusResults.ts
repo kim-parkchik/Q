@@ -28,18 +28,21 @@ export interface BonusResultCalc {
   isNursing: boolean;
   /** 賃金台帳の内訳（支給・控除の項目ごとの額。utils/legalBooks.ts） */
   ledger: PayLedger;
+  /** 年4回以上払う賞与で、社会保険の報酬として扱った（標準賞与額・社会保険料は 0。賞与支払届に書かない。utils/shoyoHoushu.ts） */
+  shahoHoushu?: boolean;
 }
 
 /**
  * 賞与を追加する文：賞与設定と、初めから有効にする項目（is_default_active）の紐付け
  * いま足した賞与の id は、賞与設定の中でいちばん大きい id（AUTOINCREMENT。まとめて保存している間はほかに足されない）
  */
-export const buildAddBonusSettingStatements = (name: string, paymentDate: string): SqlStatement[] => {
+export const buildAddBonusSettingStatements = (name: string, paymentDate: string, shahoHoushu = false): SqlStatement[] => {
   const [year, month] = paymentDate.split("-").map(Number);
   return [
     {
-      sql: "INSERT INTO bonus_settings (name, target_year, target_month, payment_date) VALUES (?, ?, ?, ?)",
-      values: [name, year, month, paymentDate],
+      // shaho_houshu：年4回以上払う賞与（同じ性質の賞与を年4回以上払う）の1回か（utils/shoyoHoushu.ts）
+      sql: "INSERT INTO bonus_settings (name, target_year, target_month, payment_date, shaho_houshu) VALUES (?, ?, ?, ?, ?)",
+      values: [name, year, month, paymentDate, shahoHoushu ? 1 : 0],
     },
     {
       sql: `INSERT INTO bonus_setting_items (bonus_setting_id, item_id)
@@ -56,12 +59,13 @@ export const buildFinalizeBonusStatements = (
   { sql: "DELETE FROM bonus_results WHERE bonus_setting_id = ?", values: [settingId] },
   ...rows.map(({ staff, calc }) => ({
     sql: `INSERT INTO bonus_results (bonus_setting_id, staff_id, total_earnings, hyojun_bonus, health_insurance, nursing_insurance,
-            child_support, welfare_pension, emp_insurance, income_tax, flat_tax_reduction, custom_deductions, net_pay, is_nursing, ledger, in_kind)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            child_support, welfare_pension, emp_insurance, income_tax, flat_tax_reduction, custom_deductions, net_pay, is_nursing, ledger, in_kind,
+            shaho_houshu)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     values: [
       settingId, String(staff.id), calc.totalEarnings, calc.hyojunBonus, calc.healthInsurance, calc.nursingInsurance,
       calc.childSupport, calc.welfarePension, calc.empInsurance, calc.incomeTax, calc.flatTaxReduction, calc.customDeductions, calc.netPay,
-      calc.isNursing ? 1 : 0, JSON.stringify(calc.ledger), calc.inKind ?? 0,
+      calc.isNursing ? 1 : 0, JSON.stringify(calc.ledger), calc.inKind ?? 0, calc.shahoHoushu ? 1 : 0,
     ],
   })),
   { sql: "UPDATE bonus_settings SET is_closed = 1 WHERE id = ?", values: [settingId] },

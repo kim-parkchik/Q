@@ -228,6 +228,8 @@ export interface LeaveEndFormInput {
   /** 被保険者が事業主に申し出た日 */
   appliedOn: string;
   myNumber: boolean;
+  /** 年4回以上払う賞与：months に足した1か月あたりの額を、備考の「その他」に書く文（utils/shoyoHoushu.ts。なければ空） */
+  houshuRemark?: string;
 }
 
 /**
@@ -268,7 +270,7 @@ export const leaveEndForm = (input: LeaveEndFormInput): PrintForm => {
       { label: "昇（降）給", value: input.gradeDiff === null ? "" : input.gradeDiff > 0 ? "1. 昇給" : "2. 降給" },
       { label: "改定年月", value: warekiMonth(input.revisionFrom) },
       { label: "給与締切日・支払日", value: input.payRule },
-      { label: "備考", value: [age70 ? "1. 70歳以上被用者" : "", Number(staff.multi_office) === 1 ? "2. 二以上勤務被保険者" : "", input.short ? "3. 短時間労働者（特定適用事業所等）" : "", input.part ? "4. パート" : ""].filter(Boolean).join("・") },
+      { label: "備考", value: [age70 ? "1. 70歳以上被用者" : "", Number(staff.multi_office) === 1 ? "2. 二以上勤務被保険者" : "", input.short ? "3. 短時間労働者（特定適用事業所等）" : "", input.part ? "4. パート" : "", input.houshuRemark ? `その他（${input.houshuRemark}）` : ""].filter(Boolean).join("・") },
       { label: "月変該当の確認（□に✔）", value: input.type === "childcare" ? "育児休業等を終了した日の翌日に引き続いて産前産後休業を開始していません" : "産前産後休業を終了した日の翌日に引き続いて育児休業等を開始していません" },
     ],
     problems,

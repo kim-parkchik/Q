@@ -14,17 +14,28 @@ import { findLeaveEndCandidates, judgeLeaveEnd, type LeaveEndCandidate, type Lea
 import { latestStandardRemuneration, remunerationHistoryOf, stringifyRemunerationHistory } from "../../utils/standardRemuneration";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
+import {
+  houshuForRevision, houshuLookback, houshuMonthlyOf, houshuRemark, parseHoushuOverrides, withHoushu,
+  type HoushuOverrides, type HoushuResult, type HoushuSetting, type RevisionHoushu,
+} from "../../utils/shoyoHoushu";
 
 /** 画面で直した値（働き方の区分・3か月の日数と報酬） */
 interface Override {
   kind?: SanteiWorkerKind;
   months?: Record<number, Partial<Pick<SanteiMonth, "days" | "amount">>>;
+  /** 年4回以上払う賞与の、毎月の報酬に足す1か月あたりの額（画面で直した額。utils/shoyoHoushu.ts） */
+  houshu?: number | null;
 }
 
 export interface LeaveEndRow extends LeaveEndCandidate {
   key: string;
   kind: SanteiWorkerKind;
   judgement: LeaveEndJudgement;
+  /**
+   * 年4回以上払う賞与：3か月の報酬に足す1か月あたりの額（通知に書かれていないので、随時改定と同じに、7・8・9月の改定は計算し直し、
+   * ほかの月の改定は、いまの標準報酬月額を決めたときの額。画面で直せる）。判定は足したあとの報酬で行う
+   */
+  houshu: { auto: RevisionHoushu; monthly: number; monthlyInKind: number; overridden: boolean; remark: string };
 }
 
 export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDataChange: () => void) {
@@ -35,6 +46,7 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
   const [overrides, setOverrides] = useState<Record<string, Override>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [houshuData, setHoushuData] = useState<{ settings: HoushuSetting[]; results: HoushuResult[]; overrides: HoushuOverrides }>({ settings: [], results: [], overrides: {} });
 
   useEffect(() => {
     const load = async () => {
@@ -59,6 +71,17 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
             )
           : [];
         setData({ groups, salaries, attendance });
+        // 年4回以上払う賞与（7・8・9月の改定で計算し直すのに使う、7月1日前の1年間に払った印を付けた賞与と、年ごとに決めた扱い）
+        const lookback = houshuLookback(year);
+        const bonusSettings = await db.select<HoushuSetting[]>(
+          "SELECT id, name, payment_date, shaho_houshu, is_closed FROM bonus_settings WHERE shaho_houshu = 1 AND payment_date BETWEEN ? AND ?", [lookback.from, lookback.to]
+        );
+        const bonusResults = await db.select<HoushuResult[]>(
+          `SELECT r.bonus_setting_id, r.staff_id, r.total_earnings, r.in_kind FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id
+            WHERE s.shaho_houshu = 1 AND s.payment_date BETWEEN ? AND ?`, [lookback.from, lookback.to]
+        );
+        const company = await db.select<{ shoyo_houshu: string | null }[]>("SELECT shoyo_houshu FROM company WHERE id = 1");
+        setHoushuData({ settings: bonusSettings ?? [], results: bonusResults ?? [], overrides: parseHoushuOverrides(company?.[0]?.shoyo_houshu) });
       } catch (e) {
         console.error("休業終了時改定のデータの読み込みに失敗しました:", e);
         dialog.error(`休業終了時改定のデータを読み込めませんでした。\n${e}`);
@@ -78,11 +101,19 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
       const kind = o.kind ?? "general";
       const revision = addMonths(c.year, c.month, 3);
       const table = Master.getInsuranceMaster(revision.year, revision.month).HYOJUN_TABLE;
-      return { ...c, months, key, kind, judgement: judgeLeaveEnd(months, kind, c.previous, table, c.followedBy !== null) };
-    }), [staffList, year, data, overrides]);
+      // 年4回以上払う賞与の1か月あたりの額を、3か月の報酬に足して判定する（utils/shoyoHoushu.ts）
+      const auto = houshuForRevision(c.staff, revision.year, revision.month, houshuData.settings, houshuData.results, houshuData.overrides);
+      const add = houshuMonthlyOf(auto, o.houshu);
+      const houshu = { auto, ...add, overridden: o.houshu !== null && o.houshu !== undefined, remark: houshuRemark(auto.months, add.monthly) };
+      return { ...c, months, key, kind, houshu, judgement: judgeLeaveEnd(withHoushu(months, add), kind, c.previous, table, c.followedBy !== null) };
+    }), [staffList, year, data, overrides, houshuData]);
 
   const setKind = (key: string, kind: SanteiWorkerKind) =>
     setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], kind } }));
+
+  /** 年4回以上払う賞与の1か月あたりの額を直す（null は自動で決めた額に戻す） */
+  const setHoushu = (key: string, houshu: number | null) =>
+    setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], houshu } }));
 
   /** 3か月の日数・報酬を手で直す（空にすると、その月の給与は未確定の扱い） */
   const updateMonth = (key: string, index: number, patch: Partial<Pick<SanteiMonth, "days" | "amount">>) =>
@@ -105,7 +136,7 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
     try {
       const history = [
         ...remunerationHistoryOf(row.staff).filter((e) => e.from !== row.revisionFrom),
-        { from: row.revisionFrom, amount: row.judgement.standard, reason: "kyugyo" as const },
+        { from: row.revisionFrom, amount: row.judgement.standard, reason: "kyugyo" as const, ...(row.houshu.monthly > 0 ? { bonus: row.houshu.monthly } : {}) },
       ];
       await db.execute(
         "UPDATE staff SET standard_remuneration_history = ?, standard_remuneration = ? WHERE id = ?",
@@ -121,5 +152,5 @@ export function useLeaveEndRevisionManager(db: Database, staffList: any[], onDat
     }
   };
 
-  return { year, setYear, isLoading, savingKey, rows, setKind, updateMonth, register, groups: data.groups };
+  return { year, setYear, isLoading, savingKey, rows, setKind, updateMonth, setHoushu, register, groups: data.groups };
 }

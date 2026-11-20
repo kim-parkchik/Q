@@ -25,6 +25,10 @@ import { useToast } from "../../components/Toast";
 import { useShahoFile } from "./useShahoFile";
 import { useShahoMyNumbers } from "./useShahoMyNumbers";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
+import {
+  houshuForRevision, houshuLookback, houshuMonthlyOf, houshuRemark, parseHoushuOverrides, withHoushu,
+  type HoushuOverrides, type HoushuResult, type HoushuSetting, type RevisionHoushu,
+} from "../../utils/shoyoHoushu";
 
 /** 画面で変動月を指定した候補 */
 interface ManualEntry {
@@ -50,6 +54,8 @@ interface Override {
   reason?: string | null;
   remarks?: string | null;
   include?: boolean;
+  /** 年4回以上払う賞与の、毎月の報酬に足す1か月あたりの額（画面で直した額。utils/shoyoHoushu.ts） */
+  houshu?: number | null;
 }
 
 export interface ZuijiRow extends ZuijiCandidate {
@@ -74,6 +80,11 @@ export interface ZuijiRow extends ZuijiCandidate {
    * byAnnual: 年間平均で申し立てた / noRevision: 年間平均で申し立てると改定しない
    */
   decided: { standard: number | null; byAnnual: boolean; noRevision: boolean };
+  /**
+   * 年4回以上払う賞与：自動で決めた額（auto。7・8・9月の改定は、その年の定時決定と同じく計算し直し、ほかの月の改定は、いまの標準報酬月額を
+   * 決めたときの額）と、3か月の報酬に足す額（monthly。画面で直した額）。判定（judgement・annual）は、足したあとの報酬で行う
+   */
+  houshu: { auto: RevisionHoushu; monthly: number; monthlyInKind: number; overridden: boolean };
 }
 
 const keyOf = (staffId: string, year: number, month: number) => `${staffId}-${year}-${month}`;
@@ -88,6 +99,8 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
   const [isLoading, setIsLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [insurers, setInsurers] = useState<Map<number, HealthInsurer>>(new Map());
+  // 年4回以上払う賞与：7・8・9月の改定で計算し直すのに使う、7月1日前の1年間に払った印を付けた賞与と、年ごとに決めた扱い
+  const [houshuData, setHoushuData] = useState<{ settings: HoushuSetting[]; results: HoushuResult[]; overrides: HoushuOverrides }>({ settings: [], results: [], overrides: {} });
   /** 月額変更届を作る改定年月（YYYY-MM） */
   const [reportMonth, setReportMonth] = useState("");
   const file = useShahoFile(db);
@@ -119,6 +132,16 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
           : [];
         setData({ groups, salaries, attendance });
         setInsurers(await loadHealthInsurers(db));
+        const lookback = houshuLookback(year);
+        const bonusSettings = await db.select<HoushuSetting[]>(
+          "SELECT id, name, payment_date, shaho_houshu, is_closed FROM bonus_settings WHERE shaho_houshu = 1 AND payment_date BETWEEN ? AND ?", [lookback.from, lookback.to]
+        );
+        const bonusResults = await db.select<HoushuResult[]>(
+          `SELECT r.bonus_setting_id, r.staff_id, r.total_earnings, r.in_kind FROM bonus_results r JOIN bonus_settings s ON s.id = r.bonus_setting_id
+            WHERE s.shaho_houshu = 1 AND s.payment_date BETWEEN ? AND ?`, [lookback.from, lookback.to]
+        );
+        const company = await db.select<{ shoyo_houshu: string | null }[]>("SELECT shoyo_houshu FROM company WHERE id = 1");
+        setHoushuData({ settings: bonusSettings ?? [], results: bonusResults ?? [], overrides: parseHoushuOverrides(company?.[0]?.shoyo_houshu) });
       } catch (e) {
         console.error("月変のデータの読み込みに失敗しました:", e);
         dialog.error(`月変のデータを読み込めませんでした。\n${e}`);
@@ -152,8 +175,13 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         const o = overrides[key] ?? {};
         const months = c.months.map((m, i) => ({ ...m, ...(o.months?.[i] ?? {}) }));
         const retro = o.retro ?? {};
+        // 年4回以上払う賞与の1か月あたりの額を、3か月の報酬に足す（7・8・9月の改定は計算し直し、ほかの月は前に決めた額。utils/shoyoHoushu.ts）
+        const [ry, rm] = c.revisionFrom.split("-").map(Number);
+        const auto = houshuForRevision(c.staff, ry, rm, houshuData.settings, houshuData.results, houshuData.overrides);
+        const add = houshuMonthlyOf(auto, o.houshu);
+        const houshu = { auto, ...add, overridden: o.houshu !== null && o.houshu !== undefined };
         // 遡って払った差額は、平均から除く（月額変更届には、払った額と遡及支払額を書き、差額を除いた平均を修正平均額に書く）
-        const adjusted = months.map((m, i) => (retro[i] && m.amount !== null ? { ...m, amount: Math.max(0, m.amount - retro[i]) } : m));
+        const adjusted = withHoushu(months, add).map((m, i) => (retro[i] && m.amount !== null ? { ...m, amount: Math.max(0, m.amount - retro[i]) } : m));
         const short = !!o.short;
         const table = Master.getInsuranceMaster(addMonths(c.year, c.month, 3).year, addMonths(c.year, c.month, 3).month).HYOJUN_TABLE;
         const judgement = judgeZuiji(adjusted, short, c.previous, c.direction, table);
@@ -175,9 +203,9 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         const eligible = decided.standard !== null &&
           (decided.byAnnual ? annual.status === "target" : judgement.status === "target" || judgement.boundaryNote !== null);
         const include = eligible && (o.include ?? (decided.byAnnual ? annual.status === "target" : judgement.status === "target"));
-        return { ...c, months, key, manual: isManual, short, judgement, annualMonths, annual, annualRequested, decided, retro, eligible, include };
+        return { ...c, months, key, manual: isManual, short, judgement, annualMonths, annual, annualRequested, decided, retro, eligible, include, houshu };
       });
-  }, [staffList, year, data, manual, overrides]);
+  }, [staffList, year, data, manual, overrides, houshuData]);
 
   const setShort = (key: string, short: boolean) =>
     setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], short } }));
@@ -206,6 +234,8 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
   const setReason = (key: string, reason: string | null) => setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], reason } }));
   const setRemarks = (key: string, remarks: string | null) => setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], remarks } }));
   const setInclude = (key: string, include: boolean) => setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], include } }));
+  /** 年4回以上払う賞与の1か月あたりの額を直す（null は自動で決めた額に戻す） */
+  const setHoushu = (key: string, houshu: number | null) => setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], houshu } }));
 
   // 月額変更届：改定年月ごとに作る（登録できる人の改定年月から選ぶ。初めは、いちばん新しい改定年月）
   const reportMonths = [...new Set(rows.filter((r) => r.eligible).map((r) => r.revisionFrom))].sort();
@@ -220,7 +250,8 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
       return {
         key: r.key, staff: r.staff, changeYear: r.year, changeMonth: r.month, direction: r.direction, revisionFrom: r.revisionFrom,
         previous: r.previous, previousFrom: remunerationFromAt(r.staff, third.year, third.month),
-        months: r.months.map((m) => ({ year: m.year, month: m.month, days: m.days, amount: m.amount, inKind: m.inKind ?? 0 })),
+        // 年4回以上払う賞与の1か月あたりの額を足した報酬（届書の「通貨」に書く。遡及支払額は含めたまま）
+        months: withHoushu(r.months, r.houshu).map((m) => ({ year: m.year, month: m.month, days: m.days, amount: m.amount, inKind: m.inKind ?? 0 })),
         short: r.short, ordinaryAverage: r.judgement.average,
         annualAverage: r.decided.byAnnual ? r.annual.average : null,
         retro: retroIndexes.length === 1 ? { index: retroIndexes[0], amount: r.retro[retroIndexes[0]] } : null,
@@ -236,6 +267,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
         insurer: insurerOf(insurers, r.staff.social_insurance_group_id),
         pensionRange: { min: master.PENSION_MIN_HYOJUN, max: master.PENSION_MAX_HYOJUN },
         myNumber: my.writes(String(r.staff.id)),
+        houshu: r.houshu.monthly > 0 ? { monthly: r.houshu.monthly, remark: houshuRemark(r.houshu.auto.months, r.houshu.monthly) } : null,
       };
     });
     const built = buildGeppenReport(inputs, file.office.values);
@@ -278,9 +310,10 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
     if (!ok) return;
     setSavingKey(row.key);
     try {
+      // 年4回以上払う賞与の1か月あたりの額も残す（次の随時改定で、計算し直さずに足す。utils/shoyoHoushu.ts）
       const history = [
         ...remunerationHistoryOf(row.staff).filter((e) => e.from !== row.revisionFrom),
-        { from: row.revisionFrom, amount: standard, reason: "zuiji" as const },
+        { from: row.revisionFrom, amount: standard, reason: "zuiji" as const, ...(row.houshu.monthly > 0 ? { bonus: row.houshu.monthly } : {}) },
       ];
       await db.execute(
         "UPDATE staff SET standard_remuneration_history = ?, standard_remuneration = ? WHERE id = ?",
@@ -299,7 +332,7 @@ export function useZuijiManager(db: Database, staffList: any[], onDataChange: ()
   return {
     year, setYear, isLoading, savingKey, rows,
     setShort, updateMonth, updateAnnualMonth, setAnnualRequested, addManual, removeManual, register,
-    updateRetro, setReason, setRemarks, setInclude,
+    updateRetro, setReason, setRemarks, setInclude, setHoushu,
     file, reportMonths, reportMonth: currentReportMonth, setReportMonth, reportCandidates, report, reportBlocked, my, saveReport,
     insurers,
     /** 健康保険組合に出すファイルを保存したあと（組合の媒体通番を読み直す） */

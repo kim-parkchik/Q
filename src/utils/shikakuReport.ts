@@ -199,6 +199,11 @@ export const buildShutokuRow = (input: ShutokuInput, office: string[]): ShutokuR
   const total = (wage ?? 0) + inKind;
   if (wage !== null && wage > 0 && total < 1000) add("報酬月額の合計は1,000円以上で書きます", 22);
   if (total >= TEN_MILLION) notes.push("報酬月額が1千万円以上なので、仕様書の決まりで 9999999 と書きます");
+  // 年4回以上払う賞与（社会保険の報酬）：資格取得時は、同じような仕事をして同じような賞与を受ける人の、賞与に係る報酬の平均額を足す（utils/shoyoHoushu.ts）
+  const houshu = houshuAtAcquisitionOf(staff);
+  if (houshu > 0) {
+    notes.push(`年4回以上払う賞与の1か月あたりの額（${houshu.toLocaleString()}円。標準報酬月額の履歴の「うち賞与」）を、報酬月額に含めて届け出ます${staff.wage_type === "monthly" ? "（初めの値に足してあります）" : "（時給・日給の人は、入れる報酬月額に足してください）"}`);
+  }
 
   const address = input.myNumber ? ["", "", "", ""] : addressValues(staff, SHAHO_SHUTOKU_FIELDS[32], add, notes);
   const remarks = toShahoKanji(input.remarks);
@@ -410,14 +415,19 @@ export const acquiredOnOf = (staff: any): { date: string; fromHistory: boolean }
 
 /**
  * 報酬月額の初めの値：月給の人は、基本給＋固定残業代＋通勤手当（月額）。時給・日給の人と、日額の通勤手当は入れてもらう
- * （資格取得時の決定は、月給は月の額、時給・日給は同じ仕事の人の報酬などから決め、残業代などの見込みも入れる）
+ * （資格取得時の決定は、月給は月の額、時給・日給は同じ仕事の人の報酬などから決め、残業代などの見込みも入れる）。
+ * 年4回以上払う賞与（社会保険の報酬）がある会社で、標準報酬月額の履歴の最初の行に「うち賞与」（同じような仕事をして同じような賞与を受ける人の、
+ * 賞与に係る報酬の平均額）を入れていれば、それも足す（通知 2(2)。utils/shoyoHoushu.ts）
  */
 export const estimatedWageOf = (staff: any): number | null => {
   if (staff?.wage_type !== "monthly") return null;
   // 定期券などを現物で渡す通勤手当は、現物の見込み（estimatedInKindOf）に入れる
   const commute = staff.commute_type === "monthly" && !parseCommuteSetting(staff.commute_setting).inKind ? Number(staff.commute_amount) || 0 : 0;
-  return (Number(staff.base_wage) || 0) + (Number(staff.fixed_overtime_allowance) || 0) + commute;
+  return (Number(staff.base_wage) || 0) + (Number(staff.fixed_overtime_allowance) || 0) + commute + houshuAtAcquisitionOf(staff);
 };
+
+/** 資格取得時の、年4回以上払う賞与の1か月あたりの額（標準報酬月額の履歴の最初の行の「うち賞与」。なければ 0） */
+export const houshuAtAcquisitionOf = (staff: any): number => Math.max(0, Math.floor(Number(remunerationHistoryOf(staff)[0]?.bonus) || 0));
 
 /**
  * 報酬月額の「現物」の初めの値：資格取得日にしている「現物で払う報酬」（社宅・食事など）の1か月分の額と、
