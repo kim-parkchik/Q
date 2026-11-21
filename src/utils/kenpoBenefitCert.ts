@@ -24,6 +24,8 @@
  *   ・そのほかの月額の手当（扶養手当・住宅手当など・固定残業代）と月給制の基本給：Q の給与では、休業（従業員の画面の休業・休職）の日の分は
  *     日割りして払わないので、休業の月の日割りを「しない」にしているときだけ入れる。休業でない欠勤の日には、手当は引かない
  *     （基本給は欠勤控除をしない完全月給制のときだけ）ので、欠勤の日がある計算期間の手当は入れる
+ *   ・固定残業代は、給与規定グループの「固定残業代の日割り」が「日割りしない」なら、休業の日がある月も満額を払っているので入れる
+ *     （確定した給与に残した月額（applied_fixed_overtime）と払った額が同じなら、日割りしていない）
  */
 import dayjs from "dayjs";
 import type { PayLedger } from "./legalBooks";
@@ -56,6 +58,8 @@ export interface CertSalary {
   prescribedDays: number | null;
   /** 休業の日がある月に月給を払った日数 */
   leavePaidDays: number | null;
+  /** 確定したときの固定残業代の月額（日割りする前の額。払った額と同じなら日割りしていない。わからなければ null） */
+  fixedOvertimeMonthly?: number | null;
 }
 
 export interface CertInput {
@@ -225,10 +229,15 @@ export const buildBenefitCert = (input: CertInput): CertResult => {
     const allowanceForAbsence = otherAbsent.length > 0;
     for (const l of s.ledger.earnings) {
       if (l.amount <= 0 || isWorkLine(l.name) || l.name === "通勤手当" || l.avg !== "month") continue;
+      // 固定残業代を日割りせずに満額を払った月は、休業の日の分も払っている（給与規定グループの「固定残業代の日割り」が「日割りしない」）
+      const fixedOvertimeInFull = l.name === "固定残業代" && leaveDays.length > 0
+        && s.fixedOvertimeMonthly !== null && s.fixedOvertimeMonthly !== undefined && l.amount >= s.fixedOvertimeMonthly;
+      const checked = paidForLeave || allowanceForAbsence || fixedOvertimeInFull;
       rows.push({
-        key: `allowance:${s.periodStart}:${l.name}`, from: s.periodStart, to: s.periodEnd, amount: l.amount, label: l.name,
-        checked: paidForLeave || allowanceForAbsence,
-        ...(paidForLeave || allowanceForAbsence ? {} : { hint: "休業の日の分は日割りして払っていないので、初めは書きません（出勤の有無に関わらず払っているなら印を付けます）" }),
+        key: `allowance:${s.periodStart}:${l.name}`, from: s.periodStart, to: s.periodEnd, amount: l.amount,
+        label: fixedOvertimeInFull && !paidForLeave && !allowanceForAbsence ? "固定残業代（休業の日も日割りせずに払った）" : l.name,
+        checked,
+        ...(checked ? {} : { hint: "休業の日の分は日割りして払っていないので、初めは書きません（出勤の有無に関わらず払っているなら印を付けます）" }),
       });
     }
     if (monthly && basePay > 0 && (paidForLeave || (otherAbsent.length > 0 && input.absenceDeduction === "none"))) {

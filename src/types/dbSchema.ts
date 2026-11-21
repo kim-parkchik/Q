@@ -318,7 +318,8 @@ export const DB_SCHEMAS = [
     standard_overtime_pay INTEGER,   -- 標準割増の支給額（固定残業代がある人は、法定の計算額）
     high_overtime_pay INTEGER,       -- 高率割増の支給額（固定残業代がある人は、法定の計算額）
     statutory_overtime_pay INTEGER,  -- 法定内残業の支給額（割増なし）
-    fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0）
+    fixed_overtime_allowance INTEGER,           -- 固定残業代（時間外労働の割増賃金に当てる定額。なしは 0。日割りした月は日割りした額、まるごと休業の月は 0）
+    applied_fixed_overtime INTEGER,             -- その時の固定残業代の月額（日割り・休業で減らす前の額。なしは 0。月変・算定で前の月と比べる。utils/zuiji.ts）
     fixed_overtime_excess INTEGER DEFAULT 0,    -- 時間外労働の割増賃金が固定残業代を超えた差額（超過分として払った額）
     non_fixed_earnings INTEGER,                 -- 支給合計のうち非固定的賃金（残業代・休日や深夜の手当・変動の支給項目。月変の年間平均に使う）
     absence_deduction INTEGER,                  -- 欠勤控除の額（月給制）
@@ -441,6 +442,7 @@ export const DB_SCHEMAS = [
     social_ins_collection TEXT DEFAULT 'current', -- 社会保険料の徴収 'current':当月徴収（その月の分） / 'next':翌月徴収（前月の分）
     proration_method TEXT DEFAULT 'none', -- 計算期間の途中で入社・退職した月給制の人の日割り 'none':しない / 'workdays':所定労働日数 / 'calendar':暦日数
     leave_proration_method TEXT DEFAULT 'workdays', -- 計算期間の途中で休業が始まる・終わる月の日割り 'workdays':所定労働日数 / 'calendar':暦日数 / 'none':しない（utils/leaveOfAbsence.ts）
+    fixed_overtime_proration INTEGER DEFAULT 0,     -- 固定残業代も月給と同じく日割りする 1:する / 0:しない（満額を払う）。入社・退職の月と、休業が途中で始まる・終わる月の両方
     shutdown_allowance_rate REAL DEFAULT 60,        -- 会社都合で休ませた日の休業手当（平均賃金の何%。60以上。労働基準法26条。utils/averageWage.ts）
     absence_deduction_method TEXT DEFAULT 'workdays', -- 月給制の人の欠勤控除 'workdays':計算期間の所定労働日数で割る / 'annual':1年間の月平均の所定労働日数で割る / 'none':しない（完全月給制）
     tardy_deduction_method TEXT DEFAULT 'none',       -- 月給制・日給制の人の遅刻・早退・中抜けの控除 'none':しない / 'annual':1か月平均所定労働時間で割る / 'period':計算期間の所定労働時間で割る

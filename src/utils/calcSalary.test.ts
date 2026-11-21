@@ -2010,6 +2010,73 @@ describe("休業・休職の日の給与（決まりは leaveOfAbsence.ts。2026
     });
 });
 
+describe("固定残業代の日割り（給与規定グループの「固定残業代の日割り」。2026年6月は平日22日・6月16日は火曜）", () => {
+    const JUNE = { start: "2026-06-01", end: "2026-06-30" };
+    // 月給 300,000円・固定残業代 50,000円（20時間分）。1年の所定労働日数 240日 → 残業代の時給 300,000 ÷（240日 × 8時間 ÷ 12）＝ 1,875円
+    const fixed = { ...monthly, fixed_overtime_allowance: 50000, fixed_overtime_hours: 20 };
+    const joined = { ...fixed, join_date: "2026-06-16" };
+    const joinOpts = (o: Partial<SalaryExtras> = {}): Partial<SalaryExtras> =>
+        ({ prorationMethod: "workdays", period: JUNE, periodWorkDays: 22, employedWorkDays: 11, annualWorkDays: 240, ...o });
+    const on = { fixedOvertimeProration: true };
+
+    test("入社した月：「日割りしない」（初めの値）なら満額、「日割りする」なら月給と同じ 11日 ÷ 22日 で 25,000円", () => {
+        const full = calc(joined, [], joinOpts());
+        expect([full.basePay, full.fixedOvertimeAllowance, full.fixedOvertimeMonthly, full.fixedOvertimeProrated]).toEqual([150000, 50000, 50000, false]);
+        expect(full.totalEarnings).toBe(200000);
+        const prorated = calc(joined, [], joinOpts(on));
+        expect([prorated.basePay, prorated.fixedOvertimeAllowance, prorated.fixedOvertimeMonthly, prorated.fixedOvertimeProrated]).toEqual([150000, 25000, 50000, true]);
+        expect(prorated.fixedOvertimeHours).toBe(20); // 何時間分かは、決めた時間のまま（明細では「20:00分を日割り」）
+        expect(prorated.totalEarnings).toBe(175000);
+        // 固定残業代は固定的賃金（非固定的賃金に入れない）
+        expect(prorated.nonFixedEarnings).toBe(0);
+    });
+    test("超過分は、日割りした固定残業代と比べる（時間外労働12時間 × 1,875円 × 1.25 ＝ 28,125円）", () => {
+        const rows = ["16", "17", "18"].map((d) => day(d, 12)); // 1日8時間を超えた 4時間 × 3日
+        const full = calc(joined, rows, joinOpts());
+        expect([full.standardPremiumHours, full.standardOvertimePay, full.fixedOvertimeExcess]).toEqual([12, 28125, 0]);
+        const prorated = calc(joined, rows, joinOpts(on));
+        expect([prorated.fixedOvertimeAllowance, prorated.fixedOvertimeExcess]).toEqual([25000, 3125]);
+        expect(prorated.totalEarnings).toBe(150000 + 25000 + 3125);
+        // 残業代の時給は、日割りする前の月給で計算する（固定残業代は時給に入れない）
+        expect(prorated.overtimeHourlyRate).toBe(1875);
+    });
+    test("退職した月を暦日数で日割り：50,000円 × 10日 ÷ 30日 ＝ 16,666.6…円 → 16,667円（1円未満切り上げ）", () => {
+        const r = calc({ ...fixed, retirement_date: "2026-06-10" }, [], joinOpts({ ...on, prorationMethod: "calendar" }));
+        expect(r.proration).toEqual({ method: "calendar", numerator: 10, denominator: 30 });
+        expect([r.basePay, r.fixedOvertimeAllowance]).toEqual([100000, 16667]);
+    });
+    test("月給を日割りしない設定・途中で入社していない月は、「日割りする」でも満額", () => {
+        expect(calc(joined, [], joinOpts({ ...on, prorationMethod: "none" })).fixedOvertimeAllowance).toBe(50000);
+        const r = calc(fixed, [], joinOpts(on));
+        expect([r.proration, r.fixedOvertimeAllowance, r.fixedOvertimeProrated]).toEqual([null, 50000, false]);
+    });
+    test("休業が途中で始まる月も、月給と同じく日割りする（まるごと休業の月は払わない・休業の月を日割りしない設定なら満額）", () => {
+        const leaves = (start: string, end: string) => JSON.stringify([{ type: "other", start, end }]);
+        const leaveOpts = (o: Partial<SalaryExtras> = {}): Partial<SalaryExtras> => ({ period: JUNE, periodWorkDays: 22, nonLeaveWorkDays: 11, ...o });
+        const staff = { ...fixed, leave_periods: leaves("2026-06-16", "2026-09-30") };
+        expect(calc(staff, [], leaveOpts()).fixedOvertimeAllowance).toBe(50000);
+        const prorated = calc(staff, [], leaveOpts(on));
+        expect(prorated.proration).toEqual({ method: "workdays", numerator: 11, denominator: 22, reason: "leave" });
+        expect([prorated.basePay, prorated.fixedOvertimeAllowance, prorated.fixedOvertimeProrated]).toEqual([150000, 25000, true]);
+        expect(calc(staff, [], leaveOpts({ ...on, leaveProrationMethod: "none" })).fixedOvertimeAllowance).toBe(50000);
+        const whole = calc({ ...fixed, leave_periods: leaves("2026-05-20", "2026-09-30") }, [], leaveOpts({ ...on, nonLeaveWorkDays: 0 }));
+        expect([whole.fixedOvertimeAllowance, whole.fixedOvertimeMonthly, whole.fixedOvertimeProrated]).toEqual([0, 50000, false]);
+    });
+    test("時給制の人の固定残業代は計算に使わない（月額も 0）", () => {
+        const r = calc({ ...hourly, fixed_overtime_allowance: 20000, fixed_overtime_hours: 10, join_date: "2026-06-16" }, [], joinOpts(on));
+        expect([r.fixedOvertimeAllowance, r.fixedOvertimeMonthly, r.fixedOvertimeProrated]).toEqual([0, 0, false]);
+    });
+    test("確定した給与に、払った固定残業代と月額（applied_fixed_overtime。月変で前の月と比べる）を残す", async () => {
+        const db = new Database(":memory:");
+        for (const s of DB_SCHEMAS) db.exec(s);
+        const asyncDb = { execute: async (sql: string, params: any[]) => db.prepare(sql).run(...params) };
+        await saveSalaryResult(asyncDb, "S001", 2026, 6, calc(joined, [], joinOpts(on)), joined);
+        await saveSalaryResult(asyncDb, "S001", 2026, 7, calculateSalary(fixed, [], extras({ annualWorkDays: 240 }), 2026, 7, company), fixed);
+        expect(db.query("SELECT target_month AS m, fixed_overtime_allowance AS paid, applied_fixed_overtime AS monthly FROM salary_results ORDER BY target_month").all())
+            .toEqual([{ m: 6, paid: 25000, monthly: 50000 }, { m: 7, paid: 50000, monthly: 50000 }]);
+    });
+});
+
 describe("会社都合で休ませた日の休業手当（労働基準法26条）と、労災の待期の休業補償（76条）。平均賃金は averageWage.test.ts", () => {
     const JUNE = { start: "2026-06-01", end: "2026-06-30" };
     const wage = (amountSen: number | null, error: string | null = null) => ({ amountSen, error, manual: false });

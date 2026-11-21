@@ -85,7 +85,7 @@ export default function KenpoBenefitCertManager({ db, staffList }: Props) {
         const lo = dayjs(from).subtract(1, "month");
         const hi = dayjs(to).add(2, "month");
         const r = await db.select<any[]>(
-          `SELECT target_year, target_month, ledger, prescribed_work_days, leave_paid_days FROM salary_results
+          `SELECT target_year, target_month, ledger, prescribed_work_days, leave_paid_days, applied_fixed_overtime FROM salary_results
            WHERE staff_id = ? AND (target_year * 100 + target_month) BETWEEN ? AND ?`,
           [staff.id, lo.year() * 100 + lo.month() + 1, hi.year() * 100 + hi.month() + 1],
         );
@@ -99,6 +99,8 @@ export default function KenpoBenefitCertManager({ db, staffList }: Props) {
             periodStart: ledger.periodStart, periodEnd: ledger.periodEnd, ledger,
             prescribedDays: x.prescribed_work_days === null || x.prescribed_work_days === undefined ? null : Number(x.prescribed_work_days),
             leavePaidDays: x.leave_paid_days === null || x.leave_paid_days === undefined ? null : Number(x.leave_paid_days),
+            // 固定残業代の月額（払った額と同じなら、休業の日も日割りせずに払った。utils/kenpoBenefitCert.ts）
+            fixedOvertimeMonthly: x.applied_fixed_overtime === null || x.applied_fixed_overtime === undefined ? null : Number(x.applied_fixed_overtime),
           });
         }
         setLoaded({

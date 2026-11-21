@@ -27,6 +27,9 @@
  *  - 時間外労働（1日8時間・週40時間超）の割増賃金に当てる定額の手当として、時間外労働の有無にかかわらず払う
  *  - 労働基準法37条で計算した時間外労働の割増賃金（25%・月60時間超は50%）が固定残業代を超えたら、差額を「超過分」として足して払う
  *  - 法定内残業・休日労働・深夜労働の手当は、固定残業代とは別に払う
+ *  - 計算期間の途中で入社・退職した月と、休業が途中で始まる・終わる月に日割りするかは、会社の賃金規程で決める（法律では決まっていない）。
+ *    給与規定グループの「固定残業代も日割りする」なら、月給と同じ割合で日割りし（extras.fixedOvertimeProration）、
+ *    法定の計算額が日割りした固定残業代を上回る分を超過分として払う。まるごと休業の月は、設定にかかわらず払わない
  *  出典：厚生労働省「固定残業代を支払うこととすれば、残業や休日勤務をさせても別途に残業代を支払わなくてよいでしょうか？」
  *        https://www.startup-roudou.mhlw.go.jp/qa/zigyonushi/chingin/q11.html
  *        （医療法人康心会事件 最判平29.7.7、平29.7.31 基発0731第27号：固定残業代が37条で計算した額を下回るときは差額を払う）
@@ -196,6 +199,11 @@ export interface SalaryExtras {
   collectRetirementMonth?: boolean;
   /** 計算期間の途中で入社・退職した人の日割り（給与規定グループの設定。省略時はしない） */
   prorationMethod?: ProrationMethod;
+  /**
+   * 固定残業代も、月給と同じく日割りする（給与規定グループの設定。省略時はしない＝満額を払う）。
+   * 入社・退職の月（prorationMethod）と、休業が途中で始まる・終わる月（leaveProrationMethod）の両方に、月給と同じ割合で使う
+   */
+  fixedOvertimeProration?: boolean;
   /** 月給制の人の欠勤控除のしかた（給与規定グループの設定。省略時は計算期間の所定労働日数で割る） */
   absenceDeductionMethod?: AbsenceDeductionMethod;
   /** 月給制・日給制の人の遅刻・早退・中抜けの控除のしかた（給与規定グループの設定。省略時は引かない） */
@@ -310,9 +318,19 @@ export interface SalaryResult {
   standardOvertimePay: number;
   highOvertimePay: number;
   holidayWorkPay: number;         // 法定休日労働の手当（35%増）
-  /** 固定残業代（月給制で設定がある人。なければ 0）。standardOvertimePay・highOvertimePay は、これに当てる法定の計算額になる */
+  /**
+   * 固定残業代（月給制で設定がある人。なければ 0。日割りした月は日割りした額、まるごと休業の月は 0）。
+   * standardOvertimePay・highOvertimePay は、これに当てる法定の計算額になる
+   */
   fixedOvertimeAllowance: number;
-  /** 固定残業代が何時間分か（表示用） */
+  /**
+   * 固定残業代の月額（日割り・休業で減らす前の額。月給制でない人・設定がない人は 0）。確定した結果に applied_fixed_overtime として残し、
+   * 月変・算定で前の月と比べる（日割りした入社の月の次の月を、固定残業代が上がった月と見まちがえないように）
+   */
+  fixedOvertimeMonthly: number;
+  /** 固定残業代を日割りした（給与規定グループの「固定残業代も日割りする」で、入社・退職の月か、休業が途中で始まる・終わる月） */
+  fixedOvertimeProrated: boolean;
+  /** 固定残業代が何時間分か（表示用。日割りしても、決めた時間のまま） */
   fixedOvertimeHours: number;
   /** 時間外労働の割増賃金（法定の計算額）が固定残業代を超えた差額（固定残業代の超過分として払う） */
   fixedOvertimeExcess: number;
@@ -816,12 +834,12 @@ export const saveSalaryResult = async (
       total_work_hours, total_overtime_hours, total_night_hours,
       standard_overtime_hours, high_overtime_hours,
       standard_overtime_pay, high_overtime_pay, statutory_overtime_pay,
-      fixed_overtime_allowance, fixed_overtime_excess, non_fixed_earnings,
+      fixed_overtime_allowance, applied_fixed_overtime, fixed_overtime_excess, non_fixed_earnings,
       absence_deduction, prescribed_work_days, leave_paid_days, tardy_deduction, unpaid_leave_deduction, flex_carry_hours, flex_month,
       total_earnings, taxable_amount, non_remuneration, in_kind, in_kind_taxable, in_kind_emp, in_kind_detail,
       health_insurance, nursing_insurance, child_support, welfare_pension, emp_insurance, kokuho_premium,
       social_ins_total, income_tax, flat_tax_reduction, resident_tax, year_end_adjustment, net_pay, ledger
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(staff_id, target_year, target_month) DO UPDATE SET
       applied_base_wage = excluded.applied_base_wage,
       applied_dependents = excluded.applied_dependents,
@@ -834,6 +852,7 @@ export const saveSalaryResult = async (
       high_overtime_pay = excluded.high_overtime_pay,
       statutory_overtime_pay = excluded.statutory_overtime_pay,
       fixed_overtime_allowance = excluded.fixed_overtime_allowance,
+      applied_fixed_overtime = excluded.applied_fixed_overtime,
       fixed_overtime_excess = excluded.fixed_overtime_excess,
       non_fixed_earnings = excluded.non_fixed_earnings,
       absence_deduction = excluded.absence_deduction,
@@ -872,7 +891,8 @@ export const saveSalaryResult = async (
     result.totalWorkHours, result.totalOvertimeHours, result.totalNightHours,
     result.standardPremiumHours, result.highPremiumHours,
     result.standardOvertimePay, result.highOvertimePay, result.statutoryOvertimePay,
-    result.fixedOvertimeAllowance, result.fixedOvertimeExcess, result.nonFixedEarnings,
+    // 固定残業代：払った額（日割りした月は日割りした額）と、月額（日割り・休業で減らす前の額。月変・算定で前の月と比べる。utils/zuiji.ts）
+    result.fixedOvertimeAllowance, result.fixedOvertimeMonthly, result.fixedOvertimeExcess, result.nonFixedEarnings,
     // 欠勤控除の額と計算期間の所定労働日数（算定・月変の支払基礎日数に使う。utils/santei.ts）
     result.absenceDeduction, result.periodWorkDays,
     // 休業の日がある月に月給を払った日数（日割りの日数。まるごと休業の月は 0。算定・月変の支払基礎日数に使う。utils/leaveOfAbsence.ts）
@@ -2132,10 +2152,12 @@ export const calculateSalary = (
   const holidayLine = applyRounding(holidayWorkPay || 0, roundOvertime);
   const nightLine = applyRounding(nightPay || 0, roundOvertime);
 
-  // 固定残業代（月給制の人だけ）：時間外労働の割増賃金の代わりに定額を払い、法定の計算額が上回る分だけ足す（まるごと休業の月は払わない）
-  const fixedOvertimeAllowance = staff.wage_type === 'monthly' && !leaveFull
-    ? Math.max(0, Math.floor(Number(staff.fixed_overtime_allowance) || 0))
-    : 0;
+  // 固定残業代（月給制の人だけ）：時間外労働の割増賃金の代わりに定額を払い、法定の計算額が上回る分だけ足す（まるごと休業の月は払わない）。
+  // 給与規定グループの「固定残業代も日割りする」なら、入社・退職の月と、休業が途中で始まる・終わる月は、月給と同じ割合で日割りする
+  // （1円未満は切り上げ。日割りしても、法定の計算額が日割りした固定残業代を上回る分は、超過分として払う）
+  const fixedOvertimeMonthly = staff.wage_type === 'monthly' ? Math.max(0, Math.floor(Number(staff.fixed_overtime_allowance) || 0)) : 0;
+  const fixedOvertimeProrated = fixedOvertimeMonthly > 0 && !leaveFull && !!extras.fixedOvertimeProration && !!proration;
+  const fixedOvertimeAllowance = leaveFull ? 0 : fixedOvertimeProrated ? prorate(fixedOvertimeMonthly, proration) : fixedOvertimeMonthly;
   const fixedOvertimeHours = fixedOvertimeAllowance > 0 ? Math.max(0, Number(staff.fixed_overtime_hours) || 0) : 0;
   const fixedOvertimeExcess = fixedOvertimeAllowance > 0 ? Math.max(0, overtimeLegalTotal - fixedOvertimeAllowance) : 0;
   // 時間外労働の手当として払う額（固定残業代がある人は、固定残業代 ＋ 超過分）と、休日・深夜の手当
@@ -2277,6 +2299,8 @@ export const calculateSalary = (
     highOvertimePay: highLine,
     holidayWorkPay: holidayLine,
     fixedOvertimeAllowance,
+    fixedOvertimeMonthly,
+    fixedOvertimeProrated,
     fixedOvertimeHours,
     fixedOvertimeExcess,
     isOvertimeEligible,

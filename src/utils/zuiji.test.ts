@@ -107,7 +107,7 @@ describe("変動月の候補を探す", () => {
     });
     describe("固定残業代の追加・廃止・金額の変更も、固定的賃金の変動として探す", () => {
         const pay = (m: number, base: number, fixed: number | null, total = base + (fixed ?? 0)) =>
-            ({ ...salary(2026, m, base, total), fixed_overtime_allowance: fixed });
+            ({ ...salary(2026, m, base, total), applied_fixed_overtime: fixed });
         test("固定残業代を新しく払い始めた月（基本給は同じ）→ 上がった", () => {
             const salaries = [pay(3, 300000, 0), pay(4, 300000, 60000), pay(5, 300000, 60000), pay(6, 300000, 60000)];
             const [c, ...rest] = findZuijiCandidates([staff], 2026, [group], salaries, []);
@@ -127,6 +127,20 @@ describe("変動月の候補を探す", () => {
         test("固定残業代がわからない（空の）月とは比べない", () => {
             const salaries = [pay(3, 300000, null), pay(4, 300000, 60000), pay(5, 300000, 60000)];
             expect(findZuijiCandidates([staff], 2026, [group], salaries, [])).toHaveLength(0);
+        });
+        test("日割りした月・まるごと休業の月も、固定残業代の月額（日割りする前の額）で比べるので、次の月を変動月にしない", () => {
+            const salaries = [
+                // 4月：日割りして 30,000円を払った（月額は 60,000円）
+                { ...pay(4, 300000, 60000, 180000), fixed_overtime_allowance: 30000 },
+                pay(5, 300000, 60000), pay(6, 300000, 60000),
+                // 7月：まるごと休業で払わなかった（月額は 60,000円のまま）
+                { ...pay(7, 300000, 60000, 0), fixed_overtime_allowance: 0 },
+                pay(8, 300000, 60000),
+            ];
+            expect(findZuijiCandidates([staff], 2026, [group], salaries, [])).toHaveLength(0);
+            // 月額が変わった月は、いままでどおり変動月にする
+            const raised = [...salaries, pay(9, 300000, 70000)];
+            expect(findZuijiCandidates([staff], 2026, [group], raised, [])).toMatchObject([{ month: 9, direction: "up", fixedOvertimeBefore: 60000, fixedOvertimeAfter: 70000 }]);
         });
         test("基本給と固定残業代が同じ月に変わったら、合計の上がり下がりで向きを決める", () => {
             // 基本給 +20,000円・固定残業代 −30,000円 → 合計 −10,000円で「下がった」

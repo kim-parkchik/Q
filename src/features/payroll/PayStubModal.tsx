@@ -40,6 +40,14 @@ export default function PayStubModal(props: Props) {
   // 現物で払った報酬（utils/genbutsu.ts）。価額を出せない理由があれば確定できない
   const inKindProblems = salary.inKind?.problems ?? [];
   const inKindMonthLabel = salary.inKind ? salary.inKind.month.replace(/^(\d+)-0?(\d+)$/, "$1年$2月分") : "";
+  // 日割りの説明：日割りしたもの（固定残業代は、給与規定グループの「固定残業代の日割り」で日割りした月だけ）と、日割りしていないもの
+  const joinItems = (items: string[]) => (items.length === 2 ? items.join("と") : items.join("・"));
+  const proratedItems = joinItems(["月給", ...(salary.customEarningLines.length > 0 ? ["固定の支給項目"] : []), ...(salary.fixedOvertimeProrated ? ["固定残業代"] : [])]);
+  const notProrated = [
+    ...(salary.fixedOvertimeAllowance > 0 && !salary.fixedOvertimeProrated ? ["固定残業代"] : []),
+    ...(salary.commutePay > 0 ? ["通勤手当"] : []),
+  ];
+  const notProratedText = notProrated.length > 0 ? `${notProrated.join("・")}は日割りしていません。` : "";
 
   const padRows = (current: number, target: number) =>
   Array.from({ length: Math.max(0, target - current) }, (_, i) => (
@@ -221,7 +229,7 @@ export default function PayStubModal(props: Props) {
                 {salary.leave.full
                   ? `計算期間がまるごと休業（${names}）なので、月給${items}・固定残業代・通勤手当（月額）は払いません。`
                   : salary.proration?.reason === "leave"
-                    ? `休業（${names}）の日が${salary.leave.days}日あるため、月給${items.replace("・", "と")}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（休業していない日 ${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。固定残業代・通勤手当は日割りしていません。`
+                    ? `休業（${names}）の日が${salary.leave.days}日あるため、${proratedItems}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（休業していない日 ${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。${notProratedText}`
                     : !salary.prorationNote
                       ? `休業（${names}）の日が${salary.leave.days}日ありますが、給与規定グループの「休業の月の日割り」が「${LEAVE_PRORATION_METHOD_LABELS.none}」なので、月給を全額払います。`
                       : null}
@@ -262,7 +270,7 @@ export default function PayStubModal(props: Props) {
           {((salary.proration && salary.proration.reason !== "leave") || salary.prorationNote) && (
             <div style={{ marginTop: 10, fontSize: 12, color: salary.prorationNote ? "#b45309" : "#475569" }}>
               {salary.proration && salary.proration.reason !== "leave"
-                ? `計算期間の途中で入社・退職したため、月給${salary.customEarningLines.length > 0 ? "と固定の支給項目" : ""}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。固定残業代・通勤手当は日割りしていません。`
+                ? `計算期間の途中で入社・退職したため、${proratedItems}を${salary.proration.method === "workdays" ? "所定労働日数" : "暦日数"}で日割りしました（${salary.proration.numerator}日 ÷ ${salary.proration.denominator}日、1円未満切り上げ）。${notProratedText}`
                 : `⚠ ${salary.prorationNote}`}
             </div>
           )}
@@ -484,7 +492,7 @@ export default function PayStubModal(props: Props) {
                   {/* 固定残業代がある人は、時間外労働の割増賃金の代わりに固定残業代（と超過分）を払う */}
                   {salary.fixedOvertimeAllowance > 0 ? (
                     <>
-                      <tr><td style={S.tdS}>固定残業代{salary.fixedOvertimeHours > 0 && `(${fmtH(salary.fixedOvertimeHours)}分)`}</td><td style={S.rtdS}>¥{salary.fixedOvertimeAllowance.toLocaleString()}</td></tr>
+                      <tr><td style={S.tdS}>固定残業代{salary.fixedOvertimeHours > 0 ? `(${fmtH(salary.fixedOvertimeHours)}分${salary.fixedOvertimeProrated ? "を日割り" : ""})` : salary.fixedOvertimeProrated ? "(日割り)" : ""}</td><td style={S.rtdS}>¥{salary.fixedOvertimeAllowance.toLocaleString()}</td></tr>
                       {salary.fixedOvertimeExcess > 0 && (
                         <tr><td style={S.tdS}>時間外手当(固定残業代の超過分)</td><td style={S.rtdS}>¥{salary.fixedOvertimeExcess.toLocaleString()}</td></tr>
                       )}
@@ -668,7 +676,8 @@ export default function PayStubModal(props: Props) {
           {salary.fixedOvertimeAllowance > 0 && (
             <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
               時間外労働 {fmtH(salary.standardPremiumHours + salary.highPremiumHours)}
-              （法定の割増賃金 ¥{(salary.standardOvertimePay + salary.highOvertimePay).toLocaleString()}）は、固定残業代 ¥{salary.fixedOvertimeAllowance.toLocaleString()} に含みます。
+              （法定の割増賃金 ¥{(salary.standardOvertimePay + salary.highOvertimePay).toLocaleString()}）は、固定残業代 ¥{salary.fixedOvertimeAllowance.toLocaleString()}
+              {salary.fixedOvertimeProrated ? `（月額 ¥${salary.fixedOvertimeMonthly.toLocaleString()} を日割りした額）に含みます。` : " に含みます。"}
               {salary.fixedOvertimeExcess > 0 && `固定残業代を超えた ¥${salary.fixedOvertimeExcess.toLocaleString()} を、超過分として支給します。`}
               <span style={{ color: "#666" }}>法定内残業・休日出勤・深夜の手当は、固定残業代とは別に支給します。</span>
             </div>

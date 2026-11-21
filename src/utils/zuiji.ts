@@ -227,9 +227,11 @@ export interface FixedWageChange {
 /**
  * その月に支払った給与で、固定的賃金（基本給と固定残業代）が前の月から変わったか（変わっていなければ null）
  * 基本給は、どちらかの月がわからない・0 の月とは比べない。固定残業代は、わからない（空の）月とは比べない
+ * どちらも、確定したときの月額（applied_base_wage・applied_fixed_overtime。日割り・休業で減らす前の額）で比べる
+ * （入社した月に日割りした・休業の月に払わなかった固定残業代を、次の月に上がったと見まちがえないように）
  */
 export const fixedWageChange = (staff: any, year: number, month: number, salaries: SalaryRecord[]): FixedWageChange | null => {
-  const valueOf = (y: number, m: number, key: 'applied_base_wage' | 'fixed_overtime_allowance') => {
+  const valueOf = (y: number, m: number, key: 'applied_base_wage' | 'applied_fixed_overtime') => {
     const s = salaries.find((r) => String(r.staff_id) === String(staff.id) && Number(r.target_year) === y && Number(r.target_month) === m);
     const v = s?.[key];
     return v === null || v === undefined ? null : Number(v);
@@ -238,8 +240,8 @@ export const fixedWageChange = (staff: any, year: number, month: number, salarie
   const baseBefore = valueOf(prev.year, prev.month, 'applied_base_wage');
   const baseAfter = valueOf(year, month, 'applied_base_wage');
   const baseChanged = baseBefore !== null && baseAfter !== null && baseBefore > 0 && baseAfter > 0 && baseBefore !== baseAfter;
-  const fixedBefore = valueOf(prev.year, prev.month, 'fixed_overtime_allowance');
-  const fixedAfter = valueOf(year, month, 'fixed_overtime_allowance');
+  const fixedBefore = valueOf(prev.year, prev.month, 'applied_fixed_overtime');
+  const fixedAfter = valueOf(year, month, 'applied_fixed_overtime');
   const fixedChanged = fixedBefore !== null && fixedAfter !== null && fixedBefore !== fixedAfter;
   // 現物の固定的な額：その月が1か月分そろっていれば、その前の1か月分そろった月（給与がある月を12か月まで）と比べる
   const salaryOf = (y: number, m: number) =>

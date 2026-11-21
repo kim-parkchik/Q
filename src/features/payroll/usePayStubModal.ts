@@ -133,10 +133,11 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       if (!db) return;
       try {
         const rows = await db.select(
-          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, absence_deduction_method, tardy_deduction_method, flex_rule, payment_day, premium_rates FROM payroll_groups WHERE id = ?",
+          "SELECT tax_calc_method, social_ins_collection, is_next_month, proration_method, leave_proration_method, fixed_overtime_proration, absence_deduction_method, tardy_deduction_method, flex_rule, payment_day, premium_rates FROM payroll_groups WHERE id = ?",
           [staff.payroll_group_id || 1]
         ) as {
           tax_calc_method?: string; social_ins_collection?: string; is_next_month?: number; proration_method?: string; leave_proration_method?: string;
+          fixed_overtime_proration?: number | null;
           absence_deduction_method?: string; tardy_deduction_method?: string; flex_rule?: string | null; payment_day?: number | null;
           premium_rates?: string | null;
         }[];
@@ -150,6 +151,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
           prorationMethod: toProrationMethod(rows?.[0]?.proration_method),
           // 休業の月の日割り（初めは所定労働日数で日割り。utils/leaveOfAbsence.ts）
           leaveProrationMethod: toLeaveProrationMethod(rows?.[0]?.leave_proration_method),
+          // 固定残業代も月給と同じく日割りする（入社・退職の月と休業の月。初めはしない）
+          fixedOvertimeProration: Number(rows?.[0]?.fixed_overtime_proration) === 1,
           absenceDeductionMethod: toAbsenceDeductionMethod(rows?.[0]?.absence_deduction_method),
           tardyDeductionMethod: toTardyDeductionMethod(rows?.[0]?.tardy_deduction_method),
           // フレックスタイム制の決まり（utils/flexTime.ts）

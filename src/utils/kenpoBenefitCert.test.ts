@@ -54,6 +54,15 @@ describe("賃金支給状況", () => {
     // 申請期間の外の有給（11月5日）は書かない
     expect(r.rows.some((x) => x.label === "有給休暇")).toBe(false);
   });
+  test("固定残業代：日割りせずに満額を払った月（給与規定グループの「固定残業代の日割り」が「日割りしない」）は、休業の日の分も払っているので書く", () => {
+    const input = (paid: number) => base({
+      leavePeriods: [{ type: "other", start: "2026-11-09", end: "2026-11-30" }],
+      salaries: [sal("2026-11-01", "2026-11-30", ledger([{ name: "基本給", amount: 75000 }, { name: "固定残業代", amount: paid }]), { leavePaidDays: 5, fixedOvertimeMonthly: 40000 })],
+    });
+    expect(buildBenefitCert(input(40000)).rows.map((x) => [x.amount, x.label, x.checked])).toEqual([[40000, "固定残業代（休業の日も日割りせずに払った）", true]]);
+    // 日割りした月（払った 10,000円 ＜ 月額 40,000円）は、休業の日の分を払っていないので、初めは書かない
+    expect(buildBenefitCert(input(10000)).rows.map((x) => [x.amount, x.label, x.checked])).toEqual([[10000, "固定残業代", false]]);
+  });
   test("月給制・休業の月の日割りを「しない」：休業の日も払った基本給と手当を書く。有給は 基本給 ÷ 所定労働日数 を1日分にする", () => {
     const r = buildBenefitCert(base({
       leaveProration: "none",

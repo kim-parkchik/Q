@@ -35,6 +35,8 @@
  *     会社に定時決定の年ごとの扱い（shoyo_houshu）を足す
  *   ・v13: 従業員に曜日ごとの所定労働時間（weekday_hours）、勤怠にその日だけ直した所定労働時間（attendance.scheduled_hours）を足す
  *   ・v14: 拠点に週44時間の特例の事業（branches.weekly44_business）を足す
+ *   ・v15: 給与規定グループに固定残業代も日割りするか（payroll_groups.fixed_overtime_proration）、確定した給与に固定残業代の月額
+ *     （salary_results.applied_fixed_overtime。いままでの給与は、払った固定残業代を入れる）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -192,6 +194,19 @@ export const MIGRATIONS: Migration[] = [
     description: "拠点に、週44時間の特例（特例措置対象事業場）の事業の列を足す",
     up: async (db) => {
       await addColumnIfMissing(db, "branches", "weekly44_business", "INTEGER");
+    },
+  },
+  {
+    version: 15,
+    description: "給与規定グループに、固定残業代も日割りするかの列を、確定した給与に、固定残業代の月額（日割りする前の額）の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "payroll_groups", "fixed_overtime_proration", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "salary_results", "applied_fixed_overtime", "INTEGER");
+      // いままでは固定残業代を日割りしていなかったので、払った固定残業代を月額とする（月変で前の月と比べる）
+      const cols = await db.select<{ name: string }[]>("PRAGMA table_info(salary_results)");
+      if (cols.some((c) => c.name === "fixed_overtime_allowance") && cols.some((c) => c.name === "applied_fixed_overtime")) {
+        await db.execute("UPDATE salary_results SET applied_fixed_overtime = fixed_overtime_allowance WHERE applied_fixed_overtime IS NULL");
+      }
     },
   },
 ];

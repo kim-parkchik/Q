@@ -105,7 +105,7 @@ export function useSanteiManager(db: Database, staffList: any[], onDataChange: (
         const salaries = await db.select<any[]>(
           // 欠勤控除の額・計算期間の所定労働日数は、月給制の人の支払基礎日数に使う（utils/santei.ts の monthFigures）
           "SELECT staff_id, target_year, target_month, total_earnings, non_remuneration, in_kind, in_kind_detail, absence_deduction, unpaid_leave_deduction, prescribed_work_days, leave_paid_days, " +
-          "applied_base_wage, fixed_overtime_allowance FROM salary_results " +
+          "applied_base_wage, applied_fixed_overtime FROM salary_results " +
           "WHERE (target_year = ? AND target_month >= 7) OR (target_year = ? AND target_month <= 6)",
           [year - 1, year]
         );

@@ -62,6 +62,8 @@ export default function PayrollGroupTab({ cm }: Props) {
         setPgProrationMethod,
         pgLeaveProrationMethod,
         setPgLeaveProrationMethod,
+        pgFixedOvertimeProration,
+        setPgFixedOvertimeProration,
         pgShutdownRate,
         setPgShutdownRate,
         pgAbsenceDeductionMethod,
@@ -116,6 +118,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                                         / 社会保険料: {SOCIAL_INS_COLLECTION_LABELS[toSocialInsCollection(pg.social_ins_collection)]}
                                         / 途中入社・退職: {PRORATION_METHOD_LABELS[toProrationMethod(pg.proration_method)]}
                                         / 休業の月: {LEAVE_PRORATION_METHOD_LABELS[toLeaveProrationMethod(pg.leave_proration_method)]}
+                                        / 固定残業代: {Number(pg.fixed_overtime_proration) === 1 ? "月給と同じく日割りする" : "日割りしない"}
                                         / 休業手当: 平均賃金の{toShutdownRate(pg.shutdown_allowance_rate)}%
                                         / 欠勤控除: {ABSENCE_DEDUCTION_METHOD_LABELS[toAbsenceDeductionMethod(pg.absence_deduction_method)]}
                                         / 遅刻・早退・中抜け: {TARDY_DEDUCTION_METHOD_LABELS[toTardyDeductionMethod(pg.tardy_deduction_method)]}
@@ -255,7 +258,7 @@ export default function PayrollGroupTab({ cm }: Props) {
                         日割りのしかたは法律では決まっていないので、会社の賃金規程（就業規則）に合わせて選んでください。
                         厚生労働省のモデル就業規則（第46条第2項）は「当該計算期間の所定労働日数を基準に日割計算」です。
                         月給制の人の基本給と、給与項目のうち「固定（毎月同額）」の支給項目を日割りします（1円未満は切り上げ）。
-                        固定残業代・通勤手当・「変動」の項目は日割りしないので、規程で日割りするなら金額を直してください。
+                        固定残業代は、下の「固定残業代の日割り」で選びます。通勤手当・「変動」の項目は日割りしないので、規程で日割りするなら金額を直してください。
                         所定労働日数は、会社カレンダー（従業員の出勤曜日）から数えます。
                     </p>
 
@@ -272,8 +275,28 @@ export default function PayrollGroupTab({ cm }: Props) {
                     <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
                         産休・育休・介護休業などの休業の日は働いていないので、その日の分の給与は払いません（従業員の画面の「休業・休職」で期間を入れます）。
                         計算期間がまるごと休業の月は、この設定にかかわらず、月給・固定の支給項目・固定残業代・通勤手当（月額）を払いません。
-                        途中で始まる・終わる月は、月給と固定の支給項目を、ここで選んだしかたで日割りします（1円未満は切り上げ。入社・退職の月と同じく、固定残業代・通勤手当は日割りしません）。
+                        途中で始まる・終わる月は、月給と固定の支給項目を、ここで選んだしかたで日割りします（1円未満は切り上げ。入社・退職の月と同じく、通勤手当は日割りしません。
+                        固定残業代は、下の「固定残業代の日割り」で選びます）。
                         日割りした日数は、算定・月変の支払基礎日数にもなります。
+                    </p>
+
+                    {/* 固定残業代の日割り（入社・退職の月と、休業が途中で始まる・終わる月。utils/calcSalary.ts の fixedOvertimeProration） */}
+                    <label style={miniLabelStyle}>固定残業代の日割り（入社・退職の月と、休業が途中で始まる・終わる月）</label>
+                    <select
+                        value={pgFixedOvertimeProration ? "prorate" : "full"}
+                        onChange={e => setPgFixedOvertimeProration(e.target.value === "prorate")}
+                        style={{ ...inputStyle, marginBottom: "6px" }}
+                        data-setting="fixed-overtime-proration"
+                    >
+                        <option value="full">日割りしない（満額を払う）</option>
+                        <option value="prorate">月給と同じく日割りする</option>
+                    </select>
+                    <p style={{ fontSize: "11px", color: "#94a3b8", margin: "0 0 20px 0", lineHeight: 1.5 }}>
+                        固定残業代を日割りするかは法律では決まっていないので、会社の賃金規程（就業規則）に合わせて選んでください。
+                        「日割りする」にすると、入社・退職の月は上の「途中で入社・退職した人の月給」、休業が途中で始まる・終わる月は「休業・休職が始まる・終わる月の月給」と
+                        同じしかた・同じ日数で日割りします（1円未満は切り上げ。月給を日割りしない設定の月は、固定残業代も日割りしません）。
+                        日割りした月も、時間外労働の割増賃金（法律の計算額）が日割りした固定残業代を超えたら、その差額を超過分として払います。
+                        計算期間がまるごと休業の月は、この設定にかかわらず払いません。
                     </p>
 
                     {/* 残業代の割増率（就業規則・36協定で決めた率。法律の率より低くはできない。utils/premiumRates.ts） */}

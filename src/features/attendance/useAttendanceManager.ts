@@ -719,6 +719,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         prorationMethod: toProrationMethod(currentGroup?.proration_method),
         // 休業の月の日割り（給与規定グループの設定。初めは所定労働日数で日割り）
         leaveProrationMethod: toLeaveProrationMethod(currentGroup?.leave_proration_method),
+        // 固定残業代も月給と同じく日割りする（給与規定グループの設定。初めはしない）
+        fixedOvertimeProration: Number(currentGroup?.fixed_overtime_proration) === 1,
         // 月給制の人の欠勤控除（給与規定グループの設定。計算期間の所定労働日数か、1年間の月平均で割る）
         absenceDeductionMethod: toAbsenceDeductionMethod(currentGroup?.absence_deduction_method),
         // 月給制・日給制の人の遅刻・早退・中抜けの控除（給与規定グループの設定。初めは引かない）
