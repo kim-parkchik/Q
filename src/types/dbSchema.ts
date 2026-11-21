@@ -85,7 +85,8 @@ export const DB_SCHEMAS = [
     koyo_office_number TEXT,  -- 雇用保険適用事業所番号（この拠点が別の適用事業所のときだけ。空なら会社の番号）
     koyo_hello_work TEXT,     -- 雇用保険の届書を出すハローワーク（別の適用事業所のときだけ。空なら会社の設定）
     rousai_business TEXT,     -- 労災保険率表の事業の種類の番号（別の労働保険番号のときだけ。空なら会社の設定）
-    rousai_rate REAL          -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ）
+    rousai_rate REAL,         -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ）
+    weekly44_business INTEGER -- 週44時間の特例の事業（労働基準法 別表第一の号 8・10・13・14。NULL なら週40時間。utils/weekly44.ts）
   );`,
 
   // 3. カレンダーパターン

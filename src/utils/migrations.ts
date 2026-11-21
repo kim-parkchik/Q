@@ -34,6 +34,7 @@
  *   ・v12: 賞与に年4回以上払う賞与の印（bonus_settings.shaho_houshu）、確定した賞与に社会保険の報酬として扱ったか（bonus_results.shaho_houshu）、
  *     会社に定時決定の年ごとの扱い（shoyo_houshu）を足す
  *   ・v13: 従業員に曜日ごとの所定労働時間（weekday_hours）、勤怠にその日だけ直した所定労働時間（attendance.scheduled_hours）を足す
+ *   ・v14: 拠点に週44時間の特例の事業（branches.weekly44_business）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -184,6 +185,13 @@ export const MIGRATIONS: Migration[] = [
     up: async (db) => {
       await addColumnIfMissing(db, "staff", "weekday_hours", "TEXT");
       await addColumnIfMissing(db, "attendance", "scheduled_hours", "REAL");
+    },
+  },
+  {
+    version: 14,
+    description: "拠点に、週44時間の特例（特例措置対象事業場）の事業の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "branches", "weekly44_business", "INTEGER");
     },
   },
 ];

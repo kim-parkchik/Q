@@ -22,6 +22,8 @@ import { LEGAL_PREMIUM_RATES, parsePremiumRates, premiumRateProblems, stringifyP
 import { parseKyotei36Settings, type Kyotei36Settings } from "../../utils/kyotei36";
 import { toLeaveProrationMethod, type LeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { SHUTDOWN_ALLOWANCE_MIN_RATE, toShutdownRate } from "../../utils/averageWage";
+import { branchWorkerCount, parseWeekly44Business } from "../../utils/weekly44";
+import { WEEKLY_44 } from "../../constants/workHours";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -89,6 +91,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
 
     // --- 支店管理用ステート ---
     const [branches, setBranches] = useState<any[]>([]);
+    // 拠点ごとの、在籍している人（役員を除く）の数（週44時間の特例は、常時10人未満の事業場だけ。utils/weekly44.ts）
+    const [branchWorkers, setBranchWorkers] = useState<Record<number, number>>({});
     const [editingBranchId, setEditingBranchId] = useState<number | null>(null);
     const [bName, setBName] = useState("");
     const [bZip, setBZip] = useState("");
@@ -226,6 +230,13 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             }
             const resB = await db.select<any[]>("SELECT * FROM branches ORDER BY id ASC");
             setBranches(resB);
+            try {
+                const people = await db.select<any[]>("SELECT branch_id, status, is_executive FROM staff");
+                setBranchWorkers(Object.fromEntries(resB.map(b => [Number(b.id), branchWorkerCount(people ?? [], b.id)])));
+            } catch (e) {
+                console.error("拠点の人数の読み込みエラー:", e);
+                setBranchWorkers({});
+            }
             const head = resB.find(b => b.id === 1);
             if (head) setHeadPref(head.prefecture || "");
 
@@ -428,6 +439,21 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
             toast.success("給与規定グループを削除しました");
         } catch (e) {
             dialog.error("削除に失敗しました");
+        }
+    };
+
+    /**
+     * 拠点の週44時間の特例の事業（労働基準法 別表第一の号。null なら特例を使わない）を、選んだときに保存する（本店も支店も、支店リストで選ぶ）
+     */
+    const saveBranchWeekly44 = async (id: number, business: number | null) => {
+        if (!db) return;
+        try {
+            await db.execute("UPDATE branches SET weekly44_business = ? WHERE id = ?", [parseWeekly44Business(business), id]);
+            setBranches(prev => prev.map(b => (Number(b.id) === Number(id) ? { ...b, weekly44_business: parseWeekly44Business(business) } : b)));
+            toast.success(business ? `週${WEEKLY_44.weekly}時間の特例にしました` : "週44時間の特例を使わないことにしました");
+        } catch (e) {
+            console.error(e);
+            dialog.error(`週44時間の特例を保存できませんでした。\n${e}`);
         }
     };
 
@@ -778,6 +804,8 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         savePayrollGroup,
         deletePayrollGroup,
         saveBranch,
+        saveBranchWeekly44,
+        branchWorkers,
         resetBranchForm,
         startEditBranch,
         deleteBranch,

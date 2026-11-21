@@ -69,6 +69,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     prefecture: Master.toKenpoPrefName(staff.kenpoPrefecture ?? staff.prefecture) ?? "",
     // 現物給与の価額は、働く場所（拠点）の都道府県
     workPrefecture: Master.toKenpoPrefName(staff.prefecture) ?? "",
+    // 拠点の週44時間の特例（給与一覧で拠点から決める。utils/weekly44.ts）
+    weekly44Business: staff.weekly44Business ?? null,
     dependents: Number(staff.dependents) || 0,
     customItems: [],
   });

@@ -127,6 +127,7 @@ import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
 import { SPECIAL_LEAVE_HALF, specialLeaveHoursOf, specialLeaveOfRow } from './specialLeave';
 import { averageDailyHoursOf, baseHoursOf, dayScheduledHours, hasWeekdayHours, scheduledHoursMissing, toHours } from './scheduledHours';
+import { weeklyLegalHoursFor } from './weekly44';
 import { DEFAULT_FLEX_RULE, isFlexStaff, settleFlex, type FlexPeriodContext, type FlexRule, type FlexSettlement } from './flexTime';
 import { healthPremiumsOf, type HealthInsurer, type InsurerType, type UnionRate } from './healthInsurer';
 import { salaryLedgerOf } from './legalBooks';
@@ -184,6 +185,11 @@ export interface SalaryExtras {
    * 契約曜日の所定労働日ごとに曜日の時間を足す。utils/scheduledHours.ts の sumScheduledHours）。なければ 1年間の所定労働日数 × 1日平均所定労働時間
    */
   annualWorkHours?: number | null;
+  /**
+   * 拠点の週44時間の特例の事業（労働基準法 別表第一の号。null・省略なら週40時間。utils/weekly44.ts）。
+   * 特例の事業場は週44時間を超えた時間を時間外労働にする（清算期間が1か月を超えるフレックスタイム制の人は40時間）
+   */
+  weekly44Business?: number | null;
   /** 社会保険料の徴収（給与規定グループの設定。省略時は当月徴収） */
   socialInsCollection?: SocialInsCollection;
   /** 翌月徴収で、退職する月の給与から、その月の分の保険料も引く（この後に給与を払わないとき） */
@@ -272,6 +278,12 @@ export interface SalaryResult {
   scheduledHoursVary: boolean;
   /** 日給を時間あたりにした時間（1日の所定労働時間。曜日で違う人は1週間の1日平均所定労働時間。労基則19条1項2号） */
   dailyRateHours: number;
+  /** 週の法定労働時間（40時間。拠点が週44時間の特例の事業場なら44時間。フレックスタイム制は法定の総枠に使う。utils/weekly44.ts） */
+  weeklyLegalHours: number;
+  /** 週44時間の特例を使ったか */
+  weekly44: boolean;
+  /** 拠点は特例の事業場だが、清算期間が1か月を超えるフレックスタイム制なので40時間で数えた（労基則25条の2 4項） */
+  weekly44FlexIgnored: boolean;
   basePay: number;
   /** 欠勤控除（月給制の人だけ。給与規定グループの設定で計算する） */
   absenceDeduction: number;
@@ -1497,7 +1509,10 @@ export const calculateSalary = (
   const sorted = [...attendanceData].sort((a, b) => a.work_date.localeCompare(b.work_date));
 
   // ── 週40時間超の割り当て ─────────────────────────────────
-  // 週の労働時間を日付順に足していき、40時間に達した「後」の時間を、その日の法定外残業とする
+  // 週の法定労働時間：40時間。拠点が週44時間の特例の事業場なら44時間（労基則25条の2。清算期間が1か月を超えるフレックスタイム制の人は40時間。
+  // utils/weekly44.ts）。フレックスタイム制の人は日ごとに数えないので、法定の総枠（下の「フレックスタイム制の清算」）に使う
+  const weeklyLegal = weeklyLegalHoursFor(extras.weekly44Business, flex ? (extras.flexRule ?? DEFAULT_FLEX_RULE).months : undefined);
+  // 週の労働時間を日付順に足していき、40時間（特例は44時間）に達した「後」の時間を、その日の法定外残業とする
   // ・1日8時間を超えた分は日の残業として別に数えるので、週の累計には各日8時間までを足す
   // ・法定休日の労働は休日労働（35%増）として別に払うため、週40時間の計算には含めない
   // ・計算期間の初めの日がある週は、計算期間より前の日（前の計算期間の確定した勤怠）の時間から足し始める（その日は払わない）
@@ -1524,7 +1539,7 @@ export const calculateSalary = (
     const after = before + Math.min(Number(row.work_hours) || 0, Master.LEGAL_WORK_HOURS_DAILY);
     weeklyLegalHours[wk] = after;
     weeklyOvertimeByDate[row.work_date] =
-      Math.max(0, after - Master.LEGAL_WORK_HOURS_WEEKLY) - Math.max(0, before - Master.LEGAL_WORK_HOURS_WEEKLY);
+      Math.max(0, after - weeklyLegal.hours) - Math.max(0, before - weeklyLegal.hours);
   }
 
   // ── 計算期間の途中で入社・退職した人の日割り ─────────────────────
@@ -1860,6 +1875,8 @@ export const calculateSalary = (
         : undefined,
       periodLabel: fp?.label ?? null,
       finalPayLabel: fp ? `${fp.finalPay.year}年${fp.finalPay.month}月支給` : null,
+      // 週44時間の特例の事業場で清算期間が1か月以内なら、法定の総枠は 44時間 × 暦日数 ÷ 7（労基則25条の2 3項）
+      weeklyLegalHours: weeklyLegal.hours,
     });
     // 時給制の人は、働いた時間の分を払うので、不足時間を引かず、繰り越しもしない
     flexSettlement = staff.wage_type === 'hourly' ? { ...settled, carryOutHours: 0, deductHours: 0 } : settled;
@@ -2237,6 +2254,9 @@ export const calculateSalary = (
     scheduledHoursMissing: scheduledHoursUnset,
     scheduledHoursVary,
     dailyRateHours: averageHours,
+    weeklyLegalHours: weeklyLegal.hours,
+    weekly44: weeklyLegal.special,
+    weekly44FlexIgnored: weeklyLegal.flexIgnored,
 
     // --- 支給額 (Earnings) ---
     basePay: Math.floor(basePay),

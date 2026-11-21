@@ -1,6 +1,7 @@
 /**
  * 労働基準法・就業規則関連の定数
  */
+import { LEGAL_WORK_HOURS } from './workHours';
 
 /** 深夜労働の定義 (22:00 - 05:00) */
 export const NIGHT_START_HOUR = 22;
@@ -10,9 +11,9 @@ export const NIGHT_END_HOUR_NEXT_DAY = 29; // 翌日5時 (24 + 5)
 export const NIGHT_START_MINUTES = NIGHT_START_HOUR * 60;
 export const NIGHT_END_MINUTES = NIGHT_END_HOUR_NEXT_DAY * 60;
 
-/** 労働時間の法的基準 */
-export const LEGAL_WORK_HOURS_DAILY = 8;
-export const LEGAL_WORK_HOURS_WEEKLY = 40;
+/** 労働時間の法的基準（労働基準法32条。条文から scripts/import_work_hours.py で作った constants/workHours.ts） */
+export const LEGAL_WORK_HOURS_DAILY = LEGAL_WORK_HOURS.daily;
+export const LEGAL_WORK_HOURS_WEEKLY = LEGAL_WORK_HOURS.weekly;
 
 /** 割増率（法定基準） */
 export const OVERTIME_RATE = 1.25;      // 時間外労働

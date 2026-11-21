@@ -626,18 +626,29 @@ export default function PayStubModal(props: Props) {
             </div>
           )}
 
+          {/* 週44時間の特例（拠点が特例措置対象事業場。労働基準法施行規則25条の2。utils/weekly44.ts） */}
+          {(salary.weekly44 || salary.weekly44FlexIgnored) && (
+            <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
+              {salary.weekly44
+                ? (salary.flex
+                  ? `この人の拠点は週${salary.weeklyLegalHours}時間の特例の事業場（会社設定の支店リスト）なので、フレックスタイム制の法定の総枠を ${salary.weeklyLegalHours}時間 × 暦日数 ÷ 7 で数えています（労働基準法施行規則25条の2 3項）。`
+                  : `この人の拠点は週${salary.weeklyLegalHours}時間の特例の事業場（会社設定の支店リスト）なので、週${salary.weeklyLegalHours}時間を超えた時間を時間外労働にしています（労働基準法施行規則25条の2）。`)
+                : `この人の拠点は週44時間の特例の事業場ですが、清算期間が1か月を超えるフレックスタイム制なので、特例を使わず ${salary.weeklyLegalHours}時間で数えています（労働基準法施行規則25条の2 4項）。`}
+            </div>
+          )}
+
           {/* 週40時間：前の計算期間の日も数えた・所定労働時間の中の時間外労働は割増分だけを払った */}
           {salary.isOvertimeEligible && (salary.weekCarryOver
             || (salary.overtimeWithinScheduleHours > 0 && (staff.wage_type !== "hourly" || salary.overtimeBaseAllowances > 0))) && (
             <div style={{ marginTop: 12, fontSize: 12, border: "1px solid #999", padding: "6px 10px" }}>
               {salary.weekCarryOver && (
                 <div>
-                  週40時間は、前の計算期間の日（{md(salary.weekCarryOver.from)}〜{md(salary.weekCarryOver.to)}）に働いた {fmtH(salary.weekCarryOver.hours)} も合わせて数えています（その日の給与は、前の計算期間の分として支給済みです）。
+                  週{salary.weeklyLegalHours}時間は、前の計算期間の日（{md(salary.weekCarryOver.from)}〜{md(salary.weekCarryOver.to)}）に働いた {fmtH(salary.weekCarryOver.hours)} も合わせて数えています（その日の給与は、前の計算期間の分として支給済みです）。
                 </div>
               )}
               {salary.overtimeWithinScheduleHours > 0 && (staff.wage_type !== "hourly" || salary.overtimeBaseAllowances > 0) && (
                 <div>
-                  時間外労働のうち {fmtH(salary.overtimeWithinScheduleHours)} は所定労働時間の中の時間（週40時間を超えた所定労働日の時間など）で、
+                  時間外労働のうち {fmtH(salary.overtimeWithinScheduleHours)} は所定労働時間の中の時間（週{salary.weeklyLegalHours}時間を超えた所定労働日の時間など）で、
                   {staff.wage_type === "hourly"
                     ? "手当の分の通常の賃金は月額の手当で支給しているので、手当の分も割増分（25%。月60時間を超えた分は50%）だけを支給します。"
                     : `通常の賃金は${staff.wage_type === "monthly" ? "月給" : "日給"}で支給しているので、割増分（25%。月60時間を超えた分は50%）だけを支給します。`}

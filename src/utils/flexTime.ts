@@ -47,13 +47,14 @@
 import dayjs from "dayjs";
 import { specialLeaveOfRow } from "./specialLeave";
 import { getPayrollPeriod, getPeriodForPayMonth, type PayrollGroupForPeriod } from "./payrollPeriod";
+import { FLEX_LIMITS, LEGAL_WORK_HOURS } from "../constants/workHours";
 
-/** 法定の1週間の労働時間 */
-const WEEKLY_LEGAL_HOURS = 40;
-/** 清算期間が1か月を超えるときの、1か月ごとの週平均の上限 */
-const WEEKLY_MONTH_CAP_HOURS = 50;
-/** 完全週休2日制の特例の1日の時間 */
-const FIVE_DAY_DAILY_HOURS = 8;
+/** 法定の1週間の労働時間（労働基準法32条1項。週44時間の特例の事業場で清算期間が1か月以内なら、呼び出し側が weeklyLegalHours で44時間を渡す） */
+const WEEKLY_LEGAL_HOURS = LEGAL_WORK_HOURS.weekly;
+/** 清算期間が1か月を超えるときの、1か月ごとの週平均の上限（32条の3 2項） */
+const WEEKLY_MONTH_CAP_HOURS = FLEX_LIMITS.monthCapWeeklyHours;
+/** 完全週休2日制の特例の1日の時間（32条の3 3項の「同条第二項の労働時間」＝ 1日の法定労働時間） */
+const FIVE_DAY_DAILY_HOURS = LEGAL_WORK_HOURS.daily;
 /** 1か月の決めた時間の上限（31日 × 24時間） */
 const MAX_FIXED_HOURS_PER_MONTH = 744;
 
@@ -112,7 +113,7 @@ export const FLEX_MONTHS_LABELS: Record<FlexMonths, string> = {
 };
 
 export const FLEX_LIMIT_LABELS: Record<FlexRule["limit"], string> = {
-  standard: "40時間 × 暦日数 ÷ 7（原則）",
+  standard: `${LEGAL_WORK_HOURS.weekly}時間 × 暦日数 ÷ 7（原則）`,
   fiveDay: "所定労働日数 × 8時間（完全週休2日制の特例。労使協定がいる）",
 };
 
@@ -251,6 +252,11 @@ export interface FlexInput {
   /** 画面に出す清算期間（「2026年4月1日〜6月30日」）と、最後の月の支給年月（「2026年7月支給」） */
   periodLabel?: string | null;
   finalPayLabel?: string | null;
+  /**
+   * 法定の総枠に使う1週間の時間（省略時は40時間）。週44時間の特例の事業場で、清算期間が1か月以内なら44時間
+   * （労働基準法施行規則25条の2 3項。清算期間が1か月を超えるときは使わない（4項））
+   */
+  weeklyLegalHours?: number;
 }
 
 export interface FlexSettlement {
@@ -451,13 +457,15 @@ export const settleFlex = (input: FlexInput): FlexSettlement => {
   // 法定の総枠：途中で入社・退職した人は、働いた期間を平均して週40時間（32条の3の2。完全週休2日制の特例は使わない）。
   // 清算期間をまるごと働いた人は、清算期間の暦日数で数える
   const limitDays = multi && !partial ? calendarDaysOf(multi.periodStart, multi.periodEnd) : daysTotal;
+  // 1週間の時間：週44時間の特例の事業場で清算期間が1か月以内なら44時間（呼び出し側が決める）、ほかは40時間
+  const legalWeekly = input.weeklyLegalHours && input.weeklyLegalHours > 0 ? input.weeklyLegalHours : WEEKLY_LEGAL_HOURS;
   const limit = !partial && rule.limit === "fiveDay"
     ? sum((r) => r.workDays) * FIVE_DAY_DAILY_HOURS * 60
-    : weeklyAverageLimitMinutes(WEEKLY_LEGAL_HOURS, limitDays);
+    : weeklyAverageLimitMinutes(legalWeekly, limitDays);
   if (partial) {
     notes.push(
       `清算期間の途中で${input.retiring ? "退職する" : "入社した"}ので、働いた期間（${daysTotal}日）で清算します。`
-      + `法定の総枠は 40時間 × ${daysTotal}日 ÷ 7 ＝ ${flexHoursLabel(hoursOf(limit))} です（労働基準法32条の3の2）。`,
+      + `法定の総枠は ${legalWeekly}時間 × ${daysTotal}日 ÷ 7 ＝ ${flexHoursLabel(hoursOf(limit))} です（労働基準法32条の3の2）。`,
     );
   }
   if (!daily && total > limit) {

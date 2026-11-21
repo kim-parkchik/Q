@@ -31,6 +31,8 @@ import {
     editingBadgeStyle
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
+import { parseWeekly44Business, weekly44Problem, WEEKLY_44_OPTIONS } from '../../../utils/weekly44';
+import { LEGAL_WORK_HOURS, WEEKLY_44, WEEKLY_44_BUSINESSES } from '../../../constants/workHours';
 
 interface Props {
     cm: CompanyManagerState;
@@ -67,12 +69,22 @@ export default function BranchTab({ cm }: Props) {
         resetBranchForm,
         startEditBranch,
         deleteBranch,
+        saveBranchWeekly44,
+        branchWorkers,
     } = cm;
 
     return (
         <section style={tabContentStyle}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "25px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* 週44時間の特例（特例措置対象事業場。労働基準法施行規則25条の2。utils/weekly44.ts） */}
+                    <div style={{ fontSize: "11px", color: "#64748b", lineHeight: 1.6, padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <b>週{WEEKLY_44.weekly}時間の特例</b>：労働基準法 別表第一の{WEEKLY_44_BUSINESSES.map(x => `第${x.item}号`).join("・")}の事業
+                        （商業・映画演劇業・保健衛生業・接客娯楽業）で、常時{WEEKLY_44.workersBelow}人未満の労働者を使用する事業場は、
+                        1週間{WEEKLY_44.weekly}時間・1日{WEEKLY_44.daily}時間まで働かせられます（労働基準法施行規則25条の2）。拠点ごとに選ぶと、その拠点の人は
+                        週{WEEKLY_44.weekly}時間を超えた時間を時間外労働にします（選ばなければ週{LEGAL_WORK_HOURS.weekly}時間）。人数と事業は会社で確かめて選んでください（パート・アルバイトも数えます）。
+                        フレックスタイム制は清算期間が{WEEKLY_44.flexMaxMonths}か月以内のときだけで、1か月を超える人には使いません。
+                    </div>
                     {branches.map((b) => {
                         const isDeleting = deletingBranchId === b.id;
                         const isEditing = editingBranchId === b.id;
@@ -103,6 +115,25 @@ export default function BranchTab({ cm }: Props) {
                                             </div>
                                         </div>
                                     </div>
+                                    {/* 週44時間の特例：選ぶとすぐ保存する（本店も支店も、ここで選ぶ） */}
+                                    <div style={{ marginTop: "6px", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                        <label htmlFor={`weekly44-${b.id}`} style={{ color: "#475569" }}>週{WEEKLY_44.weekly}時間の特例</label>
+                                        <select
+                                            id={`weekly44-${b.id}`}
+                                            value={parseWeekly44Business(b.weekly44_business) ?? ""}
+                                            onChange={e => saveBranchWeekly44(b.id, e.target.value === "" ? null : Number(e.target.value))}
+                                            style={{ fontSize: "12px", padding: "2px 4px", maxWidth: "420px" }}
+                                        >
+                                            <option value="">使わない（週{LEGAL_WORK_HOURS.weekly}時間）</option>
+                                            {WEEKLY_44_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                        </select>
+                                        <span style={{ color: "#94a3b8" }}>在籍 {branchWorkers[Number(b.id)] ?? 0}人（役員を除く）</span>
+                                    </div>
+                                    {weekly44Problem(b.weekly44_business, branchWorkers[Number(b.id)] ?? 0) && (
+                                        <div style={{ marginTop: "4px", fontSize: "11px", color: "#b45309", lineHeight: 1.5 }}>
+                                            ⚠ {weekly44Problem(b.weekly44_business, branchWorkers[Number(b.id)] ?? 0)}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>

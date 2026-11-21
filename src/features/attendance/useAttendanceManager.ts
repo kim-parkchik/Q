@@ -5,6 +5,7 @@ import { calculateSalary, loadCustomItems, loadWeekCarryOver, toAbsenceDeduction
 import { isFlexStaff, loadFlexPeriod, parseFlexRule, type FlexPeriodContext } from "../../utils/flexTime";
 import { countPrescribedWorkDays, loadCalendarContext } from "../../utils/annualWorkDays";
 import { averageDailyHoursOf, dayScheduledHours, sumScheduledHours, toHours } from "../../utils/scheduledHours";
+import { weekly44BusinessOf } from "../../utils/weekly44";
 import { countNonLeaveWorkDays, leaveByDate, toLeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { useAverageWagePay } from "../payroll/useAverageWagePay";
 import { staffAsOf } from "../../utils/staffHistory";
@@ -54,6 +55,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
   // 協会けんぽの健康保険料率の都道府県（入っている適用事業所）と、働く拠点の都道府県（現物給与の価額）
   const [branchPrefecture, setBranchPrefecture] = useState<string>("");
   const [workPrefecture, setWorkPrefecture] = useState<string>("");
+  // 拠点の週44時間の特例の事業（null なら週40時間。utils/weekly44.ts）
+  const [weekly44Business, setWeekly44Business] = useState<number | null>(null);
   // 有給の付与・確定した勤怠・前の記録（有給の残りを数える。有給の画面と同じ読み方）
   const [paidLeaveData, setPaidLeaveData] = useState<{
     staffId: string; grants: LeaveGrantRow[]; attendance: AttendanceLeaveRow[]; manual: ManualLeaveRecord[];
@@ -703,6 +706,8 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         residentTax: 0, 
         prefecture: branchPrefecture, 
         workPrefecture,
+        // 拠点の週44時間の特例（週44時間を超えた時間を時間外労働にする）
+        weekly44Business,
         // 残業代の割増率（給与規定グループの決まり。utils/premiumRates.ts）。36協定の年の時間外労働は、給与明細で読む（ここでは見込み）
         premiumRates: parsePremiumRates(currentGroup?.premium_rates),
         dependents: Number(selectedStaff.dependents) || 0, 
@@ -741,7 +746,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
 
     // 2. もしエンジンから basePay が返ってきていればそれを使う
     return result || defaultResult;
-  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, workPrefecture, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexPeriod, averageWagePay]);
+  }, [monthlyWorkData, selectedStaff, companySettings, branchPrefecture, workPrefecture, weekly44Business, targetYear, targetMonth, currentGroup, customItems, workDays, periodStart, periodEnd, weekCarryOver, flexPeriod, averageWagePay]);
 
   // --- スタッフフィルタ ---
   const filteredStaffList = useMemo(() => {
@@ -870,11 +875,12 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
         const branchId = Number(selectedStaff.branch_id) || 1;
         // 支店が本店の適用事業所にまとめて入っていれば、健康保険料率は本店の都道府県（utils/branchPrefecture.ts）
         const branchData = await db.select(
-          "SELECT id, name, prefecture, health_ins_num FROM branches WHERE id IN (?, 1)",
+          "SELECT id, name, prefecture, health_ins_num, weekly44_business FROM branches WHERE id IN (?, 1)",
           [branchId]
         ) as any[];
         setBranchPrefecture(kenpoPrefectureOf(branchData ?? [], branchId).prefecture ?? "");
         setWorkPrefecture(branchPrefectureOf(branchData ?? [], branchId).prefecture ?? "");
+        setWeekly44Business(weekly44BusinessOf(branchData ?? [], branchId));
       }
     } catch (e) {
       console.error("Company/branch load error:", e);

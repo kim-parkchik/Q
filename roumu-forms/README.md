@@ -8,17 +8,21 @@ Q の次の画面で使う、書類の欄・決まり・数の出どころです
 
 数（36協定の上限・障害者雇用率・障害者雇用状況報告の週の所定労働時間の区分と数え方・高年齢者雇用状況等報告の年齢の区分）は、
 下の条文の XML と PDF から、スクリプトで読み取って `src/constants/roumu.ts` に作っています（手で書き写していません）。
+法定労働時間（週40時間・1日8時間）・週44時間の特例（特例措置対象事業場）・フレックスタイム制の清算期間（3か月）と週平均50時間は、
+労働基準法の全文と施行規則25条の2の XML から `src/constants/workHours.ts` に作っています（給与の計算・会社設定の支店リスト。`src/utils/weekly44.ts`）。
 書類の欄の並びと名前は、それぞれの様式・記入例・記入要領で確かめました。
 
 ## 出典
 
-2026年11月18日に取得しました（ユーザーの許しを得て取得）。PDF と Word は大きいので、リポジトリには入れていません（`source/` は .gitignore）。
+2026年11月18日に取得しました（ユーザーの許しを得て取得）。labor-standards-act.xml と labor-standards-rule-25-2.xml は、2026年11月21日に取得しました（ユーザーの許しを得て取得）。PDF と Word は大きいので、リポジトリには入れていません（`source/` は .gitignore）。
 法令の条文の XML（e-Gov 法令API）は、法令は著作権の対象にならないので、このフォルダに入れています。
 
 | 置く場所 | 内容 | 入手元 | 大きさ（バイト） | SHA-256 |
 |---|---|---|---|---|
 | labor-standards-act-36.xml | 労働基準法 第36条（時間外及び休日の労働） | https://laws.e-gov.go.jp/api/1/articles;lawId=322AC0000000049;article=36 | 11,115 | 0e710ea4cbe62071a5684e012cc3cba510ef2ba1ce7d7c5e1faa3bbfc0dfb667 |
 | disability-employment-order-9.xml | 障害者の雇用の促進等に関する法律施行令 第9条（障害者雇用率） | https://laws.e-gov.go.jp/api/1/articles;lawId=335CO0000000292;article=9 | 743 | f465720cdf2585aab39c9e869f34f59aa2c948417b26a45eaf3cfb07d51fc6e7 |
+| labor-standards-act.xml | 労働基準法（全文。32条・32条の3・別表第一を読む） | https://laws.e-gov.go.jp/api/1/lawdata/322AC0000000049 | 431,309 | `7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0` |
+| labor-standards-rule-25-2.xml | 労働基準法施行規則 第25条の2（週44時間の特例） | https://laws.e-gov.go.jp/api/1/articles;lawId=322M40000100023;article=25の2 | 5,830 | `730484b373d15e9798fbd7fcb773d7e64586debc3fa2ab56b85049f5fe0a1718` |
 | source/roudoujouken-ippan.docx | 厚生労働省 モデル労働条件通知書【一般労働者用】常用、有期雇用型（令和8年10月1日以降の様式） | https://www.mhlw.go.jp/content/11200000/001697541.docx | 57,127 | d6b941fb84627273ea4e5ed795dcacbc7f8e2e60ccedc05573ab5732e163baed |
 | source/roudoujouken-tanjikan.docx | 同【短時間労働者用】常用、有期雇用型 | https://www.mhlw.go.jp/content/11200000/001697546.docx | 54,640 | 029ca18cc3e3d248f7ae6cd53ddbef4c9260063f24fbe722577c32abcb6fc6e7 |
 | source/36-youshiki9.docx | 時間外労働・休日労働に関する協定届 様式第9号（一般条項） | https://www.mhlw.go.jp/content/11200000/001695822.docx | 72,942 | 105ad6086a97d7331a20e7943e52b240ee1690971464ed991539f95671fab039 |
@@ -62,7 +66,14 @@ macOS の文字認識（`scripts/pdf_ocr.swift`）で読みました。
 
 ```
 python3 -I scripts/import_roumu_tables.py roumu-forms src/constants/roumu.ts
+python3 -I scripts/import_work_hours.py roumu-forms src/constants/workHours.ts
 ```
+
+`import_work_hours.py` は、リポジトリの中の XML（labor-standards-act.xml・labor-standards-rule-25-2.xml）だけで動きます。
+労働基準法32条の「一週間について四十時間」「一日について八時間」、32条の3の清算期間「三箇月以内」と「五十時間」、
+施行規則25条の2の1項（別表第一の号・「映画の製作の事業を除く」・「常時十人未満」・「四十四時間」「八時間」）、3項（44時間・「一箇月以内」）、
+4項（「清算期間が一箇月を超える」・第三十二条の四・第三十二条の五）を読み、別表第一の号の事業の名前を引きます。
+1項と3項の44時間・施行規則と法の8時間が違う、清算期間の1か月がそろわない、別表第一に号がない・除く事業がその号の名前にないときは止まります。
 
 読むところと、止まるとき（作らないとき）は、スクリプトの初めの説明に書いてあります。主なもの：
 
