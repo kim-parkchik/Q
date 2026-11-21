@@ -8,8 +8,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-    canExemptLeave, checkLeaveExemptBonus, checkLeaveExemptMonth, exemptLeavePeriodsOf, parseLeavePeriods, stringifyLeavePeriods,
-    validateLeavePeriod, type LeavePeriod,
+    canExemptLeave, checkLeaveExemptBonus, checkLeaveExemptMonth, exemptLeavePeriodsOf, papaLeaveWorkDays, parseLeavePeriods,
+    parsePlannedWorkHoursText, sameMonthChildcareDays, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod,
 } from "./leaveExemption";
 
 const maternity = (start: string, end = ""): LeavePeriod => ({ type: "maternity", start, end });
@@ -84,6 +84,73 @@ describe("育児休業等", () => {
         // 合わせると1か月を超えるので、6月の賞与も免除（別々なら、どちらも1か月以下で免除されない）
         expect(checkLeaveExemptBonus(leaves, "2026-06-30")).toBe(true);
         expect(checkLeaveExemptBonus([leaves[1]], "2026-06-30")).toBe(false);
+    });
+});
+
+describe("産後パパ育休で働かせる日（14日から就業予定日数を除く。健康保険法施行規則135条4項・厚生年金保険法施行規則25条の2第5項）", () => {
+    /** 1日の所定労働時間 hours の人（産後パパ育休の期間を JSON で持つ） */
+    const papaStaff = (leaves: LeavePeriod[], hours: unknown = 8) => ({ leave_periods: stringifyLeavePeriods(leaves), scheduled_work_hours: hours });
+    const papa = (start: string, end: string, plannedWorkHours?: number): LeavePeriod => ({ type: "childcare", start, end, papaLeave: true, plannedWorkHours });
+
+    test("就業予定日数は、働かせる時間の合計 ÷ 1日の所定労働時間（1日未満は切り捨て）。産後パパ育休でなければ0日", () => {
+        expect(papaLeaveWorkDays(papa("2026-11-01", "2026-11-15", 12), 8)).toBe(1); // 1.5日 → 1日
+        expect(papaLeaveWorkDays(papa("2026-11-01", "2026-11-15", 16), 8)).toBe(2);
+        expect(papaLeaveWorkDays(papa("2026-11-01", "2026-11-15", 15), 7.5)).toBe(2); // 7時間30分の人の15時間は、ちょうど2日
+        expect(papaLeaveWorkDays(papa("2026-11-01", "2026-11-15", 14.75), 7.5)).toBe(1);
+        expect(papaLeaveWorkDays(papa("2026-11-01", "2026-11-15"), 8)).toBe(0); // 働かせない
+        expect(papaLeaveWorkDays({ ...childcare("2026-11-01", "2026-11-15"), plannedWorkHours: 16 }, 8)).toBe(0); // 産後パパ育休でない
+        expect(papaLeaveWorkDays(papa("2026-11-01", "2026-11-15", 16), null)).toBeNull(); // 1日の所定労働時間がわからない
+    });
+    test("働かせる時間の入力欄（「12」「12:30」「１２：３０」。空は null、読めない・0は undefined）", () => {
+        expect(parsePlannedWorkHoursText("12")).toBe(12);
+        expect(parsePlannedWorkHoursText("12:30")).toBe(12.5);
+        expect(parsePlannedWorkHoursText("１２：３０")).toBe(12.5);
+        expect(parsePlannedWorkHoursText("80")).toBe(80);
+        expect(parsePlannedWorkHoursText("")).toBeNull();
+        expect(parsePlannedWorkHoursText("0")).toBeUndefined();
+        expect(parsePlannedWorkHoursText("12:75")).toBeUndefined();
+        expect(parsePlannedWorkHoursText("abc")).toBeUndefined();
+    });
+    test("同じ月のうちに始まって終わる産後パパ育休は、就業予定日数を除いて14日以上なら免除（11月1日〜15日の15日）", () => {
+        // 8時間（1日）働かせる → 14日で免除。16時間（2日）働かせる → 13日で免除されない
+        const one = exemptLeavePeriodsOf(papaStaff([papa("2026-11-01", "2026-11-15", 8)]));
+        expect(one[0].workDays).toBe(1);
+        expect(sameMonthChildcareDays(one, 2026, 11)).toEqual({ days: 14, calendarDays: 15, workDays: 1, count: 1 });
+        expect(checkLeaveExemptMonth(one, 2026, 11)).toBe(true);
+        const two = exemptLeavePeriodsOf(papaStaff([papa("2026-11-01", "2026-11-15", 16)]));
+        expect(sameMonthChildcareDays(two, 2026, 11)).toEqual({ days: 13, calendarDays: 15, workDays: 2, count: 1 });
+        expect(checkLeaveExemptMonth(two, 2026, 11)).toBe(false);
+        // 1日の所定労働時間が6時間の人なら、12時間で2日 → 免除されない
+        expect(checkLeaveExemptMonth(exemptLeavePeriodsOf(papaStaff([papa("2026-11-01", "2026-11-15", 12)], 6)), 2026, 11)).toBe(false);
+        // 1日の所定労働時間がわからない人は、給与の計算と同じく8時間で見込む（12時間 → 1日 → 14日）
+        expect(exemptLeavePeriodsOf(papaStaff([papa("2026-11-01", "2026-11-15", 12)], null))[0].workDays).toBe(1);
+    });
+    test("同じ月に2つ取ったときは、それぞれ就業予定日数を除いた日数を合わせる。続けて取ったものは1つとして数える", () => {
+        // 11月2日〜10日（9日・8時間＝1日）と11月16日〜22日（7日・ふつうの育休）→ 8＋7＝15日で免除
+        const leaves = exemptLeavePeriodsOf(papaStaff([papa("2026-11-02", "2026-11-10", 8), childcare("2026-11-16", "2026-11-22")]));
+        expect(sameMonthChildcareDays(leaves, 2026, 11)).toEqual({ days: 15, calendarDays: 16, workDays: 1, count: 2 });
+        expect(checkLeaveExemptMonth(leaves, 2026, 11)).toBe(true);
+        // 24時間（3日）働かせると 6＋7＝13日で免除されない
+        const more = exemptLeavePeriodsOf(papaStaff([papa("2026-11-02", "2026-11-10", 24), childcare("2026-11-16", "2026-11-22")]));
+        expect(checkLeaveExemptMonth(more, 2026, 11)).toBe(false);
+        // 11月1日〜8日の産後パパ育休（16時間＝2日）のすぐ後に11月9日〜16日の育休 → 1つの育休（16日 − 2日 ＝ 14日）で免除
+        const joined = exemptLeavePeriodsOf(papaStaff([papa("2026-11-01", "2026-11-08", 16), childcare("2026-11-09", "2026-11-16")]));
+        expect(sameMonthChildcareDays(joined, 2026, 11)).toEqual({ days: 14, calendarDays: 16, workDays: 2, count: 1 });
+        expect(checkLeaveExemptMonth(joined, 2026, 11)).toBe(true);
+    });
+    test("月末をはさむ産後パパ育休は、働かせる日があっても、開始した月の分は免除（14日の数え方は使わない）。賞与は期間の長さで決める", () => {
+        const leaves = exemptLeavePeriodsOf(papaStaff([papa("2026-11-20", "2026-12-10", 40)]));
+        expect(exemptMonths2026(leaves)).toEqual([11]);
+        expect(sameMonthChildcareDays(leaves, 2026, 11)).toBeNull();
+        // 11月20日〜12月10日は1か月以下なので、11月の賞与は免除しない（働かせる日とは関係ない）
+        expect(checkLeaveExemptBonus(leaves, "2026-11-25")).toBe(false);
+    });
+    test("産後パパ育休の印と働かせる時間・届けた就業予定日数を保存して読み直せる（産後パパ育休でなければ、働かせる時間は残さない）", () => {
+        const leaves: LeavePeriod[] = [
+            { ...papa("2026-11-01", "2026-11-15", 12.5), reported: { kind: "apply", on: "2026-11-16", start: "2026-11-01", end: "2026-11-15", workDays: 1 } },
+        ];
+        expect(parseLeavePeriods(stringifyLeavePeriods(leaves))).toEqual(leaves);
+        expect(parseLeavePeriods(stringifyLeavePeriods([{ ...childcare("2026-11-01", "2026-11-15"), plannedWorkHours: 12 }]))).toEqual([childcare("2026-11-01", "2026-11-15")]);
     });
 });
 

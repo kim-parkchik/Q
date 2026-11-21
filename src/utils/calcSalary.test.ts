@@ -456,6 +456,21 @@ describe("産休・育休中の社会保険料の免除（決まりは leaveExem
         expect(m.isLeaveExemptMonth).toBe(true);
         expect([m.healthInsurance, m.welfarePension]).toEqual([0, 0]);
     });
+    test("給与計算：6月1日〜15日の産後パパ育休は、働かせる日（就業予定日数）を除いて14日以上なら6月分を免除し、足りなければ引く", () => {
+        const papa = (plannedWorkHours: number) => JSON.stringify([{ type: "childcare", start: "2026-06-01", end: "2026-06-15", papaLeave: true, plannedWorkHours }]);
+        // 8時間（1日）働かせる → 15日 − 1日 ＝ 14日で免除
+        const one = calc({ ...monthly, leave_periods: papa(8) }, []);
+        expect(one.isLeaveExemptMonth).toBe(true);
+        expect([one.healthInsurance, one.welfarePension]).toEqual([0, 0]);
+        expect(one.leaveSameMonthDays).toEqual({ days: 14, calendarDays: 15, workDays: 1, count: 1 });
+        // 16時間（2日）働かせる → 13日で免除されない（いままでは働かせる日を除かずに15日として免除していた）
+        const two = calc({ ...monthly, leave_periods: papa(16) }, []);
+        expect(two.isLeaveExemptMonth).toBe(false);
+        expect([two.healthInsurance, two.welfarePension]).toEqual([calc(monthly, []).healthInsurance, calc(monthly, []).welfarePension]);
+        expect(two.leaveSameMonthDays).toEqual({ days: 13, calendarDays: 15, workDays: 2, count: 1 });
+        // 同じ月のうちに始まって終わる育休がなければ null
+        expect(calc(monthly, []).leaveSameMonthDays).toBeNull();
+    });
 });
 
 describe("源泉所得税の乙欄", () => {

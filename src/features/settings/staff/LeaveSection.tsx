@@ -2,10 +2,41 @@
  * 「休業・休職」：産前産後休業・育児休業等・介護休業・業務上の負傷や疾病による休業・その他の休職の期間
  * 社会保険料の免除（産休・育休だけ）の決まりは utils/leaveExemption.ts、給与・勤怠・年休の出勤率での扱いは utils/leaveOfAbsence.ts
  */
+import { useEffect, useState } from 'react';
 import { Baby, Plus, Trash2 } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
-import { validateLeavePeriod, type LeavePeriod, type LeaveType } from '../../../utils/leaveExemption';
+import {
+    papaLeaveWorkDays, parsePlannedWorkHoursText, plannedWorkHoursOf, validateLeavePeriod, type LeavePeriod, type LeaveType,
+} from '../../../utils/leaveExemption';
+import { hoursText } from '../../../utils/scheduledHours';
 import type { StaffManagerState } from '../useStaffManager';
+
+/** 産後パパ育休で働かせる時間の合計（"12"・"12:30"。空なら働かせない） */
+function PlannedWorkHoursInput({ value, onChange }: { value: number; onChange: (hours: number | undefined) => void }) {
+    const [text, setText] = useState(value > 0 ? hoursText(value) : '');
+    const [bad, setBad] = useState(false);
+    useEffect(() => { setText(value > 0 ? hoursText(value) : ''); setBad(false); }, [value]);
+    const commit = () => {
+        const parsed = parsePlannedWorkHoursText(text);
+        if (parsed === undefined) { setBad(true); return; }
+        setBad(false);
+        setText(parsed === null ? '' : hoursText(parsed));
+        onChange(parsed ?? undefined);
+    };
+    return (
+        <input
+            type="text"
+            inputMode="numeric"
+            value={text}
+            placeholder="例 12:00"
+            onChange={e => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            data-leave="planned-work-hours"
+            style={{ ...inputStyle, fontSize: "12px", width: "80px", textAlign: "right", borderColor: bad ? "#dc2626" : undefined }}
+        />
+    );
+}
 
 interface Props {
     cm: StaffManagerState;
@@ -20,7 +51,9 @@ const LEAVE_TYPE_OPTIONS: { value: LeaveType; label: string }[] = [
 ];
 
 export default function LeaveSection({ cm }: Props) {
-    const { targetLeavePeriods, setTargetLeavePeriods, targetIsExecutive } = cm;
+    const { targetLeavePeriods, setTargetLeavePeriods, targetIsExecutive, targetDailyHours } = cm;
+    // 産後パパ育休の就業予定日数を数える1日の所定労働時間（画面の「1日の所定労働時間」。入れていなければ null）
+    const dailyHours = Number(targetDailyHours) > 0 ? Number(targetDailyHours) : null;
 
     const update = (index: number, patch: Partial<LeavePeriod>) =>
         setTargetLeavePeriods(targetLeavePeriods.map((p, i) => (i === index ? { ...p, ...patch } : p)));
@@ -100,6 +133,38 @@ export default function LeaveSection({ cm }: Props) {
                                         </label>
                                     </div>
                                 )}
+                                {p.type === 'childcare' && (
+                                    // 産後パパ育休（出生時育児休業）で働かせる時間：就業予定日数（14日の数え方・申出書。utils/leaveExemption.ts）
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginTop: "4px", fontSize: "11px", color: "#475569" }}>
+                                        <label style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={p.papaLeave === true}
+                                                onChange={e => update(i, e.target.checked ? { papaLeave: true } : { papaLeave: undefined, plannedWorkHours: undefined })}
+                                                data-leave="papa-leave"
+                                            />産後パパ育休（出生時育児休業）
+                                        </label>
+                                        {p.papaLeave === true && (() => {
+                                            const hours = plannedWorkHoursOf(p);
+                                            const days = papaLeaveWorkDays(p, dailyHours);
+                                            return (
+                                                <>
+                                                    <span>労使協定で働かせる時間の合計</span>
+                                                    <PlannedWorkHoursInput value={hours} onChange={h => update(i, { plannedWorkHours: h })} />
+                                                    {hours <= 0 ? (
+                                                        <span style={{ color: "#64748b" }}>働かせる日がなければ空のまま（就業予定日数 0日）</span>
+                                                    ) : days === null ? (
+                                                        <span style={{ color: "#dc2626" }}>1日の所定労働時間を入れると、就業予定日数を出します（入れるまでは8時間で数えます）</span>
+                                                    ) : (
+                                                        <span data-leave="planned-work-days">
+                                                            → 就業予定日数 <b>{days}日</b>（{hoursText(hours)} ÷ 1日の所定労働時間 {hoursText(dailyHours)}。1日未満は切り捨て）
+                                                        </span>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                )}
                                 {(p.type === 'maternity' || p.type === 'childcare') && p.reported && (
                                     <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
                                         届け出た内容：{p.reported.on}に{({ apply: "申出", change: "変更", extend: "延長", end: "終了" } as Record<string, string>)[p.reported.kind]}（{p.reported.start}〜{p.reported.end}）。
@@ -139,6 +204,9 @@ export default function LeaveSection({ cm }: Props) {
             <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>
                 産前産後休業・育児休業は、年金事務所（健康保険組合）に申出をした期間を入れてください。開始日がある月の分から、終了日の翌日がある月の前月分まで、
                 健康保険・介護保険・子ども・子育て支援金・厚生年金の保険料を引きません（雇用保険料は引きます）。休日をはさんで続けて休むときも、1つの期間として入れてください。
+                同じ月のうちに始まって終わる育児休業は、その月に合わせて14日以上（休日も数える）なら、その月の分を引きません。
+                産後パパ育休で、労使協定に基づいて休業中に働かせる日があるときは、働かせる時間の合計を入れてください。1日の所定労働時間で割った日数
+                （1日未満は切り捨て）を就業予定日数にし、14日から除いて数え、申出書にも書きます（健康保険法施行規則135条4項）。
                 介護休業・業務上の負傷や疾病による休業・その他の休職には保険料の免除がないので、給与がない月も社会保険料・住民税を引きます（差引支給額がマイナスになることがあります）。
             </p>
             <p style={{ fontSize: "11px", color: "#64748b", margin: "4px 0 0 0", lineHeight: 1.6 }}>

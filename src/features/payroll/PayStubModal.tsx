@@ -11,6 +11,7 @@ import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
 import { describeUnionRate, INSURER_TYPE_LABELS } from '../../utils/healthInsurer';
 import { describeFlatTaxPayment } from '../../utils/flatTaxReduction';
 import { LEAVE_PRORATION_METHOD_LABELS, LEAVE_TYPE_NAMES } from '../../utils/leaveOfAbsence';
+import { SAME_MONTH_CHILDCARE_MIN_DAYS } from '../../utils/leaveExemption';
 
 interface Props {
   db: any;
@@ -347,11 +348,19 @@ export default function PayStubModal(props: Props) {
               </div>
             </div>
           )}
-          {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isInsuredMonth || salary.isLeaveExemptMonth || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (
+          {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isInsuredMonth || salary.isLeaveExemptMonth || !!salary.leaveSameMonthDays || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
               {!salary.isSocialInsEnrolled && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
               {salary.isSocialInsEnrolled && !salary.isInsuredMonth && <div>※ 社会保険料は、入社した月の分から、退職日の翌日（資格喪失日）がある月の前月分までかかるため、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分はかかりません（月末に退職した人は、退職した月の分までかかります）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && salary.isLeaveExemptMonth && <div>※ 産休・育休中のため、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分の健康保険料・介護保険料・子ども・子育て支援金・厚生年金保険料は免除されます（年金事務所・健康保険組合への申出が必要です）。</div>}
+              {salary.isSocialInsEnrolled && salary.isInsuredMonth && salary.leaveSameMonthDays && (() => {
+                // 同じ月のうちに始まって終わる育休：産後パパ育休の就業予定日数を除いて14日以上なら、その月の分を免除（utils/leaveExemption.ts）
+                const d = salary.leaveSameMonthDays;
+                const count = `${d.count > 1 ? "合わせて" : ""}${d.calendarDays}日${d.workDays > 0 ? `（産後パパ育休の就業予定日数 ${d.workDays}日を除くと ${d.days}日）` : ""}`;
+                return d.days >= SAME_MONTH_CHILDCARE_MIN_DAYS
+                  ? <div data-note="same-month-childcare">※ この月のうちに始まって終わる育児休業等が{count}で、{SAME_MONTH_CHILDCARE_MIN_DAYS}日以上なので、この月の分は免除されます。</div>
+                  : !salary.isLeaveExemptMonth && <div data-note="same-month-childcare">※ この月のうちに始まって終わる育児休業等が{count}で、{SAME_MONTH_CHILDCARE_MIN_DAYS}日に足りないので、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分の社会保険料は免除されません。</div>;
+              })()}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && !salary.isLeaveExemptMonth && !salary.isHealthInsAgeTarget && <div>※ 75歳の誕生月の分から、健康保険料・子ども・子育て支援金はかかりません（後期高齢者医療制度へ移るため）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && !salary.isLeaveExemptMonth && !salary.isPensionAgeTarget && <div>※ 70歳に達した月（誕生日の前日がある月）の分から、厚生年金保険料はかかりません（70歳以上被用者）。</div>}
               {!salary.isEmploymentInsEnrolled && <div>※ 雇用保険は未加入のため控除していません（従業員設定の「雇用保険加入」）。</div>}

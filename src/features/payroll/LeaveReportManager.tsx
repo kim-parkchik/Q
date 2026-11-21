@@ -11,7 +11,9 @@ import { useEffect, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { formatWareki } from "../../utils/wareki";
 import { MY_NUMBER_PLACEHOLDER } from "../../utils/shahoCsv";
-import type { ChildcareReported, MaternityReported } from "../../utils/leaveReport";
+import { papaLeaveWorkDays } from "../../utils/leaveExemption";
+import { baseHoursOf } from "../../utils/scheduledHours";
+import { isSameMonthLeave, type ChildcareReported, type MaternityReported } from "../../utils/leaveReport";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
 import { LEAVE_REPORT_LABELS, useLeaveReportManager, type LeaveReportMode } from "./useLeaveReportManager";
 import { ShahoFilePanel, ShahoOfficeTable, card, fieldStyle, input, labelStyle, note, shahoPrintStyle, small, table, td, th, title } from "./ShahoFilePanel";
@@ -46,6 +48,13 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
           育休を延ばすとき（延長）、予定より早く終わったとき（終了）は、従業員の画面で期間を直すと、ここに出す届書が出ます。
           健康保険組合の人は、組合にも組合の決まりで出してください（この申出書は、組合に出すファイルの形がありません）。
         </p>
+        {!maternity && (
+          <p style={note}>
+            開始日と終了日の翌日が同じ月の育休は、育児休業等取得日数と就業予定日数を書きます。就業予定日数は、従業員の画面の育児休業の行に入れた
+            「産後パパ育休で働かせる時間」を1日の所定労働時間で割った数（小数点以下切り捨て）で、産後パパ育休でなければ0日です。
+            育児休業等取得日数は、開始日から終了日までの日数から就業予定日数を差し引いた日数で、14日以上なければ保険料は免除されません（申出書の記入方法）。
+          </p>
+        )}
         <ShahoFilePanel
           file={z.file} dataLines={z.dataLines} blocked={z.blocked} label={z.label} count={z.included.length}
           onPrint={() => setPrintRequest((n) => n + 1)} canPrint={z.rows.length > 0} onSave={z.save}
@@ -99,7 +108,7 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
                 const { key, staff, leave, group, suggest, edit: e, row: r } = item;
                 const set = (patch: Parameters<typeof z.update>[1]) => z.update(item, patch);
                 const rep = e.reported as MaternityReported & ChildcareReported;
-                const setRep = (patch: Partial<MaternityReported>) => set({ reported: { ...e.reported, ...patch } });
+                const setRep = (patch: Partial<MaternityReported & ChildcareReported>) => set({ reported: { ...e.reported, ...patch } });
                 return (
                   <tr key={key} style={{ opacity: e.include ? 1 : 0.5 }}>
                     <td style={td} className="no-print"><input type="checkbox" checked={e.include} onChange={(ev) => set({ include: ev.target.checked })} /></td>
@@ -130,15 +139,7 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
                           {group.map((g, i) => (
                             <div key={g.index} style={{ fontSize: 12 }}>
                               {i + 1}回目 {w(g.leave.start)} 〜 {w(g.leave.end)}
-                              {i < 2 && (
-                                <>
-                                  ・就業予定日数
-                                  <input type="number" min={0} max={16} className="no-print" value={e.groupWorkDays[i] ?? 0}
-                                    onChange={(ev) => set({ groupWorkDays: group.map((_, j) => (j === i ? Math.max(0, Math.trunc(Number(ev.target.value) || 0)) : e.groupWorkDays[j] ?? 0)) })}
-                                    style={{ ...smallInput, width: 50, marginLeft: 4 }} />
-                                  <span className="print-only">{e.groupWorkDays[i] ?? 0}</span>日
-                                </>
-                              )}
+                              {g.leave.papaLeave && <>・産後パパ育休（就業予定日数 {papaLeaveWorkDays(g.leave, baseHoursOf(staff)) ?? "—"}日）</>}
                             </div>
                           ))}
                           {r.values[24] && <div style={{ fontSize: 12 }}>取得日数 合計 {r.values[24]}日・就業予定日数 合計 {r.values[25]}日</div>}
@@ -146,12 +147,10 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
                       ) : (
                         <>
                           {leave.childName || leave.childKana || "（子の氏名なし）"}（{w(leave.childBirthday)}生{leave.adopted ? "・実子以外" : ""}）<br />
-                          {w(leave.start)} 〜 {w(leave.end)}{leave.papaMama ? "・パパママ育休プラス" : ""}
+                          {w(leave.start)} 〜 {w(leave.end)}{leave.papaLeave ? "・産後パパ育休" : ""}{leave.papaMama ? "・パパママ育休プラス" : ""}
                           {r.values[24] && (
                             <div style={{ fontSize: 12 }}>
-                              取得日数 {r.values[24]}日・就業予定日数
-                              <input type="number" min={0} max={16} className="no-print" value={e.workDays} onChange={(ev) => set({ workDays: Math.max(0, Math.trunc(Number(ev.target.value) || 0)) })} style={{ ...smallInput, width: 50, marginLeft: 4 }} />
-                              <span className="print-only">{r.values[25]}</span>日
+                              取得日数 {r.values[24]}日・就業予定日数 {r.values[25]}日
                             </div>
                           )}
                         </>
@@ -167,6 +166,16 @@ export default function LeaveReportManager({ db, staffList, currentUser, onDataC
                           <label>終了予定日 <input type="date" className="no-print" value={rep.end ?? ""} onChange={(ev) => setRep({ end: ev.target.value })} style={smallInput} /><span className="print-only">{w(rep.end)}</span></label>
                           {maternity && (
                             <label className="no-print"><input type="checkbox" checked={rep.multiple === true} onChange={(ev) => setRep({ multiple: ev.target.checked })} />多胎</label>
+                          )}
+                          {!maternity && !group && isSameMonthLeave(rep.start, rep.end) && (
+                            <label title="申出のときに届けた就業予定日数（空なら、いまの期間の就業予定日数を書きます）">
+                              就業予定日数{" "}
+                              <input type="number" min={0} max={16} className="no-print" value={rep.workDays ?? ""}
+                                placeholder={String(papaLeaveWorkDays(leave, baseHoursOf(staff)) ?? "")}
+                                onChange={(ev) => setRep({ workDays: ev.target.value === "" ? undefined : Math.max(0, Math.trunc(Number(ev.target.value) || 0)) })}
+                                style={{ ...smallInput, width: 50 }} />
+                              <span className="print-only">{r.values[25]}</span>日
+                            </label>
                           )}
                         </div>
                       )}

@@ -124,7 +124,7 @@ import {
   getWeekKey
 } from './timeUtils';
 import { calcDailyHeiTaxByTable, calcWithholdingTax, toTaxColumn, type TaxCalcMethod, type TaxColumn } from './incomeTax';
-import { checkLeaveExemptMonth, exemptLeavePeriodsOf, type LeaveType } from './leaveExemption';
+import { checkLeaveExemptMonth, exemptLeavePeriodsOf, sameMonthChildcareDays, type LeaveType, type SameMonthChildcareDays } from './leaveExemption';
 import { hasWorkRecord, periodLeaveOf, toLeaveProrationMethod, type LeaveProrationMethod } from './leaveOfAbsence';
 import { getStandardRemuneration } from './standardRemuneration';
 import { commuteLimitOf, parseCommuteSetting, type CommuteMethod } from './commuteAllowance';
@@ -487,6 +487,11 @@ export interface SalaryResult {
   isInsuredMonth: boolean;
   /** 産休・育休で、その月の分の社会保険料が免除されるか */
   isLeaveExemptMonth: boolean;
+  /**
+   * その月に始まって、その月のうちに終わる育児休業等の日数（14日以上ならその月の分を免除。産後パパ育休の就業予定日数を除いた日数と、
+   * 除く前の日数・就業予定日数。なければ null。utils/leaveExemption.ts の sameMonthChildcareDays）
+   */
+  leaveSameMonthDays: SameMonthChildcareDays | null;
   /** 社会保険料の徴収（当月徴収・翌月徴収） */
   socialInsCollection: SocialInsCollection;
   /** この給与から引いた社会保険料が何年何月分か（YYYY-MM。翌月徴収の退職月は2か月分）。isInsuredMonth などは最初の月の状態 */
@@ -987,8 +992,11 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
   const byAge = getInsuranceByAge(staff.birthday || '', year, month, staff.kouki_date, staff.kaigo_exempt, staff.shaho_loss);
   // 入社前の月・資格喪失日（退職日の翌日）がある月からの分は、どの社会保険料もかからない
   const isInsuredMonth = checkInsuredMonth(staff.join_date, staff.retirement_date, year, month);
-  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）
-  const isLeaveExemptMonth = checkLeaveExemptMonth(exemptLeavePeriodsOf(staff), year, month);
+  // 産休・育休で免除される月の分も、どの社会保険料もかからない（詳しくは utils/leaveExemption.ts。役員の育休は免除されない）。
+  // 同じ月のうちに始まって終わる育休は、産後パパ育休の就業予定日数を除いて14日以上なら免除（給与明細に日数を出す）
+  const exemptLeaves = exemptLeavePeriodsOf(staff);
+  const isLeaveExemptMonth = checkLeaveExemptMonth(exemptLeaves, year, month);
+  const leaveSameMonthDays = sameMonthChildcareDays(exemptLeaves, year, month);
   const isSocialInsMonth = isSocialInsEnrolled && isInsuredMonth && !isLeaveExemptMonth;
   // 社会保険料（本人負担分）の端数：会社の設定（なければ、給与から引くときの原則の50銭以下切り捨て・50銭超切り上げ）
   const sInsType = companySettings?.round_social_ins || 'currency_law';
@@ -1021,7 +1029,7 @@ const socialPremiumsOf = (staff: any, year: number, month: number, prefecture: s
     : 0;
 
   return {
-    isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth,
+    isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, leaveSameMonthDays,
     healthInsurance, nursingInsurance, childSupport, welfarePension, kokuhoPremium,
     /** 健康保険料がかかる月なのに、料率がわからないので計算していない（prefecture：協会けんぽの都道府県／unionRate：組合のその月の分の料率） */
     healthRateMissing: health?.missing ?? null,
@@ -2202,7 +2210,7 @@ export const calculateSalary = (
   const insurer = extras.healthInsurer ?? null;
   const perMonth = socialInsMonths.map(({ year, month }) => socialPremiumsOf(staff, year, month, extras.prefecture, companySettings, insurer));
   const main = perMonth[0];
-  const { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth } = main;
+  const { isSocialInsEnrolled, hyojunHoshu, byAge, isInsuredMonth, isLeaveExemptMonth, leaveSameMonthDays } = main;
   const healthInsurance = perMonth.reduce((sum, p) => sum + p.healthInsurance, 0);
   const nursingInsurance = perMonth.reduce((sum, p) => sum + p.nursingInsurance, 0);
   const childSupport = perMonth.reduce((sum, p) => sum + p.childSupport, 0);
@@ -2384,6 +2392,7 @@ export const calculateSalary = (
     isPensionAgeTarget: byAge.pension,
     isInsuredMonth,
     isLeaveExemptMonth,
+    leaveSameMonthDays,
     socialInsCollection,
     socialInsMonths: socialInsMonths.map(({ year, month }) => ymOf(year, month)),
     retirementMonthCollectable,

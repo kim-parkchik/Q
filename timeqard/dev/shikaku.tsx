@@ -20,7 +20,8 @@
  * ■ 産休・育休の申出書
  *   中島さん：産休（出産予定日 11月1日・10月28日に出産。出産後の申出）
  *   西田さん：産休（予定日 10月5日で申出済み → 9月28日に出産し、終了日を11月23日に直した → 変更届）
- *   野村さん：産後パパ育休（10月5日〜25日。同じ月なので取得日数・就業予定日数）
+ *   野村さん：産後パパ育休（10月5日〜25日の21日。同じ月なので取得日数・就業予定日数。労使協定で20時間働かせる（1日8時間）
+ *            → 就業予定日数 20 ÷ 8 ＝ 2日（切り捨て）、取得日数 21 − 2 ＝ 19日）
  *   浜田さん：育休（申出済み 2026年10月9日まで → 12月1日まで延ばした → 延長）
  *   平野さん：育休（子の氏名・生年月日がない）／役員さん：役員の育休（申出できない）
  * 「…を保存」で保存の窓の代わりに、保存したバイトを window.__savedFiles に足す
@@ -111,7 +112,9 @@ const staffList: any[] = [
     leave_periods: leaves({ type: "maternity", start: "2026-08-25", end: "2026-11-23", dueDate: "2026-10-05", birthDate: "2026-09-28",
       reported: { kind: "apply", on: "2026-08-26", start: "2026-08-25", end: "2026-11-30", dueDate: "2026-10-05" } }) }),
   person({ id: "3203", name: "野村　育休", furigana: "ノムラ イクキュウ", birthday: "1989-10-10", join_date: "2014-04-01", pension_num: "23", base_wage: 300000, basic_pension_number: "8901234567",
-    leave_periods: leaves({ type: "childcare", start: "2026-10-05", end: "2026-10-25", childName: "野村　陽太", childKana: "ノムラ ヨウタ", childBirthday: "2026-09-30" }) }),
+    scheduled_work_hours: 8,
+    leave_periods: leaves({ type: "childcare", start: "2026-10-05", end: "2026-10-25", childName: "野村　陽太", childKana: "ノムラ ヨウタ", childBirthday: "2026-09-30",
+      papaLeave: true, plannedWorkHours: 20 }) }),
   person({ id: "3204", name: "浜田　延長", furigana: "ハマダ エンチョウ", birthday: "1990-12-12", gender: "female", join_date: "2013-04-01", pension_num: "24", base_wage: 280000,
     basic_pension_number: "9012345678",
     leave_periods: leaves({ type: "childcare", start: "2025-12-10", end: "2026-12-01", childName: "浜田　結", childKana: "ハマダ ユイ", childBirthday: "2025-10-10",

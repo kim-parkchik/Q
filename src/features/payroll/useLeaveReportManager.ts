@@ -33,11 +33,11 @@ export const LEAVE_REPORT_LABELS: Record<LeaveReportMode, string> = {
 export interface LeaveEdit {
   include: boolean;
   kind: string;
-  /** 申出のときに届けた内容（変更・延長・終了の共通記載欄。直さなければ期間に残したもの） */
+  /**
+   * 申出のときに届けた内容（変更・延長・終了の共通記載欄。直さなければ期間に残したもの）。
+   * 育児休業等の就業予定日数は、従業員の画面の育児休業の行（産後パパ育休で働かせる時間）から数える（utils/leaveExemption.ts の papaLeaveWorkDays）
+   */
   reported: MaternityReported | ChildcareReported;
-  workDays: number;
-  /** 同じ月の育休をまとめた行の、期間ごとの就業予定日数 */
-  groupWorkDays: number[];
   remarks: string;
 }
 
@@ -106,8 +106,6 @@ export function useLeaveReportManager(db: any, staffList: any[], user: MyNumberU
     kind: item.suggest ?? (item.leave.type === "maternity" ? "change" : "extend"),
     reported: item.leave.type === "maternity" ? maternityReportedOf(item.leave)
       : item.group ? childcareGroupReportedOf(item.group.map((g) => g.leave)) : childcareReportedOf(item.leave),
-    workDays: 0,
-    groupWorkDays: item.group?.map(() => 0) ?? [],
     remarks: "",
   }, [edits]);
   const update = (item: LeaveItem, patch: Partial<LeaveEdit>) =>
@@ -124,8 +122,8 @@ export function useLeaveReportManager(db: any, staffList: any[], user: MyNumberU
       }, file.office.values)
       : buildIkukyuRow({
         staff, leaveIndex: index, leave, kind: e.kind as IkukyuKind, reported: e.kind === "apply" ? null : e.reported as ChildcareReported,
-        workDays: e.workDays, remarks: e.remarks, myNumber, today,
-        group: item.group?.map((g, i) => ({ leave: g.leave, leaveIndex: g.index, workDays: e.groupWorkDays[i] ?? 0 })),
+        remarks: e.remarks, myNumber, today,
+        group: item.group?.map((g) => ({ leave: g.leave, leaveIndex: g.index })),
       }, file.office.values);
     const insurer = insurerOf(insurers, staff.social_insurance_group_id);
     if (insurer?.type === "union") {

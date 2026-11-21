@@ -21,7 +21,7 @@ const sankyu = (leave: Partial<LeavePeriod>, o: Partial<SankyuInput> = {}): Sank
 const ikukyu = (leave: Partial<LeavePeriod>, o: Partial<IkukyuInput> = {}): IkukyuInput => ({
   staff: masako, leaveIndex: 1,
   leave: { type: "childcare", start: "2022-12-07", end: "2023-10-09", childName: "年金　正明", childKana: "ネンキン マサアキ", childBirthday: "2022-10-10", ...leave },
-  kind: "apply", reported: null, workDays: 0, remarks: "", myNumber: true, today: "2022-12-10", ...o,
+  kind: "apply", reported: null, remarks: "", myNumber: true, today: "2022-12-10", ...o,
 });
 const line = (row: { staffId: string; values: string[] }) => fillMyNumbers([row], { [row.staffId]: "123456789000" })[0].join(",");
 
@@ -107,12 +107,41 @@ describe("育児休業等取得者申出書（新規・延長）／終了届", (
   });
 
   test("開始日と終了日の翌日が同じ月なら、取得日数と就業予定日数を書く（産後パパ育休）。14日に足りなければ申出できない", () => {
-    const papa = { ...masako, id: "2002", name: "年金　正男", furigana: "ネンキン マサオ", gender: "male" };
-    const row = buildIkukyuRow(ikukyu({ start: "2022-10-10", end: "2022-10-27" }, { staff: papa, workDays: 2, today: "2022-10-28" }), office);
+    const papa = { ...masako, id: "2002", name: "年金　正男", furigana: "ネンキン マサオ", gender: "male", scheduled_work_hours: 8 };
+    // 10月10日〜27日（18日）に産後パパ育休を取り、労使協定で16時間働かせる：就業予定日数 16時間 ÷ 8時間 ＝ 2日、
+    // 育児休業等取得日数は 18日 − 2日 ＝ 16日（申出書の記入方法：「就業予定日数」を差し引いた日数）
+    const row = buildIkukyuRow(ikukyu({ start: "2022-10-10", end: "2022-10-27", papaLeave: true, plannedWorkHours: 16 }, { staff: papa, today: "2022-10-28" }), office);
     expect(row.problems).toEqual([]);
-    expect(row.values.slice(20, 27)).toEqual(["9", "041010", "9", "041027", "18", "2", ""]);
+    expect(row.values.slice(20, 27)).toEqual(["9", "041010", "9", "041027", "16", "2", ""]);
+    expect(row.notes).toContain("産後パパ育休（2022-10-10〜2022-10-27）で働かせる 16:00 ÷ 1日の所定労働時間 8:00 ＝ 2日（小数点以下切り捨て）を就業予定日数にします");
+    expect(row.reported).toEqual({ kind: "apply", on: "2022-10-28", start: "2022-10-10", end: "2022-10-27", workDays: 2 });
+    // 産後パパ育休でなければ就業予定日数は0日で、取得日数は期間の日数のまま
+    const plain = buildIkukyuRow(ikukyu({ start: "2022-10-10", end: "2022-10-27" }, { staff: papa, today: "2022-10-28" }), office);
+    expect(plain.values.slice(24, 26)).toEqual(["18", "0"]);
     const short = buildIkukyuRow(ikukyu({ start: "2022-10-10", end: "2022-10-20" }, { staff: papa, today: "2022-10-28" }), office);
     expect(short.problems).toEqual(["同じ月のうちに始まって終わる育児休業等が11日で、14日に足りないので、保険料は免除されません（申出書は出せません）"]);
+  });
+
+  test("産後パパ育休：働かせる時間を除くと14日に足りなければ申出できない。半端な時間は切り捨て。1日の所定労働時間がなければ直すところ", () => {
+    const papa = { ...masako, id: "2002", name: "年金　正男", furigana: "ネンキン マサオ", gender: "male", scheduled_work_hours: 7.5 };
+    // 10月1日〜15日（15日）。7時間30分の人に 15時間 → ちょうど2日 → 13日で足りない
+    const two = buildIkukyuRow(ikukyu({ start: "2026-10-01", end: "2026-10-15", papaLeave: true, plannedWorkHours: 15, childBirthday: "2026-09-25" }, { staff: papa, today: "2026-10-16" }), office);
+    expect(two.problems).toEqual([
+      "同じ月のうちに始まって終わる育児休業等が15日で、産後パパ育休の就業予定日数（2日）を除くと13日になり、14日に足りないので、保険料は免除されません（申出書は出せません）",
+    ]);
+    // 14時間59分なら 1.99… → 1日 → 14日で申出できる
+    const one = buildIkukyuRow(ikukyu({ start: "2026-10-01", end: "2026-10-15", papaLeave: true, plannedWorkHours: 14 + 59 / 60, childBirthday: "2026-09-25" }, { staff: papa, today: "2026-10-16" }), office);
+    expect(one.problems).toEqual([]);
+    expect(one.values.slice(24, 26)).toEqual(["14", "1"]);
+    // 1日の所定労働時間を入れていない人は、日数を数えられない
+    const missing = buildIkukyuRow(ikukyu({ start: "2026-10-01", end: "2026-10-20", papaLeave: true, plannedWorkHours: 8, childBirthday: "2026-09-25" }, {
+      staff: { ...papa, scheduled_work_hours: null }, today: "2026-10-21",
+    }), office);
+    expect(missing.problems).toContain("1日の所定労働時間を従業員の画面に入れてください（産後パパ育休の就業予定日数を、働かせる時間 ÷ 1日の所定労働時間で数えます）");
+    // 月をまたぐ育休は、取得日数・就業予定日数を書かない
+    const across = buildIkukyuRow(ikukyu({ start: "2026-10-20", end: "2026-11-10", papaLeave: true, plannedWorkHours: 16, childBirthday: "2026-09-25" }, { staff: papa, today: "2026-10-21" }), office);
+    expect(across.problems).toEqual([]);
+    expect(across.values.slice(24, 26)).toEqual(["", ""]);
   });
 
   test("同じ月に2回以上取った育休は、1つの届書にまとめ、開始日に初めの日・終了予定日に最後の日、日数は合計、育休等取得内訳に1回ずつ書く", () => {
@@ -129,13 +158,13 @@ describe("育児休業等取得者申出書（新規・延長）／終了届", (
     expect(suggestIkukyuGroupKind([leaves[0], leaves[2]])).toBe("apply");
     const row = buildIkukyuRow(ikukyu(leaves[0], {
       staff: papa, leaveIndex: 0, today: "2026-10-22",
-      group: [{ leave: leaves[0], leaveIndex: 0, workDays: 1 }, { leave: leaves[2], leaveIndex: 2, workDays: 2 }],
+      group: [{ leave: leaves[0], leaveIndex: 0 }, { leave: leaves[2], leaveIndex: 2 }],
     }), office);
     expect(row.problems).toEqual([]);
-    // 開始日 10月1日・終了予定日 10月21日・取得日数 7＋7＝14日・就業予定日数 1＋2＝3日
-    expect(row.values.slice(20, 26)).toEqual(["9", "081001", "9", "081021", "14", "3"]);
-    // 内訳①（10月1日〜7日・7日・1日）・内訳②（10月15日〜21日・7日・2日）・③④は空
-    expect(row.values.slice(34, 46)).toEqual(["9", "081001", "9", "081007", "7", "1", "9", "081015", "9", "081021", "7", "2"]);
+    // 開始日 10月1日・終了予定日 10月21日・取得日数 7＋7＝14日・就業予定日数 0日（産後パパ育休でない）
+    expect(row.values.slice(20, 26)).toEqual(["9", "081001", "9", "081021", "14", "0"]);
+    // 内訳①（10月1日〜7日・7日・0日）・内訳②（10月15日〜21日・7日・0日）・③④は空
+    expect(row.values.slice(34, 46)).toEqual(["9", "081001", "9", "081007", "7", "0", "9", "081015", "9", "081021", "7", "0"]);
     expect(row.values.slice(46)).toEqual(Array(10).fill(""));
     expect(row.values).toHaveLength(SHAHO_IKUKYU_FIELDS.length);
     expect(row.notes.join("")).toContain("育休等取得内訳に1回ずつ書きます");
@@ -144,9 +173,23 @@ describe("育児休業等取得者申出書（新規・延長）／終了届", (
     // 1回ずつでは14日に足りなくても、合わせて14日以上なら申出できる。合わせても足りなければ申出できない
     const short = buildIkukyuRow(ikukyu(leaves[0], {
       staff: papa, leaveIndex: 0, today: "2026-10-22",
-      group: [{ leave: leaves[0], leaveIndex: 0, workDays: 0 }, { leave: { ...leaves[2], end: "2026-10-18" }, leaveIndex: 2, workDays: 0 }],
+      group: [{ leave: leaves[0], leaveIndex: 0 }, { leave: { ...leaves[2], end: "2026-10-18" }, leaveIndex: 2 }],
     }), office);
     expect(short.problems).toEqual(["同じ月のうちに始まって終わる育児休業等が合わせて11日で、14日に足りないので、保険料は免除されません（申出書は出せません）"]);
+    // 2回とも産後パパ育休で、10月1日〜12日（12日）に8時間・10月15日〜26日（12日）に20時間働かせる（1日8時間）：
+    // 就業予定日数 1＋2＝3日、取得日数（12−1）＋（12−2）＝21日。内訳①②にも、差し引いた日数と就業予定日数を書く
+    const papaLeaves = [
+      { ...leaves[0], end: "2026-10-12", papaLeave: true, plannedWorkHours: 8 },
+      { ...leaves[2], end: "2026-10-26", papaLeave: true, plannedWorkHours: 20 },
+    ];
+    const both = buildIkukyuRow(ikukyu(papaLeaves[0], {
+      staff: { ...papa, scheduled_work_hours: 8 }, leaveIndex: 0, today: "2026-10-27",
+      group: [{ leave: papaLeaves[0], leaveIndex: 0 }, { leave: papaLeaves[1], leaveIndex: 2 }],
+    }), office);
+    expect(both.problems).toEqual([]);
+    expect(both.values.slice(24, 26)).toEqual(["21", "3"]);
+    expect(both.values.slice(34, 46)).toEqual(["9", "081001", "9", "081012", "11", "1", "9", "081015", "9", "081026", "10", "2"]);
+    expect(both.group?.map((g) => g.reported.workDays)).toEqual([1, 2]);
     // 届けたあとで、最後の期間を早く終えたら終了届
     const reported = (l: LeavePeriod) => ({ ...l, reported: { kind: "apply", on: "2026-10-22", start: l.start, end: l.end } });
     expect(suggestIkukyuGroupKind([reported(leaves[0]), reported(leaves[2])])).toBeNull();
@@ -162,7 +205,32 @@ describe("育児休業等取得者申出書（新規・延長）／終了届", (
     const row = buildIkukyuRow(ikukyu(leave, { kind: "extend", reported: { start: "2022-12-07", end: "2023-10-09" }, today: "2023-10-01" }), office);
     expect(row.problems).toEqual([]);
     expect(row.values.slice(20, 34)).toEqual(["9", "041207", "9", "051009", "", "", "", "", "9", "060409", "", "", "", ""]);
-    expect(row.reported).toEqual({ kind: "extend", on: "2023-10-01", start: "2022-12-07", end: "2024-04-09" });
+    expect(row.reported).toEqual({ kind: "extend", on: "2023-10-01", start: "2022-12-07", end: "2024-04-09", workDays: 0 });
+  });
+
+  test("産後パパ育休の延長・終了：共通記載欄には申出のときに届けた就業予定日数、変更後の取得日数は、いまの就業予定日数を差し引いた日数", () => {
+    const papa = { ...masako, id: "2002", name: "年金　正男", furigana: "ネンキン マサオ", gender: "male", scheduled_work_hours: 8 };
+    const base: LeavePeriod = {
+      type: "childcare", start: "2026-10-01", end: "2026-10-20", childName: "年金　正明", childKana: "ネンキン マサアキ", childBirthday: "2026-09-25",
+      papaLeave: true, plannedWorkHours: 24,
+      reported: { kind: "apply", on: "2026-10-01", start: "2026-10-01", end: "2026-10-16", workDays: 2 },
+    };
+    // 10月16日までで届け（16日 − 2日 ＝ 14日）、20日まで延ばして働かせる時間を24時間（3日）にした：
+    // 共通記載欄は 14日・2日（届けた日数）、変更後の取得日数は 20日 − 3日 ＝ 17日
+    const extend = buildIkukyuRow(ikukyu(base, { staff: papa, kind: "extend", reported: { start: "2026-10-01", end: "2026-10-16", workDays: 2 }, today: "2026-10-17" }), office);
+    expect(extend.problems).toEqual([]);
+    expect(extend.values.slice(24, 26)).toEqual(["14", "2"]);
+    expect(extend.values.slice(28, 31)).toEqual(["9", "081020", "17"]);
+    expect(extend.reported).toEqual({ kind: "extend", on: "2026-10-17", start: "2026-10-01", end: "2026-10-20", workDays: 3 });
+    // 届けた就業予定日数がわからない（Q で届けていない）ときは、いまの就業予定日数を書く
+    const unknown = buildIkukyuRow(ikukyu(base, { staff: papa, kind: "extend", reported: { start: "2026-10-01", end: "2026-10-16" }, today: "2026-10-17" }), office);
+    expect(unknown.values.slice(24, 26)).toEqual(["13", "3"]);
+    // 10月12日で早く終えたら終了届：変更後の取得日数は 12日 − 3日 ＝ 9日（終了届は1〜30日）
+    const end = buildIkukyuRow(ikukyu({ ...base, end: "2026-10-12" }, {
+      staff: papa, kind: "end", reported: { start: "2026-10-01", end: "2026-10-16", workDays: 2 }, today: "2026-10-13",
+    }), office);
+    expect(end.problems).toEqual([]);
+    expect(end.values.slice(31, 34)).toEqual(["9", "081012", "9"]);
   });
 
   test("終了：予定より早く終わったら終了届", () => {

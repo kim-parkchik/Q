@@ -17,7 +17,10 @@
  *   ・育児休業等を取るたび（1歳まで・1歳6か月まで・2歳まで・3歳までの措置・産後パパ育休）に申出する。期間中か、終了日から起算して
  *     1か月以内に出す。開始日より前・子の生年月日より前は e-Gov で受け付けない
  *   ・開始日と終了（予定）日の翌日が同じ月のときは、育児休業等取得日数（14〜30日）と就業予定日数（0〜16日）を書く
- *     （14日に足りないと保険料が免除されないので、e-Gov で受け付けない）
+ *     （14日に足りないと保険料が免除されないので、e-Gov で受け付けない）。申出書の記入方法のとおり、就業予定日数は
+ *     産後パパ育休（出生時育児休業）で働かせる時間の合計 ÷ 1日の所定労働時間（小数点以下切り捨て。産後パパ育休でなければ0日）、
+ *     育児休業等取得日数は、開始日から終了（予定）日までの日数から就業予定日数を差し引いた日数（utils/leaveExemption.ts の
+ *     papaLeaveWorkDays。働かせる時間は従業員の画面の育児休業の行に入れる）。延長・終了の共通記載欄には、申出のときに届けた就業予定日数を書く
  *   ・終了予定日を延ばすときは延長（共通記載欄に申出のときの開始日・終了予定日、延長欄に変更後の終了予定日）、
  *     予定より早く終わったときは終了届（終了年月日）
  *   ・終了（予定）日は、子が3歳に達する日より前。女性の実子の育児休業は、ふつう産後休業（出産の日後56日）のあとから
@@ -33,7 +36,8 @@ import {
   SHAHO_BIRTH_KINDS, SHAHO_CHILD_RELATIONS, SHAHO_IKUKYU_FIELDS, SHAHO_IKUKYU_FORM_CODE, SHAHO_IKUKYU_SEXES, SHAHO_LEAVE_BIRTH_ERA_CODES,
   SHAHO_LEAVE_ERA_CODES, SHAHO_SANKYU_FIELDS, SHAHO_SANKYU_FORM_CODE, type ShahoField,
 } from "../constants/shahoTodoke";
-import type { LeavePeriod, LeaveReported } from "./leaveExemption";
+import { SAME_MONTH_CHILDCARE_MIN_DAYS, papaLeaveWorkDays, plannedWorkHoursOf, type LeavePeriod, type LeaveReported } from "./leaveExemption";
+import { baseHoursOf, hoursText } from "./scheduledHours";
 import { MY_NUMBER_PLACEHOLDER, hasNameSpace, shahoDate, toShahoKana, toShahoKanji, unusableChars, valueProblem } from "./shahoCsv";
 import { shahoPersonValues, type ShahoPersonPart } from "./shahoPerson";
 
@@ -55,8 +59,9 @@ export const leaveReportDeadline = (end: string): string => {
 /** 産前産後休業の終了予定日の目安（出産の日（まだなら出産予定日）の56日後） */
 export const maternityEndOf = (birthOrDue: string): string => (birthOrDue ? dayjs(birthOrDue).add(56, "day").format("YYYY-MM-DD") : "");
 
-/** 開始日と、終了日の翌日が同じ月か（育児休業等取得日数を書く） */
+/** 開始日と、終了日の翌日が同じ月か（育児休業等取得日数・就業予定日数を書く） */
 const withinOneMonth = (start: string, end: string) => !!start && !!end && start.slice(0, 7) === dayjs(end).add(1, "day").format("YYYY-MM");
+export const isSameMonthLeave = (start: string | undefined, end: string | undefined): boolean => withinOneMonth(start ?? "", end ?? "");
 /** 日数（両端を入れる） */
 const daysOf = (start: string, end: string) => dayjs(end).diff(dayjs(start), "day") + 1;
 
@@ -255,6 +260,8 @@ export const buildSankyuRow = (input: SankyuInput, office: string[]): LeaveRepor
 export interface ChildcareReported {
   start: string;
   end: string;
+  /** 届けた就業予定日数（わからなければ、いまの期間の就業予定日数を書く） */
+  workDays?: number;
 }
 
 export interface IkukyuInput {
@@ -263,13 +270,11 @@ export interface IkukyuInput {
   leave: LeavePeriod;
   kind: IkukyuKind;
   reported: ChildcareReported | null;
-  /** 就業予定日数（開始日と終了予定日の翌日が同じ月のとき。産後パパ育休で働く予定の日数） */
-  workDays: number;
   /**
-   * 同じ月のうちに始まって終わる、同じ人の育児休業等（2つ以上。開始日の順。leave も入れる）と、それぞれの就業予定日数。
+   * 同じ月のうちに始まって終わる、同じ人の育児休業等（2つ以上。開始日の順。leave も入れる）。
    * あれば1つの届書にまとめ、育休等取得内訳（4回まで）に書く（sameMonthChildcareGroups）
    */
-  group?: { leave: LeavePeriod; leaveIndex: number; workDays: number }[];
+  group?: { leave: LeavePeriod; leaveIndex: number }[];
   remarks: string;
   myNumber: boolean;
   today: string;
@@ -317,7 +322,9 @@ export const suggestIkukyuKind = (leave: LeavePeriod): IkukyuKind | null => {
 };
 
 export const childcareReportedOf = (leave: LeavePeriod): ChildcareReported =>
-  leave.reported ? { start: leave.reported.start, end: leave.reported.end } : { start: leave.start, end: leave.end };
+  leave.reported
+    ? { start: leave.reported.start, end: leave.reported.end, ...(leave.reported.workDays !== undefined ? { workDays: leave.reported.workDays } : {}) }
+    : { start: leave.start, end: leave.end };
 
 export const buildIkukyuRow = (input: IkukyuInput, office: string[]): LeaveReportRow => {
   const { staff, leave, kind } = input;
@@ -373,24 +380,44 @@ export const buildIkukyuRow = (input: IkukyuInput, office: string[]): LeaveRepor
     notes.push(`出産の日後56日（${maternityEndOf(childBirthday)}）までは産後休業なので、女性の育児休業は、ふつうその翌日から始まります`);
   }
 
-  // 同じ月の育児休業等の1回ずつ（申出のときは今の期間、延長・終了のときは届けた期間）
+  // 産後パパ育休の就業予定日数：働かせる時間の合計 ÷ 1日の所定労働時間（小数点以下切り捨て。産後パパ育休でなければ0日）
+  const daily = baseHoursOf(staff);
+  const work = (l: LeavePeriod) => papaLeaveWorkDays(l, daily) ?? 0;
+  const papaHours = (parts ? parts.map((p) => p.leave) : [leave]).filter((l) => plannedWorkHoursOf(l) > 0);
+  if (papaHours.length > 0 && daily === null) {
+    add("1日の所定労働時間を従業員の画面に入れてください（産後パパ育休の就業予定日数を、働かせる時間 ÷ 1日の所定労働時間で数えます）", 25);
+  }
+
+  // 同じ月の育児休業等の1回ずつ（申出のときは今の期間と就業予定日数、延長・終了のときは届けた期間と届けた就業予定日数）。
+  // 育児休業等取得日数は、期間の日数から就業予定日数を差し引いた日数（申出書の記入方法）
   const pieces = parts?.map((p) => {
     const src = kind === "apply" ? p.leave : p.leave.reported ?? p.leave;
-    return { start: src.start, end: src.end, days: daysOf(src.start, src.end), work: Math.max(0, Math.trunc(p.workDays || 0)) };
+    const w = kind !== "apply" && p.leave.reported?.workDays !== undefined ? p.leave.reported.workDays : work(p.leave);
+    const calendar = daysOf(src.start, src.end);
+    return { start: src.start, end: src.end, calendar, work: w, days: Math.max(0, calendar - w) };
   }) ?? null;
   // 開始日と終了（予定）日の翌日が同じ月：育児休業等取得日数（14日以上）と就業予定日数（同じ月に2回以上取るときは、その合計）
-  const workDays = pieces ? pieces.reduce((sum, x) => sum + x.work, 0) : Math.max(0, Math.trunc(input.workDays || 0));
+  const workDays = pieces ? pieces.reduce((sum, x) => sum + x.work, 0) : kind === "apply" ? work(leave) : common.workDays ?? work(leave);
   let daysText = ["", ""];
   if (withinOneMonth(common.start, common.end)) {
-    const days = pieces ? pieces.reduce((sum, x) => sum + x.days, 0) : daysOf(common.start, common.end);
-    if (days < 14 && kind === "apply") {
-      add(`同じ月のうちに始まって終わる育児休業等が${pieces ? "合わせて" : ""}${days}日で、14日に足りないので、保険料は免除されません（申出書は出せません）`, 24);
+    const calendar = pieces ? pieces.reduce((sum, x) => sum + x.calendar, 0) : daysOf(common.start, common.end);
+    const days = pieces ? pieces.reduce((sum, x) => sum + x.days, 0) : Math.max(0, calendar - workDays);
+    if (days < SAME_MONTH_CHILDCARE_MIN_DAYS && kind === "apply") {
+      add(workDays > 0
+        ? `同じ月のうちに始まって終わる育児休業等が${pieces ? "合わせて" : ""}${calendar}日で、産後パパ育休の就業予定日数（${workDays}日）を除くと${days}日になり、${SAME_MONTH_CHILDCARE_MIN_DAYS}日に足りないので、保険料は免除されません（申出書は出せません）`
+        : `同じ月のうちに始まって終わる育児休業等が${pieces ? "合わせて" : ""}${days}日で、${SAME_MONTH_CHILDCARE_MIN_DAYS}日に足りないので、保険料は免除されません（申出書は出せません）`, 24);
     }
     if (workDays > 16) add("就業予定日数は16日までです", 25);
     daysText = [String(days), String(workDays)];
+    const how = workDays > 0 ? `。${calendar}日から就業予定日数を差し引いた日数` : "";
     notes.push(pieces
-      ? `同じ月に${pieces.length}回の育児休業等を取るので、開始日に初めの日、終了予定日に最後の日、育児休業等取得日数（${days}日）と就業予定日数（${workDays}日）に合計を書き、育休等取得内訳に1回ずつ書きます`
-      : `開始日と終了日の翌日が同じ月なので、育児休業等取得日数（${days}日）と就業予定日数（${workDays}日）を書きます`);
+      ? `同じ月に${pieces.length}回の育児休業等を取るので、開始日に初めの日、終了予定日に最後の日、育児休業等取得日数（${days}日${how}）と就業予定日数（${workDays}日）に合計を書き、育休等取得内訳に1回ずつ書きます`
+      : `開始日と終了日の翌日が同じ月なので、育児休業等取得日数（${days}日${how}）と就業予定日数（${workDays}日）を書きます`);
+    if (daily !== null) {
+      for (const l of papaHours) {
+        notes.push(`産後パパ育休（${l.start}〜${l.end}）で働かせる ${hoursText(plannedWorkHoursOf(l))} ÷ 1日の所定労働時間 ${hoursText(daily)} ＝ ${work(l)}日（小数点以下切り捨て）を就業予定日数にします${kind !== "apply" ? "（届けた就業予定日数がわかれば、そちらを書きます）" : ""}`);
+      }
+    }
   }
   // 育休等取得内訳（1・2回目は開始日・終了日・取得日数・就業予定日数、3・4回目は開始日・終了日・取得日数）
   const breakdown: string[] = Array(SHAHO_IKUKYU_FIELDS.length - 34).fill("");
@@ -407,14 +434,17 @@ export const buildIkukyuRow = (input: IkukyuInput, office: string[]): LeaveRepor
 
   let extend = ["", "", ""];
   let ended = ["", "", ""];
-  // 延長・終了の、変更後の育児休業等取得日数（同じ月の育休をまとめた届書は、今の期間の合計）
+  // 延長・終了の、変更後の育児休業等取得日数（期間の日数から、いまの就業予定日数を差し引いた日数。同じ月の育休をまとめた届書は、今の期間の合計）
   const changedDays = (end: string) => (parts
-    ? parts.reduce((sum, p) => sum + (p.leave.end ? daysOf(p.leave.start, p.leave.end) : 0), 0)
-    : daysOf(common.start, end));
+    ? parts.reduce((sum, p) => sum + (p.leave.end ? Math.max(0, daysOf(p.leave.start, p.leave.end) - work(p.leave)) : 0), 0)
+    : Math.max(0, daysOf(common.start, end) - work(leave)));
   if (kind === "extend") {
     const ne = leaveDate(currentEnd);
     if (!currentEnd || (common.end && currentEnd <= common.end)) add(`延長するときは、従業員の画面の終了日を、届けた終了予定日（${common.end}）より後にしてください`, 28, 29);
     const sameMonth = withinOneMonth(common.start, currentEnd);
+    if (sameMonth && changedDays(currentEnd) < SAME_MONTH_CHILDCARE_MIN_DAYS) {
+      add(`延長したあとの育児休業等取得日数（${changedDays(currentEnd)}日）が${SAME_MONTH_CHILDCARE_MIN_DAYS}日に足りません（e-Gov は14〜30日を受け付けます）`, 30);
+    }
     extend = [ne.era, ne.ymd, sameMonth ? String(changedDays(currentEnd)) : ""];
   }
   if (kind === "end") {
@@ -441,7 +471,8 @@ export const buildIkukyuRow = (input: IkukyuInput, office: string[]): LeaveRepor
   return {
     staffId: String(staff.id), name: String(staff.name ?? ""), kana: person[1], leaveIndex: input.leaveIndex, kind, myNumber: input.myNumber,
     start: common.start, end, deadline: leaveReportDeadline(end), values, problems: [...new Set(problems)], notes,
-    reported: { kind, on: input.today, start: common.start, end },
-    group: parts?.map((p) => ({ leaveIndex: p.leaveIndex, reported: { kind, on: input.today, start: p.leave.start, end: p.leave.end } })),
+    // 届け出た内容（就業予定日数は、いまの期間の日数。次に延長・終了の届書を出すとき、共通記載欄に書く）
+    reported: { kind, on: input.today, start: common.start, end, workDays: work(leave) },
+    group: parts?.map((p) => ({ leaveIndex: p.leaveIndex, reported: { kind, on: input.today, start: p.leave.start, end: p.leave.end, workDays: work(p.leave) } })),
   };
 };
