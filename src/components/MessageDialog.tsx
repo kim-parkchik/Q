@@ -9,26 +9,40 @@
  *   - 入力不足や、ルール上できない操作の案内     … dialog.warning("〜を入力してください") 黄・！
  *   - 成功の知らせ                               … toast.success（Toast.tsx）
  *   - 取り消せない操作の確認                     … これまで通り ask()
+ *   - いくつかの中から1つ選んでもらう            … dialog.choose("〜を選んでください", ["A", "B"])  青・選んだ番号（選ばなければ null）
  *
  * ■ 使い方
  *   const dialog = useMessageDialog();
  *   return dialog.warning("会社名は必須です");   // OK を押すまで待つ場合は await する
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { XCircle, AlertTriangle } from "lucide-react";
+import { XCircle, AlertTriangle, ListChecks } from "lucide-react";
 
 type DialogKind = "error" | "warning";
 
-interface DialogItem {
+interface MessageItem {
+    type: "message";
     kind: DialogKind;
     title: string;
     message: string;
     resolve: () => void;
 }
 
+interface ChoiceItem {
+    type: "choice";
+    title: string;
+    message: string;
+    options: string[];
+    resolve: (index: number | null) => void;
+}
+
+type DialogItem = MessageItem | ChoiceItem;
+
 interface MessageDialogApi {
     error: (message: string, title?: string) => Promise<void>;
     warning: (message: string, title?: string) => Promise<void>;
+    /** いくつかの中から1つ選んでもらう（選んだものの番号。「選ばない」・Esc なら null） */
+    choose: (message: string, options: string[], title?: string) => Promise<number | null>;
 }
 
 const DEFAULT_TITLES: Record<DialogKind, string> = {
@@ -45,26 +59,39 @@ export function MessageDialogProvider({ children }: { children: ReactNode }) {
 
     const open = useCallback((kind: DialogKind, message: string, title?: string) => {
         return new Promise<void>((resolve) => {
-            setQueue((prev) => [...prev, { kind, message, title: title ?? DEFAULT_TITLES[kind], resolve }]);
+            setQueue((prev) => [...prev, { type: "message", kind, message, title: title ?? DEFAULT_TITLES[kind], resolve }]);
         });
     }, []);
 
-    const close = useCallback(() => {
+    const openChoice = useCallback((message: string, options: string[], title?: string) => {
+        return new Promise<number | null>((resolve) => {
+            setQueue((prev) => [...prev, { type: "choice", message, options, title: title ?? "選んでください", resolve }]);
+        });
+    }, []);
+
+    // いま出している窓を閉じる（選ぶ窓は、選んだ番号か null を返す）
+    const close = useCallback((index: number | null = null) => {
         setQueue((prev) => {
-            prev[0]?.resolve();
+            const item = prev[0];
+            if (item?.type === "choice") item.resolve(index);
+            else item?.resolve();
             return prev.slice(1);
         });
     }, []);
 
+    const closeMessage = useCallback(() => close(null), [close]);
+
     const api = useMemo<MessageDialogApi>(() => ({
         error: (message, title) => open("error", message, title),
         warning: (message, title) => open("warning", message, title),
-    }), [open]);
+        choose: (message, options, title) => openChoice(message, options, title),
+    }), [open, openChoice]);
 
     return (
         <MessageDialogContext.Provider value={api}>
             {children}
-            {current && <DialogView item={current} onClose={close} />}
+            {current?.type === "message" && <DialogView item={current} onClose={closeMessage} />}
+            {current?.type === "choice" && <ChoiceView item={current} onClose={close} />}
         </MessageDialogContext.Provider>
     );
 }
@@ -76,7 +103,7 @@ export function useMessageDialog(): MessageDialogApi {
     return ctx;
 }
 
-function DialogView({ item, onClose }: { item: DialogItem; onClose: () => void }) {
+function DialogView({ item, onClose }: { item: MessageItem; onClose: () => void }) {
     const okRef = useRef<HTMLButtonElement>(null);
     const color = THEME[item.kind];
 
@@ -113,10 +140,86 @@ function DialogView({ item, onClose }: { item: DialogItem; onClose: () => void }
     );
 }
 
+/** いくつかの中から1つ選んでもらう窓（選んだら、その番号で閉じる。「選ばない」・Esc は null） */
+function ChoiceView({ item, onClose }: { item: ChoiceItem; onClose: (index: number | null) => void }) {
+    const firstRef = useRef<HTMLButtonElement>(null);
+
+    // 開いたら1つめの選ぶボタンにフォーカス。Esc で「選ばない」
+    useEffect(() => {
+        firstRef.current?.focus();
+        const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(null); };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [item, onClose]);
+
+    return (
+        <div style={overlayStyle}>
+            <style>{dialogKeyframes}</style>
+            <div role="dialog" aria-modal="true" aria-labelledby="q-choice-title" data-dialog="choice"
+                style={{ ...boxStyle, width: "460px", borderTop: `6px solid ${CHOICE_THEME.main}` }}>
+                <div style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
+                    <div style={{ ...iconWrapStyle, backgroundColor: CHOICE_THEME.light }}>
+                        <ListChecks size={26} color={CHOICE_THEME.main} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                        <div id="q-choice-title" style={{ ...titleStyle, color: CHOICE_THEME.main }}>{item.title}</div>
+                        <div style={messageStyle}>{item.message}</div>
+                    </div>
+                </div>
+                <div style={choiceListStyle}>
+                    {item.options.map((label, i) => (
+                        <button key={i} ref={i === 0 ? firstRef : undefined} data-choice={i}
+                            onClick={() => onClose(i)} style={choiceBtnStyle}>
+                            {label}
+                        </button>
+                    ))}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "14px" }}>
+                    <button onClick={() => onClose(null)} data-choice="none" style={choiceCancelStyle}>
+                        選ばない
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // --- スタイル ---
 const THEME: Record<DialogKind, { main: string; light: string }> = {
     error: { main: "#e74c3c", light: "#fdecea" },
     warning: { main: "#d68910", light: "#fef5e7" },
+};
+
+const CHOICE_THEME = { main: "#2f80c9", light: "#eaf3fb" };
+
+const choiceListStyle = {
+    marginTop: "14px",
+    maxHeight: "50vh",
+    overflowY: "auto" as const,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: "6px",
+};
+
+const choiceBtnStyle = {
+    textAlign: "left" as const,
+    padding: "9px 12px",
+    fontSize: "14px",
+    color: "#2c3e50",
+    backgroundColor: "#f8fafc",
+    border: "1px solid #dbe3ec",
+    borderRadius: "8px",
+    cursor: "pointer",
+};
+
+const choiceCancelStyle = {
+    color: "#475569",
+    backgroundColor: "white",
+    border: "1px solid #cbd5e1",
+    borderRadius: "8px",
+    padding: "9px 20px",
+    fontSize: "14px",
+    cursor: "pointer",
 };
 
 const overlayStyle = {

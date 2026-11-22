@@ -5,7 +5,10 @@
 import { useState, useEffect } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { fetchAddressByZip } from "../../utils/addressUtils";
+import {
+    commonZipAddress, formatZip, lookupZip, normalizeZip, pickZipAddress, zipAddressKanaText, zipAddressText,
+    ZIP_CHOOSE_MESSAGE, ZIP_CHOOSE_TITLE, ZIP_NOT_FOUND_MESSAGE,
+} from "../../utils/zipcode";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { STAFF_RECORD_TABLES } from "../../types/dbSchema";
 import { parseLeavePeriods, stringifyLeavePeriods, validateLeavePeriod, type LeavePeriod } from "../../utils/leaveExemption";
@@ -223,30 +226,31 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [payrollGroups, setPayrollGroups] = useState<any[]>([]);
     const [targetPayrollGroupId, setTargetPayrollGroupId] = useState(1);
     
-    // 🆕 住所検索を実行する関数
+    // 住所検索：日本郵便の郵便番号データを Q の中で引き（utils/zipcode.ts。郵便番号を外に送らない）、住所と住所のフリガナを入れる。
+    // 町域がいくつもある郵便番号は選んでもらい、選ばなければ、どれにも同じ部分（都道府県・市区町村）だけを入れる
     const handleZipSearch = async () => {
-        // 数字以外を除去
-        const cleanZip = targetZip.replace(/[^\d]/g, "");
-        
-        if (cleanZip.length !== 7) {
-            alert("郵便番号は7桁の数字で入力してください。");
+        const zip7 = normalizeZip(targetZip);
+        if (!zip7) {
+            dialog.warning("郵便番号は7桁の数字で入力してください。");
             return;
         }
-
-        // ハイフンを入れた形式に整形 (例: 1234567 -> 123-4567)
-        const formattedZip = cleanZip.slice(0, 3) + "-" + cleanZip.slice(3);
-        setTargetZip(formattedZip); // 入力欄の見た目もハイフンありに更新
+        setTargetZip(formatZip(zip7)); // 入力欄の見た目もハイフンありに更新
 
         setIsSearchingZip(true);
         try {
-            const res = await fetchAddressByZip(cleanZip); // 検索自体は数字のみでOK
-            if (res) {
-                setTargetAddress(`${res.address1}${res.address2}${res.address3}`);
-            } else {
-                alert("該当する住所が見つかりませんでした。");
+            const candidates = await lookupZip(zip7);
+            if (candidates.length === 0) {
+                dialog.warning(ZIP_NOT_FOUND_MESSAGE);
+                return;
             }
+            const picked = await pickZipAddress(candidates, (labels) => dialog.choose(ZIP_CHOOSE_MESSAGE, labels, ZIP_CHOOSE_TITLE));
+            const a = picked ?? commonZipAddress(candidates);
+            if (!a) return;
+            setTargetAddress(zipAddressText(a));
+            setTargetAddressKana(zipAddressKanaText(a));
         } catch (e) {
-            alert("住所検索エラーが発生しました。");
+            console.error("住所検索エラー:", e);
+            dialog.error("住所の検索に失敗しました。");
         } finally {
             setIsSearchingZip(false);
         }

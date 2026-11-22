@@ -17,7 +17,8 @@ import {
     Check,
     Rocket,
     Loader2,
-    AlertCircle
+    AlertCircle,
+    ExternalLink
 } from 'lucide-react';
 import * as Master from '../../../constants';
 import {
@@ -63,13 +64,12 @@ export default function InitialSetupForm({ cm }: Props) {
         setIsSearchingZip,
         weekStartDay,
         setWeekStartDay,
-        isSearchingComp,
         setIsZipFocus,
         handleFocus,
         handleBlur,
         handleZipSearch,
         saveCompany,
-        searchCorporateNumber,
+        openCorporateNumberPage,
     } = cm;
 
     return (
@@ -104,26 +104,27 @@ export default function InitialSetupForm({ cm }: Props) {
                                     style={{ ...zipInputStyle, flex: 1, border: "none" }} 
                                 />
                                 <button 
-                                    onClick={searchCorporateNumber} 
-                                    disabled={isSearchingComp || compNum.length !== 13}
+                                    onClick={openCorporateNumberPage} 
+                                    disabled={compNum.length !== 13}
+                                    data-action="houjin-bangou-page"
                                     style={{ 
                                         ...zipBtnStyle, 
-                                        width: "140px", 
+                                        width: "190px", 
                                         borderLeft: "1px solid #ddd",
                                         display: "flex",
                                         alignItems: "center",
                                         justifyContent: "center",
                                         gap: "6px",
-                                        cursor: isSearchingComp ? "not-allowed" : "pointer"
+                                        cursor: compNum.length !== 13 ? "not-allowed" : "pointer"
                                     }}
                                 >
-                                    {isSearchingComp ? (
-                                        <Loader2 size={14} className="animate-spin" />
-                                    ) : (
-                                        <Fingerprint size={14} />
-                                    )}
-                                    <span>{isSearchingComp ? "取得中..." : "名称・住所取得"}</span>
+                                    <ExternalLink size={14} />
+                                    <span>国税庁のページで調べる</span>
                                 </button>
+                            </div>
+                            <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", lineHeight: 1.6 }}>
+                                国税庁の法人番号公表サイトの、この番号のページをブラウザで開きます。下の会社名と本店所在地に、
+                                ページの「商号又は名称」と「本店又は主たる事務所の所在地」を写してください（郵便番号は「住所検索」で入れられます）。
                             </div>
                         </div>
 

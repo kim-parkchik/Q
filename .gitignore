@@ -63,3 +63,6 @@ roumu-forms/source/
 
 # 年4回以上の賞与（賞与に係る報酬）の算定基礎届ガイドブック・Q&A・事例集（日本年金機構の PDF なので上げない。出どころと SHA-256 は shoyo-houshu/README.md）
 shoyo-houshu/source/
+
+# 日本郵便の郵便番号データ（zip。scripts/import_zipcode.py で Q 用の形にしたものだけを上げる。出どころと SHA-256 は zipcode/README.md）
+zipcode/source/

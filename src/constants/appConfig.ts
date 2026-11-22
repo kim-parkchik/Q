@@ -41,3 +41,9 @@ export const SYSTEM_MIN_YEAR = 2026;
 
 // 祝日データ取得用（内閣府提供のCSV）
 export const HOLIDAY_CSV_URL_DEFAULT = "https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv";
+
+/**
+ * 国税庁の法人番号公表サイトの、法人番号を指定したページ（後ろに13けたの法人番号を付ける）。ブラウザで開くだけで、Q は読みに行かない
+ * （src-tauri/capabilities/default.json の opener:allow-open-url に、このページだけを許してある。変えるときは、そちらも変える）
+ */
+export const HOUJIN_BANGOU_PAGE_URL = "https://www.houjin-bangou.nta.go.jp/henkorireki-johoto.html?selHouzinNo=";

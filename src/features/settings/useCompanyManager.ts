@@ -5,10 +5,10 @@
 import React, { useEffect, useState } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { fetch } from '@tauri-apps/plugin-http';
 import { ask } from '@tauri-apps/plugin-dialog';
-import * as Master from '../../constants';
-import { fetchAddressByZip } from "../../utils/addressUtils";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { commonZipAddress, formatZip, lookupZip, normalizeZip, pickZipAddress, ZIP_CHOOSE_MESSAGE, ZIP_CHOOSE_TITLE, ZIP_NOT_FOUND_MESSAGE } from "../../utils/zipcode";
+import { houjinBangouPageUrl, isValidCorporateNumber } from "../../utils/houjinBangou";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import type { TaxCalcMethod } from "../../utils/incomeTax";
@@ -64,7 +64,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
     const [halfDayLeave, setHalfDayLeave] = useState(true);
     const [isWeekStartEditable, setIsWeekStartEditable] = useState(false);
     const [originalWeekStartDay, setOriginalWeekStartDay] = useState(0);
-    const [isSearchingComp, setIsSearchingComp] = useState(false);
 
     // --- 給与規定グループ用ステート ---
     const [payrollGroups, setPayrollGroups] = useState<any[]>([]);
@@ -131,72 +130,37 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         e.currentTarget.style.boxShadow = "none";
     };
 
-    /**
-     * 法人番号（13桁）が正しい形式か検証する
-     * @param code 13桁の数字文字列
-     * @returns boolean
-     */
-    const isValidCorporateNumber = (code: string): boolean => {
-        if (!/^\d{13}$/.test(code)) return false;
-
-        const digits = code.split("").map(Number);
-        const checkDigit = digits[0];
-
-        // 2〜13桁
-        const base = digits.slice(1).reverse();
-
-        let oddSum = 0;   // 奇数桁
-        let evenSum = 0;  // 偶数桁
-
-        base.forEach((digit, index) => {
-            if ((index + 1) % 2 === 0) {
-                evenSum += digit;
-            } else {
-                oddSum += digit;
-            }
-        });
-
-        const total = evenSum * 2 + oddSum;
-        const remainder = total % 9;
-        const calculatedCheckDigit = (9 - remainder) % 10;
-
-        return checkDigit === calculatedCheckDigit;
-    };
-
-    // 🆕 共通：郵便番号を整形して住所を取得する関数
+    // 共通：住所検索。日本郵便の郵便番号データを Q の中で引き（utils/zipcode.ts。郵便番号を外に送らない）、
+    // 都道府県と、市区町村・町域を入れる。町域がいくつもある郵便番号は選んでもらい、選ばなければ、どれにも同じ部分だけを入れる
     const handleZipSearch = async (
-        zip: string, 
-        setZip: (z: string) => void, 
-        setPref: (p: string) => void, 
-        setAddr: (a: string) => void, 
+        zip: string,
+        setZip: (z: string) => void,
+        setPref: (p: string) => void,
+        setAddr: (a: string) => void,
         setLoading: (l: boolean) => void
     ) => {
-        // 数字以外を除去（utils側でもやってますが、ここでもバリデーションとして実行）
-        const cleanZip = zip.replace(/[^\d]/g, "");
-        
-        if (cleanZip.length !== 7) {
+        const zip7 = normalizeZip(zip);
+        if (!zip7) {
             dialog.warning("郵便番号は7桁で入力してください");
             return;
         }
-
-        // 💡 ハイフンを自動挿入して見た目を整える
-        const formattedZip = cleanZip.slice(0, 3) + "-" + cleanZip.slice(3);
-        setZip(formattedZip);
+        setZip(formatZip(zip7)); // ハイフンを入れて見た目を整える
 
         setLoading(true);
         try {
-            // 💡 utils.ts の共通関数を呼び出す
-            const res = await fetchAddressByZip(cleanZip);
-            
-            if (res) {
-                setPref(res.address1);
-                setAddr(res.address2 + res.address3);
-            } else {
-                dialog.warning("該当する住所が見つかりませんでした");
+            const candidates = await lookupZip(zip7);
+            if (candidates.length === 0) {
+                dialog.warning(ZIP_NOT_FOUND_MESSAGE);
+                return;
             }
+            const picked = await pickZipAddress(candidates, (labels) => dialog.choose(ZIP_CHOOSE_MESSAGE, labels, ZIP_CHOOSE_TITLE));
+            const a = picked ?? commonZipAddress(candidates);
+            if (!a) return;
+            setPref(a.pref);
+            setAddr(a.city + a.town);
         } catch (e) {
             console.error("住所検索エラー:", e);
-            dialog.error("住所検索中にエラーが発生しました");
+            dialog.error("住所の検索に失敗しました");
         } finally {
             // ローディングが速すぎてチカチカするのを防ぐ
             setTimeout(() => setLoading(false), 300);
@@ -578,93 +542,21 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         }
     };
 
-    // 法人番号検索ロジック
-    const searchCorporateNumber = async () => {
-        // 前後の空白削除（念のため）
+    // 法人番号：国税庁の法人番号公表サイトの、その番号のページをブラウザで開く（Q は読みに行かない。utils/houjinBangou.ts）。
+    // 商号又は名称・本店又は主たる事務所の所在地は、ページを見て写してもらう（郵便番号は「住所検索」で入れられる）
+    const openCorporateNumberPage = async () => {
         const targetNum = compNum.trim();
-
         if (targetNum.length !== 13) {
             return dialog.warning("法人番号は13桁で入力してください。");
         }
-
-        // バリデーション実行
         if (!isValidCorporateNumber(targetNum)) {
             return dialog.warning("法人番号の形式（チェックディジット）が正しくありません。入力ミスがないか再度ご確認ください。");
         }
-
-        setIsSearchingComp(true);
-
         try {
-            // --- Step 1: 国税庁から名称と住所を取得 ---
-            const ntaUrl = `https://www.houjin-bangou.nta.go.jp/henkorireki-johoto.html?selHouzinNo=${compNum}`;
-            const resNta = await fetch(ntaUrl, { 
-                method: 'GET', 
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                redirect: 'follow' 
-            });
-            const html = await resNta.text();
-
-            const nameMatch = html.match(/<p class="nodeName">([\s\S]*?)<\/p>/) || html.match(/<dt>商号又は名称<\/dt>\s*<dd>([\s\S]*?)<\/dd>/);
-            const addrMatch = html.match(/<p class="nodeAddress">([\s\S]*?)<\/p>/) || html.match(/<dt>本店又は主たる事務所の所在地<\/dt>\s*<dd>([\s\S]*?)<\/dd>/);
-
-            if (nameMatch && addrMatch) {
-                const cleanName = nameMatch[1].replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-                const cleanAddr = addrMatch[1].replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-
-                setCompName(cleanName);
-
-                // --- Step 2: 郵便番号を粘り強く検索 (末尾から1文字ずつ削る) ---
-                let foundZip = "";
-                let searchAddr = cleanAddr.replace(/[0-9０-９-－].*$/, "").trim();
-
-                while (searchAddr.length >= 5) {
-                    try {
-                        const zipUrl = `https://zipcloud.ibsnet.co.jp/api/search?address=${encodeURIComponent(searchAddr)}`;
-                        
-                        const resZip = await fetch(zipUrl, { 
-                            method: 'GET',
-                            // 🆕 TauriのプラグインHTTPで、ブラウザであることをより強く主張する
-                            headers: {
-                                'Accept': 'application/json',
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                            },
-                            connectTimeout: 5000 // タイムアウト設定
-                        });
-
-                        const zipData: any = await resZip.json();
-
-                        // デバッグ用: コンソールで中身を確認
-                        console.log(`Searching: ${searchAddr}`, zipData);
-
-                        if (zipData && zipData.results && zipData.results.length > 0) {
-                            const z = zipData.results[0];
-                            foundZip = `${z.zipcode.substring(0, 3)}-${z.zipcode.substring(3)}`;
-                            break; 
-                        }
-                    } catch (e) {
-                        console.error("Zip search error:", e);
-                    }
-                    searchAddr = searchAddr.slice(0, -1);
-                }
-                setCompZip(foundZip);
-
-                const found = Master.PREFECTURE_MASTER.find(p => cleanAddr.startsWith(p.name));
-                let detectedPref = found ? found.name : "";
-
-                if (detectedPref) {
-                    setHeadPref(detectedPref);
-                    setCompAddr(cleanAddr.replace(detectedPref, "").trim());
-                } else {
-                    setCompAddr(cleanAddr);
-                }
-            } else {
-                throw new Error("法人情報の取得に失敗しました。番号を確認してください。");
-            }
+            await openUrl(houjinBangouPageUrl(targetNum));
         } catch (e) {
             console.error(e);
-            dialog.error("情報の取得に失敗しました。");
-        } finally {
-            setIsSearchingComp(false);
+            dialog.error("国税庁の法人番号公表サイトを開けませんでした。");
         }
     };
 
@@ -725,8 +617,6 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         setHalfDayLeave,
         originalWeekStartDay,
         setOriginalWeekStartDay,
-        isSearchingComp,
-        setIsSearchingComp,
         payrollGroups,
         setPayrollGroups,
         pgName,
@@ -815,7 +705,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         startEditBranch,
         deleteBranch,
         saveRoundingSettings,
-        searchCorporateNumber,
+        openCorporateNumberPage,
     };
 }
 
