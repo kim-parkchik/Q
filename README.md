@@ -303,6 +303,11 @@ Windows / Linux 環境での動作確認は行っていません。
    bun test
    ```
 
+部品を新しくするときは、Tauri の画面の側（package.json の `@tauri-apps/…`）と Rust の側（`src-tauri/Cargo.lock`・`timeqard/src-tauri/Cargo.lock` の
+`tauri`・`tauri-plugin-…`）を、同じ版（2.12 のように、2つめの数まで）にそろえます（違うと `bun tauri build` が止まります）。
+新しく出たばかりの版は避け、公開から7日以上たった版を使います（`bun update --minimum-release-age=604800`。Rust の側は `cargo update -p 名前 --precise 版`）。
+弱いところが知られていないかは、`bun audit` と、Rust の側は OSV（osv.dev）で確かめます。
+
 ## ライセンス
 Q 本体は [GNU Affero General Public License v3.0](LICENSE) です。
 
