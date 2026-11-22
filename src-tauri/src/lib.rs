@@ -5,11 +5,14 @@ use argon2::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::sqlite::SqliteConnectOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::FsExt;
 use tauri_plugin_sql::{DbInstances, DbPool};
 
+mod q_folder;
 mod wal_check;
 
 // --- パスワードをハッシュ化するコマンド ---
@@ -146,6 +149,69 @@ fn sqlite_file_path(config_dir: PathBuf, db: &str) -> Result<PathBuf, String> {
     Ok(options.get_filename().to_path_buf())
 }
 
+// --- Q のフォルダ（バックアップ・ログ・書き出しを置くところ。q_folder.rs。画面の側は utils/qFolder.ts・components/QFolderPanel.tsx） ---
+fn env_var(key: &str) -> Option<String> {
+    std::env::var(key).ok()
+}
+
+/// いまの Q のフォルダと、クラウドと同期しているか
+#[tauri::command]
+fn q_folder(app: tauri::AppHandle) -> Result<q_folder::QFolderInfo, String> {
+    let dirs = q_folder::Dirs::from_app(&app)?;
+    Ok(q_folder::folder_info(&dirs, q_folder::load_setting(&dirs.config).as_deref(), &env_var))
+}
+
+/// 窓でフォルダを選んでもらう（まだ Q のフォルダにはしない。画面で決めたら apply_q_folder の "picked" で変える）。
+/// 窓は Rust の側で開くので、画面からは好きな場所を指せない
+#[tauri::command]
+async fn pick_q_folder(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, q_folder::PendingFolder>,
+) -> Result<Option<q_folder::PickedFolder>, String> {
+    *pending.0.lock().map_err(|e| e.to_string())? = None;
+    let dirs = q_folder::Dirs::from_app(&app)?;
+    let current = q_folder::load_setting(&dirs.config).unwrap_or_else(|| dirs.default_folder());
+    let start = if current.is_dir() { current } else { dirs.home.clone() };
+    let Some(picked) = app.dialog().file().set_title("Q のフォルダを選ぶ").set_directory(start).blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    q_folder::check_chosen_folder(&path, &dirs)?;
+    let cloud = q_folder::cloud_place(&path, &dirs.home, &env_var);
+    *pending.0.lock().map_err(|e| e.to_string())? = Some(path.clone());
+    Ok(Some(q_folder::PickedFolder { path: path.to_string_lossy().into_owned(), cloud }))
+}
+
+/// Q のフォルダを変える。choice は "picked"（窓で選んだフォルダ）・"home"（ホームフォルダの Q）・"default"（書類フォルダの Q）
+#[tauri::command]
+fn apply_q_folder(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, q_folder::PendingFolder>,
+    choice: String,
+) -> Result<q_folder::QFolderInfo, String> {
+    let dirs = q_folder::Dirs::from_app(&app)?;
+    let folder = match choice.as_str() {
+        "default" => None,
+        "home" => Some(dirs.home_folder()),
+        "picked" => Some(pending.0.lock().map_err(|e| e.to_string())?.take().ok_or("フォルダが選ばれていません")?),
+        _ => return Err(format!("知らない選び方です: {choice}")),
+    };
+    let folder = folder.and_then(|folder| q_folder::normalize_setting(&dirs, folder));
+    if let Some(folder) = &folder {
+        std::fs::create_dir_all(folder).map_err(|e| format!("フォルダを作れませんでした: {e}"))?;
+        app.fs_scope().allow_directory(folder, true).map_err(|e| e.to_string())?;
+    }
+    q_folder::save_setting(&dirs.config, folder.as_deref())?;
+    Ok(q_folder::folder_info(&dirs, folder.as_deref(), &env_var))
+}
+
+/// 会社ファイル（path）がクラウドと同期する場所にあれば、そのクラウドの名前（開く前に知らせる）
+#[tauri::command]
+fn cloud_place_of(app: tauri::AppHandle, path: String) -> Result<Option<String>, String> {
+    let dirs = q_folder::Dirs::from_app(&app)?;
+    Ok(q_folder::cloud_place(Path::new(&path), &dirs.home, &env_var))
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -159,6 +225,18 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init()) 
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(q_folder::PendingFolder::default())
+        .setup(|app| {
+            // ほかの場所にした Q のフォルダの読み書きを足す（書類フォルダの Q は capabilities/default.json でいつも許す）
+            if let Ok(dirs) = q_folder::Dirs::from_app(app.handle()) {
+                if let Some(folder) = q_folder::load_setting(&dirs.config) {
+                    if let Err(e) = app.fs_scope().allow_directory(&folder, true) {
+                        eprintln!("Q のフォルダの読み書きを足せませんでした: {e}");
+                    }
+                }
+            }
+            Ok(())
+        })
         // 🆕 ここに hash_password を追加して登録！
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -166,7 +244,11 @@ pub fn run() {
             verify_password,
             derive_key,
             execute_batch,
-            check_company_file
+            check_company_file,
+            q_folder,
+            pick_q_folder,
+            apply_q_folder,
+            cloud_place_of
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

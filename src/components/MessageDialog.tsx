@@ -10,6 +10,7 @@
  *   - 成功の知らせ                               … toast.success（Toast.tsx）
  *   - 取り消せない操作の確認                     … これまで通り ask()
  *   - いくつかの中から1つ選んでもらう            … dialog.choose("〜を選んでください", ["A", "B"])  青・選んだ番号（選ばなければ null）
+ *     （「選ばない」の字は変えられる：dialog.choose("〜しますか？", ["〜する"], "題", "やめる")）
  *
  * ■ 使い方
  *   const dialog = useMessageDialog();
@@ -33,6 +34,8 @@ interface ChoiceItem {
     title: string;
     message: string;
     options: string[];
+    /** 選ばないボタンの字（初めは「選ばない」） */
+    cancelLabel: string;
     resolve: (index: number | null) => void;
 }
 
@@ -41,8 +44,8 @@ type DialogItem = MessageItem | ChoiceItem;
 interface MessageDialogApi {
     error: (message: string, title?: string) => Promise<void>;
     warning: (message: string, title?: string) => Promise<void>;
-    /** いくつかの中から1つ選んでもらう（選んだものの番号。「選ばない」・Esc なら null） */
-    choose: (message: string, options: string[], title?: string) => Promise<number | null>;
+    /** いくつかの中から1つ選んでもらう（選んだものの番号。「選ばない」（cancelLabel の字）・Esc なら null） */
+    choose: (message: string, options: string[], title?: string, cancelLabel?: string) => Promise<number | null>;
 }
 
 const DEFAULT_TITLES: Record<DialogKind, string> = {
@@ -63,9 +66,9 @@ export function MessageDialogProvider({ children }: { children: ReactNode }) {
         });
     }, []);
 
-    const openChoice = useCallback((message: string, options: string[], title?: string) => {
+    const openChoice = useCallback((message: string, options: string[], title?: string, cancelLabel?: string) => {
         return new Promise<number | null>((resolve) => {
-            setQueue((prev) => [...prev, { type: "choice", message, options, title: title ?? "選んでください", resolve }]);
+            setQueue((prev) => [...prev, { type: "choice", message, options, title: title ?? "選んでください", cancelLabel: cancelLabel ?? "選ばない", resolve }]);
         });
     }, []);
 
@@ -84,7 +87,7 @@ export function MessageDialogProvider({ children }: { children: ReactNode }) {
     const api = useMemo<MessageDialogApi>(() => ({
         error: (message, title) => open("error", message, title),
         warning: (message, title) => open("warning", message, title),
-        choose: (message, options, title) => openChoice(message, options, title),
+        choose: (message, options, title, cancelLabel) => openChoice(message, options, title, cancelLabel),
     }), [open, openChoice]);
 
     return (
@@ -144,7 +147,7 @@ function DialogView({ item, onClose }: { item: MessageItem; onClose: () => void 
 function ChoiceView({ item, onClose }: { item: ChoiceItem; onClose: (index: number | null) => void }) {
     const firstRef = useRef<HTMLButtonElement>(null);
 
-    // 開いたら1つめの選ぶボタンにフォーカス。Esc で「選ばない」
+    // 開いたら1つめの選ぶボタンにフォーカス。Esc で選ばない
     useEffect(() => {
         firstRef.current?.focus();
         const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(null); };
@@ -176,7 +179,7 @@ function ChoiceView({ item, onClose }: { item: ChoiceItem; onClose: (index: numb
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "14px" }}>
                     <button onClick={() => onClose(null)} data-choice="none" style={choiceCancelStyle}>
-                        選ばない
+                        {item.cancelLabel}
                     </button>
                 </div>
             </div>

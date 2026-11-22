@@ -5,9 +5,11 @@
 export const DEFAULT_BASE_DATE = '2026-01-01';
 
 /**
- * ドキュメントフォルダ内に作成するメインディレクトリ名
- * Q の窓がプログラムで読み書きできるのは、書類フォルダのこのフォルダの中だけ（src-tauri/capabilities/default.json の fs:scope の
- * "$DOCUMENT/Q"。名前を変えるときは、そちらも変える。ファイルを選ぶ窓で選んだファイルは、どこにあっても読み書きできる）
+ * Q のフォルダ（会社ファイルの初めの置き場所と、バックアップ・ログ・書き出しを置くところ）の名前。初めは書類フォルダのこのフォルダ
+ * Q の窓がプログラムで読み書きできるのは、Q のフォルダの中だけ（書類フォルダのこのフォルダは src-tauri/capabilities/default.json の
+ * fs:scope の "$DOCUMENT/Q" で、いつも許す。名前を変えるときは、そちらと src-tauri/src/q_folder.rs の FOLDER_NAME も変える）。
+ * 最初の画面で、ほかの場所（ホームフォルダの Q や、窓で選んだフォルダ）にもできる（utils/qFolder.ts）。
+ * ファイルを選ぶ窓で選んだファイルは、どこにあっても読み書きできる
  */
 export const APP_DIR_NAME = "Q";
 

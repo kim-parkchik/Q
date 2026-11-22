@@ -180,7 +180,12 @@ function PlainBackupsCard({ z }: { z: Z }) {
         {b.after.length === 0 && "（会社ファイルを閉じると作られます。一度閉じて開き直してから消すと、バックアップがなくなる間ができません）"}
       </p>
       <ul style={{ ...note, margin: "6px 0 0 0", paddingLeft: 20 }}>
-        {b.before.map((name) => <li key={name}>{name}</li>)}
+        {b.before.map((file) => (
+          <li key={`${file.dir}/${file.name}`}>
+            {file.name}
+            {file.dir !== b.currentDir && `（前の Q のフォルダ：${file.dir}）`}
+          </li>
+        ))}
       </ul>
       <button type="button" disabled={z.busy}
         style={{ ...mainButton, backgroundColor: "#dc2626", marginTop: 10, opacity: z.busy ? 0.6 : 1 }}

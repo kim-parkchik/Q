@@ -31,8 +31,11 @@ const REFUSAL =
   invoke: async (cmd: string, args: any) => {
     (window as any).__calls.push({ cmd, args });
     switch (cmd) {
-      case "plugin:path|resolve_directory":
-        return DOCUMENTS;
+      case "q_folder":
+        return {
+          path: `${DOCUMENTS}/Q`, isDefault: true, exists: true, cloud: null,
+          defaultPath: `${DOCUMENTS}/Q`, homePath: "/Users/sample/Q", homeCloud: null,
+        };
       case "plugin:path|join":
         return (args.paths as string[]).join("/");
       case "plugin:dialog|open":

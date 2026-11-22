@@ -1,14 +1,14 @@
 import Database from "@tauri-apps/plugin-sql";
 import {
-  BaseDirectory,
   mkdir,
   writeTextFile
 } from "@tauri-apps/plugin-fs";
+import { join } from "@tauri-apps/api/path";
 import {
-  APP_DIR_NAME,
   LOG_DIR_NAME,
   EXT_LOG
 } from "../constants/appConfig";
+import { qFolderPath } from "./qFolder";
 
 // ログの種類（今後 writeLog の引数の型として使う予定）
 export type LogLevel =
@@ -23,8 +23,6 @@ export type LogCategory =
   | "attendance"
   | "salary"
   | "backup";
-
-const logDir = `${APP_DIR_NAME}/${LOG_DIR_NAME}`;
 
 export const writeLog = async (
   db: Database | null,
@@ -41,8 +39,7 @@ export const writeLog = async (
   const yyyy = nowDate.getFullYear();
   const mm = String(nowDate.getMonth() + 1).padStart(2, "0");
 
-  const logPath =
-    `${logDir}/${yyyy}-${mm}.${EXT_LOG}`;
+  const logName = `${yyyy}-${mm}.${EXT_LOG}`;
 
   // SQLite
   if (db) {
@@ -64,12 +61,12 @@ export const writeLog = async (
     }
   }
 
-  // ファイル（書類/Q/Logs の「年-月.qlog」）
+  // ファイル（Q のフォルダの Logs の「年-月.qlog」。初めは書類フォルダの Q/Logs。utils/qFolder.ts）
   // 1行を、ファイルの終わりに書き足す（append）。読み込んでから全部を書き戻すと、2つの記録を同時に書いたときに、
   // あとから書き戻したほうが先に書いた行を消してしまう。書き足すなら、どちらの行も残る（ファイルがなければ作る）
   try {
+    const logDir = await qFolderPath(LOG_DIR_NAME);
     await mkdir(logDir, {
-      baseDir: BaseDirectory.Document,
       recursive: true
     });
 
@@ -78,8 +75,7 @@ export const writeLog = async (
       (userName ? ` (${userName})` : "") +
       "\n";
 
-    await writeTextFile(logPath, line, {
-      baseDir: BaseDirectory.Document,
+    await writeTextFile(await join(logDir, logName), line, {
       append: true
     });
 

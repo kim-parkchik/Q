@@ -1,17 +1,18 @@
 // @ts-ignore
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { copyFile, exists, mkdir, readDir, remove } from "@tauri-apps/plugin-fs";
-import { documentDir, join } from "@tauri-apps/api/path";
+import { join } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Database from "@tauri-apps/plugin-sql";
 import { useEffect, useState } from "react";
 import { DB_SCHEMAS } from "./types/dbSchema";
-import { APP_DIR_NAME, BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, HOLIDAY_CSV_URL_DEFAULT } from "./constants/appConfig";
+import { BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, HOLIDAY_CSV_URL_DEFAULT } from "./constants/appConfig";
 import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
 import { prepareCompanyFile } from "./utils/migrations";
 import { backupFileName, backupsToDelete, companyBaseName, isBackupFile, restoredFileName } from "./utils/backupFiles";
 import { companyFileProblem, sqliteUrl } from "./utils/companyFileCheck";
+import { cloudFileMessage, cloudPlaceOf, qFolderPath } from "./utils/qFolder";
 import { useMessageDialog } from "./components/MessageDialog";
 import { lockVault } from "./features/mynumber/myNumberVault";
 
@@ -36,12 +37,13 @@ export const useApp = () => {
 
   // 🆕 【新規作成】戦い：新しい .qp ファイルを作る
   const createNewProject = async () => {
-    const docsPath = await documentDir();
-    const qFolder = await join(docsPath, APP_DIR_NAME);
+    // Q のフォルダ（初めは書類フォルダの「Q」。最初の画面で変えられる。utils/qFolder.ts）
+    const qFolder = await qFolderPath();
 
-    // 1. 保存する前に「Q」フォルダ自体が存在することを確認（なければ作る）
+    // 1. 保存する前に Q のフォルダ自体が存在することを確認（なければ作る）
     // これをしないと、OSによってはダイアログが「書類」の直下に戻ってしまうことがあります。
-    await mkdir(qFolder, { recursive: true });
+    // （外付けのディスクにした Q のフォルダがつながっていないときなど、作れなくても窓は出す）
+    await mkdir(qFolder, { recursive: true }).catch((e) => console.warn("Q のフォルダを作れませんでした:", e));
 
     const defaultDest = await join(qFolder, `新しい会社データ.${EXT_MAIN}`);
 
@@ -55,16 +57,15 @@ export const useApp = () => {
 
   // 🆕 【開く】戦い：既存の .qp ファイルを選ぶ
   const openProject = async () => {
-    const docsPath = await documentDir();
-    const qFolder = await join(docsPath, APP_DIR_NAME);
-    
-    // フォルダを作っておくことで、ダイアログが最初から「Q」フォルダを見てくれるようになります。
-    await mkdir(qFolder, { recursive: true });
+    const qFolder = await qFolderPath();
+
+    // フォルダを作っておくことで、ダイアログが最初から Q のフォルダを見てくれるようになります（作れなくても窓は出す）。
+    await mkdir(qFolder, { recursive: true }).catch((e) => console.warn("Q のフォルダを作れませんでした:", e));
 
     const filePath = await open({
       multiple: false,
       filters: [{ name: APP_PROJECT_NAME, extensions: [EXT_MAIN, EXT_BACKUP] }], // 👈 バックアップ(.qb)も開けるように追加！
-      defaultPath: qFolder // 👈 「開く」時もQフォルダを初期位置にする
+      defaultPath: qFolder // 👈 「開く」時も Q のフォルダを初期位置にする
     });
     if (typeof filePath !== "string") return;
     if (isBackupFile(filePath)) {
@@ -107,6 +108,15 @@ export const useApp = () => {
 
   // 🆕 共通のロード処理（ここが今の useEffect の中身を移植した場所）
   const loadDatabase = async (path: string) => {
+    // クラウドと同期する場所の会社ファイルなら、開く前に知らせる（utils/qFolder.ts。わからなければ知らせない）
+    const cloud = await cloudPlaceOf(path).catch((e) => {
+      console.error("会社ファイルの場所がクラウドと同期しているかを確かめられませんでした:", e);
+      return null;
+    });
+    if (cloud) {
+      const answer = await dialog.choose(cloudFileMessage(cloud), ["このまま開く"], "クラウドと同期する場所の会社ファイル", "開かない");
+      if (answer !== 0) return;
+    }
     // ほかの会社ファイルで開けたマイナンバーの鍵は閉じる
     lockVault("close");
     setIsLoading(true);
@@ -225,9 +235,8 @@ export const useApp = () => {
       try {
         console.log("バックアップ作成中...");
 
-        // 1. 保存場所（ドキュメント/Q/Backup）を特定
-        const docsPath = await documentDir();
-        const backupDir = await join(docsPath, APP_DIR_NAME, BACKUP_DIR_NAME);
+        // 1. 保存場所（Q のフォルダの Backup。初めは書類フォルダの Q/Backup）を特定
+        const backupDir = await qFolderPath(BACKUP_DIR_NAME);
         
         // 2. フォルダがなければ作成
         await mkdir(backupDir, { recursive: true });
@@ -262,7 +271,7 @@ export const useApp = () => {
         // 知らせないと、バックアップが作られていないことに気づけない（閉じる前に OK を押してもらう）
         await dialog.error(
           `会社ファイルのバックアップを作れませんでした（会社ファイルはそのまま閉じます）。\n` +
-          `書類フォルダの「${APP_DIR_NAME}/${BACKUP_DIR_NAME}」に書き込めるか、空き容量があるかを確かめてください。\n${err instanceof Error ? err.message : String(err)}`
+          `Q のフォルダ（最初の画面に出ている場所）の「${BACKUP_DIR_NAME}」に書き込めるか、空き容量があるかを確かめてください。\n${err instanceof Error ? err.message : String(err)}`
         );
       } finally {
         // 5. バックアップが終わってから、あるいは失敗しても、接続は必ず閉じる

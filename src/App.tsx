@@ -69,6 +69,7 @@ import LegalBooksManager from "./features/legalBooks/LegalBooksManager";
 import AverageWageManager from "./features/payroll/AverageWageManager";
 import { useExpiredMyNumberCount } from "./features/mynumber/useExpiredMyNumberCount";
 import { useToast } from "./components/Toast";
+import QFolderPanel from "./components/QFolderPanel";
 import BonusManager from "./features/payroll/BonusManager";
 import PayReportManager from "./features/payroll/PayReportManager";
 import WithholdingPaymentManager from "./features/payroll/WithholdingPaymentManager";
@@ -317,6 +318,8 @@ function App() {
             既存のファイルを開く (.qp)
           </button>
         </div>
+        {/* Q のフォルダ（バックアップ・ログ・書き出しの置き場所）。クラウドと同期していれば知らせ、場所を変えられる */}
+        <QFolderPanel />
         <div style={{ color: "#909399", fontSize: "12px", marginTop: "10px" }}>
           {APP_NAME} ver {APP_VERSION}
         </div>

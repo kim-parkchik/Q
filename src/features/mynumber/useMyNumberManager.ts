@@ -10,9 +10,10 @@ import Database from "@tauri-apps/plugin-sql";
 import { ask } from "@tauri-apps/plugin-dialog";
 // remove は、番号を消す remove（この画面の操作）と名前が同じなので removeFile にする
 import { readDir, remove as removeFile } from "@tauri-apps/plugin-fs";
-import { documentDir, join } from "@tauri-apps/api/path";
-import { APP_DIR_NAME, BACKUP_DIR_NAME } from "../../constants/appConfig";
+import { join } from "@tauri-apps/api/path";
+import { BACKUP_DIR_NAME } from "../../constants/appConfig";
 import { backupsBeforeEncryption, companyBaseName } from "../../utils/backupFiles";
+import { getQFolder } from "../../utils/qFolder";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 import { buildMyNumberList, myNumberError, normalizeMyNumber, SELF_KEY, type MyNumberEntry, type MyNumberStaffRow } from "../../utils/myNumber";
@@ -24,16 +25,25 @@ import {
 import { useMyNumberUnlock, useVaultState } from "./MyNumberUnlock";
 import { changeVaultPassword, loadKeyRecord, lockVault, recoverVault, renewVaultRecoveryKey, setupVault } from "./myNumberVault";
 
-/** 暗号化を始める前に作ったバックアップ（その会社ファイルのもの。暗号化していない番号が入っている） */
+/** バックアップのファイル（フォルダと名前） */
+export interface BackupFile {
+  dir: string;
+  name: string;
+}
+
+/**
+ * 暗号化を始める前に作ったバックアップ（その会社ファイルのもの。暗号化していない番号が入っている）
+ * いまの Q のフォルダの Backup と、書類フォルダの Q の Backup（Q のフォルダを変える前の場所）から探す
+ */
 export interface PlainBackups {
   /** 暗号化を始めた日時（"YYYY-MM-DD HH:MM:SS"） */
   startedAt: string;
-  /** バックアップのフォルダ（書類/Q/Backup） */
-  dir: string;
-  /** 暗号化を始める前に作ったもの（古い順） */
-  before: string[];
+  /** いまの Q のフォルダの Backup（ここにないものは、前の場所のものとして出す） */
+  currentDir: string;
+  /** 暗号化を始める前に作ったもの（フォルダごとに古い順） */
+  before: BackupFile[];
   /** 暗号化を始めてから作ったもの */
-  after: string[];
+  after: BackupFile[];
 }
 
 export interface MyNumberLog {
@@ -75,20 +85,32 @@ export function useMyNumberManager(
   const [busy, setBusy] = useState(false);
   const [plainBackups, setPlainBackups] = useState<PlainBackups | null>(null);
 
-  /** 暗号化を始める前に作った、この会社ファイルのバックアップを探す（名前の日時と、暗号化を始めた日時を比べる） */
+  /**
+   * 暗号化を始める前に作った、この会社ファイルのバックアップを探す（名前の日時と、暗号化を始めた日時を比べる）
+   * いまの Q のフォルダの Backup と、書類フォルダの Q の Backup（Q のフォルダを変える前の場所。クラウドと同期していることがある）から探す
+   */
   const loadPlainBackups = async (): Promise<PlainBackups | null> => {
     if (!companyPath) return null;
     const keyRows = await db.select<any[]>("SELECT created_at FROM my_number_keys WHERE id = 1");
     const startedAt = String(keyRows?.[0]?.created_at ?? "");
     if (!startedAt) return null;
-    const dir = await join(await documentDir(), APP_DIR_NAME, BACKUP_DIR_NAME);
-    let names: string[] = [];
-    try {
-      names = (await readDir(dir)).filter((e) => e.isFile).map((e) => e.name);
-    } catch {
-      names = []; // バックアップのフォルダがまだない
+    const folder = await getQFolder();
+    const currentDir = await join(folder.path, BACKUP_DIR_NAME);
+    const dirs = [...new Set([currentDir, await join(folder.defaultPath, BACKUP_DIR_NAME)])];
+    const before: BackupFile[] = [];
+    const after: BackupFile[] = [];
+    for (const dir of dirs) {
+      let names: string[] = [];
+      try {
+        names = (await readDir(dir)).filter((e) => e.isFile).map((e) => e.name);
+      } catch {
+        names = []; // バックアップのフォルダがまだない
+      }
+      const found = backupsBeforeEncryption(names, companyBaseName(companyPath), startedAt);
+      before.push(...found.before.map((name) => ({ dir, name })));
+      after.push(...found.after.map((name) => ({ dir, name })));
     }
-    return { startedAt, dir, ...backupsBeforeEncryption(names, companyBaseName(companyPath), startedAt) };
+    return { startedAt, currentDir, before, after };
   };
 
   const load = async () => {
@@ -281,7 +303,7 @@ export function useMyNumberManager(
     if (!target || target.before.length === 0) return;
     const ok = await ask(
       `暗号化を始める前に作ったバックアップ${target.before.length}個を消します。\n\n`
-      + target.before.map((name) => `・${name}`).join("\n")
+      + target.before.map((file) => `・${file.name}${file.dir === target.currentDir ? "" : `（${file.dir}）`}`).join("\n")
       + "\n\nこれらには、そのときに登録していたマイナンバーが、暗号化しないまま入っています。"
       + "消したバックアップは元に戻せず、その日の会社ファイルにも戻せなくなります。"
       + (target.after.length === 0
@@ -299,13 +321,13 @@ export function useMyNumberManager(
     const removed: string[] = [];
     const failed: string[] = [];
     try {
-      for (const name of target.before) {
+      for (const file of target.before) {
         try {
-          await removeFile(await join(target.dir, name));
-          removed.push(name);
+          await removeFile(await join(file.dir, file.name));
+          removed.push(file.name);
         } catch (err) {
           console.error(err);
-          failed.push(name);
+          failed.push(file.name);
         }
       }
       if (removed.length > 0) {

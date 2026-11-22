@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Q の窓で使えること（会社ファイル・ファイルを選ぶ窓・書類フォルダの Q フォルダの中の読み書き・祝日の CSV（内閣府）の取り込み・Q の GitHub のページと国税庁の法人番号公表サイトの法人番号のページを開く）。ファイルを選ぶ窓で選んだファイルは、窓が読み書きを許す。書類フォルダの Q の名前は src/constants/appConfig.ts の APP_DIR_NAME と、法人番号のページは HOUJIN_BANGOU_PAGE_URL と同じにする。郵便番号の住所は Q の中のデータ（public/zipcode）で引くので、通信しない",
+  "description": "Q の窓で使えること（会社ファイル・ファイルを選ぶ窓・Q のフォルダの中の読み書き（書類フォルダの Q はここでいつも許す。最初の画面で Q のフォルダをほかの場所にしたときは、src-tauri/src/q_folder.rs が、Q が動いているあいだ、その場所の読み書きを足す）・祝日の CSV（内閣府）の取り込み・Q の GitHub のページと国税庁の法人番号公表サイトの法人番号のページを開く）。ファイルを選ぶ窓で選んだファイルは、窓が読み書きを許す。書類フォルダの Q の名前は src/constants/appConfig.ts の APP_DIR_NAME と、法人番号のページは HOUJIN_BANGOU_PAGE_URL と同じにする。郵便番号の住所は Q の中のデータ（public/zipcode）で引くので、通信しない",
   "windows": ["main"],
   "permissions": [
     "core:default",

@@ -3,12 +3,13 @@
  *
  * ブラウザ式のダウンロードだと「ダウンロード」フォルダに黙って保存されてしまうため、
  * Tauri の保存ダイアログで場所とファイル名を選んでもらう。
- * 初期位置は「書類/Q/Export」フォルダ。
+ * 初期位置は Q のフォルダの「Export」フォルダ（初めは書類フォルダの Q/Export。utils/qFolder.ts）。
  */
 import { save } from "@tauri-apps/plugin-dialog";
 import { mkdir, writeFile } from "@tauri-apps/plugin-fs";
-import { documentDir, join } from "@tauri-apps/api/path";
-import { APP_DIR_NAME, EXPORT_DIR_NAME } from "../constants/appConfig";
+import { join } from "@tauri-apps/api/path";
+import { EXPORT_DIR_NAME } from "../constants/appConfig";
+import { qFolderPath } from "./qFolder";
 
 export interface SavedFile {
     /** 保存したファイルのフルパス */
@@ -27,10 +28,10 @@ const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
  * @returns 保存したファイルの情報。キャンセルされたら null
  */
 export const saveCsvFile = async (content: string, defaultFileName: string): Promise<SavedFile | null> => {
-    // 初期フォルダ（書類/Q/Export）を用意する。作れなくても保存自体は続ける。
+    // 初期フォルダ（Q のフォルダの Export）を用意する。作れなくても保存自体は続ける。
     let defaultPath = defaultFileName;
     try {
-        const exportDir = await join(await documentDir(), APP_DIR_NAME, EXPORT_DIR_NAME);
+        const exportDir = await qFolderPath(EXPORT_DIR_NAME);
         await mkdir(exportDir, { recursive: true });
         defaultPath = await join(exportDir, defaultFileName);
     } catch (e) {
@@ -66,7 +67,7 @@ export const saveTextFile = async (
 ): Promise<SavedFile | null> => {
     let defaultPath = defaultFileName;
     try {
-        const exportDir = await join(await documentDir(), APP_DIR_NAME, EXPORT_DIR_NAME);
+        const exportDir = await qFolderPath(EXPORT_DIR_NAME);
         await mkdir(exportDir, { recursive: true });
         defaultPath = await join(exportDir, defaultFileName);
     } catch (e) {
@@ -92,7 +93,7 @@ export const saveBinaryFile = async (
 ): Promise<SavedFile | null> => {
     let defaultPath = defaultFileName;
     try {
-        const exportDir = await join(await documentDir(), APP_DIR_NAME, EXPORT_DIR_NAME);
+        const exportDir = await qFolderPath(EXPORT_DIR_NAME);
         await mkdir(exportDir, { recursive: true });
         defaultPath = await join(exportDir, defaultFileName);
     } catch (e) {
