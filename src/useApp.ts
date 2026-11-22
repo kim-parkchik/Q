@@ -11,6 +11,7 @@ import * as S from "./App.styles";
 import { writeLog } from "./utils/logUtils";
 import { prepareCompanyFile } from "./utils/migrations";
 import { backupFileName, backupsToDelete, companyBaseName, isBackupFile, restoredFileName } from "./utils/backupFiles";
+import { companyFileProblem, sqliteUrl } from "./utils/companyFileCheck";
 import { useMessageDialog } from "./components/MessageDialog";
 import { lockVault } from "./features/mynumber/myNumberVault";
 
@@ -110,8 +111,16 @@ export const useApp = () => {
     lockVault("close");
     setIsLoading(true);
     try {
+      // 開く前に、となりにある作業中のファイル（-wal）が会社ファイルと合っているかを確かめる（utils/companyFileCheck.ts）
+      const url = sqliteUrl(path);
+      const problem = await companyFileProblem(url);
+      if (problem) {
+        console.error("会社ファイルを開きません:", problem);
+        dialog.error(problem);
+        return;
+      }
       // 魔法の一行：指定されたパスを読み込む！
-      const sqlite = await Database.load(`sqlite:${path}`);
+      const sqlite = await Database.load(url);
       
       // 会社ファイルの形式を確かめてから表を作り、足りない列などを追加する（詳しくは utils/migrations.ts）
       const appliedMigrations = await prepareCompanyFile(sqlite, DB_SCHEMAS);

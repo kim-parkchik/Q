@@ -4,7 +4,13 @@ use argon2::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use sqlx::sqlite::SqliteConnectOptions;
+use std::path::PathBuf;
+use std::str::FromStr;
+use tauri::Manager;
 use tauri_plugin_sql::{DbInstances, DbPool};
+
+mod wal_check;
 
 // --- パスワードをハッシュ化するコマンド ---
 #[tauri::command]
@@ -118,6 +124,28 @@ async fn run_batch(
     Ok(results)
 }
 
+// --- 会社ファイルを開く前に、となりにある作業中のファイル（-wal）を確かめる（wal_check.rs。画面の側は utils/companyFileCheck.ts） ---
+// db は、画面が Database.load に渡す "sqlite:…" と同じもの。tauri-plugin-sql と同じ読み方で、SQLite に渡すファイルの名前にする
+#[tauri::command]
+async fn check_company_file(app: tauri::AppHandle, db: String) -> Result<(), String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let path = sqlite_file_path(config_dir, &db)?;
+    wal_check::check_company_file(&path).map_err(|problem| problem.message())
+}
+
+/// tauri-plugin-sql が Database.load("sqlite:…") で開くファイルの名前。プラグイン（path_mapper）のとおりアプリの設定フォルダに
+/// つなぎ（はじめから場所が書いてあればそのまま）、sqlx（SqliteConnectOptions::from_str）と同じく「?」の前を、「%」の書き方をもどして読む
+fn sqlite_file_path(config_dir: PathBuf, db: &str) -> Result<PathBuf, String> {
+    let rest = db
+        .strip_prefix("sqlite:")
+        .ok_or_else(|| format!("会社ファイルの場所の書き方が違います: {db}"))?;
+    let mut path = config_dir;
+    path.push(rest);
+    let url = format!("sqlite:{}", path.to_str().ok_or("会社ファイルの場所を読めません")?);
+    let options = SqliteConnectOptions::from_str(&url).map_err(|e| e.to_string())?;
+    Ok(options.get_filename().to_path_buf())
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -137,7 +165,8 @@ pub fn run() {
             hash_password,
             verify_password,
             derive_key,
-            execute_batch
+            execute_batch,
+            check_company_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -165,6 +194,18 @@ mod tests {
             .await
             .unwrap();
         (pool, path)
+    }
+
+    #[test]
+    fn 確かめるファイルの名前は_プラグインとsqlxと同じ読み方にする() {
+        let config = PathBuf::from("/設定");
+        assert_eq!(sqlite_file_path(config.clone(), "sqlite:/書類/Q/会社.qp").unwrap(), PathBuf::from("/書類/Q/会社.qp"));
+        // sqlx は「%」の書き方をもどし、「?」の後ろを設定として読む
+        assert_eq!(sqlite_file_path(config.clone(), "sqlite:/書類/a%62c.qp").unwrap(), PathBuf::from("/書類/abc.qp"));
+        assert_eq!(sqlite_file_path(config.clone(), "sqlite:/書類/会社.qp?mode=ro").unwrap(), PathBuf::from("/書類/会社.qp"));
+        // 場所が書いてなければ、アプリの設定フォルダの中（TimeQard の "sqlite:timeqard.db" と同じ）
+        assert_eq!(sqlite_file_path(config.clone(), "sqlite:timeqard.db").unwrap(), PathBuf::from("/設定/timeqard.db"));
+        assert!(sqlite_file_path(config, "mysql://localhost/q").is_err());
     }
 
     async fn count(pool: &sqlx::SqlitePool) -> i64 {
