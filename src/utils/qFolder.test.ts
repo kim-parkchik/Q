@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_DIR_NAME, BACKUP_DIR_NAME, EXPORT_DIR_NAME, LOG_DIR_NAME } from "../constants/appConfig";
+import { APP_DIR_NAME, BACKUP_DIR_NAME, EXPORT_DIR_NAME } from "../constants/appConfig";
 import {
   changedMessage,
   cloudFileMessage,
@@ -34,7 +34,7 @@ const icloud: QFolderInfo = {
 };
 const home: QFolderInfo = { ...icloud, path: "/Users/someone/Q", isDefault: false, cloud: null };
 
-describe("Q のフォルダ（バックアップ・ログ・書き出しの置き場所）", () => {
+describe("Q のフォルダ（バックアップ・書き出しの置き場所）", () => {
   test("Rust の側の答えを受け取る。場所がわからない答えは使わない", async () => {
     const calls: unknown[] = [];
     const info = await getQFolder(async (cmd, args) => {
@@ -50,7 +50,7 @@ describe("Q のフォルダ（バックアップ・ログ・書き出しの置�
   test("クラウドと同期しているときの知らせ", () => {
     const message = cloudFolderMessage(icloud);
     expect(message).toContain("Q のフォルダ（/Users/someone/Documents/Q）は、iCloud Drive と同期しています。");
-    expect(message).toContain("バックアップ・ログ・書き出したファイルが、自動でクラウドに上がります");
+    expect(message).toContain("バックアップ・書き出したファイルが、自動でクラウドに上がります");
     expect(message).toContain("同期しない場所に変えてください。");
     expect(missingFolderMessage(home)).toContain("Q のフォルダ（/Users/someone/Q）が見つかりません。");
   });
@@ -67,7 +67,7 @@ describe("Q のフォルダ（バックアップ・ログ・書き出しの置�
   test("場所を変えたときは、前のフォルダのファイルが残っていることを知らせる", () => {
     const message = changedMessage(icloud, home);
     expect(message).toContain("Q のフォルダを「/Users/someone/Q」にしました。");
-    expect(message).toContain("前のフォルダ（/Users/someone/Documents/Q）にあるバックアップ・ログ・書き出したファイルと会社ファイルは、そのまま残っています。");
+    expect(message).toContain("前のフォルダ（/Users/someone/Documents/Q）にあるバックアップ・書き出したファイルと会社ファイルは、そのまま残っています。");
     expect(message).not.toContain("新しいフォルダも");
     expect(changedMessage(home, { ...home, path: "/Volumes/外付け/Q", cloud: "OneDrive" })).toContain("新しいフォルダも、OneDrive と同期しています。");
     expect(changedMessage(home, home)).toBe("Q のフォルダは「/Users/someone/Q」のままです。");
@@ -81,7 +81,7 @@ describe("Q のフォルダ（バックアップ・ログ・書き出しの置�
   test("フォルダの名前は、Rust の側・権限（書類フォルダの Q はいつも読み書きできる）と同じ", () => {
     const rust = readFileSync(join(ROOT, "src-tauri/src/q_folder.rs"), "utf8");
     expect(rust).toContain(`pub const FOLDER_NAME: &str = "${APP_DIR_NAME}";`);
-    expect(rust).toContain(`const SUBFOLDERS: [&str; 3] = ["${BACKUP_DIR_NAME}", "${LOG_DIR_NAME}", "${EXPORT_DIR_NAME}"];`);
+    expect(rust).toContain(`const SUBFOLDERS: [&str; 2] = ["${BACKUP_DIR_NAME}", "${EXPORT_DIR_NAME}"];`);
     const capability = JSON.parse(readFileSync(join(ROOT, "src-tauri/capabilities/default.json"), "utf8"));
     const scope = capability.permissions.find((p: any) => p.identifier === "fs:scope");
     expect(scope.allow.map((a: any) => a.path)).toEqual([`$DOCUMENT/${APP_DIR_NAME}`, `$DOCUMENT/${APP_DIR_NAME}/**`]);

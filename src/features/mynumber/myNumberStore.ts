@@ -4,7 +4,7 @@
  */
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
-import { writeLog } from "../../utils/logUtils";
+import { logUserName, writeLog } from "../../utils/logUtils";
 import { decryptNumber, type OpenKeys } from "../../utils/myNumberCrypto";
 import { buildMyNumberList } from "../../utils/myNumber";
 import { myNumberRetentions } from "../../utils/myNumberRetention";
@@ -46,7 +46,7 @@ export const countMyNumbers = async (db: Database): Promise<number> => {
 
 /** 取扱いの記録（番号は書かない。ガイドライン（別添1）組織的安全管理措置 c） */
 export const logMyNumber = (db: Database, user: MyNumberUser | null | undefined, message: string) =>
-  writeLog(db, "INFO", "mynumber", message, user ? `${user.display_name}（${user.login_id}）` : undefined);
+  writeLog(db, "INFO", "mynumber", message, user ? logUserName(user) : undefined);
 
 // ── 保存期間（utils/myNumberRetention.ts）に使う値 ─────────────────────────
 

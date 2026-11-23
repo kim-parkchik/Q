@@ -1,7 +1,7 @@
-//! Q のフォルダ（会社ファイルの初めの置き場所と、バックアップ（Backup）・ログ（Logs）・書き出し（Export）を置くところ）
+//! Q のフォルダ（会社ファイルの初めの置き場所と、バックアップ（Backup）・書き出し（Export）を置くところ）
 //!
 //! 初めは書類フォルダの「Q」。書類フォルダが iCloud（Mac の「デスクトップと書類」）や OneDrive（Windows の書類フォルダを
-//! OneDrive に移す設定）と同期していると、バックアップ・ログ・書き出したファイルが自動でクラウドに上がり、同期のせいで
+//! OneDrive に移す設定）と同期していると、バックアップ・書き出したファイルが自動でクラウドに上がり、同期のせいで
 //! 会社ファイルが開けなくなることもある。そこで、クラウドと同期する場所かを見分けて画面で知らせ（画面の側は utils/qFolder.ts）、
 //! このパソコンの設定として、同期しない場所に変えられるようにする（アプリの設定フォルダの q-folder.json）。
 //!
@@ -16,8 +16,8 @@ use std::sync::Mutex;
 
 /// Q のフォルダの名前（src/constants/appConfig.ts の APP_DIR_NAME と、capabilities/default.json の "$DOCUMENT/Q" と同じ）
 pub const FOLDER_NAME: &str = "Q";
-/// Q のフォルダの中のフォルダ（appConfig.ts の BACKUP_DIR_NAME・LOG_DIR_NAME・EXPORT_DIR_NAME と同じ）
-const SUBFOLDERS: [&str; 3] = ["Backup", "Logs", "Export"];
+/// Q のフォルダの中のフォルダ（appConfig.ts の BACKUP_DIR_NAME・EXPORT_DIR_NAME と同じ）
+const SUBFOLDERS: [&str; 2] = ["Backup", "Export"];
 /// このパソコンの設定（アプリの設定フォルダに置く）
 const SETTINGS_FILE: &str = "q-folder.json";
 /// 空のフォルダかを見るときに数えないもの（OS が作るもの）
@@ -167,7 +167,7 @@ pub fn cloud_place(path: &Path, home: &Path, env: &dyn Fn(&str) -> Option<String
 
 /// 窓で選んだフォルダを、Q のフォルダにできるか
 /// ・ホームフォルダとその上、書類・デスクトップ・ダウンロードのフォルダそのものはできない（中のファイルが全部、Q から読み書きできるようになる）
-/// ・空のフォルダか、前に Q のフォルダとして使っていたフォルダ（Backup・Logs・Export のフォルダか、会社ファイル（.qp）・バックアップ（.qb）がある）
+/// ・空のフォルダか、前に Q のフォルダとして使っていたフォルダ（Backup・Export のフォルダか、会社ファイル（.qp）・バックアップ（.qb）がある）
 pub fn check_chosen_folder(path: &Path, dirs: &Dirs) -> Result<(), String> {
     let real = real_path(path);
     if !real.is_dir() {
@@ -199,7 +199,7 @@ pub fn check_chosen_folder(path: &Path, dirs: &Dirs) -> Result<(), String> {
         Ok(())
     } else {
         Err(
-            "Q のフォルダには、空のフォルダか、前に Q のフォルダとして使っていたフォルダ（Backup・Logs・Export のフォルダや、会社ファイル（.qp）が\
+            "Q のフォルダには、空のフォルダか、前に Q のフォルダとして使っていたフォルダ（Backup・Export のフォルダや、会社ファイル（.qp）が\
              入っているもの）を選んでください。窓の「新規フォルダ」で作ってから選べます。"
                 .to_string(),
         )

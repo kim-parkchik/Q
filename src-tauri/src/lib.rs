@@ -149,7 +149,7 @@ fn sqlite_file_path(config_dir: PathBuf, db: &str) -> Result<PathBuf, String> {
     Ok(options.get_filename().to_path_buf())
 }
 
-// --- Q のフォルダ（バックアップ・ログ・書き出しを置くところ。q_folder.rs。画面の側は utils/qFolder.ts・components/QFolderPanel.tsx） ---
+// --- Q のフォルダ（バックアップ・書き出しを置くところ。q_folder.rs。画面の側は utils/qFolder.ts・components/QFolderPanel.tsx） ---
 fn env_var(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }

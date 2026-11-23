@@ -1,5 +1,5 @@
 /**
- * 最初の画面の「Q のフォルダ」（会社ファイルの初めの置き場所と、バックアップ・ログ・書き出しを置くところ。utils/qFolder.ts）
+ * 最初の画面の「Q のフォルダ」（会社ファイルの初めの置き場所と、バックアップ・書き出しを置くところ。utils/qFolder.ts）
  * クラウドと同期していれば知らせ、このパソコンの設定として、同期しない場所に変えられるようにする
  */
 import { useEffect, useState, type CSSProperties } from "react";
@@ -69,7 +69,7 @@ export default function QFolderPanel() {
       <div style={currentStyle}>
         <FolderOpen size={14} />
         <span>
-          Q のフォルダ（バックアップ・ログ・書き出しの置き場所）：<span data-q-folder-path>{info.path}</span>
+          Q のフォルダ（バックアップ・書き出しの置き場所）：<span data-q-folder-path>{info.path}</span>
         </span>
         {!warning && (
           <button type="button" data-q-folder-change onClick={() => setShowChoices((v) => !v)} style={linkStyle}>

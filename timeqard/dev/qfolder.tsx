@@ -1,5 +1,5 @@
 /**
- * Q のフォルダ（バックアップ・ログ・書き出しの置き場所。src/utils/qFolder.ts・src/components/QFolderPanel.tsx・src-tauri/src/q_folder.rs）と、
+ * Q のフォルダ（バックアップ・書き出しの置き場所。src/utils/qFolder.ts・src/components/QFolderPanel.tsx・src-tauri/src/q_folder.rs）と、
  * クラウドと同期する場所の知らせを、Q の最初の画面（src/App.tsx・src/useApp.ts）で確かめる（開発用。配るものには入らない）
  * 使い方：確かめ用の画面（vite.preview.config.ts）を動かし、http://localhost:1432/dev/qfolder.html を開く
  * ・初めは、書類フォルダ（/Users/sample/Documents）が iCloud Drive と同期している Mac のつもり → Q のフォルダの知らせが出る

@@ -318,7 +318,7 @@ function App() {
             既存のファイルを開く (.qp)
           </button>
         </div>
-        {/* Q のフォルダ（バックアップ・ログ・書き出しの置き場所）。クラウドと同期していれば知らせ、場所を変えられる */}
+        {/* Q のフォルダ（バックアップ・書き出しの置き場所）。クラウドと同期していれば知らせ、場所を変えられる */}
         <QFolderPanel />
         <div style={{ color: "#909399", fontSize: "12px", marginTop: "10px" }}>
           {APP_NAME} ver {APP_VERSION}

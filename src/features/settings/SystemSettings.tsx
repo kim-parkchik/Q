@@ -1,8 +1,9 @@
 import { useState } from "react";
 import * as S from "./SystemSettings.styles";
 import { useSystemSettings } from "./useSystemSettings";
-import { Users, DatabaseZap, Settings, Calendar, FileUp } from "lucide-react";
+import { Users, DatabaseZap, Settings, Calendar, FileUp, ScrollText } from "lucide-react";
 import DevMessagePreview from "../../components/DevMessagePreview";
+import OperationLogTab from "./OperationLogTab";
 
 // propsに currentUser を追加
 export default function SystemSettings({ db, currentUser }: { db: any, currentUser: { id: number, login_id: string, display_name: string, role: string } }) {
@@ -32,7 +33,7 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
   const [changePassword, setChangePassword] = useState("");
   const [changePasswordConfirm, setChangePasswordConfirm] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"users" | "maintenance" | "backup">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "maintenance" | "backup" | "logs">("users");
 
   // ✅ スタッフなら自分のみを表示するフィルタリング
   const displayUsers = isAdmin 
@@ -112,6 +113,17 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
             >
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <Settings size={18} /> バックアップ設定
+              </div>
+            </div>
+
+            {/* 操作の記録（会社ファイルの中の記録を見る。OperationLogTab.tsx） */}
+            <div
+              style={S.tabItem(activeTab === "logs")}
+              onClick={() => setActiveTab("logs")}
+              data-settings-tab="logs"
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <ScrollText size={18} /> 操作の記録
               </div>
             </div>
           </>
@@ -326,6 +338,9 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
             )}
           </div>
         </div>
+      ) : activeTab === "logs" ? (
+        // 管理者だけ（タブも管理者にだけ出す）
+        isAdmin ? <OperationLogTab db={db} /> : null
       ) : (
         /* 🆕 バックアップ設定画面 */
         <div style={S.maintenanceSection}>

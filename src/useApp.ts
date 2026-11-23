@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { DB_SCHEMAS } from "./types/dbSchema";
 import { BACKUP_DIR_NAME, EXT_MAIN, EXT_BACKUP, APP_PROJECT_NAME, HOLIDAY_CSV_URL_DEFAULT } from "./constants/appConfig";
 import * as S from "./App.styles";
-import { writeLog } from "./utils/logUtils";
+import { logUserName, setLogUser, writeLog } from "./utils/logUtils";
 import { prepareCompanyFile } from "./utils/migrations";
 import { backupFileName, backupsToDelete, companyBaseName, isBackupFile, restoredFileName } from "./utils/backupFiles";
 import { companyFileProblem, sqliteUrl } from "./utils/companyFileCheck";
@@ -286,6 +286,11 @@ export const useApp = () => {
     setHasUser(null);
     setActiveTab("company");
   };
+
+  // 操作の記録（utils/logUtils.ts）に、いまログインしている人を残す（記録を残すところで渡さなくても残る）
+  useEffect(() => {
+    setLogUser(currentUser ? logUserName(currentUser) : null);
+  }, [currentUser]);
 
   useEffect(() => {
     // listen は Promise を返すので、async/await で解除関数を取得します
