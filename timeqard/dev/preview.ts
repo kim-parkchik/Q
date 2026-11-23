@@ -14,6 +14,8 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { buildStaffFile, cardHash, cardPayload, jstIso, serializeStaffFile } from "../../shared/timeqard";
 
 const MARK = "K7M3QP2X";
+/** 打刻の CSV の確かめの印の鍵（見本。Q の確かめ用の画面 dev/import.html と同じ） */
+const KEY = "K7M3QP2X".repeat(6) + "ABCD";
 const CARDS: Record<string, string> = {
   "1001": "AAAAAAAAAAAAAAAAAAAAAAAAAA",
   "1002": "BBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -22,6 +24,7 @@ const CARDS: Record<string, string> = {
 const staffFile = buildStaffFile({
   companyName: "確かめ用株式会社",
   companyMark: MARK,
+  csvKey: KEY,
   exportedAt: jstIso(Date.now() - 60 * 60 * 1000),
   staff: [
     { id: "1001", name: "山田 太郎", join_date: "2019-04-01" },

@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { buildStaffFile, CSV_HEADERS, DAY_MS, jstMs, parseCsvRecords } from "../../shared/timeqard";
+import { buildStaffFile, CSV_HEADERS, DAY_MS, jstMs, parseCsvRecords, verifyCsvChecks } from "../../shared/timeqard";
 import { addPunch, addRequest, applyStaffFile, loadDayEvents, loadWebAccount, loadWebLogins, prepareDb, setSetting, type KioskDb } from "./store";
 import { createWebApi, IP_MAX_FAILURES, LOCK_MS, MAX_FAILURES, SESSION_IDLE_MS } from "./webApi";
 import { newInitialPassword, PASSWORD_ALPHABET, passwordProblem } from "./passwordRules";
@@ -20,11 +20,12 @@ const wrap = (db: Database): KioskDb => ({
 });
 
 const MARK = "K7M3QP2X";
+const KEY = "K7M3QP2X".repeat(6) + "ABCD";
 const PC = "192.168.0.50";
 const OTHER_PC = "192.168.0.77";
 
 const staffFile = (staff: { id: string; name: string; join_date?: string }[]) =>
-  buildStaffFile({ companyName: "○○株式会社", companyMark: MARK, exportedAt: "2026-11-01T09:00:00+09:00", staff, cardHashesByStaff: new Map() });
+  buildStaffFile({ companyName: "○○株式会社", companyMark: MARK, csvKey: KEY, exportedAt: "2026-11-01T09:00:00+09:00", staff, cardHashesByStaff: new Map() });
 
 const setup = async () => {
   const db = wrap(new Database(":memory:"));
@@ -376,10 +377,20 @@ describe("ブラウザ版の頼み", () => {
     expect(csv.body.fileName).toBe("○○株式会社_打刻_2026-11-01〜2026-11-30.csv");
     const { records } = parseCsvRecords(csv.body.csv);
     expect(records.map((r) => [r.values[CSV_HEADERS.staffId], r.values["出勤"], r.values[CSV_HEADERS.web]])).toEqual([["1001", "08:55", "出勤"]]);
+    // 確かめの印が付き、Q と同じ鍵で合う
+    expect(records[0].values[CSV_HEADERS.check]).toMatch(/^[A-Z2-7]{8}-1-1-[A-Z2-7]{26}$/);
+    expect(await verifyCsvChecks(records, KEY, (r) => [r.values[CSV_HEADERS.staffId]])).toEqual({
+      checkedRows: 1, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false,
+    });
     expect(csv.body.summary.web).toBe(1);
     expect(csv.body.summaryText).toContain("ブラウザで押した日 1日");
     expect((await t.call("admin_csv", { token, from: "2026-11-30", to: "2026-11-01" })).status).toBe(400);
     expect((await t.call("admin_csv", { token, from: "2026-12-01", to: "2026-12-31" })).status).toBe(404);
+    // 鍵がない（前の形の従業員ファイルを読み込んだまま）なら、書き出さずに、従業員ファイルを読み込み直すよう知らせる
+    await t.db.execute("DELETE FROM settings WHERE key = 'csv_key'");
+    const noKey = await t.call("admin_csv", { token, from: "2026-11-01", to: "2026-11-30" });
+    expect(noKey.status).toBe(409);
+    expect(noKey.body.error).toContain("従業員ファイルを書き出し直して、読み込んでください");
   });
 
   test("ブラウザ版を止めているとき・知らない頼み・読めない中身には答えない", async () => {

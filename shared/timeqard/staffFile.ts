@@ -2,15 +2,17 @@
  * 従業員ファイル（Q → TimeQard）
  *
  * Q で書き出し、USB メモリなどで運んで TimeQard に読み込む（くわしくは timeqard/DESIGN.md の 5.3・付録 B）。
- * ・入れるもの：形式・会社名・会社の印・書き出した日時と、従業員ごとの スタッフID・名前・入社日・退職日・カードの確かめ用の値
+ * ・入れるもの：形式・会社名・会社の印・打刻の CSV の確かめの印の鍵・書き出した日時と、従業員ごとの スタッフID・名前・入社日・退職日・
+ *   カードの確かめ用の値
  * ・入れないもの：給与・マイナンバー・住所・生年月日・電話・家族など
  * ・入れる人：書き出した日に在籍している人（退職日が空か、書き出した日から後）と、入社日がこれからの人
+ * ・形式の番号：2 で、打刻の CSV の確かめの印の鍵（csvKey。csv.ts の「確かめの印」）を足した
  */
-import { isCardHash, isCompanyMark, sha256Hex } from "./codes";
+import { isCardHash, isCompanyMark, isCsvKey, sha256Hex } from "./codes";
 import { isDateString, jstDate, parseIso } from "./time";
 
 export const STAFF_FILE_FORMAT = "timeqard-staff";
-export const STAFF_FILE_VERSION = 1;
+export const STAFF_FILE_VERSION = 2;
 
 export interface StaffFileEntry {
   id: string;
@@ -26,6 +28,8 @@ export interface StaffFile {
   version: number;
   companyName: string;
   companyMark: string;
+  /** 打刻の CSV の確かめの印の鍵（Q が会社ファイルごとに作る。秘密。TimeQard は、CSV の1行ずつに、この鍵で計算した印を付ける） */
+  csvKey: string;
   /** 書き出した日時（「2026-11-07T16:30:00+09:00」） */
   exportedAt: string;
   staff: StaffFileEntry[];
@@ -64,12 +68,14 @@ export const compareStaffId = (a: string, b: string) =>
 export const buildStaffFile = (args: {
   companyName: string;
   companyMark: string;
+  csvKey: string;
   exportedAt: string;
   staff: StaffForExport[];
   /** スタッフID ごとの、いま使えるカードの確かめ用の値 */
   cardHashesByStaff: Map<string, string[]>;
 }): StaffFile => {
   if (!isCompanyMark(args.companyMark)) throw new Error(`会社の印の形ではありません: ${args.companyMark}`);
+  if (!isCsvKey(args.csvKey)) throw new Error("打刻の CSV の確かめの印の鍵の形ではありません");
   const exportedMs = parseIso(args.exportedAt);
   if (exportedMs === null) throw new Error(`書き出した日時の形ではありません: ${args.exportedAt}`);
   const asOf = jstDate(exportedMs);
@@ -88,6 +94,7 @@ export const buildStaffFile = (args: {
     version: STAFF_FILE_VERSION,
     companyName: args.companyName.trim(),
     companyMark: args.companyMark,
+    csvKey: args.csvKey,
     exportedAt: args.exportedAt,
     staff,
   };
@@ -98,10 +105,10 @@ export const serializeStaffFile = (file: StaffFile) => JSON.stringify(file, null
 
 /**
  * 中身の確かめ用の値（書き出した日時を除いた中身の SHA-256）。
- * Q は書き出したときの値を残しておき、そのあとに従業員・カードが変わったら「書き出し直してください」と知らせる。
+ * Q は書き出したときの値を残しておき、そのあとに従業員・カード・鍵が変わったら「書き出し直してください」と知らせる。
  */
 export const staffFileFingerprint = (file: StaffFile) =>
-  sha256Hex(JSON.stringify({ companyName: file.companyName, companyMark: file.companyMark, staff: file.staff }));
+  sha256Hex(JSON.stringify({ companyName: file.companyName, companyMark: file.companyMark, csvKey: file.csvKey, staff: file.staff }));
 
 /** ファイル名に使えない文字（\ / : * ? " < > |）を「_」にする */
 export const safeFileNamePart = (s: string) => s.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "会社";
@@ -130,11 +137,20 @@ export const parseStaffFile = (text: string): ParseStaffFileResult => {
   if (d.version > STAFF_FILE_VERSION) {
     return { ok: false, error: `新しい形式（${d.version}）の従業員ファイルです。TimeQard を新しくしてから読み込んでください。` };
   }
+  if (d.version < STAFF_FILE_VERSION) {
+    return {
+      ok: false,
+      error: "前の形の従業員ファイルです（打刻の CSV に付ける確かめの印の鍵が入っていません）。Q を新しくしてから、従業員ファイルを書き出し直してください。",
+    };
+  }
   if (typeof d.companyName !== "string" || d.companyName.trim() === "") {
     return { ok: false, error: "従業員ファイルに会社名がありません。" };
   }
   if (!isCompanyMark(d.companyMark)) {
     return { ok: false, error: "従業員ファイルの会社の印が読めません。" };
+  }
+  if (!isCsvKey(d.csvKey)) {
+    return { ok: false, error: "従業員ファイルの、打刻の CSV の確かめの印の鍵が読めません。" };
   }
   if (parseIso(d.exportedAt) === null) {
     return { ok: false, error: "従業員ファイルの書き出した日時が読めません。" };
@@ -176,6 +192,7 @@ export const parseStaffFile = (text: string): ParseStaffFileResult => {
       version: d.version,
       companyName: d.companyName,
       companyMark: d.companyMark,
+      csvKey: d.csvKey,
       exportedAt: d.exportedAt as string,
       staff,
     },

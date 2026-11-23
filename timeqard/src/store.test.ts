@@ -34,6 +34,8 @@ const wrap = (db: Database): KioskDb => ({
 });
 
 const MARK = "K7M3QP2X";
+/** 打刻の CSV の確かめの印の鍵（Q が作り、従業員ファイルで渡す） */
+const KEY = "K7M3QP2X".repeat(6) + "ABCD";
 
 const setup = async () => {
   const raw = new Database(":memory:");
@@ -43,6 +45,7 @@ const setup = async () => {
   const file = buildStaffFile({
     companyName: "○○株式会社",
     companyMark: MARK,
+    csvKey: KEY,
     exportedAt: "2026-11-01T09:00:00+09:00",
     staff: [
       { id: "1001", name: "山田 太郎", join_date: "2019-04-01" },
@@ -83,11 +86,15 @@ describe("記録のファイル", () => {
 });
 
 describe("従業員ファイルの読み込み", () => {
-  test("会社の印・会社名・書き出した日時を設定にする", async () => {
-    const { db } = await setup();
+  test("会社の印・打刻の CSV の確かめの印の鍵・会社名・書き出した日時を設定にする", async () => {
+    const { db, file } = await setup();
     const s = await loadSettings(db);
-    expect([s.companyMark, s.companyName, s.staffFileExportedAt]).toEqual([MARK, "○○株式会社", "2026-11-01T09:00:00+09:00"]);
+    expect([s.companyMark, s.csvKey, s.companyName, s.staffFileExportedAt]).toEqual([MARK, KEY, "○○株式会社", "2026-11-01T09:00:00+09:00"]);
     expect([s.showBreak, s.sound]).toEqual([true, true]);
+    // 読み込み直すと、鍵も入れ替える（Q で鍵を作り直したときなど）
+    const otherKey = "A".repeat(52);
+    await applyStaffFile(db, { ...file, csvKey: otherKey, exportedAt: "2026-11-10T09:00:00+09:00" }, "2026-11-10T10:00:00+09:00");
+    expect((await loadSettings(db)).csvKey).toBe(otherKey);
   });
 
   test("読み込み直すと入れ替え、一覧から消えた人は押せなくして、名前を残す", async () => {
@@ -194,9 +201,11 @@ describe("CSV の書き出し → Q の取り込み", () => {
       "1001 山田 太郎 2026-11-30 22:00-06:05 ",
       "1002 佐藤 花子 2026-11-06 - ",
     ]);
-    const csv = writeTimeQardCsv(rows);
-    const read = readAttendanceImport(csv, { staff: [{ id: "1001", name: "山田 太郎" }, { id: "1002", name: "佐藤 花子" }], companyMark: MARK });
+    const csv = await writeTimeQardCsv(rows, { key: KEY });
+    const read = await readAttendanceImport(csv, { staff: [{ id: "1001", name: "山田 太郎" }, { id: "1002", name: "佐藤 花子" }], companyMark: MARK, csvKey: KEY });
     expect(read.error).toBeNull();
+    // Q は、同じ鍵で確かめの印を確かめる（どの行も合う）
+    expect(read.check).toEqual({ checkedRows: 3, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false, noKey: false });
     expect(read.rows.length).toBe(3);
     expect(read.rows[2].requests).toEqual({ entry: "09:00" });
     expect(parseCsvRecords(csv).records[0].values["会社の印"]).toBe(MARK);
@@ -214,7 +223,7 @@ describe("CSV の書き出し → Q の取り込み", () => {
     expect(rows.map((r) => [r.date, r.noBreakRequest, r.requests, r.requestReason])).toEqual([
       ["2026-11-04", true, {}, "休憩なし：休憩を取れなかった（来客が続いた）"],
     ]);
-    const read = readAttendanceImport(writeTimeQardCsv(rows), { staff: [{ id: "1001", name: "山田 太郎" }], companyMark: MARK });
+    const read = await readAttendanceImport(await writeTimeQardCsv(rows, { key: KEY }), { staff: [{ id: "1001", name: "山田 太郎" }], companyMark: MARK, csvKey: KEY });
     expect(read.error).toBeNull();
     expect(read.rows[0].noBreakRequest).toBe(true);
   });
@@ -242,7 +251,7 @@ describe("休憩の申し出（始めと終わり）と、外出のない打刻"
     const rows = await exportRows(db, { companyMark: MARK, from: "2026-11-06", to: "2026-11-06", now: at });
     expect(rows[0].requestBreaks).toEqual([{ start: "15:00", end: "17:00" }]);
     expect(rows[0].requests).toEqual({ exit: "18:00" });
-    expect(writeTimeQardCsv(rows)).toContain(",15:00-17:00,");
+    expect(await writeTimeQardCsv(rows, { key: KEY })).toContain(",15:00-17:00,");
   });
   test("休憩は何回でも押せて、1日の行に全部入る。外出の打刻は残せない（休憩にまとめた）", async () => {
     const { db } = await setup();

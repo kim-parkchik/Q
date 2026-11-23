@@ -5,10 +5,11 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { DB_SCHEMAS } from "../../types/dbSchema";
-import { cardHash, parseStaffFile, serializeStaffFile } from "../../../shared/timeqard";
+import { cardHash, isCsvKey, parseStaffFile, serializeStaffFile, staffFileFingerprint } from "../../../shared/timeqard";
 import type { SqlStatement } from "../../utils/dbBatch";
 import {
   ensureCompanyMark,
+  ensureTimeQardSettings,
   issueCards,
   loadActiveCards,
   loadTimeQardSettings,
@@ -56,13 +57,26 @@ const fixedRandom = (seed: number) => {
   };
 };
 
-describe("会社の印", () => {
-  test("初めて使うときに作り、2回目からは同じ印を返す", async () => {
+describe("会社の印と、打刻の CSV の確かめの印の鍵", () => {
+  test("初めて使うときに作り、2回目からは同じ印・鍵を返す", async () => {
     const db = wrap(open());
     expect(await loadTimeQardSettings(db)).toBeNull();
     const mark = await ensureCompanyMark(db);
     expect(mark).toMatch(/^[A-Z2-7]{8}$/);
     expect(await ensureCompanyMark(db)).toBe(mark);
+    const settings = await loadTimeQardSettings(db);
+    expect(isCsvKey(settings?.csvKey)).toBe(true);
+    expect((await ensureTimeQardSettings(db)).csvKey).toBe(settings!.csvKey);
+  });
+
+  test("鍵がない会社ファイル（鍵を足す前に会社の印を作ったもの）は、使うときに鍵だけを作る（会社の印は変えない）", async () => {
+    const raw = open();
+    raw.exec("INSERT INTO timeqard_settings (id, company_mark) VALUES (1, 'K7M3QP2X')");
+    const db = wrap(raw);
+    expect((await loadTimeQardSettings(db))?.csvKey).toBeNull();
+    const settings = await ensureTimeQardSettings(db);
+    expect(settings.companyMark).toBe("K7M3QP2X");
+    expect(isCsvKey(settings.csvKey)).toBe(true);
   });
 });
 
@@ -115,6 +129,18 @@ describe("従業員ファイル", () => {
     expect(text).not.toContain(card.cardNumber); // カードの番号そのものは入れない
     expect(file.staff[1].cardHashes).toEqual([]);
     expect(parseStaffFile(text)).toEqual({ ok: true, file });
+    // 打刻の CSV の確かめの印の鍵（会社ファイルに残したもの）も入れる
+    expect(file.csvKey).toBe((await loadTimeQardSettings(db))!.csvKey!);
+  });
+
+  test("鍵を足す前に書き出した従業員ファイル（鍵が入っていない）なら、書き出し直すよう知らせる", async () => {
+    const raw = open();
+    raw.exec("INSERT INTO timeqard_settings (id, company_mark) VALUES (1, 'K7M3QP2X')");
+    const db = wrap(raw);
+    const old = { ...(await makeStaffFile(db, "○○株式会社", "2026-11-07T16:30:00+09:00")), csvKey: "" };
+    await recordStaffFileExport(db, old);
+    expect(await staffFileFingerprint(old)).not.toBe(await staffFileFingerprint(await makeStaffFile(db, "○○株式会社", "2026-11-07T16:30:00+09:00")));
+    expect(await staffFileChangedSinceExport(db, "○○株式会社")).toBe(true);
   });
 
   test("書き出したあとに、カード・入社・名前が変わったら知らせる", async () => {

@@ -3,6 +3,7 @@
  * くわしくは timeqard/DESIGN.md の 5.2〜5.4
  *
  * ・会社の印は、会社ファイルごとに1つ。最初に使うときに作り、timeqard_settings に残す。
+ *   打刻の CSV の確かめの印の鍵（秘密。shared/timeqard/csv.ts の「確かめの印」）も、いっしょに作って残し、従業員ファイルで TimeQard に渡す。
  * ・打刻カードの番号は timeqard_cards に残す（同じカードを刷り直せるように）。作り直すと、前のカードに revoked_at を入れる。
  * ・従業員ファイルには、カードの番号そのものではなく、確かめ用の値（SHA-256）だけを入れる。
  * ・書き出したときの中身の確かめ用の値を残し、そのあとに従業員（入社・退職・名前）・カード・会社名が変わったら、
@@ -15,6 +16,7 @@ import {
   isInStaffFile,
   newCardNumber,
   newCompanyMark,
+  newCsvKey,
   staffFileFingerprint,
   type RandomBytes,
   type StaffFile,
@@ -29,28 +31,39 @@ export interface TimeQardDb extends BatchDb {
 
 export interface TimeQardSettings {
   companyMark: string;
+  /** 打刻の CSV の確かめの印の鍵（まだ作っていなければ null） */
+  csvKey: string | null;
   /** 最後に従業員ファイルを書き出した日時（まだなら null） */
   lastExportAt: string | null;
   lastExportFingerprint: string | null;
 }
 
 export const loadTimeQardSettings = async (db: TimeQardDb): Promise<TimeQardSettings | null> => {
-  const rows = await db.select<{ company_mark: string; last_export_at: string | null; last_export_fingerprint: string | null }[]>(
-    "SELECT company_mark, last_export_at, last_export_fingerprint FROM timeqard_settings WHERE id = 1"
+  const rows = await db.select<{ company_mark: string; csv_key: string | null; last_export_at: string | null; last_export_fingerprint: string | null }[]>(
+    "SELECT company_mark, csv_key, last_export_at, last_export_fingerprint FROM timeqard_settings WHERE id = 1"
   );
   const r = rows?.[0];
   return r
-    ? { companyMark: r.company_mark, lastExportAt: r.last_export_at ?? null, lastExportFingerprint: r.last_export_fingerprint ?? null }
+    ? {
+        companyMark: r.company_mark,
+        csvKey: r.csv_key || null,
+        lastExportAt: r.last_export_at ?? null,
+        lastExportFingerprint: r.last_export_fingerprint ?? null,
+      }
     : null;
 };
 
-/** 会社の印を返す（まだなければ作る） */
-export const ensureCompanyMark = async (db: TimeQardDb, random?: RandomBytes) => {
-  await db.execute("INSERT OR IGNORE INTO timeqard_settings (id, company_mark) VALUES (1, ?)", [newCompanyMark(random)]);
+/** 会社の印と、打刻の CSV の確かめの印の鍵を返す（まだなければ作る） */
+export const ensureTimeQardSettings = async (db: TimeQardDb, random?: RandomBytes): Promise<TimeQardSettings & { csvKey: string }> => {
+  await db.execute("INSERT OR IGNORE INTO timeqard_settings (id, company_mark, csv_key) VALUES (1, ?, ?)", [newCompanyMark(random), newCsvKey(random)]);
+  await db.execute("UPDATE timeqard_settings SET csv_key = ? WHERE id = 1 AND (csv_key IS NULL OR csv_key = '')", [newCsvKey(random)]);
   const settings = await loadTimeQardSettings(db);
-  if (!settings) throw new Error("会社の印を作れませんでした");
-  return settings.companyMark;
+  if (!settings?.csvKey) throw new Error("会社の印と、打刻の CSV の確かめの印の鍵を作れませんでした");
+  return { ...settings, csvKey: settings.csvKey };
 };
+
+/** 会社の印を返す（まだなければ作る。打刻の CSV の確かめの印の鍵も、いっしょに作る） */
+export const ensureCompanyMark = async (db: TimeQardDb, random?: RandomBytes) => (await ensureTimeQardSettings(db, random)).companyMark;
 
 export interface TimeQardCard {
   id: number;
@@ -98,14 +111,14 @@ export const loadStaffForExport = async (db: TimeQardDb) =>
 /** 従業員ファイルに入る人（その日に在籍している人と、これから入社する人） */
 export const staffInFile = (staff: StaffForExport[], asOfDate: string) => staff.filter((s) => isInStaffFile(s, asOfDate));
 
-/** 従業員ファイルの中身を作る（会社の印がまだなければ作る） */
+/** 従業員ファイルの中身を作る（会社の印・打刻の CSV の確かめの印の鍵がまだなければ作る） */
 export const makeStaffFile = async (db: TimeQardDb, companyName: string, exportedAt: string): Promise<StaffFile> => {
-  const companyMark = await ensureCompanyMark(db);
+  const { companyMark, csvKey } = await ensureTimeQardSettings(db);
   const staff = await loadStaffForExport(db);
   const cards = await loadActiveCards(db);
   const cardHashesByStaff = new Map<string, string[]>();
   for (const [staffId, card] of cards) cardHashesByStaff.set(staffId, [await cardHash(card.cardNumber)]);
-  return buildStaffFile({ companyName, companyMark, exportedAt, staff, cardHashesByStaff });
+  return buildStaffFile({ companyName, companyMark, csvKey, exportedAt, staff, cardHashesByStaff });
 };
 
 /** 書き出したことを残す（そのときの中身の確かめ用の値も） */
@@ -115,7 +128,7 @@ export const recordStaffFileExport = async (db: TimeQardDb, file: StaffFile) => 
 };
 
 /**
- * 前に書き出したあとに、従業員ファイルの中身が変わったか（変わっていたら、書き出し直して TimeQard に読み込む）。
+ * 前に書き出したあとに、従業員ファイルの中身（従業員・カード・会社名・鍵）が変わったか（変わっていたら、書き出し直して TimeQard に読み込む）。
  * 前に書き出した日を基準に作り直して比べる（退職日が過ぎただけなら、TimeQard が押させないので、変わったとはしない）。
  * まだ書き出していなければ null。
  */

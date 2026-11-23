@@ -169,6 +169,8 @@ export const prepareDb = async (db: KioskDb) => {
 export interface KioskSettings {
   adminPasswordHash: string | null;
   companyMark: string | null;
+  /** 打刻の CSV の確かめの印の鍵（従業員ファイルで Q から受け取る。秘密。shared/timeqard/csv.ts の「確かめの印」） */
+  csvKey: string | null;
   companyName: string;
   staffFileExportedAt: string | null;
   /** 休憩のボタン（休憩始・休憩終）を出すか。休憩は何回でも押せる（中抜けも休憩として押す） */
@@ -207,6 +209,7 @@ export const loadSettings = async (db: KioskDb): Promise<KioskSettings> => {
   return {
     adminPasswordHash: m.get("admin_password_hash") ?? null,
     companyMark: m.get("company_mark") ?? null,
+    csvKey: m.get("csv_key") ?? null,
     companyName: m.get("company_name") ?? "",
     staffFileExportedAt: m.get("staff_file_exported_at") ?? null,
     showBreak: flag("show_break", true), // 初めは、休憩は出す
@@ -251,7 +254,7 @@ export const loadStaff = async (db: KioskDb, companyMark: string): Promise<Kiosk
 /**
  * 従業員ファイルの中身を入れる（その会社の印の従業員を入れ替える。一覧から消えた人は、押せないようにして名前を残し、
  * ブラウザ版のパスワードを消す）。
- * 会社の印・会社名・書き出した日時を、いまの設定にする。
+ * 会社の印・打刻の CSV の確かめの印の鍵・会社名・書き出した日時を、いまの設定にする。
  */
 export const applyStaffFile = async (db: KioskDb, file: StaffFile, loadedAt: string) => {
   const before = await loadStaff(db, file.companyMark);
@@ -270,6 +273,7 @@ export const applyStaffFile = async (db: KioskDb, file: StaffFile, loadedAt: str
     await db.execute("DELETE FROM web_accounts WHERE company_mark = ? AND staff_id = ?", [file.companyMark, s.id]);
   }
   await setSetting(db, "company_mark", file.companyMark);
+  await setSetting(db, "csv_key", file.csvKey);
   await setSetting(db, "company_name", file.companyName);
   await setSetting(db, "staff_file_exported_at", file.exportedAt);
   await db.execute(
@@ -437,6 +441,10 @@ export const exportRows = async (db: KioskDb, args: { companyMark: string; from:
   const names = new Map((await loadStaff(db, args.companyMark)).map((s) => [s.id, s.name]));
   return rows.map((r) => ({ ...r, name: names.get(r.staffId) ?? "", companyMark: args.companyMark }));
 };
+
+/** 打刻の CSV に付ける確かめの印の鍵がないとき（前の形の従業員ファイルを読み込んだままのとき）の知らせ */
+export const NO_CSV_KEY_MESSAGE =
+  "打刻の CSV に付ける確かめの印の鍵がありません。Q の「TimeQard（打刻）」の画面で従業員ファイルを書き出し直して、読み込んでください。";
 
 export const recordExport = async (db: KioskDb, e: { companyMark: string; from: string; to: string; fileName: string; rowCount: number; at: number }) => {
   await db.execute(

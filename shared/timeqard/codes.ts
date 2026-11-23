@@ -7,6 +7,7 @@
  * ・会社の印は8文字（40ビット）。秘密ではなく、ほかの会社のファイルと取り違えないためのもの。
  * ・カードの番号は26文字（130ビット）の、でたらめな値。ID を知っていてもカードは作れない。
  * ・従業員ファイルには、カードの番号そのものではなく、確かめ用の値（SHA-256）だけを入れる。
+ * ・打刻の CSV の確かめの印の鍵は52文字（260ビット）。Q が会社ファイルごとに作り、従業員ファイルで TimeQard に渡す（秘密）。
  */
 
 export const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -33,6 +34,36 @@ export const randomCode = (length: number, random: RandomBytes = cryptoRandom) =
 
 export const newCompanyMark = (random?: RandomBytes) => randomCode(COMPANY_MARK_LENGTH, random);
 export const newCardNumber = (random?: RandomBytes) => randomCode(CARD_NUMBER_LENGTH, random);
+
+/**
+ * 打刻の CSV の確かめの印（csv.ts）に使う鍵の長さ（52文字。260ビット）。
+ * Q が会社ファイルごとに1つ作り、従業員ファイルで TimeQard に渡す。秘密のもの（知っている人は、印を作れる）
+ */
+export const CSV_KEY_LENGTH = 52;
+/** 打刻の CSV の書き出しの番号の長さ（8文字。書き出すたびに作る） */
+export const EXPORT_ID_LENGTH = 8;
+/** 確かめの印の長さ（26文字。130ビット） */
+export const CHECK_MAC_LENGTH = 26;
+
+export const newCsvKey = (random?: RandomBytes) => randomCode(CSV_KEY_LENGTH, random);
+export const newExportId = (random?: RandomBytes) => randomCode(EXPORT_ID_LENGTH, random);
+
+export const isCsvKey = (s: unknown): s is string => typeof s === "string" && /^[A-Z2-7]{52}$/.test(s);
+export const isExportId = (s: unknown): s is string => typeof s === "string" && /^[A-Z2-7]{8}$/.test(s);
+
+/** 確かめの印を計算する鍵（HMAC-SHA256。鍵の52文字を、そのままバイトにして使う） */
+export const importCheckKey = (key: string): Promise<CryptoKey> => {
+  if (!isCsvKey(key)) throw new Error("打刻の CSV の確かめの印の鍵の形ではありません");
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+};
+
+/** 文字の確かめの印（HMAC-SHA256 の初めの26バイトの下の5ビットずつを、A〜Z・2〜7 の26文字にする） */
+export const checkMac = async (key: CryptoKey, text: string) => {
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text)));
+  let out = "";
+  for (let i = 0; i < CHECK_MAC_LENGTH; i++) out += CODE_ALPHABET[mac[i] & 31];
+  return out;
+};
 
 export const isCompanyMark = (s: unknown): s is string =>
   typeof s === "string" && /^[A-Z2-7]{8}$/.test(s);

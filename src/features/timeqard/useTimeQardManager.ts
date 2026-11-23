@@ -188,7 +188,7 @@ export function useTimeQardManager({ db, staffList, currentUser }: Args) {
       await dialog.warning(
         `「${saved.name}」を保存しました（${file.staff.length}人${noCard > 0 ? `。カードのない人 ${noCard}人は、ID で押します` : ""}）。\n\n` +
           `USB メモリなどで入口のパソコンに運び、TimeQard の「管理」→「従業員ファイルを読み込む」で読み込んでください。\n\n` +
-          `このファイルには従業員の名前が入っています。読み込んだら、USB メモリからは消してください。`,
+          `このファイルには、従業員の名前と、打刻の CSV に印を付ける鍵が入っています。読み込んだら、USB メモリからは消してください。`,
         "従業員ファイルを書き出しました"
       );
       await reload();

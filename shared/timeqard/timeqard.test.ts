@@ -3,12 +3,17 @@
  * 実行方法: bun test shared
  */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import {
   addDays,
   buildDayRows,
   buildStaffFile,
   cardHash,
   cardPayload,
+  csvCheckProblem,
+  formatCheck,
+  isCsvKey,
   isDateString,
   isInStaffFile,
   jstDate,
@@ -18,11 +23,14 @@ import {
   monthRange,
   newCardNumber,
   newCompanyMark,
+  newCsvKey,
+  newExportId,
   normalizeDate,
   normalizeTime,
   NO_BREAK_LABEL,
   parseCardPayload,
   parseCardlessKinds,
+  parseCheck,
   parseCsv,
   parseCsvRecords,
   parseFormatVersion,
@@ -38,14 +46,21 @@ import {
   staffFileFingerprint,
   staffFileName,
   TIMEQARD_CSV_HEADERS,
+  verifyCsvChecks,
   workStateOf,
   writeTimeQardCsv,
   type Punch,
   type PunchKind,
   type PunchRequest,
   type RequestKind,
+  type CsvRecord,
   type TimeQardCsvRow,
 } from "./index";
+
+/** テストの鍵（打刻の CSV の確かめの印。52文字）と、書き出しの番号 */
+const KEY = "K7M3QP2X".repeat(6) + "ABCD";
+const EXPORT_ID = "H4KD2QXA";
+const sign = { key: KEY, exportId: EXPORT_ID };
 
 describe("日本時間", () => {
   test("パソコンの時計（UTC のミリ秒）から、日本時間の日付と時刻を作る", () => {
@@ -170,8 +185,8 @@ const row = (over: Partial<TimeQardCsvRow> & Pick<TimeQardCsvRow, "staffId" | "n
 });
 
 describe("CSV", () => {
-  test("設計メモ（付録 A）の例と同じ行を書く", () => {
-    const csv = writeTimeQardCsv([
+  test("設計メモ（付録 A）の例と同じ行を書く（行の終わりに、確かめの印）", async () => {
+    const csv = await writeTimeQardCsv([
       row({
         staffId: "1001",
         name: "山田 太郎",
@@ -190,19 +205,33 @@ describe("CSV", () => {
         cardless: ["exit"],
         notes: ["出勤がありません"],
       }),
-    ]);
-    expect(csv.split("\r\n")).toEqual([
+    ], sign);
+    const lines = csv.split("\r\n");
+    expect(lines.map((l) => l.replace(/,[^,]*$/, ""))).toEqual([
       "スタッフID,名前,日付,出勤,退勤,休憩,申出_出勤,申出_退勤,申出_休憩,申出_休憩なし,申出_理由,カードなし,ブラウザ,注意,会社の印,形式",
-      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00-13:00 15:00-15:10,,,,,,,,,K7M3QP2X,TimeQard 1",
-      "1002,佐藤 花子,2026-11-04,,17:31,,09:00,,12:00-13:00,,出勤：押し忘れた／休憩（12:00〜13:00）：押し忘れた,退勤,,出勤がありません,K7M3QP2X,TimeQard 1",
+      "1001,山田 太郎,2026-11-04,08:58,18:02,12:00-13:00 15:00-15:10,,,,,,,,,K7M3QP2X,TimeQard 2",
+      "1002,佐藤 花子,2026-11-04,,17:31,,09:00,,12:00-13:00,,出勤：押し忘れた／休憩（12:00〜13:00）：押し忘れた,退勤,,出勤がありません,K7M3QP2X,TimeQard 2",
       "",
     ]);
+    // 確かめ：「書き出しの番号-行の番号-行の数-印（26文字）」
+    expect(lines[0].endsWith(",形式,確かめ")).toBe(true);
+    expect(lines[1]).toMatch(/,H4KD2QXA-1-2-[A-Z2-7]{26}$/);
+    expect(lines[2]).toMatch(/,H4KD2QXA-2-2-[A-Z2-7]{26}$/);
+    // 同じ鍵・同じ書き出しの番号なら、同じ印になる。書き出しの番号を渡さなければ、書き出すたびに変わる
+    expect(await writeTimeQardCsv([row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04" })], sign)).toBe(
+      await writeTimeQardCsv([row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04" })], sign)
+    );
+    const a = parseCheck(parseCsvRecords(await writeTimeQardCsv([row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04" })], { key: KEY })).records[0].values["確かめ"]);
+    const b = parseCheck(parseCsvRecords(await writeTimeQardCsv([row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04" })], { key: KEY })).records[0].values["確かめ"]);
+    expect(a?.exportId).not.toBe(b?.exportId);
+    // 鍵の形でなければ書かない
+    await expect(writeTimeQardCsv([], { key: "abc" })).rejects.toThrow("鍵の形ではありません");
   });
 
-  test("文の中の改行・「,」・「\"」は空白にする（列がずれない）", () => {
-    const csv = writeTimeQardCsv([
+  test("文の中の改行・「,」・「\"」は空白にする（列がずれない）", async () => {
+    const csv = await writeTimeQardCsv([
       row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04", requestReason: '退勤：そのほか（会議,"長引いた"\n）', notes: ["a", "b"] }),
-    ]);
+    ], sign);
     const { records } = parseCsvRecords(csv);
     expect(records[0].values["申出_理由"]).toBe("退勤：そのほか（会議 長引いた ）");
     expect(records[0].values["注意"]).toBe("a／b");
@@ -256,19 +285,111 @@ describe("CSV", () => {
     expect(parseCardlessKinds("外出")).toEqual([]);
     expect(parseCardlessKinds("")).toEqual([]);
     expect(parseNotes("出勤がありません／退勤がありません")).toEqual(["出勤がありません", "退勤がありません"]);
-    expect(TIMEQARD_CSV_HEADERS.length).toBe(16);
+    expect(TIMEQARD_CSV_HEADERS.length).toBe(17);
   });
 
-  test("「休憩を取れなかった」の申し出は、「申出_休憩なし」の列に○を書く。列がない CSV（手で作ったものなど）は、申し出なし", () => {
-    const csv = writeTimeQardCsv([
+  test("「休憩を取れなかった」の申し出は、「申出_休憩なし」の列に○を書く。列がない CSV（手で作ったものなど）は、申し出なし", async () => {
+    const csv = await writeTimeQardCsv([
       row({ staffId: "1001", name: "山田 太郎", date: "2026-11-04", noBreakRequest: true, requestReason: "休憩なし：休憩を取れなかった（来客が続いた）" }),
-    ]);
+    ], sign);
     const { records } = parseCsvRecords(csv);
     expect(records[0].values["申出_休憩なし"]).toBe("○");
-    expect(records[0].values["形式"]).toBe("TimeQard 1");
+    expect(records[0].values["形式"]).toBe("TimeQard 2");
     expect(parseNoBreakRequest(records[0].values["申出_休憩なし"])).toBe(true);
     expect(parseNoBreakRequest("")).toBe(false);
     expect(parseNoBreakRequest(undefined)).toBe(false);
+  });
+});
+
+describe("確かめの印（書き出したあとの書き換えに気づく）", () => {
+  const rows = () => [
+    row({ staffId: "0012", name: "山田 太郎", date: "2026-11-04", times: { entry: "08:58", exit: "18:02" }, breaks: [{ start: "12:00", end: "13:00" }] }),
+    row({ staffId: "1002", name: "佐藤 花子", date: "2026-11-04", times: { entry: "", exit: "17:31" }, requests: { entry: "09:00" }, requestReason: "出勤：押し忘れた", cardless: ["exit"], notes: ["出勤がありません"] }),
+    row({ staffId: "1003", name: "鈴木 一郎", date: "2026-11-05", times: { entry: "22:00", exit: "06:05" }, breaks: [{ start: "02:00", end: "02:45" }] }),
+  ];
+  /** Q の従業員の ID に直す（Excel で先頭の 0 が消えた「12」は「0012」） */
+  const ids = (r: CsvRecord) => {
+    const raw = r.values["スタッフID"] ?? "";
+    return raw === "12" ? ["0012", raw] : [raw];
+  };
+  const verify = async (csv: string, key = KEY) => verifyCsvChecks(parseCsvRecords(csv).records, key, ids);
+  const lines = async () => (await writeTimeQardCsv(rows(), sign)).split("\r\n");
+  const join = (l: string[]) => l.join("\r\n");
+
+  test("書いたとおりなら、どの行も合う", async () => {
+    const result = await verify(join(await lines()));
+    expect(result).toEqual({ checkedRows: 3, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false });
+    expect(csvCheckProblem(result)).toBe(false);
+  });
+
+  test("Excel で保存し直した形（日付「2026/11/4」・時刻「8:58」・ID の先頭の 0 が消えた・BOM なし・LF・行の並べ替え）や、名前を変えても合う", async () => {
+    const [header, a, b, c, ...rest] = await lines();
+    const excel = [header, c, a.replace("0012,", "12,").replace("2026-11-04", "2026/11/4").replace("08:58", "8:58").replace("山田 太郎", "山田太郎"), b.replace("2026-11-04", "2026/11/4"), ...rest];
+    const result = await verify("\uFEFF" + excel.join("\n"));
+    expect(result.checkedRows).toBe(3);
+    expect(csvCheckProblem(result)).toBe(false);
+  });
+
+  test("時刻・申し出の理由・カードなし・注意を書き換えた行は、中身が違う行になる（消した行には数えない）", async () => {
+    const [header, a, b, c] = await lines();
+    expect((await verify(join([header, a.replace("18:02", "17:00"), b, c]))).changedRows).toEqual([2]);
+    expect((await verify(join([header, a, b.replace("押し忘れた", "カードを忘れた"), c]))).changedRows).toEqual([3]);
+    expect((await verify(join([header, a, b.replace(",退勤,", ",,"), c]))).changedRows).toEqual([3]);
+    expect((await verify(join([header, a, b.replace("出勤がありません", ""), c]))).changedRows).toEqual([3]);
+    const breaks = await verify(join([header, a, b, c.replace("02:00-02:45", "")]));
+    expect(breaks).toEqual({ checkedRows: 2, changedRows: [4], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false });
+    expect(csvCheckProblem(breaks)).toBe(true);
+  });
+
+  test("消した行・足した行（印がない・形が違う）・写した行・ほかの書き出しの行に気づく", async () => {
+    const [header, a, b, c] = await lines();
+    expect(await verify(join([header, a, c]))).toEqual({ checkedRows: 2, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 1, mixed: false });
+    const added = await verify(join([header, a, b, c, "1004,伊藤 三郎,2026-11-05,09:00,18:00,,,,,,,,,,K7M3QP2X,TimeQard 2,", "1005,高橋 次郎,2026-11-05,09:00,18:00,,,,,,,,,,K7M3QP2X,TimeQard 2,あいう"]));
+    expect(added.noCheckRows).toEqual([5, 6]);
+    expect(added.checkedRows).toBe(3);
+    const copied = await verify(join([header, a, b, b, c]));
+    expect(copied.copiedRows).toEqual([4]);
+    expect(copied.checkedRows).toBe(3);
+    // ほかの書き出し（書き出しの番号が違う）の行をまぜる：どちらの書き出しも、足りない行として数える
+    const other = (await writeTimeQardCsv(rows(), { key: KEY, exportId: "ZZZZ2222" })).split("\r\n");
+    expect(await verify(join([header, a, b, other[3]]))).toEqual({ checkedRows: 3, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 3, mixed: true });
+    // 確かめの列を消した CSV は、どの行も印がない
+    const noColumn = (await lines()).map((l) => l.replace(/,[^,]*$/, ""));
+    expect((await verify(join(noColumn))).noCheckRows).toEqual([2, 3, 4]);
+  });
+
+  test("鍵が違えば、どの行も合わない", async () => {
+    const result = await verify(join(await lines()), newCsvKey());
+    expect(result).toEqual({ checkedRows: 0, changedRows: [2, 3, 4], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false });
+  });
+
+  test("設計メモ（timeqard/DESIGN.md の付録 A）の例の確かめの印は、見本の鍵で合う", async () => {
+    const design = readFileSync(joinPath(import.meta.dir, "../../timeqard/DESIGN.md"), "utf8");
+    const at = design.indexOf("例（`shared/timeqard/csv.ts` の writeTimeQardCsv で、見本の鍵");
+    const example = design.slice(at).split("```")[1].trim();
+    const header = design.slice(design.indexOf("### A. CSV")).split("```")[1].trim();
+    expect(header).toBe(TIMEQARD_CSV_HEADERS.join(","));
+    const { records } = parseCsvRecords(`${header}\n${example}\n`);
+    expect(records.length).toBe(5);
+    const result = await verifyCsvChecks(records, KEY, (r) => [r.values["スタッフID"]]);
+    expect(result).toEqual({ checkedRows: 5, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false });
+  });
+
+  test("確かめの列の書き方と読み方。鍵・書き出しの番号を作る", () => {
+    const mac = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    expect(formatCheck({ exportId: EXPORT_ID, seq: 2, total: 31, mac })).toBe(`H4KD2QXA-2-31-${mac}`);
+    expect(parseCheck(`H4KD2QXA-2-31-${mac}`)).toEqual({ exportId: EXPORT_ID, seq: 2, total: 31, mac });
+    expect(parseCheck(` h4kd2qxa-２-31-${mac.toLowerCase()} `)).toEqual({ exportId: EXPORT_ID, seq: 2, total: 31, mac });
+    expect(parseCheck(`H4KD2QXA-32-31-${mac}`)).toBeNull();
+    expect(parseCheck(`H4KD2QXA-0-31-${mac}`)).toBeNull();
+    expect(parseCheck(`H4KD2QXA-1-31-${mac.slice(1)}`)).toBeNull();
+    expect(parseCheck("")).toBeNull();
+    expect(parseCheck(undefined)).toBeNull();
+    expect(isCsvKey(newCsvKey())).toBe(true);
+    expect(newCsvKey()).not.toBe(newCsvKey());
+    expect(isCsvKey(KEY)).toBe(true);
+    expect(isCsvKey(KEY.slice(1))).toBe(false);
+    expect(newExportId()).toMatch(/^[A-Z2-7]{8}$/);
   });
 });
 
@@ -288,10 +409,11 @@ describe("従業員ファイル", () => {
     expect(isInStaffFile({ id: "x", name: "x", retirement_date: "2026-11-06" }, "2026-11-07")).toBe(false);
   });
 
-  const build = (hashes = new Map<string, string[]>()) =>
+  const build = (hashes = new Map<string, string[]>(), csvKey = KEY) =>
     buildStaffFile({
       companyName: "○○株式会社",
       companyMark: "K7M3QP2X",
+      csvKey,
       exportedAt: "2026-11-07T16:30:00+09:00",
       staff,
       cardHashesByStaff: hashes,
@@ -304,10 +426,15 @@ describe("従業員ファイル", () => {
     expect(file.staff[3]).toEqual({ id: "10", name: "後から 入社", joinDate: "2026-12-01", retirementDate: null, cardHashes: [] });
   });
 
-  test("書き出したファイルを読み戻せる", () => {
+  test("書き出したファイルを読み戻せる（打刻の CSV の確かめの印の鍵も入る。形式は 2）", () => {
     const file = build();
-    const parsed = parseStaffFile(serializeStaffFile(file));
+    expect(file.version).toBe(2);
+    expect(file.csvKey).toBe(KEY);
+    const text = serializeStaffFile(file);
+    expect(Object.keys(JSON.parse(text))).toEqual(["format", "version", "companyName", "companyMark", "csvKey", "exportedAt", "staff"]);
+    const parsed = parseStaffFile(text);
     expect(parsed).toEqual({ ok: true, file });
+    expect(() => build(new Map(), "abc")).toThrow("鍵の形ではありません");
   });
 
   test("おかしなファイルは、わけを返して読まない", () => {
@@ -319,19 +446,26 @@ describe("従業員ファイル", () => {
     };
     expect(error("{")).toContain("JSON");
     expect(error(text({ format: "other" }))).toContain("TimeQard の従業員ファイルではありません");
-    expect(error(text({ version: 2 }))).toContain("TimeQard を新しく");
+    expect(error(text({ version: 3 }))).toContain("TimeQard を新しく");
+    // 前の形（鍵が入っていない形 1）は読まない（Q で書き出し直す）
+    const { csvKey: _, ...v1 } = file;
+    expect(error(JSON.stringify({ ...v1, version: 1 }))).toContain("前の形の従業員ファイルです");
+    expect(error(JSON.stringify(v1))).toContain("鍵が読めません");
+    expect(error(text({ csvKey: "abc" }))).toContain("鍵が読めません");
     expect(error(text({ companyMark: "abc" }))).toContain("会社の印");
     expect(error(text({ staff: [file.staff[0], file.staff[0]] }))).toContain("同じスタッフID");
     expect(error(text({ staff: [{ ...file.staff[0], cardHashes: ["xyz"] }] }))).toContain("カードの値");
     expect(error(text({ staff: [{ ...file.staff[0], joinDate: "2019/04/01" }] }))).toContain("入社日");
   });
 
-  test("中身の確かめ用の値は、書き出した日時では変わらず、カードが変わると変わる", async () => {
+  test("中身の確かめ用の値は、書き出した日時では変わらず、カード・鍵が変わると変わる", async () => {
     const a = await staffFileFingerprint(build());
     const b = await staffFileFingerprint({ ...build(), exportedAt: "2026-11-08T09:00:00+09:00" });
     const c = await staffFileFingerprint(build(new Map([["2", ["a".repeat(64)]]])));
+    const d = await staffFileFingerprint(build(new Map(), "A".repeat(52)));
     expect(a).toBe(b);
     expect(a).not.toBe(c);
+    expect(a).not.toBe(d);
   });
 
   test("ファイル名に使えない文字は「_」にする", () => {
@@ -573,7 +707,7 @@ describe("1日のまとめ方（付録 E）", () => {
     expect(later[0].web).toEqual(["break_start", "break_end"]);
   });
 
-  test("ブラウザ：行に入れた打刻のうち、ブラウザで押した種類。CSV の「ブラウザ」の列に書き、読める", () => {
+  test("ブラウザ：行に入れた打刻のうち、ブラウザで押した種類。CSV の「ブラウザ」の列に書き、読める", async () => {
     const rows = buildDayRows({
       punches: [
         punch("1001", "2026-11-04", "09:00", "entry", "web"),
@@ -582,7 +716,7 @@ describe("1日のまとめ方（付録 E）", () => {
       now: LATER,
     });
     expect([rows[0].web, rows[0].cardless]).toEqual([["entry"], ["exit"]]);
-    const csv = writeTimeQardCsv([{ ...rows[0], name: "山田 太郎", companyMark: "K7M3QP2X" }]);
+    const csv = await writeTimeQardCsv([{ ...rows[0], name: "山田 太郎", companyMark: "K7M3QP2X" }], sign);
     const { records } = parseCsvRecords(csv);
     expect(records[0].values["ブラウザ"]).toBe("出勤");
     expect(parseCardlessKinds(records[0].values["ブラウザ"])).toEqual(["entry"]);

@@ -595,7 +595,8 @@ export const DB_SCHEMAS = [
     company_mark TEXT NOT NULL,        -- 会社の印（A〜Z・2〜7 の8文字。従業員ファイル・打刻カード・打刻の CSV に入れ、ほかの会社のものと取り違えないようにする）
     created_at TEXT DEFAULT (DATETIME('now', 'localtime')),
     last_export_at TEXT,               -- 最後に従業員ファイルを書き出した日時（「2026-11-07T16:30:00+09:00」）
-    last_export_fingerprint TEXT       -- そのときの中身の確かめ用の値（そのあとに従業員・カードが変わったら、書き出し直すよう知らせる）
+    last_export_fingerprint TEXT,      -- そのときの中身の確かめ用の値（そのあとに従業員・カード・鍵が変わったら、書き出し直すよう知らせる）
+    csv_key TEXT                       -- 打刻の CSV の確かめの印の鍵（A〜Z・2〜7 の52文字。秘密。従業員ファイルで TimeQard に渡し、取り込むときに印を確かめる）
   );`,
 
   // TimeQard の打刻カード（QR コード）。作り直すと、前のカードに revoked_at を入れる（くわしくは timeqard/DESIGN.md の 5.2）

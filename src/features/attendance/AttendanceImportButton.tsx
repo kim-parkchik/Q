@@ -3,9 +3,11 @@
  * 勤怠の「一括操作 (CSV)」と、「TimeQard（打刻）」の画面の両方で使う。くわしくは timeqard/DESIGN.md の 5.5
  *
  * 1. CSV を選ぶ（UTF-8 で読めなければ Shift_JIS として読む）
- * 2. 会社の印・形式・ID・日付・時刻を確かめ、会社ファイルの勤怠（確定した日・修正の欄）と合わせて、まとめを出す
+ * 2. 会社の印・形式・確かめの印・ID・日付・時刻を確かめ、会社ファイルの勤怠（確定した日・修正の欄）と合わせて、まとめを出す。
+ *    TimeQard の印が合わない（書き出したあとに書き換えた）CSV は、どこが合わないかを知らせ、「このまま取り込む」を選んだときだけ、まとめに進む
  * 3. 「取り込む」で、打刻の列と、選んだ申し出を、1つのトランザクションでまとめて書き込む（全部入るか、何も入らないか）
- * 4. 取り込んだこと（ファイル名・期間・件数）を、Q の記録（ログ）に残す
+ * 4. 取り込んだこと（ファイル名・期間・件数・確かめの印）を、Q の操作の記録に残す（印が合わないまま取り込んだとき・
+ *    TimeQard を使っている会社で印のない CSV を取り込んだときは、注意として残す）
  */
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { FileDown } from "lucide-react";
@@ -13,7 +15,12 @@ import { companyMarkLabel, PUNCH_LABELS, timeLabel } from "../../../shared/timeq
 import {
   decodeCsvBytes,
   dayKey,
+  importCheckLogText,
+  importCheckMessage,
+  importCheckProblem,
+  importCheckSummary,
   importRequestLabel,
+  NO_TIMEQARD_MARK_NOTE,
   importStatements,
   planAttendanceImport,
   readAttendanceImport,
@@ -53,13 +60,20 @@ export default function AttendanceImportButton({ db, staffList, onImported, user
 
   const loadPreview = async (fileName: string, text: string) => {
     const settings = await loadTimeQardSettings(db);
-    const read = readAttendanceImport(text, {
+    const read = await readAttendanceImport(text, {
       staff: staffList.map((s) => ({ id: String(s.id), name: s.name })),
       companyMark: settings?.companyMark ?? null,
+      csvKey: settings?.csvKey ?? null,
     });
     if (read.error) {
       await dialog.warning(read.error, "取り込めません");
       return;
+    }
+    // TimeQard の印が合わない（確かめられない）ときは、知らせて、取り込むかを聞く
+    if (read.check && importCheckProblem(read.check)) {
+      const title = read.check.noKey ? "TimeQard の印を確かめられません" : "TimeQard の印が合いません";
+      const choice = await dialog.choose(importCheckMessage(read.check), ["このまま取り込む"], title, "取り込まない");
+      if (choice !== 0) return;
     }
     const existing = new Map<string, ExistingDay>();
     if (read.period) {
@@ -112,10 +126,11 @@ export default function AttendanceImportButton({ db, staffList, onImported, user
       const finalizedNow = upserts.length - imported; // まとめを出したあとに確定した日
       const applied = results.slice(plan.toWrite.length).filter((r) => r.rowsAffected > 0).length;
       const period = plan.period ? `${plan.period.from}〜${plan.period.to}` : "期間なし";
-      const source = plan.fromTimeQard ? `TimeQard の打刻・会社の印 ${plan.companyMark ?? "なし"}` : "CSV";
+      const checkText = importCheckLogText(plan);
+      const source = (plan.fromTimeQard ? `TimeQard の打刻・会社の印 ${plan.companyMark ?? "なし"}` : "CSV") + (checkText ? `・${checkText}` : "");
       await writeLog(
         db,
-        "INFO",
+        importCheckProblem(plan.check) || plan.noTimeQardMark ? "WARN" : "INFO",
         "attendance",
         `勤怠の CSV を取り込みました：${fileName}（${source}）${period}・${imported}日分` +
           `（確定した日で入れなかった ${plan.finalized.length + finalizedNow}日分・Q にない ID ${plan.unknownIds.reduce((a, x) => a + x.rows, 0)}行・` +
@@ -155,6 +170,8 @@ export default function AttendanceImportButton({ db, staffList, onImported, user
 
 const th: CSSProperties = { textAlign: "left", padding: "4px 8px", borderBottom: "1px solid #ddd", background: "#f5f7fa", fontSize: 12, whiteSpace: "nowrap" };
 const td: CSSProperties = { padding: "4px 8px", borderBottom: "1px solid #eee", fontSize: 12, verticalAlign: "top" };
+/** まとめの表の見出し（折り返さない） */
+const labelTd: CSSProperties = { ...td, whiteSpace: "nowrap" };
 
 function Section({ title, color = "#34495e", children }: { title: string; color?: string; children: ReactNode }) {
   return (
@@ -204,15 +221,30 @@ export function PreviewDialog(props: {
         <div style={{ padding: "12px 20px", overflowY: "auto" }}>
           <table style={{ borderCollapse: "collapse", fontSize: 13 }}>
             <tbody>
-              <tr><td style={td}>種類</td><td style={td}>{plan.fromTimeQard ? `TimeQard の打刻（会社の印 ${companyMarkLabel(plan.companyMark ?? "")}）` : "CSV（TimeQard のものではありません）"}</td></tr>
-              <tr><td style={td}>期間</td><td style={td}>{plan.period ? `${plan.period.from} 〜 ${plan.period.to}` : "なし"}</td></tr>
-              <tr><td style={td}>入れる</td><td style={{ ...td, fontWeight: "bold" }}>{plan.toWrite.length} 日分（{people} 人）。打刻の欄だけを入れ直します（修正の欄・確定はそのまま）</td></tr>
-              {plan.finalized.length > 0 && <tr><td style={td}>入れない</td><td style={td}>確定した日 {plan.finalized.length} 日分（上書きしません）</td></tr>}
-              {unknownRows > 0 && <tr><td style={td}>入れない</td><td style={{ ...td, color: "#c0392b" }}>Q の従業員にない ID の行 {unknownRows} 行（下に一覧）</td></tr>}
-              {plan.invalid.length > 0 && <tr><td style={td}>入れない</td><td style={{ ...td, color: "#c0392b" }}>読めない行 {plan.invalid.length} 行（下に一覧）</td></tr>}
-              {plan.fixedValues > 0 && <tr><td style={td}>直した</td><td style={td}>日付・時刻の形 {plan.fixedValues} か所（「2026/11/7」→「2026-11-07」、「8:58」→「08:58」など）</td></tr>}
-              {plan.fixedIds.length > 0 && <tr><td style={td}>直した</td><td style={td}>ID {plan.fixedIds.map((x) => `${x.csvId} → ${x.staffId}`).join("、")}</td></tr>}
-              {plan.duplicates.length > 0 && <tr><td style={td}>同じ日</td><td style={td}>同じ人・同じ日の行が2つ以上 {plan.duplicates.length} 件（後の行を使います）</td></tr>}
+              <tr><td style={labelTd}>種類</td><td style={td}>{plan.fromTimeQard ? `TimeQard の打刻（会社の印 ${companyMarkLabel(plan.companyMark ?? "")}）` : "CSV（TimeQard のものではありません）"}</td></tr>
+              {plan.check && (
+                <tr data-import-check={importCheckProblem(plan.check) ? "problem" : "ok"}>
+                  <td style={labelTd}>確かめ</td>
+                  <td style={{ ...td, color: importCheckProblem(plan.check) ? "#c0392b" : "#27ae60", fontWeight: importCheckProblem(plan.check) ? "bold" : undefined }}>
+                    {importCheckSummary(plan.check)}
+                    {importCheckProblem(plan.check) && "。このまま取り込みます（操作の記録に、注意として残します）"}
+                  </td>
+                </tr>
+              )}
+              {plan.noTimeQardMark && (
+                <tr data-import-check="no-mark">
+                  <td style={labelTd}>確かめ</td>
+                  <td style={{ ...td, color: "#b45309" }}>{NO_TIMEQARD_MARK_NOTE}（操作の記録に、注意として残します）</td>
+                </tr>
+              )}
+              <tr><td style={labelTd}>期間</td><td style={td}>{plan.period ? `${plan.period.from} 〜 ${plan.period.to}` : "なし"}</td></tr>
+              <tr><td style={labelTd}>入れる</td><td style={{ ...td, fontWeight: "bold" }}>{plan.toWrite.length} 日分（{people} 人）。打刻の欄だけを入れ直します（修正の欄・確定はそのまま）</td></tr>
+              {plan.finalized.length > 0 && <tr><td style={labelTd}>入れない</td><td style={td}>確定した日 {plan.finalized.length} 日分（上書きしません）</td></tr>}
+              {unknownRows > 0 && <tr><td style={labelTd}>入れない</td><td style={{ ...td, color: "#c0392b" }}>Q の従業員にない ID の行 {unknownRows} 行（下に一覧）</td></tr>}
+              {plan.invalid.length > 0 && <tr><td style={labelTd}>入れない</td><td style={{ ...td, color: "#c0392b" }}>読めない行 {plan.invalid.length} 行（下に一覧）</td></tr>}
+              {plan.fixedValues > 0 && <tr><td style={labelTd}>直した</td><td style={td}>日付・時刻の形 {plan.fixedValues} か所（「2026/11/7」→「2026-11-07」、「8:58」→「08:58」など）</td></tr>}
+              {plan.fixedIds.length > 0 && <tr><td style={labelTd}>直した</td><td style={td}>ID {plan.fixedIds.map((x) => `${x.csvId} → ${x.staffId}`).join("、")}</td></tr>}
+              {plan.duplicates.length > 0 && <tr><td style={labelTd}>同じ日</td><td style={td}>同じ人・同じ日の行が2つ以上 {plan.duplicates.length} 件（後の行を使います）</td></tr>}
             </tbody>
           </table>
 

@@ -161,7 +161,7 @@ export default function TimeQardManager({ db, staffList, currentUser }: Props) {
         <button disabled={m.busy} style={{ ...modernIconBtnStyle("#0055A4"), margin: 0, padding: "6px 14px" }} onClick={m.exportStaffFile}>
           <FileOutput size={16} style={{ marginRight: 6 }} /> 従業員ファイルを書き出す
         </button>
-        <p style={note}>名前が入っているので、USB メモリで運んで TimeQard に読み込んだら、USB メモリからは消してください。</p>
+        <p style={note}>名前と、打刻の CSV に印を付ける鍵（書き換えに気づくためのもの）が入っているので、USB メモリで運んで TimeQard に読み込んだら、USB メモリからは消してください。</p>
       </Block>
 
       <Block no={4} title="打刻を取り込む" icon={<FileDown size={18} />}>
@@ -181,9 +181,9 @@ export default function TimeQardManager({ db, staffList, currentUser }: Props) {
               ["②", "Q", "打刻カードを作って印刷し、従業員に配る"],
               ["③", "Q → TimeQard", "従業員ファイルを書き出し、USB メモリで運んで TimeQard に読み込む（最初と、入社・退職・カードの作り直しのとき）"],
               ["④", "TimeQard", "毎日、従業員がカードをかざして（または ID を入れて）押す。押し忘れは、その場で申し出る"],
-              ["⑤", "TimeQard → Q", "締めのあと、TimeQard の「管理」で打刻を CSV に書き出し、USB メモリで運ぶ"],
-              ["⑥", "Q", "この画面か、勤怠の「CSV 取り込み」で取り込む（まとめを確かめてから入れる）"],
-              ["⑦", "Q", "勤怠の画面で確かめて直し、確定する。そのあと給与計算"],
+              ["⑤", "TimeQard → Q", "締めのあと、TimeQard の「管理」で打刻を CSV に書き出し、USB メモリで運ぶ（CSV は書き換えない。1行ずつに、書き換えに気づくための印が付いている）"],
+              ["⑥", "Q", "この画面か、勤怠の「CSV 取り込み」で取り込む（印が合うか・まとめを確かめてから入れる）"],
+              ["⑦", "Q", "勤怠の画面で確かめて直し（修正の欄で直す。打刻の時刻と直した時刻が、どちらも残る）、確定する。そのあと給与計算"],
             ].map(([no, where, what]) => (
               <tr key={no}><td style={td}>{no}</td><td style={{ ...td, whiteSpace: "nowrap" }}>{where}</td><td style={td}>{what}</td></tr>
             ))}

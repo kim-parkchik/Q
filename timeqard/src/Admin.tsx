@@ -28,7 +28,7 @@ import {
 import { BACKUP_KEEP, backupNow } from "./backup";
 import { NewPasswordFields } from "./PasswordDialog";
 import { confirm, dataDir, getAutostart, hashPassword, pickFolder, pickTextFile, quitApp, saveCsv, setAutostart, setFullscreen } from "./platform";
-import { applyStaffFile, exportRows, loadDayEvents, loadStaff, recordExport, setSetting, type DayEvent, type KioskDb, type KioskSettings, type KioskStaff } from "./store";
+import { applyStaffFile, exportRows, loadDayEvents, loadStaff, NO_CSV_KEY_MESSAGE, recordExport, setSetting, type DayEvent, type KioskDb, type KioskSettings, type KioskStaff } from "./store";
 import { checkStaffFile } from "./staffFileLoad";
 import WebAdmin from "./WebAdmin";
 import { csvFileName, exportSummaryText, summarizeExport, type WebApi } from "./webApi";
@@ -126,6 +126,11 @@ function ExportTab({ db, settings }: TabProps) {
   const run = async () => {
     setResult(null);
     if (!settings.companyMark) return;
+    const key = settings.csvKey;
+    if (!key) {
+      setResult({ tone: "ng", text: NO_CSV_KEY_MESSAGE });
+      return;
+    }
     if (period.from > period.to) {
       setResult({ tone: "ng", text: "期間の初めの日が、終わりの日より後になっています。" });
       return;
@@ -138,7 +143,7 @@ function ExportTab({ db, settings }: TabProps) {
         return;
       }
       const fileName = csvFileName(settings.companyName, period.from, period.to);
-      const saved = await saveCsv(writeTimeQardCsv(rows), fileName);
+      const saved = await saveCsv(await writeTimeQardCsv(rows, { key }), fileName);
       if (!saved) return;
       await recordExport(db, { companyMark: settings.companyMark, from: period.from, to: period.to, fileName: saved.name, rowCount: rows.length, at: Date.now() });
       setResult({

@@ -19,7 +19,7 @@ import {
 } from "../../shared/timeqard";
 import { DEFAULT_WEB_PORT } from "../src/store";
 import type { DayEvent, KioskDb, KioskSettings, KioskStaff, WebAccount, WebLogin } from "../src/store";
-export { ADMIN_LOGIN_ID, CANCEL_WINDOW_MS, CLOCK_TOLERANCE_MS, clockProblem, DEFAULT_WEB_PORT, methodOf } from "../src/store";
+export { ADMIN_LOGIN_ID, CANCEL_WINDOW_MS, CLOCK_TOLERANCE_MS, clockProblem, DEFAULT_WEB_PORT, methodOf, NO_CSV_KEY_MESSAGE } from "../src/store";
 export type { DayEvent, KioskDb, KioskSettings, KioskStaff, WebAccount, WebLogin } from "../src/store";
 
 interface PunchRec { id: number; staffId: string; kind: PunchKind; at: number; method: PunchMethod; clientIp: string; mark: string }
@@ -49,6 +49,7 @@ export const loadSettings = async (_db: KioskDb): Promise<KioskSettings> => {
   return {
     adminPasswordHash: settings.get("admin_password_hash") ?? null,
     companyMark: settings.get("company_mark") ?? null,
+    csvKey: settings.get("csv_key") ?? null,
     companyName: settings.get("company_name") ?? "",
     staffFileExportedAt: settings.get("staff_file_exported_at") ?? null,
     showBreak: flag("show_break", true),
@@ -87,6 +88,7 @@ export const applyStaffFile = async (_db: KioskDb, file: StaffFile, _loadedAt: s
     }
   }
   settings.set("company_mark", file.companyMark);
+  settings.set("csv_key", file.csvKey);
   settings.set("company_name", file.companyName);
   settings.set("staff_file_exported_at", file.exportedAt);
   return { added: file.staff.filter((s) => !before.includes(s.id)).length, removed, total: file.staff.length };

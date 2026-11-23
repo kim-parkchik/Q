@@ -37,6 +37,7 @@
  *   ・v14: 拠点に週44時間の特例の事業（branches.weekly44_business）を足す
  *   ・v15: 給与規定グループに固定残業代も日割りするか（payroll_groups.fixed_overtime_proration）、確定した給与に固定残業代の月額
  *     （salary_results.applied_fixed_overtime。いままでの給与は、払った固定残業代を入れる）を足す
+ *   ・v16: TimeQard の設定に、打刻の CSV の確かめの印の鍵（timeqard_settings.csv_key。従業員ファイルを書き出すときに作る）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -207,6 +208,13 @@ export const MIGRATIONS: Migration[] = [
       if (cols.some((c) => c.name === "fixed_overtime_allowance") && cols.some((c) => c.name === "applied_fixed_overtime")) {
         await db.execute("UPDATE salary_results SET applied_fixed_overtime = fixed_overtime_allowance WHERE applied_fixed_overtime IS NULL");
       }
+    },
+  },
+  {
+    version: 16,
+    description: "TimeQard の設定に、打刻の CSV の確かめの印の鍵の列を足す（鍵は、従業員ファイルを書き出すときに作る）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "timeqard_settings", "csv_key", "TEXT");
     },
   },
 ];

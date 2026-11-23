@@ -62,6 +62,7 @@ import {
   loadWebAccount,
   loadWebAccounts,
   logWebLogin,
+  NO_CSV_KEY_MESSAGE,
   recordExport,
   saveWebFailures,
   saveWebPassword,
@@ -730,12 +731,15 @@ export const createWebApi = (deps: WebDeps) => {
     if (!isDateString(from) || !isDateString(to)) throw new WebError(400, "期間を選んでください。");
     if (from > to) throw new WebError(400, "期間の初めの日が、終わりの日より後になっています。");
     if ((jstMs(to) - jstMs(from)) / DAY_MS + 1 > MAX_CSV_DAYS) throw new WebError(400, "期間は1年までにしてください。");
+    const key = ctx.settings.csvKey;
+    if (!key) throw new WebError(409, NO_CSV_KEY_MESSAGE);
     const rows = await exportRows(db, { companyMark: ctx.mark, from, to, now: ctx.now });
     if (rows.length === 0) throw new WebError(404, `${from}〜${to} の打刻・申し出はありません。`);
     const fileName = csvFileName(ctx.settings.companyName, from, to);
+    const csv = await writeTimeQardCsv(rows, { key });
     await recordExport(db, { companyMark: ctx.mark, from, to, fileName: `${fileName}（ブラウザ ${ctx.ip}）`, rowCount: rows.length, at: ctx.now });
     const summary = summarizeExport(rows);
-    return { fileName, csv: writeTimeQardCsv(rows), summary, summaryText: exportSummaryText(summary) };
+    return { fileName, csv, summary, summaryText: exportSummaryText(summary) };
   };
 
   // ---------------------------------------------------------------- 受け口

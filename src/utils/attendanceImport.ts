@@ -4,7 +4,12 @@
  *
  * 取り込む前に、まとめを出して確かめてから入れる。
  * ・TimeQard の CSV（「会社の印」「形式」の列がある）は、会社の印がこの会社ファイルのものかを確かめ、違えば取り込まない。
- *   形式が Q の知らない新しいものなら取り込まない。印のない CSV（手で作ったもの・ほかのタイムカードのもの）は、いままでどおり取り込める。
+ *   形式が Q の知らない新しいもの・前の形（確かめの印がない形）なら取り込まない。
+ * ・TimeQard の CSV は、行ごとの確かめの印（shared/timeqard/csv.ts の「確かめの印」）を、この会社ファイルの鍵で確かめる。
+ *   書き出したあとに書き換えた行・消した行・足した行・写した行があれば、画面で知らせ、「このまま取り込む」を選んだときだけ取り込む
+ *   （AttendanceImportButton.tsx。取り込んだことは、操作の記録に注意として残す）。
+ * ・印のない CSV（手で作ったもの・ほかのタイムカードのもの）も取り込める。TimeQard を使っている会社（会社の印がある会社ファイル）なら、
+ *   取り込む前のまとめで、TimeQard の印がないことを知らせ、操作の記録にも注意として残す（印の列を消した CSV も、ここに入るため）。
  * ・Q の従業員にない ID の行は入れず、その ID を一覧で出す（Excel で先頭の 0 が消えた ID は、ほかに同じ数の ID がなければ直す）。
  * ・日付・時刻の形を確かめる（「2026/11/7」「8:58」などは直して入れ、直せないものは、その行を入れずに知らせる）。
  * ・確定した日は上書きしない（いままでと同じ）。
@@ -18,6 +23,7 @@
 import {
   companyMarkLabel,
   CSV_HEADERS,
+  csvCheckProblem,
   isCompanyMark,
   NO_BREAK_LABEL,
   NO_BREAK_SHORT,
@@ -37,6 +43,8 @@ import {
   TIMEQARD_CSV_FORMAT_VERSION,
   timeLabel,
   toHalfWidth,
+  verifyCsvChecks,
+  type CsvCheckResult,
   type PunchKind,
   type RequestKind,
   type TimeRequestKind,
@@ -80,12 +88,22 @@ export interface ImportRow {
   notes: string[];
 }
 
+/** TimeQard の CSV の確かめの印を確かめた結果 */
+export interface ImportCheck extends CsvCheckResult {
+  /** この会社ファイルに鍵がないので、確かめられなかった */
+  noKey: boolean;
+}
+
 export interface ReadImportResult {
   /** 取り込めないわけ（あれば、何も取り込まない） */
   error: string | null;
   /** TimeQard の CSV か */
   fromTimeQard: boolean;
   companyMark: string | null;
+  /** TimeQard の CSV の確かめの印を確かめた結果（TimeQard の CSV でなければ null） */
+  check: ImportCheck | null;
+  /** TimeQard を使っている会社（会社の印がある会社ファイル）なのに、TimeQard の印がない CSV（手で作った CSV・印の列を消した CSV など） */
+  noTimeQardMark: boolean;
   /** CSV の行の数（見出しを除く） */
   totalRows: number;
   rows: ImportRow[];
@@ -137,13 +155,20 @@ const makeIdResolver = (staff: ImportStaff[]) => {
 
 /**
  * CSV を読んで、取り込める行と、取り込めない行・わけに分ける（会社ファイルの勤怠はまだ見ない）。
+ * TimeQard の CSV は、確かめの印も確かめる（check。合わなくても error にはしない。画面で聞く）。
  * @param companyMark この会社ファイルの会社の印（まだ作っていなければ null）
+ * @param csvKey この会社ファイルの、打刻の CSV の確かめの印の鍵（まだ作っていなければ null）
  */
-export const readAttendanceImport = (text: string, args: { staff: ImportStaff[]; companyMark: string | null }): ReadImportResult => {
+export const readAttendanceImport = async (
+  text: string,
+  args: { staff: ImportStaff[]; companyMark: string | null; csvKey: string | null }
+): Promise<ReadImportResult> => {
   const result: ReadImportResult = {
     error: null,
     fromTimeQard: false,
     companyMark: null,
+    check: null,
+    noTimeQardMark: false,
     totalRows: 0,
     rows: [],
     period: null,
@@ -171,9 +196,13 @@ export const readAttendanceImport = (text: string, args: { staff: ImportStaff[];
   const badMarkRows = new Set<number>();
   if (result.fromTimeQard) {
     let newest = 0;
+    let oldest = Infinity;
     for (const r of records) {
       const version = parseFormatVersion(r.values[CSV_HEADERS.format]);
-      if (version !== null) newest = Math.max(newest, version);
+      if (version !== null) {
+        newest = Math.max(newest, version);
+        oldest = Math.min(oldest, version);
+      }
       const mark = (r.values[CSV_HEADERS.companyMark] ?? "").normalize("NFKC").trim().toUpperCase();
       if (isCompanyMark(mark)) markRows.set(mark, (markRows.get(mark) ?? 0) + 1);
       else badMarkRows.add(r.rowNumber);
@@ -185,6 +214,10 @@ export const readAttendanceImport = (text: string, args: { staff: ImportStaff[];
     // 休憩を1組しか書けなかった前の形（「休憩始」「外出」の列がある）は、休憩を落とさないように取り込まない
     if (!headers.includes(CSV_HEADERS.breaks) && (headers.includes("休憩始") || headers.includes("外出"))) {
       result.error = "前の形の TimeQard の CSV です（休憩が1組だけの形）。TimeQard を新しくして、CSV を書き出し直してください。";
+      return result;
+    }
+    if (oldest < TIMEQARD_CSV_FORMAT_VERSION) {
+      result.error = "前の形の TimeQard の CSV です（確かめの印がない形）。TimeQard を新しくして、CSV を書き出し直してください。";
       return result;
     }
     const marks = [...markRows.keys()];
@@ -208,8 +241,25 @@ export const readAttendanceImport = (text: string, args: { staff: ImportStaff[];
     }
   }
 
-  // --- 1行ずつ確かめる ---
   const resolveId = makeIdResolver(args.staff);
+
+  // --- TimeQard の CSV なら、確かめの印を確かめる（どの行も、Q の従業員にない ID の行も） ---
+  if (result.fromTimeQard) {
+    result.check = args.csvKey
+      ? {
+          ...(await verifyCsvChecks(records, args.csvKey, (r) => {
+            const raw = (r.values[CSV_HEADERS.staffId] ?? "").trim();
+            const id = resolveId(raw);
+            return id === null ? [raw] : [id, raw];
+          })),
+          noKey: false,
+        }
+      : { checkedRows: 0, changedRows: [], noCheckRows: [], copiedRows: [], missingRows: 0, mixed: false, noKey: true };
+  } else {
+    result.noTimeQardMark = args.companyMark !== null;
+  }
+
+  // --- 1行ずつ確かめる ---
   const names = new Map(args.staff.map((s) => [String(s.id), s.name]));
   const unknown = new Map<string, number>();
   const fixedIds = new Map<string, string>();
@@ -326,6 +376,76 @@ export const readAttendanceImport = (text: string, args: { staff: ImportStaff[];
   }
   return result;
 };
+
+/** 確かめの印が合わない（または確かめられない）か */
+export const importCheckProblem = (check: ImportCheck | null) => check !== null && (check.noKey || csvCheckProblem(check));
+
+/** 行の番号の一覧（多ければ、初めの10行と、ほかの行の数） */
+const rowList = (rows: number[]) => {
+  const shown = rows.slice(0, 10).map((n) => `${n}行目`).join("・");
+  return rows.length > 10 ? `${shown} ほか ${rows.length - 10}行` : shown;
+};
+
+/** 印が合わないところの短い書き方 */
+const problemParts = (check: CsvCheckResult): string[] => {
+  const parts: string[] = [];
+  if (check.changedRows.length > 0) parts.push(`中身が違う行 ${rowList(check.changedRows)}`);
+  if (check.noCheckRows.length > 0) parts.push(`印のない行 ${rowList(check.noCheckRows)}`);
+  if (check.copiedRows.length > 0) parts.push(`写した行 ${rowList(check.copiedRows)}`);
+  if (check.missingRows > 0) parts.push(`足りない行 ${check.missingRows}行`);
+  if (check.mixed) parts.push("いくつかの書き出しの行がまじっている");
+  return parts;
+};
+
+/** 確かめの印の結果の短い書き方（取り込む前のまとめ） */
+export const importCheckSummary = (check: ImportCheck): string => {
+  if (check.noKey) return "この会社ファイルに鍵がないので、印を確かめていません";
+  if (!csvCheckProblem(check)) return `${check.checkedRows}行すべて、TimeQard の印が合っています（書き出したあと、書き換えられていません）`;
+  return `TimeQard の印が合いません（${problemParts(check).join("・")}）`;
+};
+
+/** 操作の記録に書く、確かめの印のこと（TimeQard の印がない CSV は、TimeQard を使っている会社のときだけ書く） */
+export const importCheckLogText = (read: Pick<ReadImportResult, "check" | "noTimeQardMark">): string => {
+  if (read.check) {
+    if (read.check.noKey) return "鍵がないので、印を確かめずに取り込んだ";
+    if (!csvCheckProblem(read.check)) return "印が合う";
+    return `印が合わないまま取り込んだ（${problemParts(read.check).join("・")}）`;
+  }
+  return read.noTimeQardMark ? "TimeQard の印なし" : "";
+};
+
+/** 確かめの印が合わない（確かめられない）ときの知らせ。画面は「このまま取り込む」「取り込まない」を聞く */
+export const importCheckMessage = (check: ImportCheck): string => {
+  const keep = "「このまま取り込む」を選ぶと、";
+  if (check.noKey) {
+    return (
+      "この会社ファイルには、TimeQard の CSV の印を確かめる鍵がないので、CSV が書き換えられていないかを確かめられません。\n" +
+      "「TimeQard（打刻）」の画面で従業員ファイルを書き出し直して TimeQard に読み込み、CSV を書き出し直してから取り込んでください。\n\n" +
+      `${keep}確かめずに取り込みます（操作の記録に残します）。`
+    );
+  }
+  const lines: string[] = [];
+  if (check.changedRows.length > 0) lines.push(`・中身が、書き出したときと違う行：${rowList(check.changedRows)}`);
+  if (check.noCheckRows.length > 0) lines.push(`・確かめの印がない行（あとから足した行など）：${rowList(check.noCheckRows)}`);
+  if (check.copiedRows.length > 0) lines.push(`・同じ行が2つ以上あります（写した行）：${rowList(check.copiedRows)}`);
+  if (check.missingRows > 0) lines.push(`・書き出したときより、${check.missingRows}行足りません（消した行があります）`);
+  if (check.mixed) lines.push("・いくつかの書き出しの行が、まじっています");
+  const noneMatch = check.checkedRows === 0 && check.copiedRows.length === 0 && check.changedRows.length > 0;
+  return (
+    "この CSV は、TimeQard で書き出したあとに書き換えられています（TimeQard の印が合いません）。\n" +
+    lines.join("\n") +
+    "\n\n" +
+    (noneMatch ? "どの行も合わないときは、TimeQard に読み込んである従業員ファイルが、この会社ファイルで書き出したものかも確かめてください。\n" : "") +
+    "TimeQard で書き出し直した CSV を取り込んでください（TimeQard は、同じ期間を何度でも書き出せます）。" +
+    "直すところは、取り込んだあとに、勤怠の画面の修正の欄で直してください（打刻の時刻と直した時刻が、どちらも残ります）。\n\n" +
+    `${keep}書き換えたあとの時刻を、打刻の時刻として取り込みます（操作の記録に残します）。`
+  );
+};
+
+/** TimeQard を使っている会社で、TimeQard の印がない CSV を取り込むときの知らせ（取り込む前のまとめに出す） */
+export const NO_TIMEQARD_MARK_NOTE =
+  "この CSV には、TimeQard の印（会社の印・確かめ）がありません（手で作った CSV・ほかのタイムカードの CSV・印の列を消した CSV）。" +
+  "書き換えられていないかは確かめられません。TimeQard の打刻なら、TimeQard で書き出し直した CSV を取り込んでください。";
 
 /** 会社ファイルの、その日の勤怠（取り込み先） */
 export interface ExistingDay {

@@ -78,7 +78,7 @@ export default function Setup(props: { db: KioskDb; settings: KioskSettings; onD
           USB メモリなどでこのパソコンに運んで選んでください。入っているのは、スタッフID・名前・入社日・退職日・カードの確かめ用の値だけです。
         </p>
         <button className="mid-btn k-entry" disabled={needPassword || busy} onClick={loadFile}>従業員ファイルを選ぶ</button>
-        <p className="muted">読み込んだら、USB メモリの従業員ファイルは消してください（名前が入っているため）。</p>
+        <p className="muted">読み込んだら、USB メモリの従業員ファイルは消してください（名前と、打刻の CSV に印を付ける鍵が入っているため）。</p>
       </div>
 
       {error && <div className="error-text">{error}</div>}

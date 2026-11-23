@@ -17,6 +17,8 @@ import { createWebApi } from "../src/webApi";
 import * as store from "./fakeStore";
 
 const MARK = "K7M3QP2X";
+/** 打刻の CSV の確かめの印の鍵（見本） */
+const KEY = "K7M3QP2X".repeat(6) + "ABCD";
 const db = {} as store.KioskDb;
 const IP = "192.168.0.50";
 
@@ -25,6 +27,7 @@ await store.applyStaffFile(
   buildStaffFile({
     companyName: "確かめ用株式会社",
     companyMark: MARK,
+    csvKey: KEY,
     exportedAt: jstIso(Date.now() - 60 * 60 * 1000),
     staff: [
       { id: "1001", name: "山田 太郎", join_date: "2019-04-01" },
