@@ -1,4 +1,7 @@
-import Database from "@tauri-apps/plugin-sql";
+/** 記録を書く相手（tauri-plugin-sql の Database と同じ使い方） */
+export interface LogWriteDb {
+  execute(query: string, bindValues?: unknown[]): Promise<unknown>;
+}
 
 // ログの種類（今後 writeLog の引数の型として使う予定）
 export type LogLevel =
@@ -32,7 +35,7 @@ export const logUserName = (user: { display_name: string; login_id: string }) =>
  * 使った人を渡さなければ、いまログインしている人を残す
  */
 export const writeLog = async (
-  db: Database | null,
+  db: LogWriteDb | null,
   level: string,
   category: string,
   message: string,

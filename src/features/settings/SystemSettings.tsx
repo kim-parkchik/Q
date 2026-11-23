@@ -4,6 +4,7 @@ import { useSystemSettings } from "./useSystemSettings";
 import { Users, DatabaseZap, Settings, Calendar, FileUp, ScrollText } from "lucide-react";
 import DevMessagePreview from "../../components/DevMessagePreview";
 import OperationLogTab from "./OperationLogTab";
+import { isLoginLocked, lockedUntilMs, untilLabel } from "../auth/loginGuard";
 
 // propsに currentUser を追加
 export default function SystemSettings({ db, currentUser }: { db: any, currentUser: { id: number, login_id: string, display_name: string, role: string } }) {
@@ -11,7 +12,7 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
   if (!currentUser) return null;
 
   const { 
-    users, setMyNumberAccess, deleteUser, addUser, updatePassword,
+    users, unlockUser, setMyNumberAccess, deleteUser, addUser, updatePassword,
     holidaySource, holidayUrl, updateHolidaySource, downloadSampleCsv,
     searchMode, updateSearchMode, apiKey, updateApiKey,
     backupGenerations, updateBackupGenerations
@@ -171,9 +172,24 @@ export default function SystemSettings({ db, currentUser }: { db: any, currentUs
                   </td>
                   <td style={{ ...S.td, ...S.lastLogin }}>
                     {user.last_login || "未ログイン"}
+                    {/* パスワードのまちがいで止めているログイン（features/auth/loginGuard.ts） */}
+                    {isLoginLocked(user, Date.now()) && (
+                      <div data-login-locked={user.login_id} style={{ color: "#c0392b", fontSize: 12, marginTop: 2 }}>
+                        パスワードのまちがいで、{untilLabel(lockedUntilMs(user) ?? Date.now(), Date.now())}までログインできません
+                      </div>
+                    )}
                   </td>
                   <td style={S.td}>
                     <div style={{ display: "flex", gap: "8px" }}>
+                      {isAdmin && isLoginLocked(user, Date.now()) && (
+                        <button
+                          data-login-unlock={user.login_id}
+                          onClick={() => unlockUser(user)}
+                          style={{ cursor: "pointer", padding: "2px 8px", color: "#c0392b" }}
+                        >
+                          止めたのを解く
+                        </button>
+                      )}
                       <button 
                         onClick={() => {
                           setTargetUser({ login_id: user.login_id, display_name: user.display_name });

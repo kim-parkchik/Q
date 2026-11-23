@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { verifyPassword } from "../../utils/authUtils";
+import { attemptLogin } from "./loginGuard";
 
+/**
+ * ログインの画面（LoginScreen.tsx）の入れたものと、ログインのボタン
+ * パスワードを確かめ、続けてまちがえた回数を数え、操作の記録に残すのは loginGuard.ts
+ */
 export function useLogin(db: any, onLoginSuccess: (user: any) => void) {
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
@@ -11,30 +16,11 @@ export function useLogin(db: any, onLoginSuccess: (user: any) => void) {
     setError("");
 
     try {
-      // 1. まずはログインIDだけでユーザーを探す
-      const users = await db.select(
-        "SELECT * FROM users WHERE login_id = ? AND status = 'active'",
-        [loginId]
-      ) as any[];
-
-      if (users.length > 0) {
-        const user = users[0];
-
-        // 2. Rust側に「入力パスワード」と「DBのハッシュ」を渡して検証してもらう
-        const isValid = await verifyPassword(password, user.password_hash);
-
-        if (isValid) {
-          // ログイン成功
-          await db.execute(
-            "UPDATE users SET last_login = DATETIME('now', 'localtime') WHERE id = ?", 
-            [user.id]
-          );
-          onLoginSuccess(user);
-        } else {
-          setError("ログインIDまたはパスワードが正しくありません。");
-        }
+      const result = await attemptLogin(db, loginId, password, { verify: verifyPassword });
+      if (result.ok) {
+        onLoginSuccess(result.user);
       } else {
-        setError("ログインIDまたはパスワードが正しくありません。");
+        setError(result.message);
       }
     } catch (err) {
       console.error(err);

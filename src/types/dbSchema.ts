@@ -26,6 +26,8 @@ export const DB_SCHEMAS = [
     my_number_access INTEGER DEFAULT 0, -- マイナンバーを扱える（事務取扱担当者。1）。印を付けられるのは管理者（詳しくは utils/myNumber.ts）
     status TEXT DEFAULT 'active',
     last_login TEXT,
+    failed_logins INTEGER DEFAULT 0,  -- パスワードを続けてまちがえた回数（5回で、その人のログインを15分止める。features/auth/loginGuard.ts）
+    locked_until TEXT,                -- ログインを止めている終わり（世界標準時の ISO。止めていなければ NULL）
     created_at TEXT DEFAULT (DATETIME('now', 'localtime'))
   );`,
   

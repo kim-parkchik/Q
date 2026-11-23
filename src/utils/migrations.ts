@@ -38,6 +38,7 @@
  *   ・v15: 給与規定グループに固定残業代も日割りするか（payroll_groups.fixed_overtime_proration）、確定した給与に固定残業代の月額
  *     （salary_results.applied_fixed_overtime。いままでの給与は、払った固定残業代を入れる）を足す
  *   ・v16: TimeQard の設定に、打刻の CSV の確かめの印の鍵（timeqard_settings.csv_key。従業員ファイルを書き出すときに作る）を足す
+ *   ・v17: ユーザーに、パスワードを続けてまちがえた回数（users.failed_logins）と、ログインを止めている終わり（users.locked_until）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -215,6 +216,14 @@ export const MIGRATIONS: Migration[] = [
     description: "TimeQard の設定に、打刻の CSV の確かめの印の鍵の列を足す（鍵は、従業員ファイルを書き出すときに作る）",
     up: async (db) => {
       await addColumnIfMissing(db, "timeqard_settings", "csv_key", "TEXT");
+    },
+  },
+  {
+    version: 17,
+    description: "ユーザーに、パスワードを続けてまちがえた回数と、ログインを止めている終わりの列を足す（5回続けてまちがえたら、15分ログインを止める）",
+    up: async (db) => {
+      await addColumnIfMissing(db, "users", "failed_logins", "INTEGER DEFAULT 0");
+      await addColumnIfMissing(db, "users", "locked_until", "TEXT");
     },
   },
 ];

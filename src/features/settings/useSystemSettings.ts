@@ -5,6 +5,7 @@ import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { hashPassword } from "../../utils/authUtils";
 import { logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
+import { unlockLogin } from "../auth/loginGuard";
 
 export function useSystemSettings(db: any) {
   const toast = useToast();
@@ -22,9 +23,9 @@ export function useSystemSettings(db: any) {
       // 1. パスワードをハッシュ化（addUserと同じ処理を通す）
       const passwordHash = await hashPassword(newPassword);
 
-      // 2. カラム名を password_hash に修正（addUserの定義に合わせる）
+      // 2. カラム名を password_hash に修正（addUserの定義に合わせる）。パスワードのまちがいで止めていたログインも解く（features/auth/loginGuard.ts）
       await db.execute(
-        "UPDATE users SET password_hash = ? WHERE login_id = ?",
+        "UPDATE users SET password_hash = ?, failed_logins = 0, locked_until = NULL WHERE login_id = ?",
         [passwordHash, loginId]
       );
 
@@ -40,7 +41,7 @@ export function useSystemSettings(db: any) {
   // --- 1. ユーザー関連ロジック ---
   const fetchUsers = async () => {
     try {
-      const res = await db.select("SELECT id, login_id, display_name, role, last_login, my_number_access FROM users ORDER BY id ASC");
+      const res = await db.select("SELECT id, login_id, display_name, role, last_login, my_number_access, failed_logins, locked_until FROM users ORDER BY id ASC");
       setUsers(res);
     } catch (err) { console.error(err); }
   };
@@ -51,6 +52,18 @@ export function useSystemSettings(db: any) {
     if (ok) {
       await db.execute("DELETE FROM users WHERE login_id = ?", [loginId]);
       await fetchUsers();
+    }
+  };
+
+  /** パスワードのまちがいで止めたログインを解く（管理者だけ。操作の記録に残す。features/auth/loginGuard.ts） */
+  const unlockUser = async (target: { id: number; login_id: string; display_name: string }) => {
+    try {
+      await unlockLogin(db, target);
+      await fetchUsers();
+      toast.success(`${target.display_name}さんのログインを、止めていたのを解きました`);
+    } catch (e) {
+      console.error(e);
+      dialog.error(`止めていたのを解けませんでした。\n${e}`);
     }
   };
 
@@ -161,6 +174,7 @@ export function useSystemSettings(db: any) {
 
   return {
     users,
+    unlockUser,
     setMyNumberAccess,
     deleteUser,
     addUser,
