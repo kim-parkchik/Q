@@ -4,6 +4,8 @@
  * ・1人1日1行。出勤・退勤と、休憩の一覧（「12:00-13:00 15:00-15:10」。spans.ts）を書く（くわしくは timeqard/DESIGN.md の 4.5・付録 A）。
  *   Q は見出しの名前で列を探す。
  * ・名前・申し出の理由・注意などの文の中の、改行と「,」「"」は空白にする。
+ * ・名前の頭が =・+・-・@ などなら、頭に ' を付ける（表計算ソフトで開いたときに式にならないように。guardSpreadsheetText）。
+ *   Q は名前を使わない（取り込みにも、確かめの印にも使わない）ので、取り込みには関係しない。
  * ・読み方（parseCsv）は、引用符（"）でくくった値の中の「,」「""」・改行も正しく読む。
  * ・1行ずつに、書き換えに気づくための「確かめ」の印を付ける（下の「確かめの印」）。
  */
@@ -99,6 +101,18 @@ export interface TimeQardCsvRow {
 /** 文の中の改行・「,」・「"」を空白にする */
 export const cleanCsvText = (s: string) => s.replace(/[\r\n,"]+/g, " ").replace(/\s{2,}/g, " ").trim();
 
+/** 表計算ソフト（Excel など）が式として読む字の頭（=・+・-・@ と、全角の＝・＋・－・＠、タブ・CR） */
+const FORMULA_START = /^[=+\-@\t\r＝＋－＠]/;
+/** 数字だけ（-1200・+3.5・-12,000 など）。表計算ソフトは数として読み、式にはしない */
+const PLAIN_NUMBER = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/;
+
+/**
+ * CSV を表計算ソフト（Excel など）で開いたときに、字が式として読まれないようにする（CSV インジェクションの守り。見直しの P5）。
+ * 字の頭が =・+・-・@（全角の＝・＋・－・＠も）・タブ・CR なら、頭に ' を付ける。数字だけのもの（マイナスの額など）はそのまま。
+ * ' を付けるのは CSV に書くときだけ（元のデータは変えない）。表計算ソフトでは、頭に ' が付いたまま見える。
+ */
+export const guardSpreadsheetText = (s: string): string => (FORMULA_START.test(s) && !PLAIN_NUMBER.test(s) ? `'${s}` : s);
+
 /**
  * CSV の中身を作る（BOM は保存するときに付ける。行の終わりは CRLF）。
  * 1行ずつに、鍵（Q から従業員ファイルで受け取ったもの）で計算した確かめの印を付ける。
@@ -126,7 +140,10 @@ export const writeTimeQardCsv = async (rows: TimeQardCsvRow[], sign: { key: stri
       r.notes.join(NOTE_SEPARATOR),
       r.companyMark,
       TIMEQARD_CSV_FORMAT,
-    ].map(cleanCsvText);
+    ]
+      .map(cleanCsvText)
+      // 名前は、表計算ソフトで開いたときに式にならないようにする（Q は名前を取り込みに使わず、確かめの印にも入れない）
+      .map((c, idx) => (TIMEQARD_CSV_HEADERS[idx] === CSV_HEADERS.name ? guardSpreadsheetText(c) : c));
     // 印は、書いたとおりの値（Q が読む値）で計算する
     const values: Record<string, string> = Object.fromEntries(cells.map((c, idx) => [TIMEQARD_CSV_HEADERS[idx], c]));
     const position = { exportId, seq: i + 1, total: rows.length };

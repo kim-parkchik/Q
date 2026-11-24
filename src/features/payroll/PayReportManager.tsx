@@ -13,6 +13,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { saveBinaryFile, saveCsvFile } from "../../utils/fileSaveUtils";
+import { csvField } from "../../utils/csvText";
 import { parseLedger } from "../../utils/legalBooks";
 import {
   payChanges, payListCell, payListColumns, payListCsv, payListRows, payTrendRows, type PayDocPerson, type PayListGroupBy,
@@ -360,7 +361,7 @@ function TrendView({ year, data, companyName, onCsv }: { year: number; data: { m
     const head = ["項目", ...Array.from({ length: 12 }, (_, i) => `${i + 1}月`), "合計"];
     const lines = [[`${year}年 月ごとの推移表（支給した月）`], head, ["人数", ...persons.map(String), ""],
       ...rows.map((r) => [r.column.label, ...r.months.map((v) => String(r.column.hours ? Math.round(v * 100) / 100 : v)), String(r.total)])];
-    onCsv(lines.map((c) => c.map((x) => (/[",\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x)).join(",")).join("\r\n") + "\r\n");
+    onCsv(lines.map((c) => c.map(csvField).join(",")).join("\r\n") + "\r\n");
   };
   return (
     <div style={S.card}>

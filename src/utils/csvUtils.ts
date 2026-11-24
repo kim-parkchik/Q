@@ -6,9 +6,13 @@
  *   特別休暇の種類は、勤怠の leave_type_id から読んだ名前（leave_name。呼び出し側が leave_types とつないで渡す）。無給の休暇は「（無給）」を付ける。
  * ・休憩は一覧で書く（「12:00-13:00 15:00-15:10」。shared/timeqard/spans.ts。TimeQard の CSV と同じ書き方）。
  *   時間有給にした中抜けは、「時間有給の中抜け」の列に分けて書く。
+ * ・full は人が見る一覧なので、ほかの一覧表と同じ csvField（utils/csvText.ts）で書く：字の頭が =・+・-・@ などなら頭に ' を付け、
+ *   「"」がある値は "" で囲む（「"=1+1"」のような値も、Excel などが「"」の内側を式として読まないように）。
+ *   raw は Q に読み戻す形なので付けない（字の欄もない）。
  */
 import { formatSpanList } from "../../shared/timeqard";
 import { formatBreakList, formatLeaveList, parseBreaksJson } from "./breaks";
+import { csvField } from "./csvText";
 
 const RAW_HEADER = ["スタッフID", "日付", "出勤", "退勤", "休憩"];
 const FULL_HEADER = [
@@ -50,7 +54,7 @@ export const generateAttendanceCSV = (data: any[], mode: "raw" | "full"): string
       row.paid_leave_hours || 0,
       row.memo || "",
       Number(row.is_finalized) === 1 ? "1" : "0",
-    ].map(cell).join(",");
+    ].map((v) => csvField(cell(v))).join(",");
   });
   const bom = "﻿";
   return bom + [(mode === "raw" ? RAW_HEADER : FULL_HEADER).join(","), ...rows].join("\n");

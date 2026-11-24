@@ -10,6 +10,7 @@ import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { kenpoPrefectureOf, type BranchLike } from "../../utils/branchPrefecture";
 import { saveBinaryFile, saveCsvFile } from "../../utils/fileSaveUtils";
+import { csvField } from "../../utils/csvText";
 import { buildWelfareJournal, journalBytes, parseJournalSettings, type JournalSettings } from "../../utils/payJournal";
 import { loadHealthInsurers, type HealthInsurer } from "../../utils/healthInsurer";
 import { salaryClosingDate, type PayrollGroupForPeriod } from "../../utils/payrollPeriod";
@@ -129,7 +130,7 @@ export default function PremiumSummaryManager({ db, staffList }: Props) {
       ...summary.labor.map((l) => ["労働保険料（支給した月）", l.label, String(l.wages), String(l.employee), l.company === null ? "" : String(l.company)]),
     ];
     try {
-      const saved = await saveCsvFile(lines.map((c) => c.map((x) => (/[",\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x)).join(",")).join("\r\n") + "\r\n", `保険料の集計表_${year}年${month}月分.csv`);
+      const saved = await saveCsvFile(lines.map((c) => c.map(csvField).join(",")).join("\r\n") + "\r\n", `保険料の集計表_${year}年${month}月分.csv`);
       if (saved) toast.success(`「${saved.name}」を保存しました`);
     } catch (e) {
       console.error(e);

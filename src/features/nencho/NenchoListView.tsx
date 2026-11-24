@@ -4,6 +4,7 @@
  * 結果は年末調整の画面で保存したもの（year_end_adjustments.result）。保存していない人・対象外の人も、理由を出す
  */
 import { saveCsvFile } from "../../utils/fileSaveUtils";
+import { csvField } from "../../utils/csvText";
 import { useToast } from "../../components/Toast";
 import { useMessageDialog } from "../../components/MessageDialog";
 import type { NenchoStaffRow } from "./useNenchoManager";
@@ -56,8 +57,6 @@ const listRowsOf = (rows: NenchoStaffRow[], statusLabel: (r: NenchoStaffRow) => 
 
 const HEAD = ["社員番号", "氏名", "状況", "給与・賞与の総額", "社会保険料等", "給与所得控除後の金額", "所得控除の合計", "課税給与所得金額", "年調年税額", "源泉徴収税額", "還付する額", "徴収する額", "精算する給与"];
 
-const csvEscape = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-
 export default function NenchoListView({ year, rows, statusLabel }: Props) {
   const toast = useToast();
   const dialog = useMessageDialog();
@@ -75,7 +74,7 @@ export default function NenchoListView({ year, rows, statusLabel }: Props) {
       ["", "合計", `${list.length}人（年末調整 ${adjusted}人）`, ...[sum("salary"), sum("social"), sumN("employmentIncome"), sumN("deductions"), sumN("taxable"), sumN("annualTax"), sum("withheld"), sum("refund"), sum("collect")].map(String), ""],
     ];
     try {
-      const saved = await saveCsvFile(lines.map((c) => c.map(csvEscape).join(",")).join("\r\n") + "\r\n", `年末調整一覧表_${year}年分.csv`);
+      const saved = await saveCsvFile(lines.map((c) => c.map(csvField).join(",")).join("\r\n") + "\r\n", `年末調整一覧表_${year}年分.csv`);
       if (saved) toast.success(`「${saved.name}」を保存しました`);
     } catch (e) {
       console.error(e);

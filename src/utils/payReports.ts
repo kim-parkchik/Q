@@ -14,6 +14,7 @@
  *   （一般的な給与ソフトの「変動項目確認表」。確定する前の見直しや、手入力の間違いを見つけるのに使う）。
  */
 import type { LedgerLine, PayLedger } from "./legalBooks";
+import { csvField } from "./csvText";
 
 /** 明細書・一覧表の1人分（確定した給与・賞与） */
 export interface PayDocPerson {
@@ -167,8 +168,6 @@ export const payListCell = (col: PayListColumn, row: PayListRow): string => {
   return v.toLocaleString();
 };
 
-const csvEscape = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-
 /** 一覧表の CSV（1行目に表題、2行目に見出し。金額はカンマなしの数字） */
 export const payListCsv = (title: string, columns: PayListColumn[], rows: PayListRow[]): string => {
   const head = ["区分", "社員番号", "氏名", "拠点", "人数", ...columns.map((c) => c.label)];
@@ -188,7 +187,7 @@ export const payListCsv = (title: string, columns: PayListColumn[], rows: PayLis
       }),
     ]),
   ];
-  return lines.map((cells) => cells.map(csvEscape).join(",")).join("\r\n") + "\r\n";
+  return lines.map((cells) => cells.map(csvField).join(",")).join("\r\n") + "\r\n";
 };
 
 /** 時間を「8:30」の形にする（明細書の勤怠の欄） */

@@ -17,6 +17,7 @@ import type { AverageWageKind } from "./averageWage";
 import type { LeavePeriod } from "./leaveExemption";
 import { hasWorkRecord, leaveOn, LEAVE_TYPE_NAMES } from "./leaveOfAbsence";
 import { LEGAL_PREMIUM_RATES, premiumLineNames } from "./premiumRates";
+import { csvField } from "./csvText";
 
 // ── 賃金台帳の内訳（確定するときに残す） ─────────────────────────────
 
@@ -384,12 +385,8 @@ export const hoursText = (h: number | null | undefined): string => {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
 };
 
-/** CSV の1行（「,」「"」・改行がある値は "" で囲む） */
-const csvLine = (cells: (string | number | null)[]) =>
-  cells.map((c) => {
-    const s = c === null ? "" : String(c);
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }).join(",");
+/** CSV の1行（「,」「"」・改行がある値は "" で囲み、字の頭が = などなら ' を付ける。utils/csvText.ts） */
+const csvLine = (cells: (string | number | null)[]) => cells.map(csvField).join(",");
 
 export const rosterCsv = (rows: RosterRow[]): string =>
   [csvLine(ROSTER_COLUMNS.map(([label]) => label)), ...rows.map((r) => csvLine(ROSTER_COLUMNS.map(([, key]) => r[key])))].join("\r\n");

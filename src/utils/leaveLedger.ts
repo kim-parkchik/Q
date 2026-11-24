@@ -11,6 +11,7 @@
  */
 import { isAnnualLeaveGrant, type PaidLeaveSummary } from "./paidLeave";
 import type { FiveDayStatus } from "./annualLeaveGrant";
+import { csvField } from "./csvText";
 
 export interface LeaveLedgerTaken {
   date: string;
@@ -142,8 +143,6 @@ export const takenKindLabel = (t: { days: number; hours: number }): string => {
   return parts.join("・") || "—";
 };
 
-const csvEscape = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-
 /** 管理簿の CSV（1行に1つの取った日。取った日がない付与も1行出す） */
 export const leaveLedgerCsv = (people: { staffId: string; name: string; ledger: LeaveLedger }[]): string => {
   const head = ["社員番号", "氏名", "基準日（付与日）", "有効期限", "付与日数", "取得日（時季）", "取得の種類", "この付与から引いた日数", "取得日数の合計", "期限で消えた日数", "残日数", "年5日の期間", "年5日の取得日数", "年5日の状況"];
@@ -165,5 +164,5 @@ export const leaveLedgerCsv = (people: { staffId: string; name: string; ledger: 
       }
     }
   }
-  return lines.map((cells) => cells.map(csvEscape).join(",")).join("\r\n") + "\r\n";
+  return lines.map((cells) => cells.map(csvField).join(",")).join("\r\n") + "\r\n";
 };
