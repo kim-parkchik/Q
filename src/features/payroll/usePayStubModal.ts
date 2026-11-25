@@ -16,6 +16,7 @@ import { loadOvertimeYearBefore } from '../../utils/premiumRatesStore';
 import { countNonLeaveWorkDays, toLeaveProrationMethod } from '../../utils/leaveOfAbsence';
 import { useAverageWagePay } from './useAverageWagePay';
 import { ask } from '@tauri-apps/plugin-dialog';
+import { REMUNERATION_MISSING_TITLE, remunerationMissingLines, remunerationMissingOf } from '../../utils/remunerationMissing';
 
 /** 明細を開いたときに読むもの（給与規定グループの設定などのほか）。読み込み中・読み込めなかったときは確定しない */
 type LoadPart = "group" | "insurer" | "items" | "yearEnd" | "flatTax";
@@ -42,6 +43,8 @@ interface UsePayStubProps {
 export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, month, companySettings }: UsePayStubProps) {
   // 給与形態・基本給・扶養人数は、この月の分の履歴の値を使う（utils/staffHistory.ts）
   const staff = useMemo(() => staffAsOf(staffRecord, year, month), [staffRecord, year, month]);
+  // 標準報酬月額の入れ忘れ（社保規定を選んでいるのに一度も入れていない人。見直しの P10。utils/remunerationMissing.ts）
+  const remunerationMissing = useMemo(() => remunerationMissingOf(staff, year, month), [staff, year, month]);
   /** この月の分の給与を確定しているか（確定した結果があるか。確定していれば、勤怠の画面でその月の勤怠を変えられない） */
   const [isSaved, setIsSaved] = useState(false);
   useEffect(() => {
@@ -464,9 +467,21 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       alert(`現物で払う報酬の価額を出せないので、確定できません。\n${salary.inKind!.problems.map(m => `・${m}`).join("\n")}`);
       return;
     }
+    // 標準報酬月額の入れ忘れ（社保規定を選んでいるのに一度も入れていない）：確定の前に確かめる（utils/remunerationMissing.ts）
+    if (remunerationMissing) {
+      const ok = await ask(
+        `${staff.name}さんの${year}年${month}月分の給与です。\n\n${remunerationMissingLines(remunerationMissing, extras.healthInsurer?.name ?? "").join("\n\n")}\n\n`
+          + `このまま確定すると、社会保険料を引かない給与明細になります。確定しますか？`,
+        { title: REMUNERATION_MISSING_TITLE, kind: "warning", okLabel: "このまま確定する", cancelLabel: "やめる" },
+      );
+      if (!ok) return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });
     if (result.success) {
       setIsSaved(true);
+      if (remunerationMissing) {
+        await writeLog(db, "WARN", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を、標準報酬月額が入っていないまま確定しました（社会保険料を引いていません）`);
+      }
       await writeLog(db, "INFO", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を確定しました`);
       alert(`${staff.name}さん ${year}年${month}月分の給与を確定しました。\nこの月の勤怠は、確定を取り消すまで変えられません。`);
     } else {
@@ -524,6 +539,7 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
 
   return {
     monthStaff: staff,
+    remunerationMissing,
     wageMismatchDays,
     branchPrefectureProblem,
     kenpoPrefectureProblem,

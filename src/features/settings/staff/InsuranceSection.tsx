@@ -11,6 +11,7 @@ import ResidentTaxEditor from './ResidentTaxEditor';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
 import { toTaxColumn } from '../../../utils/incomeTax';
+import { REMUNERATION_MISSING_TITLE, remunerationMissingLines } from '../../../utils/remunerationMissing';
 
 interface Props {
     cm: StaffManagerState;
@@ -205,6 +206,17 @@ export default function InsuranceSection({ cm }: Props) {
                                     健康保険料・介護保険料・子ども・子育て支援金はかかりません。厚生年金は、標準報酬月額を入れるとかかります。
                                 </span>
                             </div>
+                        </div>
+                    )}
+
+                    {/* 標準報酬月額の入れ忘れ（社保規定を選んでいるのに一度も入れていない。utils/remunerationMissing.ts） */}
+                    {cm.remunerationMissing && (
+                        <div data-note="remuneration-missing" style={{
+                            padding: "8px 10px", border: "1px solid #fca5a5", borderRadius: "8px", backgroundColor: "#fef2f2",
+                            fontSize: "11px", color: "#b91c1c", lineHeight: 1.6,
+                        }}>
+                            <div style={{ fontWeight: "bold", fontSize: "12px" }}>⚠ {REMUNERATION_MISSING_TITLE}</div>
+                            {remunerationMissingLines(cm.remunerationMissing, selectedGroup?.name ?? "").map((line) => <div key={line}>{line}</div>)}
                         </div>
                     )}
 

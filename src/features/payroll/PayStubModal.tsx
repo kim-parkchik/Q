@@ -1,5 +1,6 @@
 import * as S from "./PayStubModal.styles";
 import { usePayStubModal } from './usePayStubModal';
+import { REMUNERATION_MISSING_TITLE, remunerationMissingLines } from '../../utils/remunerationMissing';
 import * as Master from '../../constants';
 import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES, TARDY_DEDUCTION_METHOD_LABELS } from '../../utils/calcSalary';
 import { describeFlexSettlement, flexHoursLabel } from '../../utils/flexTime';
@@ -30,6 +31,7 @@ export default function PayStubModal(props: Props) {
     wageLabel, customEarningItems, customDeductionItems,
     earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
     monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem, kenpoPrefectureProblem, kenpoOfficeNote,
+    remunerationMissing,
   } = usePayStubModal(props);
   /** "2026-11-29" → "11月29日" */
   const md = (date: string) => `${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日`;
@@ -133,6 +135,16 @@ export default function PayStubModal(props: Props) {
           {rateWarnings.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
               {rateWarnings.map((w) => <div key={w}>⚠ {w}</div>)}
+            </div>
+          )}
+          {/* 標準報酬月額の入れ忘れ（社保規定を選んでいるのに一度も入れていない人。確定の前にも確かめる。utils/remunerationMissing.ts） */}
+          {remunerationMissing && (
+            <div data-note="remuneration-missing" style={{
+              marginTop: 10, padding: "8px 10px", border: "1px solid #fca5a5", borderRadius: 8, backgroundColor: "#fef2f2",
+              fontSize: 12, color: "#b91c1c", lineHeight: 1.6,
+            }}>
+              <div style={{ fontWeight: "bold" }}>⚠ {REMUNERATION_MISSING_TITLE}</div>
+              {remunerationMissingLines(remunerationMissing, extras.healthInsurer?.name ?? "").map((line) => <div key={line}>{line}</div>)}
             </div>
           )}
           {flatTaxLaterUsed.length > 0 && (
@@ -351,7 +363,7 @@ export default function PayStubModal(props: Props) {
           )}
           {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isInsuredMonth || salary.isLeaveExemptMonth || !!salary.leaveSameMonthDays || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (
             <div style={{ marginTop: 10, fontSize: 12, color: "#b45309" }}>
-              {!salary.isSocialInsEnrolled && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
+              {!salary.isSocialInsEnrolled && !remunerationMissing && <div>※ 健康保険・厚生年金は未加入のため控除していません（従業員設定の標準報酬月額・社保規定）。</div>}
               {salary.isSocialInsEnrolled && !salary.isInsuredMonth && <div>※ 社会保険料は、入社した月の分から、退職日の翌日（資格喪失日）がある月の前月分までかかるため、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分はかかりません（月末に退職した人は、退職した月の分までかかります）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && salary.isLeaveExemptMonth && <div>※ 産休・育休中のため、{salary.socialInsMonths[0]?.replace(/^(\d+)-0?(\d+)$/, "$1年$2月")}分の健康保険料・介護保険料・子ども・子育て支援金・厚生年金保険料は免除されます（年金事務所・健康保険組合への申出が必要です）。</div>}
               {salary.isSocialInsEnrolled && salary.isInsuredMonth && salary.leaveSameMonthDays && (() => {

@@ -38,6 +38,7 @@ import { bankAccountProblems } from "../../utils/zengin";
 import { executeBatch } from "../../utils/dbBatch";
 import { compareTargetOf, dependentsRuleText, parseSavedDeclarations, suggestDependents, type SavedDeclaration } from "../../utils/withholdingDependents";
 import { todayYmd } from "../../utils/myNumberRetention";
+import { remunerationMissingOf } from "../../utils/remunerationMissing";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -875,9 +876,25 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     // 💡 最初の1人がいない時は、強制的に showForm を true とみなす
     const isFormVisible = isFirstRun || showForm;
 
+    // 標準報酬月額の入れ忘れ（社保規定を選んでいるのに一度も入れていない。見直しの P10。utils/remunerationMissing.ts）。
+    // 入力中の値で見る。月は、きょうか入社した月の遅いほう（先に入社する人を入れたときも知らせる）
+    const remunerationMissing = (() => {
+        const today = todayYmd();
+        const on = targetJoinDate && targetJoinDate > today ? targetJoinDate : today;
+        return remunerationMissingOf({
+            social_insurance_group_id: Number(targetSocialInsGroupId) > 0 ? Number(targetSocialInsGroupId) : null,
+            standard_remuneration_history: stringifyRemunerationHistory(targetRemunerationHistory),
+            join_date: targetJoinDate, retirement_date: targetRetirementDate || null, birthday: targetBirthday,
+            kouki_date: targetKoukiDate || null, shaho_loss: stringifyShahoLoss(targetShahoLoss),
+            wage_type: targetWageType, base_wage: Number(targetWage) || 0, fixed_overtime_allowance: Number(targetFixedOvertimeAmount) || 0,
+            commute_type: targetCommuteType, commute_amount: Number(targetCommuteAmount) || 0, commute_setting: stringifyCommuteSetting(targetCommuteSetting),
+        }, Number(on.slice(0, 4)), Number(on.slice(5, 7)));
+    })();
+
     return {
         db,
         onDataChange,
+        remunerationMissing,
         staffList,
         showForm,
         setShowForm,

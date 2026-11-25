@@ -2,6 +2,7 @@ import * as S from "./PaySlipManager.styles";
 import { usePaySlipManager } from "./usePaySlipManager";
 import PayStubModal from "./PayStubModal";
 import { staffAsOf } from "../../utils/staffHistory";
+import { remunerationMissingOf } from "../../utils/remunerationMissing";
 
 interface Props {
   db: any;
@@ -80,6 +81,8 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
               const isOver60 = totalH >= 220;
               const isCalendarInvalid = attSummary?.calendar_invalid === 1;
               const isMonthly = staffAsOf(s, year, month).wage_type === "monthly";
+              // 標準報酬月額の入れ忘れ（社保規定を選んでいるのに一度も入れていない人。utils/remunerationMissing.ts）
+              const remunerationMissing = !!remunerationMissingOf(s, year, month);
 
               // --- 🆕 修正：isDisabled は法違反のときだけ！ ---
               // 月給制で勤怠なしでも、作成自体はできるようにします。
@@ -91,9 +94,17 @@ export default function PaySlipManager({ db, staffList, targetYear: initialYear,
                   <td style={S.td}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                       <span style={{ fontSize: "10px", color: "#999", fontFamily: "monospace" }}>ID: {s.id}</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <div style={{ fontWeight: "bold", fontSize: "15px" }}>{s.name}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: "bold", fontSize: "15px", whiteSpace: "nowrap" }}>{s.name}</div>
                         {isRetired && <span style={S.retiredBadge}>退職</span>}
+                        {remunerationMissing && (
+                          <span
+                            title="社保規定を選んでいますが、標準報酬月額が一度も入っていないので、社会保険料を引いていません。従業員の画面で標準報酬月額を入れるか、加入しない人なら社保規定を「未加入 / 適用除外」にしてください"
+                            style={{ fontSize: "11px", fontWeight: "bold", color: "#b91c1c", backgroundColor: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "1px 6px", whiteSpace: "nowrap" }}
+                          >
+                            ⚠️標準報酬月額なし
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
