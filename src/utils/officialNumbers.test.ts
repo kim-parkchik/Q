@@ -5,6 +5,8 @@
  * ・割増賃金の率の最低・深夜の時間など：労働基準法と割増賃金令の XML から scripts/import_labor_standards.py
  * ・令和6年分の定額減税：租税特別措置法の XML から scripts/import_flat_tax_reduction.py
  * ・育児休業等の保険料の免除の14日・1か月・始まりの日：健康保険法・厚生年金保険法の XML から scripts/import_childcare_exemption.py
+ * ・扶養親族等の数の数え方と線（見直しの P9）：国税庁「源泉徴収税額表」の「給与所得の源泉徴収税額の求め方」の PDF から
+ *   scripts/import_withholding_dependents.py（PDF は tax-tables/source/。GitHub には上げない）
  * 作ったファイルの頭に書いた SHA-256 が、元のファイル（と README の表）と同じこと（元のファイルを取り直したのに、作り直していないことに気づく）と、
  * 数が、いままで手で書いていた数（PDF・条文に書かれた数）と同じことを確かめる
  * 実行方法: bun test
@@ -72,6 +74,22 @@ describe("作ったファイルと、元のファイル", () => {
     const ignore = read(".gitignore");
     expect(ignore).toContain("insurance-tables/source/");
     expect(ignore).toContain("roumu-forms/source/");
+  });
+
+  test("扶養親族等の数の数え方は、国税庁の「給与所得の源泉徴収税額の求め方」の PDF から作り、SHA-256 が README の表と同じ。手元にあれば、その中身とも同じ", () => {
+    const file = "src/constants/tax/withholdingDependentRules.ts";
+    const text = read(file);
+    expect(text).toContain("scripts/import_withholding_dependents.py で");
+    expect(text).toContain("手で書き換えない");
+    const pdfs = recordedHashes(file);
+    expect(pdfs.map((p) => p.file)).toEqual([2026, 2027].map((y) => `tax-tables/source/zeigakuhyo${y}-19-22.pdf`));
+    const readme = read("tax-tables/README.md");
+    for (const p of pdfs) {
+      expect(readme).toContain(`| ${p.file.replace("tax-tables/", "")} |`);
+      expect(readme).toContain(p.hash);
+      if (existsSync(join(ROOT, p.file))) expect(sha256(p.file)).toBe(p.hash);
+    }
+    expect(read(".gitignore")).toContain("tax-tables/source/");
   });
 });
 
@@ -146,6 +164,18 @@ describe("手で書いた公式の数が、コードに残っていない", () =
     expect(leave).not.toContain("'2022-10-01'");
     expect(leave).not.toMatch(/=\s*14;/);
     expect(leave).not.toContain("add(1, 'month')");
+  });
+
+  test("扶養親族等の数の数え方と、それを出す画面は、所得の線・年齢を直接書かない（国税庁の資料から作った数を使う）", () => {
+    for (const file of [
+      "src/utils/withholdingDependents.ts", "src/features/settings/staff/DependentsCheck.tsx", "src/features/nencho/DependentsYearCheck.tsx",
+    ]) {
+      const code = codeOf(read(file));
+      expect(code).not.toMatch(/\d+万円/);
+      expect(code).not.toMatch(/\d+歳/);
+      // 6けた以上の数（950000 など。色の #166534 は数えない）
+      expect(code).not.toMatch(/(^|[^\w$#])\d{6,}/);
+    }
   });
 
   test("勤怠のまとめの画面と給与明細は、法律の率・限度時間を直接書かない", () => {

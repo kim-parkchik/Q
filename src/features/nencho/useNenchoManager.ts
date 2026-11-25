@@ -12,6 +12,7 @@ import {
   validateDeclaration, type NenchoDeclaration, type SettlementStatus, type YearTotals,
 } from "../../utils/nenchoDeclaration";
 import { salaryPayDate } from "../../utils/flatTaxReduction";
+import type { UsedDependents } from "../../utils/withholdingDependents";
 import { useMessageDialog } from "../../components/MessageDialog";
 import { useToast } from "../../components/Toast";
 
@@ -35,6 +36,8 @@ export interface NenchoStaffRow {
   saved: { declaration: NenchoDeclaration; result: NenchoResult | null; updatedAt: string; settleYear: number; settleMonth: number } | null;
   /** 保存した後に、確定した給与・賞与が変わって、過不足額が変わる */
   stale: boolean;
+  /** その年に確定した給与の月ごとの、支払った日と使った扶養人数（申告書から数えた人数と比べる。utils/withholdingDependents.ts） */
+  usedDependents: UsedDependents[];
   /** 精算の状況（保存していなければ null） */
   settlement: SettlementStatus | null;
 }
@@ -72,7 +75,7 @@ export const EMPTY_NENCHO_DATA: NenchoData = { salaries: [], bonuses: [], saved:
 export async function loadNenchoData(db: Database, year: number): Promise<NenchoData> {
   // 給与を支払った日（給与規定グループの支払日。死亡した後に支払日が来る給与を年末調整に入れないために使う）
   const salaries = await db.select<any[]>(
-    `SELECT r.staff_id, r.target_month, r.taxable_amount, r.social_ins_total, r.income_tax, g.payment_day
+    `SELECT r.staff_id, r.target_month, r.taxable_amount, r.social_ins_total, r.income_tax, r.applied_dependents, g.payment_day
      FROM salary_results r
      LEFT JOIN staff st ON st.id = r.staff_id
      LEFT JOIN payroll_groups g ON g.id = COALESCE(NULLIF(st.payroll_group_id, 0), 1)
@@ -105,10 +108,18 @@ export const buildNenchoRows = (staffList: any[], data: NenchoData, year: number
     try { result = savedRow?.result ? JSON.parse(savedRow.result) : null; } catch { result = null; }
     // 死亡した人は、死亡した日より後に支払日が来る給与・賞与を入れない（相続税の対象で、所得税の対象ではない。所得税基本通達9-17）
     const beforeDeath = (payDate: string) => !diedInYear(staff, year) || !payDate || payDate <= String(staff.death_date);
+    const salaries = data.salaries.filter((r) => String(r.staff_id) === sid && beforeDeath(salaryPayDate(year, Number(r.target_month), r.payment_day ?? 25)));
     const totals = sumYearTotals(
-      data.salaries.filter((r) => String(r.staff_id) === sid && beforeDeath(salaryPayDate(year, Number(r.target_month), r.payment_day ?? 25))),
+      salaries,
       data.bonuses.filter((r) => String(r.staff_id) === sid && beforeDeath(String(r.payment_date ?? ""))),
     );
+    const usedDependents: UsedDependents[] = salaries
+      .filter((r) => r.applied_dependents !== null && r.applied_dependents !== undefined)
+      .map((r) => ({
+        month: Number(r.target_month),
+        payDate: salaryPayDate(year, Number(r.target_month), r.payment_day ?? 25),
+        used: Math.max(0, Math.floor(Number(r.applied_dependents) || 0)),
+      }));
     const declaration = parseDeclaration(savedRow?.declaration);
     const exclusion = nenchoExclusion(staff, year, declaration);
     const settleDefault = defaultSettleFor({ staff, exclusion, totals }, year);
@@ -132,6 +143,7 @@ export const buildNenchoRows = (staffList: any[], data: NenchoData, year: number
       totals,
       saved: savedRow ? { declaration, result, updatedAt: savedRow.updated_at, settleYear, settleMonth } : null,
       stale,
+      usedDependents,
       settlement,
     };
   });

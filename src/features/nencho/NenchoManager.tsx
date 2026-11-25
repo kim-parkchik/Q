@@ -9,6 +9,7 @@ import NenchoDeclarationForm from "./NenchoDeclarationForm";
 import NenchoResultPanel from "./NenchoResultPanel";
 import NenchoListView from "./NenchoListView";
 import FuyouDraftView from "./FuyouDraftView";
+import DependentsYearCheck from "./DependentsYearCheck";
 import { useState } from "react";
 import { toTaxColumn } from "../../utils/incomeTax";
 import { diedInYear, judgeDateOf, MID_YEAR_REASONS, type MidYearReason, type NenchoDeclaration } from "../../utils/nenchoDeclaration";
@@ -152,6 +153,7 @@ export default function NenchoManager({ db, staffList }: Props) {
             )}
             <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals} sourceOnly
               secondary={toTaxColumn(z.selected.staff.tax_column) === "otsu"} />
+            <DependentsYearCheck staff={z.selected.staff} year={z.year} draft={z.draft} used={z.selected.usedDependents} selfTotalIncome={null} adjusted={false} />
             {z.errors.map((e) => <div key={e} style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{e}</div>)}
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
               <button
@@ -181,6 +183,8 @@ export default function NenchoManager({ db, staffList }: Props) {
               <MidYearReasonField staff={z.selected.staff} year={z.year} draft={z.draft} setDraft={z.setDraft} />
               <NenchoDeclarationForm year={z.year} master={z.master} draft={z.draft} setDraft={z.setDraft} totals={z.selected.totals}
                 judgeDate={judgeDateOf(z.selected.staff, z.year)} expectedLastMonth={z.settle.year === z.year ? z.settle.month : 12} />
+              <DependentsYearCheck staff={z.selected.staff} year={z.year} draft={z.draft} used={z.selected.usedDependents}
+                selfTotalIncome={z.result?.totalIncome ?? null} adjusted />
             </div>
             <div style={{ ...card, position: "sticky", top: 16 }}>
               {z.result && <NenchoResultPanel r={z.result} />}

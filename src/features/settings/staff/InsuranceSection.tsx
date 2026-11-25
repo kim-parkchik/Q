@@ -6,6 +6,7 @@ import { SHAHO_LOSS_CAUSES, type ShahoLossCause } from '../../../utils/shahoLoss
 import { UserCheck, Shield, Timer } from 'lucide-react';
 import RemunerationHistory from './RemunerationHistory';
 import { DependentsHistoryEditor } from './WageDependentsHistory';
+import { DependentsCheck } from './DependentsCheck';
 import ResidentTaxEditor from './ResidentTaxEditor';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
@@ -144,6 +145,9 @@ export default function InsuranceSection({ cm }: Props) {
 
                 {/* 扶養人数の履歴（何年何月分から何人） */}
                 <DependentsHistoryEditor cm={cm} />
+
+                {/* 扶養控除等申告書（年末調整の画面）から数えた人数と、数え方 */}
+                <DependentsCheck cm={cm} />
 
                 {/* 住民税（年度ごとの6月分〜翌年5月分） */}
                 <ResidentTaxEditor cm={cm} />

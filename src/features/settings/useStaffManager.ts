@@ -2,7 +2,7 @@
  * 従業員管理画面（StaffManager）の状態とデータ操作
  * 画面の見た目は staff/ 以下の各セクション、ロジックはここにまとめる
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 // @ts-ignore
 import Database from "@tauri-apps/plugin-sql";
 import {
@@ -36,6 +36,8 @@ import { DEFAULT_COMMUTE_SETTING, parseCommuteSetting, stringifyCommuteSetting, 
 import { fromStaffAccountForm, loadStaffBankAccounts, staffBankAccountStatements, toStaffAccountForm, type StaffAccountForm } from "../../utils/bankAccounts";
 import { bankAccountProblems } from "../../utils/zengin";
 import { executeBatch } from "../../utils/dbBatch";
+import { compareTargetOf, dependentsRuleText, parseSavedDeclarations, suggestDependents, type SavedDeclaration } from "../../utils/withholdingDependents";
+import { todayYmd } from "../../utils/myNumberRetention";
 
 interface UseStaffManagerArgs {
     db: Database;
@@ -184,6 +186,14 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetDependentsHistoryPast(targetDependentsHistory);
         setTargetDependentsFrom(nextFrom(targetDependentsFrom));
     };
+    // 年末調整の画面に保存した、この人の申告書（扶養人数を、申告書から数えた人数と比べる。utils/withholdingDependents.ts）
+    const [targetDeclarations, setTargetDeclarations] = useState<SavedDeclaration[]>([]);
+    // 読み込んでいる人（別の人に切り替えたあとに、前の人の申告書が届いても使わない）
+    const declarationsFor = useRef<string | null>(null);
+    // 比べる年：きょうか、扶養人数のいちばん新しい行の始まりの遅いほう（その年分の申告書がなければ、前の年分から数えた見込み）
+    const dependentsTarget = compareTargetOf(targetDependentsFrom, todayYmd());
+    const dependentsSuggestion = suggestDependents(targetDeclarations, dependentsTarget.year, targetTaxColumn, dependentsTarget.payDate);
+    const dependentsRule = dependentsRuleText(dependentsTarget.year, targetTaxColumn, dependentsTarget.payDate);
     const removeDependentsPast = (index: number) => {
         const rest = targetDependentsHistoryPast.filter((_, i) => i !== index);
         setTargetDependentsHistoryPast(rest);
@@ -374,6 +384,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetDependents(0); setTargetResidentTax(0); setTargetResidentTaxSchedule([]); setTargetResidentTaxMunicipality(""); setTargetFlatTaxReductionPersons(0);
         setTargetWageHistoryPast([]); setTargetWageFrom("");
         setTargetDependentsHistoryPast([]); setTargetDependentsFrom("");
+        setTargetDeclarations([]); declarationsFor.current = null;
         setTargetLeavePeriods([]);
         setTargetInKind([]);
         setTargetHealthDependents([]);
@@ -402,6 +413,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         // 振込先口座は別の表から読む
         setTargetBankAccounts([]);
         setSavedBankAccounts("[]");
+        setTargetDeclarations([]);
         if (db) {
             loadStaffBankAccounts(db, s.id)
                 .then((map) => {
@@ -410,6 +422,11 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                     setSavedBankAccounts(JSON.stringify(forms));
                 })
                 .catch((e) => console.error("振込先口座の読み込みエラー:", e));
+            // 年末調整の画面に保存した申告書（扶養人数と比べるだけ。読めなくても、従業員の編集はできる）
+            declarationsFor.current = String(s.id);
+            db.select<any[]>("SELECT year, declaration, result FROM year_end_adjustments WHERE staff_id = ?", [s.id])
+                .then((rows) => { if (declarationsFor.current === String(s.id)) setTargetDeclarations(parseSavedDeclarations(rows ?? [])); })
+                .catch((e) => console.error("年末調整の申告書の読み込みエラー:", e));
         }
         setTargetId(s.id);
         setTargetName(s.name);
@@ -955,6 +972,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         wageHistoryError, addWageChange, removeWagePast,
         targetDependentsHistoryPast, setTargetDependentsHistoryPast, targetDependentsFrom, setTargetDependentsFrom,
         dependentsHistoryError, addDependentsChange, removeDependentsPast,
+        dependentsSuggestion, dependentsRule,
         targetFlatTaxReductionPersons,
         setTargetFlatTaxReductionPersons,
         targetLeavePeriods,

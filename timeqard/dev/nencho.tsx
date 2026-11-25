@@ -22,7 +22,7 @@ const staffList = [
 ];
 
 const salary = (staff_id: string, target_month: number) => ({
-  staff_id, target_month, taxable_amount: 300_000, social_ins_total: 45_000, income_tax: 6_000, payment_day: 25,
+  staff_id, target_month, taxable_amount: 300_000, social_ins_total: 45_000, income_tax: 6_000, applied_dependents: 0, payment_day: 25,
 });
 const months = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 const salaries = [
@@ -54,7 +54,7 @@ const saved: any[] = [
 const fakeDb = {
   async select(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
-    if (q.startsWith("SELECT r.staff_id, r.target_month, r.taxable_amount, r.social_ins_total, r.income_tax, g.payment_day")) {
+    if (q.startsWith("SELECT r.staff_id, r.target_month, r.taxable_amount, r.social_ins_total, r.income_tax, r.applied_dependents, g.payment_day")) {
       return params[0] === 2026 ? salaries : [];
     }
     if (q.startsWith("SELECT r.*, s.payment_date AS payment_date FROM bonus_results r")) return params[0] === 2026 ? bonuses : [];

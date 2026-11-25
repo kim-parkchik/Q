@@ -69,3 +69,6 @@ shoyo-houshu/source/
 
 # 日本郵便の郵便番号データ（zip。scripts/import_zipcode.py で Q 用の形にしたものだけを上げる。出どころと SHA-256 は zipcode/README.md）
 zipcode/source/
+
+# 国税庁「源泉徴収税額表」の「給与所得の源泉徴収税額の求め方」（令和8年分・令和9年分の PDF。PDF なので上げない。出どころと SHA-256 は tax-tables/README.md）
+tax-tables/source/

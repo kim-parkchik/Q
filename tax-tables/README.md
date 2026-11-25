@@ -83,10 +83,40 @@ python3 -I scripts/import_flat_tax_reduction.py tax-tables src/constants/tax/fla
   同日以後最初に当該支払者から支払を受ける同年中の主たる給与等」）・3項（「給与特別控除額は、三万円（…一人につき三万円を加算した金額）」）を読みます。
 - 2つの条で年・額がそろわない、本人の額と1人あたりの額が違う、始まりの日が月の初めの日でないときは止まります。追加のインストールは要りません。
 
+### 扶養親族等の数の数え方（給与所得の源泉徴収税額の求め方の PDF）
+
+月々の源泉所得税（税額表の甲欄）に使う「扶養親族等の数」の数え方と線（`src/constants/tax/withholdingDependentRules.ts`）は、
+国税庁「令和○年分 源泉徴収税額表」の「給与所得の源泉徴収税額の求め方」（19〜22ページ）の PDF から `scripts/import_withholding_dependents.py` で作っています
+（見直しの P9。手で書き写していません）。PDF なので、`source/` に置いて GitHub には上げません（`.gitignore`）。
+2026年11月25日に取得しました（ユーザーの許しを得て取得。大きさは、取得の前にサーバーに聞いた大きさと同じ）。
+
+| ファイル | 内容 | 入手元 | 大きさ（バイト） | SHA-256 |
+|---|---|---|---|---|
+| source/zeigakuhyo2026-19-22.pdf | 令和8年分 源泉徴収税額表 19〜22ページ（令和7年8月に出たもの） | https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2026/data/19-22.pdf （https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2026/01.htm） | 747,306 | `fbed5287d5e99b6d340655763f1809ae4cde6d6c5b762e5d995a05630620e42e` |
+| source/zeigakuhyo2027-19-22.pdf | 令和9年分 源泉徴収税額表 19〜22ページ（令和8年8月に出たもの） | https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2027/data/19-22.pdf （https://www.nta.go.jp/publication/pamph/gensen/zeigakuhyo2027/01.htm） | 707,059 | `ce2ac0cc772c728d41f9690fa0d62c96035738dda1d425ebe4655dfc61f167d6` |
+
+```
+python3 -I scripts/import_withholding_dependents.py tax-tables/source src/constants/tax/withholdingDependentRules.ts
+```
+
+- 「2 税額表の使い方」⑵ の文（源泉控除対象配偶者と源泉控除対象親族との合計数に、本人が障害者・寡婦・ひとり親・勤労学生に該当するごとに1人、
+  同一生計配偶者や扶養親族（16歳未満の人を含む）のうちに障害者又は同居特別障害者に該当する人がいれば、これらの一に該当するごとに1人を足す）と、
+  （注）2・3・6・（※）の線（源泉控除対象配偶者：本人900万円以下・配偶者95万円以下、扶養親族と同一生計配偶者、特定親族と源泉控除対象親族の100万円、
+  年齢と生年月日の範囲）を、PDF の文字から読みます。文が見つからない・年分が合わない・線の大きさの順や生年月日と年齢が合わないときは止まります。
+- 同居特別障害者は、障害者と同居特別障害者の両方に当たるので2人を足します。20・21ページの〔扶養親族等の数の算定方法〕の図の具体例
+  （配偶者が同居特別障害者なら3人など）を、`src/utils/withholdingDependents.test.ts` の答えにしています。
+- 令和8年分の PDF は、令和8年度の税制改正（令和8年12月1日以後に支払う給与から、扶養親族などの所得の線を58万円から62万円に引き上げ）より前のものです。
+  Q の数え方は、法定調書の手引から作った `src/constants/nencho/gensen2026.ts` の線（11月30日以前に支払う給与は58万円、12月1日以後は62万円）を使い、
+  この PDF の線とは `src/utils/withholdingDependents.test.ts` で照らし合わせています（令和8年分の PDF の線は11月30日以前の線と、
+  令和9年分の PDF の線は、令和9年分の仮の書き方（1年を通して62万円）と同じ）。
+- 数え方は、従業員の画面（扶養人数の下）と年末調整の画面に出します（`src/utils/withholdingDependents.ts`）。条文は、所得税法2条1項・185条・187条を
+  e-Gov 法令API で読みました（XML は取得していません）。
+
 ## 新しい年の表を追加するとき
 
 1. 国税庁のページから月額表・日額表・賞与の算出率の表の Excel と、電算機計算の特例の PDF をダウンロードして、このフォルダに置く
-   （電算機計算の特例は、令和9年分の資料が「令和9年分以降」なので、新しい PDF が出ていなければ、前の資料をそのまま使う）
+   （電算機計算の特例は、令和9年分の資料が「令和9年分以降」なので、新しい PDF が出ていなければ、前の資料をそのまま使う）。
+   「給与所得の源泉徴収税額の求め方」の PDF は `source/zeigakuhyo2028-19-22.pdf` の名前で置き、`scripts/import_withholding_dependents.py` の SOURCES に足す
 2. データファイルを作る（例は令和10年分）
 
    ```
@@ -95,6 +125,7 @@ python3 -I scripts/import_flat_tax_reduction.py tax-tables src/constants/tax/fla
    python3 scripts/import_daily_tax_table.py tax-tables/日額表_令和10年分.xls 2028 src/constants/tax/dailyHeiTable2028.ts <国税庁のページのURL>
    python3 scripts/import_bonus_tax_table.py tax-tables/賞与算出率表_令和10年分.xls 2028 src/constants/tax/bonusTaxTable2028.ts <国税庁のページのURL>
    python3 -I scripts/import_densanki.py tax-tables/電算機計算の特例_令和10年分.pdf 2028 src/constants/tax/densanki2028.ts <PDF のURL>
+   python3 -I scripts/import_withholding_dependents.py tax-tables/source src/constants/tax/withholdingDependentRules.ts
    ```
 
    xlrd は .xls を読むときだけ要ります（.xlsx は Python の標準ライブラリだけで読みます）。
