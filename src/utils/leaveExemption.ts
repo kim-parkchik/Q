@@ -27,6 +27,8 @@
  *       https://www.nenkin.go.jp/oshirase/taisetu/2022/202210/100302.html （令和4年10月の改正）
  *       健康保険法施行規則135条・厚生年金保険法施行規則25条の2（14日の数え方・続けて取った育児休業等）
  *       https://www.nenkin.go.jp/shinsei/kounen/tekiyo/menjo/20140403-01.html （育児休業等取得者申出書の記入方法）
+ * ※ 14日・1か月・令和4年10月1日は、条文から作った constants/insurance/childcareExemption.ts（scripts/import_childcare_exemption.py。
+ *   健康保険法159条・厚生年金保険法81条の2・健康保険法の附則）の数を使う（手で書き写さない）
  * ※ 産後パパ育休で働かせる時間は、従業員の画面の育児休業の行に入れてもらう（plannedWorkHours）。割る1日の所定労働時間は、
  *   従業員の画面の「1日の所定労働時間」（曜日で時間が違う人も同じ。条文に書かれていないので Q で決めた。入れていなければ8時間）。
  * ※ 休日をはさんで続けて休んだ（間に働いた日がない）ときも1つの育児休業等になるので、1つの期間として入力してもらう。
@@ -34,6 +36,7 @@
  *   utils/leaveOfAbsence.ts）。この3つには保険料の免除がないので、免除の計算には使わない（exemptLeavePeriodsOf で除く）。
  */
 import dayjs, { type Dayjs } from 'dayjs';
+import { CHILDCARE_EXEMPTION, CHILDCARE_RULE_2022_START } from '../constants/insurance/childcareExemption';
 import { baseHoursOf, type StaffHours } from './scheduledHours';
 
 /** 社会保険料の免除がある休業（maternity: 産前産後休業 / childcare: 育児休業等（産後パパ育休を含む）） */
@@ -185,9 +188,6 @@ export interface ExemptLeavePeriod extends LeavePeriod {
   workDays?: number;
 }
 
-/** 令和4年10月の改正（14日以上の月・賞与の1か月超）が当てはまる育児休業等の開始日 */
-const CHILDCARE_RULE_2022_START = '2022-10-01';
-
 /** 従業員の leave_periods（JSON の文字列）を読む。空・壊れているときは期間なし */
 export const parseLeavePeriods = (json: unknown): LeavePeriod[] => {
   if (typeof json !== 'string' || !json.trim()) return [];
@@ -281,14 +281,15 @@ const coversMonth = (s: Span, m: number) =>
 const isWithinOneMonth = (s: Span) => s.end !== null && monthIndex(s.start) === monthIndex(s.end.add(1, 'day'));
 
 /**
- * 期間が1か月を超えるか（暦で数える。1月15日〜2月14日はちょうど1か月、2月15日まで休めば1か月を超える）
- * 1か月後に同じ日がないとき（1月31日開始など）は、その月の末日（2月28日）でちょうど1か月になる（民法143条）
+ * 期間が、賞与を免除しない月数（CHILDCARE_EXEMPTION.bonusMonths。健康保険法159条1項の「一月以下」）を超えるか
+ * （暦で数える。1か月なら、1月15日〜2月14日はちょうど1か月、2月15日まで休めば1か月を超える）
+ * 月数のあとに同じ日がないとき（1月31日開始など）は、その月の末日（2月28日）でちょうどになる（民法143条）
  */
-const isLongerThanOneMonth = (s: Span) => {
+const isLongerThanBonusMonths = (s: Span) => {
   if (s.end === null) return true;
-  const next = s.start.add(1, 'month');
-  const oneMonthEnd = next.date() === s.start.date() ? next.subtract(1, 'day') : next;
-  return s.end.isAfter(oneMonthEnd, 'day');
+  const next = s.start.add(CHILDCARE_EXEMPTION.bonusMonths, 'month');
+  const limitEnd = next.date() === s.start.date() ? next.subtract(1, 'day') : next;
+  return s.end.isAfter(limitEnd, 'day');
 };
 
 /** 同じ月のうちに始まって終わる育児休業等の日数（その月の分） */
@@ -322,8 +323,8 @@ export const sameMonthChildcareDays = (leaves: LeavePeriod[], year: number, mont
   };
 };
 
-/** 同じ月のうちに始まって終わる育児休業等で、その月の分が免除になる日数（健康保険法159条1項2号の「十四日以上」） */
-export const SAME_MONTH_CHILDCARE_MIN_DAYS = 14;
+/** 同じ月のうちに始まって終わる育児休業等で、その月の分が免除になる日数（健康保険法159条1項2号の「十四日以上」。条文から作った数） */
+export const SAME_MONTH_CHILDCARE_MIN_DAYS = CHILDCARE_EXEMPTION.sameMonthMinDays;
 
 /** その月の分の社会保険料が、産休・育休で免除されるか */
 export const checkLeaveExemptMonth = (leaves: LeavePeriod[], year: number, month: number): boolean => {
@@ -344,5 +345,5 @@ export const checkLeaveExemptBonus = (leaves: LeavePeriod[], payDate: string): b
   return mergeSpans(leaves, 'childcare').some((s) =>
     !isWithinOneMonth(s)
     && coversMonth(s, m)
-    && (s.start.isBefore(CHILDCARE_RULE_2022_START, 'day') || isLongerThanOneMonth(s)));
+    && (s.start.isBefore(CHILDCARE_RULE_2022_START, 'day') || isLongerThanBonusMonths(s)));
 };

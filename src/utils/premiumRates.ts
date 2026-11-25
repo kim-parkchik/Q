@@ -1,8 +1,8 @@
 /**
  * 残業代の割増率（会社の決まり。給与規定グループごと。payroll_groups.premium_rates の JSON）
  *
- * ■ 法律の率（労働基準法37条・割増賃金令。constants/labor.ts）より低くはできない：
- *   時間外労働 25%・1か月60時間を超えた時間外労働 50%・法定休日の労働 35%・深夜 25%。
+ * ■ 法律の率（労働基準法37条・割増賃金令。条文から作った constants/laborStandards.ts の LEGAL_PREMIUM_PERCENT）より低くはできない：
+ *   時間外労働・1か月60時間を超えた時間外労働・法定休日の労働・深夜。
  *   法定内残業（所定労働時間を超えて法定労働時間までの時間）は、法律では割増がいらない（0%）
  * ■ 就業規則・賃金規程でこれより高い率を決めている会社は、その率で払う（決めた賃金を払わないことになる。労働基準法24条）
  * ■ 限度時間を超えた時間外労働の割増率：36協定の特別条項で、1か月・1年の限度時間（45時間・360時間。constants/roumu.ts の
@@ -18,7 +18,9 @@
  * ■ 入れていない欄は法律の率（いままでと同じ計算）
  */
 import dayjs from "dayjs";
-import { HOLIDAY_WORK_RATE, NIGHT_SHIFT_RATE, OVERTIME_PREMIUM_LIMIT_HOURS, OVERTIME_PREMIUM_RATE, OVERTIME_RATE, SME_OVERTIME_PREMIUM_FROM } from "../constants/labor";
+import {
+  LEGAL_PREMIUM_PERCENT, LEGAL_WORK_HOURS_DAILY, LEGAL_WORK_HOURS_WEEKLY, NIGHT_END_HOUR, NIGHT_START_HOUR, OVER60_HOURS, SME_OVER60_FROM,
+} from "../constants/labor";
 import { KYOTEI36_LIMITS } from "../constants/roumu";
 import type { Kyotei36 } from "./kyotei36";
 
@@ -40,16 +42,14 @@ export interface PremiumRates {
   statutory: number;
 }
 
-const pct = (multiplier: number) => Math.round(multiplier * 10000) / 100;
-
-/** 法律の率（これより低くはできない。入れていない欄もこの率） */
+/** 法律の率（これより低くはできない。入れていない欄もこの率）。限度時間を超えた分（36協定の特別条項）の法律の率は、時間外労働と同じ */
 export const LEGAL_PREMIUM_RATES: PremiumRates = {
-  overtime: pct(OVERTIME_RATE - 1),
-  overLimitMonth: pct(OVERTIME_RATE - 1),
-  over60: pct(OVERTIME_PREMIUM_RATE - 1),
-  overLimitYear: pct(OVERTIME_RATE - 1),
-  holiday: pct(HOLIDAY_WORK_RATE - 1),
-  night: pct(NIGHT_SHIFT_RATE),
+  overtime: LEGAL_PREMIUM_PERCENT.overtime,
+  overLimitMonth: LEGAL_PREMIUM_PERCENT.overtime,
+  over60: LEGAL_PREMIUM_PERCENT.over60,
+  overLimitYear: LEGAL_PREMIUM_PERCENT.overtime,
+  holiday: LEGAL_PREMIUM_PERCENT.holiday,
+  night: LEGAL_PREMIUM_PERCENT.night,
   statutory: 0,
 };
 
@@ -57,13 +57,13 @@ export const PREMIUM_RATE_KEYS: (keyof PremiumRates)[] = ["overtime", "overLimit
 
 /** 欄の名前（画面・給与明細・労働条件通知書） */
 export const PREMIUM_RATE_LABELS: Record<keyof PremiumRates, string> = {
-  overtime: "時間外労働（1日8時間・週40時間を超えた時間）",
+  overtime: `時間外労働（1日${LEGAL_WORK_HOURS_DAILY}時間・週${LEGAL_WORK_HOURS_WEEKLY}時間を超えた時間）`,
   overLimitMonth: `1か月の時間外労働が${KYOTEI36_LIMITS.monthly}時間（限度時間）を超えた分`,
-  over60: `1か月の時間外労働が${OVERTIME_PREMIUM_LIMIT_HOURS}時間を超えた分`,
+  over60: `1か月の時間外労働が${OVER60_HOURS}時間を超えた分`,
   overLimitYear: `1年の時間外労働が${KYOTEI36_LIMITS.annual}時間（限度時間）を超えた分（36協定の起算日から）`,
   holiday: "法定休日の労働",
-  night: "深夜（22時〜5時）の労働",
-  statutory: "法定内残業（所定労働時間を超えて、1日8時間・週40時間までの時間）",
+  night: `深夜（${NIGHT_START_HOUR}時〜${NIGHT_END_HOUR}時）の労働`,
+  statutory: `法定内残業（所定労働時間を超えて、1日${LEGAL_WORK_HOURS_DAILY}時間・週${LEGAL_WORK_HOURS_WEEKLY}時間までの時間）`,
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -103,9 +103,10 @@ export const premiumRateProblems = (r: Record<keyof PremiumRates, number>): stri
 /** 法律の率と違う欄だけを書く（給与規定グループの一覧に出す）。同じなら「法律の率」 */
 export const describePremiumRates = (r: PremiumRates): string => {
   const diff = PREMIUM_RATE_KEYS.filter((k) => r[k] !== LEGAL_PREMIUM_RATES[k]);
-  if (diff.length === 0) return "法律の率（時間外25%・月60時間超50%・休日35%・深夜25%）";
+  const L = LEGAL_PREMIUM_RATES;
+  if (diff.length === 0) return `法律の率（時間外${L.overtime}%・月${OVER60_HOURS}時間超${L.over60}%・休日${L.holiday}%・深夜${L.night}%）`;
   const short: Record<keyof PremiumRates, string> = {
-    overtime: "時間外", overLimitMonth: `月${KYOTEI36_LIMITS.monthly}時間超`, over60: `月${OVERTIME_PREMIUM_LIMIT_HOURS}時間超`,
+    overtime: "時間外", overLimitMonth: `月${KYOTEI36_LIMITS.monthly}時間超`, over60: `月${OVER60_HOURS}時間超`,
     overLimitYear: `年${KYOTEI36_LIMITS.annual}時間超`, holiday: "休日", night: "深夜", statutory: "法定内残業",
   };
   return PREMIUM_RATE_KEYS.map((k) => `${short[k]}${r[k]}%`).join("・");
@@ -152,12 +153,12 @@ export const overtimeSegments = (p: {
   const hours = Math.max(0, p.hours);
   if (!(hours > 0)) return [];
   const within = Math.min(hours, Math.max(0, p.within));
-  const deferredSme = p.isSmallBusiness && p.workDate < SME_OVERTIME_PREMIUM_FROM;
+  const deferredSme = p.isSmallBusiness && p.workDate < SME_OVER60_FROM;
   const cuts = new Set<number>([0, hours]);
   const add = (x: number) => { if (x > 0 && x < hours) cuts.add(x); };
   add(within);
   add(KYOTEI36_LIMITS.monthly - p.monthSoFar);
-  add(OVERTIME_PREMIUM_LIMIT_HOURS - p.monthSoFar);
+  add(OVER60_HOURS - p.monthSoFar);
   if (p.yearSoFar !== null) add(KYOTEI36_LIMITS.annual - p.yearSoFar);
   const points = [...cuts].sort((a, b) => a - b);
   const out: OvertimeSegment[] = [];
@@ -167,7 +168,7 @@ export const overtimeSegments = (p: {
     // 小数の誤差で生まれるごく短い段は作らない
     if (!(len > 1e-9)) continue;
     const monthPos = p.monthSoFar + a;
-    const over60 = monthPos >= OVERTIME_PREMIUM_LIMIT_HOURS - 1e-9;
+    const over60 = monthPos >= OVER60_HOURS - 1e-9;
     const seg = {
       hours: len,
       within: a < within - 1e-9,

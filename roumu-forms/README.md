@@ -10,19 +10,29 @@ Q の次の画面で使う、書類の欄・決まり・数の出どころです
 下の条文の XML と PDF から、スクリプトで読み取って `src/constants/roumu.ts` に作っています（手で書き写していません）。
 法定労働時間（週40時間・1日8時間）・週44時間の特例（特例措置対象事業場）・フレックスタイム制の清算期間（3か月）と週平均50時間は、
 労働基準法の全文と施行規則25条の2の XML から `src/constants/workHours.ts` に作っています（給与の計算・会社設定の支店リスト。`src/utils/weekly44.ts`）。
+割増賃金の率の最低（時間外・休日・1か月60時間超・深夜）・深夜の時間・中小事業主にも60時間超の率を使い始めた日・時間単位の年次有給休暇の上限の日数は、
+労働基準法の全文と割増賃金令の XML から `src/constants/laborStandards.ts` に作っています（`src/utils/premiumRates.ts`・`src/constants/labor.ts`）。
+育児休業等の期間中の社会保険料の免除の「十四日以上」「一月以下」と、その決まりを使い始めた日（令和4年10月1日）は、健康保険法159条・
+厚生年金保険法81条の2・健康保険法の全文の XML から `src/constants/insurance/childcareExemption.ts` に作っています（`src/utils/leaveExemption.ts`）。
 書類の欄の並びと名前は、それぞれの様式・記入例・記入要領で確かめました。
 
 ## 出典
 
-2026年11月18日に取得しました（ユーザーの許しを得て取得）。labor-standards-act.xml と labor-standards-rule-25-2.xml は、2026年11月21日に取得しました（ユーザーの許しを得て取得）。PDF と Word は大きいので、リポジトリには入れていません（`source/` は .gitignore）。
+2026年11月18日に取得しました（ユーザーの許しを得て取得）。labor-standards-act.xml と labor-standards-rule-25-2.xml は、2026年11月21日に取得しました（ユーザーの許しを得て取得）。
+wage-premium-order.xml・health-insurance-act-159.xml・employees-pension-act-81-2.xml・source/health-insurance-act.xml は、2026年11月25日に取得しました（ユーザーの許しを得て取得）。
+PDF と Word と、健康保険法の全文（source/health-insurance-act.xml）は大きいので、リポジトリには入れていません（`source/` は .gitignore）。
 法令の条文の XML（e-Gov 法令API）は、法令は著作権の対象にならないので、このフォルダに入れています。
 
 | 置く場所 | 内容 | 入手元 | 大きさ（バイト） | SHA-256 |
 |---|---|---|---|---|
 | labor-standards-act-36.xml | 労働基準法 第36条（時間外及び休日の労働） | https://laws.e-gov.go.jp/api/1/articles;lawId=322AC0000000049;article=36 | 11,115 | 0e710ea4cbe62071a5684e012cc3cba510ef2ba1ce7d7c5e1faa3bbfc0dfb667 |
 | disability-employment-order-9.xml | 障害者の雇用の促進等に関する法律施行令 第9条（障害者雇用率） | https://laws.e-gov.go.jp/api/1/articles;lawId=335CO0000000292;article=9 | 743 | f465720cdf2585aab39c9e869f34f59aa2c948417b26a45eaf3cfb07d51fc6e7 |
-| labor-standards-act.xml | 労働基準法（全文。32条・32条の3・別表第一を読む） | https://laws.e-gov.go.jp/api/1/lawdata/322AC0000000049 | 431,309 | `7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0` |
+| labor-standards-act.xml | 労働基準法（全文。32条・32条の3・37条・39条・別表第一・附則を読む） | https://laws.e-gov.go.jp/api/1/lawdata/322AC0000000049 | 431,309 | `7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0` |
 | labor-standards-rule-25-2.xml | 労働基準法施行規則 第25条の2（週44時間の特例） | https://laws.e-gov.go.jp/api/1/articles;lawId=322M40000100023;article=25の2 | 5,830 | `730484b373d15e9798fbd7fcb773d7e64586debc3fa2ab56b85049f5fe0a1718` |
+| wage-premium-order.xml | 労働基準法第三十七条第一項の時間外及び休日の割増賃金に係る率の最低限度を定める政令（平成六年政令第五号。全文） | https://laws.e-gov.go.jp/api/1/lawdata/406CO0000000005 | 3,192 | `90442057b982e16e8393fa6e97d94ec3fda09557064156e09551c110f51cd04a` |
+| health-insurance-act-159.xml | 健康保険法 第159条（育児休業等の期間中の保険料の免除） | https://laws.e-gov.go.jp/api/1/articles;lawId=211AC0000000070;article=159 | 3,016 | `e5c4688e5a1e9bd6ac9adf94decacd6300fa786c97152cfd68b7f07f0c6ef652` |
+| employees-pension-act-81-2.xml | 厚生年金保険法 第81条の2（育児休業期間中の保険料の徴収の特例） | https://laws.e-gov.go.jp/api/1/articles;lawId=329AC0000000115;article=81の2 | 3,640 | `49476696c8f1288dd334043921c43dfa4d5196f40ce4772b85baf3ade70788e8` |
+| source/health-insurance-act.xml | 健康保険法（全文。附則（令和3年6月11日法律第66号）を読む） | https://laws.e-gov.go.jp/api/1/lawdata/211AC0000000070 | 1,468,140 | `5f17ce52e03d52203f72630f7de6de6a93816b7faaac88ef8c5a4b3418e093a0` |
 | source/roudoujouken-ippan.docx | 厚生労働省 モデル労働条件通知書【一般労働者用】常用、有期雇用型（令和8年10月1日以降の様式） | https://www.mhlw.go.jp/content/11200000/001697541.docx | 57,127 | d6b941fb84627273ea4e5ed795dcacbc7f8e2e60ccedc05573ab5732e163baed |
 | source/roudoujouken-tanjikan.docx | 同【短時間労働者用】常用、有期雇用型 | https://www.mhlw.go.jp/content/11200000/001697546.docx | 54,640 | 029ca18cc3e3d248f7ae6cd53ddbef4c9260063f24fbe722577c32abcb6fc6e7 |
 | source/36-youshiki9.docx | 時間外労働・休日労働に関する協定届 様式第9号（一般条項） | https://www.mhlw.go.jp/content/11200000/001695822.docx | 72,942 | 105ad6086a97d7331a20e7943e52b240ee1690971464ed991539f95671fab039 |
@@ -67,6 +77,8 @@ macOS の文字認識（`scripts/pdf_ocr.swift`）で読みました。
 ```
 python3 -I scripts/import_roumu_tables.py roumu-forms src/constants/roumu.ts
 python3 -I scripts/import_work_hours.py roumu-forms src/constants/workHours.ts
+python3 -I scripts/import_labor_standards.py roumu-forms src/constants/laborStandards.ts
+python3 -I scripts/import_childcare_exemption.py roumu-forms src/constants/insurance/childcareExemption.ts
 ```
 
 `import_work_hours.py` は、リポジトリの中の XML（labor-standards-act.xml・labor-standards-rule-25-2.xml）だけで動きます。
@@ -74,6 +86,19 @@ python3 -I scripts/import_work_hours.py roumu-forms src/constants/workHours.ts
 施行規則25条の2の1項（別表第一の号・「映画の製作の事業を除く」・「常時十人未満」・「四十四時間」「八時間」）、3項（44時間・「一箇月以内」）、
 4項（「清算期間が一箇月を超える」・第三十二条の四・第三十二条の五）を読み、別表第一の号の事業の名前を引きます。
 1項と3項の44時間・施行規則と法の8時間が違う、清算期間の1か月がそろわない、別表第一に号がない・除く事業がその号の名前にないときは止まります。
+
+`import_labor_standards.py` も、リポジトリの中の XML（labor-standards-act.xml・wage-premium-order.xml）だけで動きます。
+労働基準法37条1項の「二割五分以上五割以下の範囲内でそれぞれ政令で定める率」と、ただし書の「一箇月について六十時間」「五割以上」、
+4項の「午後十時から午前五時まで」「二割五分以上」、39条4項2号の「五日以内」、附則（平成30年法律第71号）1条3号の
+「第一条中労働基準法第百三十八条の改正規定 令和五年四月一日」（中小事業主には60時間超の率を使わないとしていた附則138条を削った日）と、
+割増賃金令の「二割五分」（時間外）・「三割五分」（休日）を読みます。政令の率が37条1項の範囲の外にある、60時間超の率が時間外の率より低い、
+附則138条がまだあるときは止まります。
+
+`import_childcare_exemption.py` は、health-insurance-act-159.xml・employees-pension-act-81-2.xml と、取得して source/ に置いた健康保険法の全文を読みます。
+2つの条の1項の「一月以下」（賞与の保険料を免除しない育児休業等の期間）と2号の「十四日以上」、健康保険法の附則（令和3年法律第66号）1条3号の
+施行の日「令和四年十月一日」と3条3項（改正後の159条は、その日以後に開始する育児休業等に使う）を読みます。2つの条で日数・月数が違う、
+全文の159条が、159条だけの XML と違うときは止まります。厚生年金保険法81条の2も、同じ法律の附則5条で、同じ日以後に開始する育児休業等に使います
+（e-Gov 法令API の厚生年金保険法の全文をブラウザで読んで確かめました。全文は約3.2MB と大きいので、取得していません）。
 
 読むところと、止まるとき（作らないとき）は、スクリプトの初めの説明に書いてあります。主なもの：
 

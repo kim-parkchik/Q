@@ -46,12 +46,12 @@ export default function SummaryBoard({ am }: Props) {
           </div>
           {(calcResult?.highPremiumHours ?? 0) > 0 && (
             <div style={{ fontSize: "11px", color: "#ff7675" }}> 
-              (うち{Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超 [{Math.max(calcResult?.premiumRates?.over60 ?? 50, calcResult?.premiumRates?.overLimitMonth ?? 0)}%増]: {formatHours(calcResult?.highPremiumHours ?? 0)})
+              (うち{Master.OVER60_HOURS}h超 [{Math.max(calcResult?.premiumRates?.over60 ?? Master.LEGAL_PREMIUM_PERCENT.over60, calcResult?.premiumRates?.overLimitMonth ?? 0)}%増]: {formatHours(calcResult?.highPremiumHours ?? 0)})
             </div>
           )}
           {(calcResult?.deferredHighPremiumHours ?? 0) > 0 && (
             <div style={{ fontSize: "11px", color: "#95a5a6" }}>
-              (うち{Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超 [中小企業の猶予で{Math.max(calcResult?.premiumRates?.overtime ?? 25, calcResult?.premiumRates?.overLimitMonth ?? 0)}%増]: {formatHours(calcResult?.deferredHighPremiumHours ?? 0)})
+              (うち{Master.OVER60_HOURS}h超 [中小企業の猶予で{Math.max(calcResult?.premiumRates?.overtime ?? Master.LEGAL_PREMIUM_PERCENT.overtime, calcResult?.premiumRates?.overLimitMonth ?? 0)}%増]: {formatHours(calcResult?.deferredHighPremiumHours ?? 0)})
             </div>
           )}
         </div>

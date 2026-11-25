@@ -12,6 +12,7 @@ import { describeUnionRate, INSURER_TYPE_LABELS } from '../../utils/healthInsure
 import { describeFlatTaxPayment } from '../../utils/flatTaxReduction';
 import { LEAVE_PRORATION_METHOD_LABELS, LEAVE_TYPE_NAMES } from '../../utils/leaveOfAbsence';
 import { SAME_MONTH_CHILDCARE_MIN_DAYS } from '../../utils/leaveExemption';
+import { KYOTEI36_LIMITS } from '../../constants/roumu';
 
 interface Props {
   db: any;
@@ -438,24 +439,24 @@ export default function PayStubModal(props: Props) {
                       marginTop: 2,
                       borderTop: '1px dotted #ccc' 
                     }}>
-                      {Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超: {fmtH(salary.highPremiumHours)}
+                      {Master.OVER60_HOURS}h超: {fmtH(salary.highPremiumHours)}
                     </div>
                   )}
                   {/* 1か月45時間（限度時間）・36協定の年360時間を超えた時間（給与規定グループで、その分の率を高く決めたときだけ出す） */}
                   {salary.overLimitMonthHours > 0 && salary.premiumRates.overLimitMonth > salary.premiumRates.overtime && (
                     <div style={{ fontSize: '10px', color: '#7c3aed', marginTop: 2, borderTop: '1px dotted #ccc' }}>
-                      月45h超: {fmtH(salary.overLimitMonthHours)}
+                      月{KYOTEI36_LIMITS.monthly}h超: {fmtH(salary.overLimitMonthHours)}
                     </div>
                   )}
                   {salary.overLimitYearHours > 0 && salary.premiumRates.overLimitYear > salary.premiumRates.overtime && (
                     <div style={{ fontSize: '10px', color: '#7c3aed', marginTop: 2, borderTop: '1px dotted #ccc' }}>
-                      年360h超: {fmtH(salary.overLimitYearHours)}
+                      年{KYOTEI36_LIMITS.annual}h超: {fmtH(salary.overLimitYearHours)}
                     </div>
                   )}
-                  {/* 中小企業の猶予（2023年3月まで）で、60時間超も25%で計算した分 */}
+                  {/* 中小企業の猶予（Master.SME_OVER60_FROM より前）で、60時間超も時間外労働の率で計算した分（勤怠のまとめの画面と同じ率を出す） */}
                   {salary.deferredHighPremiumHours > 0 && (
                     <div style={{ fontSize: '10px', color: '#7f8c8d', marginTop: 2, borderTop: '1px dotted #ccc' }}>
-                      {Master.OVERTIME_PREMIUM_LIMIT_HOURS}h超（中小企業の猶予で25%）: {fmtH(salary.deferredHighPremiumHours)}
+                      {Master.OVER60_HOURS}h超（中小企業の猶予で{Math.max(salary.premiumRates.overtime, salary.premiumRates.overLimitMonth)}%）: {fmtH(salary.deferredHighPremiumHours)}
                     </div>
                   )}
                 </td>

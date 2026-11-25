@@ -180,7 +180,7 @@ export function useAttendanceManager({ db, staffList, targetYear, targetMonth }:
     const unfinalized = Object.entries(monthlyWorkData)
       .filter(([, row]) => Number(row.is_finalized) !== 1 && (Number(row.paidHours) || 0) > 0)
       .map(([date, row]) => ({ date, hours: Number(row.paidHours) || 0 }));
-    const hourlyYears = hourlyLeaveByGrantYear(paidLeaveData.grants, [...taken, ...unfinalized], hours, Master.ANNUAL_PAID_LEAVE_MAX_DAYS);
+    const hourlyYears = hourlyLeaveByGrantYear(paidLeaveData.grants, [...taken, ...unfinalized], hours, Master.HOURLY_PAID_LEAVE_MAX_DAYS);
     const hourlyOver = hourlyYears
       .filter(y => y.over && payrollPeriod && y.from <= payrollPeriod.endStr && y.to >= payrollPeriod.startStr)
       .map(y => ({ from: y.from, to: y.to, taken: formatLeaveMinutes(y.minutes, hours), limit: formatLeaveMinutes(y.limitMinutes, hours), hours: y.minutes / 60, limitHours: y.limitMinutes / 60 }));

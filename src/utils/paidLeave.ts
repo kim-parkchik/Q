@@ -308,10 +308,10 @@ export interface HourlyLeaveYear {
 }
 
 /**
- * 時間単位の有給を、付与の年ごとに数える（労働基準法39条4項：時間単位で与えられるのは、1年に5日分まで。
- * 前の年から繰り越した分も含めて5日まで）。付与の年は、年次有給休暇の付与日から1年（次の付与日がそれより早ければ、その前の日まで）。
+ * 時間単位の有給を、付与の年ごとに数える（労働基準法39条4項2号：時間単位で与えられるのは、1年に maxDays 日分まで。
+ * 前の年から繰り越した分も含めて maxDays 日まで）。付与の年は、年次有給休暇の付与日から1年（次の付与日がそれより早ければ、その前の日まで）。
  * 付与を登録していない人は数えない（空の一覧）。
- * @param maxDays 1年の上限の日数（constants の ANNUAL_PAID_LEAVE_MAX_DAYS）
+ * @param maxDays 1年の上限の日数（条文から作った constants/laborStandards.ts の HOURLY_PAID_LEAVE_MAX_DAYS）
  */
 export const hourlyLeaveByGrantYear = (
   grants: LeaveGrantRow[],

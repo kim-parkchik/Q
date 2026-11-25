@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataRoot>
+  <Result>
+    <Code>0</Code>
+    <Message/>
+  </Result>
+  <ApplData>
+    <LawId>211AC0000000070</LawId>
+    <LawNum/>
+    <Article>159</Article>
+    <Paragraph/>
+    <AppdxTable/>
+    <LawContents>
+      <Article Num="159">
+        <ArticleTitle>第百五十九条</ArticleTitle>
+        <Paragraph Num="1">
+          <ParagraphNum/>
+          <ParagraphSentence>
+            <Sentence Num="1" WritingMode="vertical">育児休業等をしている被保険者（第百五十九条の三の規定の適用を受けている被保険者を除く。次項において同じ。）が使用される事業所の事業主が、厚生労働省令で定めるところにより保険者等に申出をしたときは、次の各号に掲げる場合の区分に応じ、当該各号に定める月の当該被保険者に関する保険料（その育児休業等の期間が一月以下である者については、標準報酬月額に係る保険料に限る。）は、徴収しない。</Sentence>
+          </ParagraphSentence>
+          <Item Num="1">
+            <ItemTitle>一</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1" WritingMode="vertical">その育児休業等を開始した日の属する月とその育児休業等が終了する日の翌日が属する月とが異なる場合</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1" WritingMode="vertical">その育児休業等を開始した日の属する月からその育児休業等が終了する日の翌日が属する月の前月までの月</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+          <Item Num="2">
+            <ItemTitle>二</ItemTitle>
+            <ItemSentence>
+              <Column Num="1">
+                <Sentence Num="1" WritingMode="vertical">その育児休業等を開始した日の属する月とその育児休業等が終了する日の翌日が属する月とが同一であり、かつ、当該月における育児休業等の日数として厚生労働省令で定めるところにより計算した日数が十四日以上である場合</Sentence>
+              </Column>
+              <Column Num="2">
+                <Sentence Num="1" WritingMode="vertical">当該月</Sentence>
+              </Column>
+            </ItemSentence>
+          </Item>
+        </Paragraph>
+        <Paragraph Num="2">
+          <ParagraphNum>２</ParagraphNum>
+          <ParagraphSentence>
+            <Sentence Num="1" WritingMode="vertical">被保険者が連続する二以上の育児休業等をしている場合（これに準ずる場合として厚生労働省令で定める場合を含む。）における前項の規定の適用については、その全部を一の育児休業等とみなす。</Sentence>
+          </ParagraphSentence>
+        </Paragraph>
+      </Article>
+    </LawContents>
+  </ApplData>
+</DataRoot>
