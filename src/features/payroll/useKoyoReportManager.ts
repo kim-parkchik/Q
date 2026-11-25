@@ -24,6 +24,7 @@ import { groupOfStaff, loadKoyoBase, loadWageData, type KoyoBase } from "../../u
 import { buildWageCertificate, type WageCertResult } from "../../utils/wageCertificate";
 import { birthdayAt } from "../../utils/calcSalary";
 import type { MyNumberUser } from "../mynumber/myNumberStore";
+import { useMyNumberFileGuard } from "../mynumber/useMyNumberFileGuard";
 import { useShahoMyNumbers } from "./useShahoMyNumbers";
 
 export type KoyoMode = "shutoku" | "soshitsu" | "tenkin" | "bango";
@@ -50,6 +51,7 @@ export function useKoyoReportManager(db: any, staffList: any[], user: MyNumberUs
   const dialog = useMessageDialog();
   const toast = useToast();
   const my = useShahoMyNumbers(db, user);
+  const guard = useMyNumberFileGuard();
   const [mode, setMode] = useState<KoyoMode>("shutoku");
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
   const [base, setBase] = useState<KoyoBase | null>(null);
@@ -182,7 +184,7 @@ export function useKoyoReportManager(db: any, staffList: any[], user: MyNumberUs
     const title = KOYO_FORM_TITLES[g.form];
     try {
       const lines = buildKoyoLines(g.form, g.officeValues, mediaNumber, createdOn, xmlReturn, resolved.lines);
-      const saved = await saveBinaryFile(encodeShahoFile(lines), KOYO_FILE_NAMES[g.form], { name: "雇用保険の届書の電子申請用ファイル", extensions: ["csv"] });
+      const saved = await saveBinaryFile(encodeShahoFile(lines), KOYO_FILE_NAMES[g.form], { name: "雇用保険の届書の電子申請用ファイル", extensions: ["csv"] }, guard.saveOptions(resolved.count));
       if (!saved) return false;
       await db.execute("UPDATE company SET koyo_media_seq = ? WHERE id = 1", [mediaNumber]);
       // 届け出たことを従業員の雇用保険の情報に残す（次に出す届書を決めるのに使う）
@@ -208,13 +210,15 @@ export function useKoyoReportManager(db: any, staffList: any[], user: MyNumberUs
       if (resolved.count > 0) await my.logWritten(title, resolved.count, KOYO_FILE_NAMES[g.form]);
       toast.success(`${title}の電子申請用ファイルを保存しました（${saved.name}）`);
       setReloadKey((k) => k + 1);
+      // マイナンバーを書いたときは、出し終わったら消すことなどを知らせる
+      await guard.notice(saved, resolved.count, "employment");
       return true;
     } catch (e) {
       console.error(e);
       dialog.error(`電子申請用のファイルを書き出せませんでした。\n${e}`);
       return false;
     }
-  }, [fileProblems, my, mediaNumber, createdOn, xmlReturn, db, staffList, today, dialog, toast, excluded]);
+  }, [fileProblems, my, guard, mediaNumber, createdOn, xmlReturn, db, staffList, today, dialog, toast, excluded]);
 
   /** ファイルの中身（マイナンバーは「［マイナンバー］」のまま） */
   const preview = useCallback((g: typeof groups[number]): string[] | null => {

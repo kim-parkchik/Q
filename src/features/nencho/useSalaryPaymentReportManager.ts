@@ -19,6 +19,7 @@ import type { SummarySheet } from "./SalaryReportSummaryView";
 import { buildSalaryReportCsv, type ReportCsvCompany, type ReportCsvPerson } from "../../utils/salaryPaymentReportCsv";
 import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 import { useMyNumberUnlock } from "../mynumber/MyNumberUnlock";
+import { useMyNumberFileGuard } from "../mynumber/useMyNumberFileGuard";
 import { saveCsvFile } from "../../utils/fileSaveUtils";
 import { localGovLabel } from "../../utils/localGov";
 import { useMessageDialog } from "../../components/MessageDialog";
@@ -70,6 +71,7 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
   const dialog = useMessageDialog();
   const toast = useToast();
   const unlock = useMyNumberUnlock();
+  const guard = useMyNumberFileGuard();
   const [year, setYear] = useState(REPORT_YEARS[REPORT_YEARS.length - 1] ?? new Date().getFullYear());
   const master = getNenchoMaster(year);
   const slipMaster = getWithholdingSlipMaster(year);
@@ -276,7 +278,7 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
       const numbers = withNumbers ? await unlock.readNumbers(db, user, rows.map((r) => r.staffId)) : null;
       if (withNumbers && !numbers) return;
       const out = numbers ? buildSalaryReportCsv(year, company, csvPeople(numbers)) : csv;
-      const saved = await saveCsvFile(out.csv, `給与支払報告書_${year}年分.csv`);
+      const saved = await saveCsvFile(out.csv, `給与支払報告書_${year}年分.csv`, guard.saveOptions(out.myNumbers));
       if (!saved) return;
       if (withNumbers) {
         await logMyNumber(db, user, `給与支払報告書の CSV（${year}年分・${out.count}人。本人のマイナンバー ${out.myNumbers}人分）を書き出しました：${saved.name}`);
@@ -284,6 +286,8 @@ export function useSalaryPaymentReportManager(db: Database, staffList: any[], us
       toast.success(`「${saved.name}」を保存しました（${out.count}人・${out.municipalities}市区町村）`);
       const notes = withNumbers ? out.notes : [...out.notes, "マイナンバーは書いていません（事務取扱担当者の印がある人が書き出すと書きます）"];
       if (notes.length > 0) await dialog.warning(notes.join("\n"));
+      // マイナンバーを書いたときは、出し終わったら消すことなどを知らせる
+      await guard.notice(saved, out.myNumbers, "tax");
     } catch (e) {
       console.error(e);
       dialog.error(`CSV を保存できませんでした。\n${e}`);

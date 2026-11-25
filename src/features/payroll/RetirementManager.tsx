@@ -25,12 +25,13 @@ import {
   type OtherRetirement, type PriorRetirement, type RetirementInput, type RetirementKind, type RetirementPart, type RetirementRecord,
 } from "../../utils/retirementIncome";
 import { retirementDeclarationOf } from "../../utils/retirementDeclaration";
-import { encodeEtaxFile, ETAX_TITLES, etax316Of, etax325Of, etax339Of, nonResidentReportOf, type EtaxCode, type EtaxFile } from "../../utils/retirementReports";
+import { encodeEtaxFile, ETAX_TITLES, etax316Of, etax325Of, etax339Of, etaxMyNumberCount, nonResidentReportOf, type EtaxCode, type EtaxFile } from "../../utils/retirementReports";
 import { saveBinaryFile } from "../../utils/fileSaveUtils";
 import { TAISHOKU_BENEFIT_REPORT, TAISHOKU_NONRESIDENT } from "../../constants/taishoku";
 import { formatWareki } from "../../utils/wareki";
 import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 import { useMyNumberUnlock } from "../mynumber/MyNumberUnlock";
+import { useMyNumberFileGuard } from "../mynumber/useMyNumberFileGuard";
 import { LocalGovSelect } from "../settings/staff/ResidentTaxEditor";
 import { benefitReportDueDate, benefitReportProblems, benefitSummaryOf, heirKeyOf, heirOmitted, heirsOf, submittedHeirs } from "../../utils/retirementBenefitReport";
 import NonResidentReportSheet from "./NonResidentReportSheet";
@@ -89,6 +90,7 @@ export default function RetirementManager({ db, staffList, currentUser = null }:
   const toast = useToast();
   const dialog = useMessageDialog();
   const unlock = useMyNumberUnlock();
+  const guard = useMyNumberFileGuard();
   const [year, setYear] = useState(today.getFullYear());
   const [records, setRecords] = useState<RetirementRecord[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -253,15 +255,16 @@ export default function RetirementManager({ db, staffList, currentUser = null }:
     if (!file.rows.length) return dialog.warning("支払調書を出す受給者がいません（受給者ごとの額が100万円以下なら、支払調書は出さなくてよいので、CSV も要りません）。");
     const { bytes, unknown } = encodeEtaxFile(file);
     if (unknown.length) return dialog.warning(`シフトJISにない字があるので、保存しませんでした（${unknown.join("")}）。`);
+    // ファイルに書いたマイナンバーの人数（番号を読まなければ 0）
+    const myNumbers = etaxMyNumberCount(file);
     try {
-      const saved = await saveBinaryFile(bytes, `${code}_${code === "325" ? etaxMonth.replace("-", "") : year}.csv`, { name: "CSV", extensions: ["csv"] });
+      const saved = await saveBinaryFile(bytes, `${code}_${code === "325" ? etaxMonth.replace("-", "") : year}.csv`, { name: "CSV", extensions: ["csv"] }, guard.saveOptions(myNumbers));
       if (!saved) return;
-      if (numbers) {
-        const count = Object.values(numbers).filter(Boolean).length;
-        await logMyNumber(db, currentUser, `e-Tax の CSV（${ETAX_TITLES[code]}）を保存しました（マイナンバー ${count}人分）`);
-      }
+      if (numbers) await logMyNumber(db, currentUser, `e-Tax の CSV（${ETAX_TITLES[code]}）を保存しました（マイナンバー ${myNumbers}人分）`);
       toast.success(`${saved.name} を保存しました（${file.rows.length}枚）`);
       if (file.notes.length) await dialog.warning(file.notes.join("\n"), "保存しました（確かめてください）");
+      // マイナンバーを書いたときは、出し終わったら消すことなどを知らせる
+      await guard.notice(saved, myNumbers, "tax");
     } catch (e) {
       console.error(e);
       dialog.error(`保存できませんでした。\n${e}`);

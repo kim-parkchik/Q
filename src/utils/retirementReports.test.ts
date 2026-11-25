@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ETAX_LAYOUTS } from "../constants/taishoku";
 import { calcRetirement, emptyRetirementHeir, emptyRetirementInput, type RetirementInput, type RetirementRecord } from "./retirementIncome";
-import { encodeEtaxFile, etax316Of, etax325Of, etax339Of, etaxItemProblem, nonResidentReportOf } from "./retirementReports";
+import { encodeEtaxFile, etax316Of, etax325Of, etax339Of, etaxItemProblem, etaxMyNumberCount, nonResidentReportOf } from "./retirementReports";
 
 const payer = { name: "株式会社テスト", address: "東京都千代田区霞が関3-1-1", phone: "03-1234-5678", corporateNumber: "1234567890123" };
 const rec = (o: Partial<RetirementRecord> & { input: Partial<RetirementInput> }): RetirementRecord => ({
@@ -106,5 +106,35 @@ describe("e-Tax の CSV", () => {
     expect(row.slice(10, 20)).toEqual(["08", "Ｓｉｎｇａｐｏｒｅ", "1", "", "退職　一郎", "退職手当等", "総額１０，０００，０００円のうち居住者期間の勤務分", "8000000", "1000000", "1633600"]);
     expect(row.slice(20, 35).every((x) => x === "")).toBe(true);
     expect(row.slice(35, 48)).toEqual(["東京都港区４－５－６", "代理　次郎", "800", "20", "19", "04", "01", "08", "12", "20", "租税条約の適用なし", "1234567890123", " "]);
+  });
+});
+
+describe("e-Tax の CSV に書いたマイナンバーの人数（etaxMyNumberCount。見直しの P6 の知らせと、マイナンバーの取扱いの記録に使う）", () => {
+  const person = (name: string) => ({ name, deathDate: "" });
+  test("316：番号を書いた人だけ数える（番号がない人・番号を読まないときは数えない）", () => {
+    const a0 = rec({ staffId: "7", input: { serviceFrom: "2007-04-01", serviceTo: "2026-12-20" } });
+    const b0 = rec({ staffId: "8", input: { serviceFrom: "2010-04-01", serviceTo: "2026-12-20" } });
+    const list = [a0, b0].map((r) => ({ record: r, result: resultOf(r), person: person(`退職 ${r.staffId}`) }));
+    expect(etaxMyNumberCount(etax316Of(list, payer, { 7: "123456789012", 8: "210987654321" }))).toBe(2);
+    expect(etaxMyNumberCount(etax316Of(list, payer, { 7: "123456789012" }))).toBe(1);
+    expect(etaxMyNumberCount(etax316Of(list, payer, null))).toBe(0);
+  });
+  test("325：受給者が2人でも、退職した人の番号は1人と数える。339：番号を読まなければ 0（最後の項目のスペースは数えない）", () => {
+    const r = rec({
+      payDate: "2026-07-10", amount: 6_000_000,
+      input: {
+        death: true, serviceTo: "2026-06-30", address: "東京都港区1-2-3", position: "課長", benefitKind: "退職金",
+        heirs: [
+          { ...emptyRetirementHeir(), name: "退職 花子", address: "東京都港区1-2-3", relation: "妻", amount: 4_000_000 },
+          { ...emptyRetirementHeir(), name: "退職 一郎", address: "大阪市北区1-1", relation: "子", amount: 2_000_000 },
+        ],
+      },
+    });
+    const f = etax325Of([{ record: r, person: { name: "退職 太郎", deathDate: "2026-06-30" } }], payer, "2026-08-10", { 7: "123456789012" });
+    expect([f.rows.length, etaxMyNumberCount(f)]).toEqual([2, 1]);
+    expect(etaxMyNumberCount(etax325Of([{ record: r, person: { name: "退職 太郎", deathDate: "2026-06-30" } }], payer, "2026-08-10", null))).toBe(0);
+    const n0 = rec({ input: { serviceFrom: "2007-04-01", serviceTo: "2026-12-20", nonResident: true, domesticAmount: 8_000_000, abroad: true, address: "Singapore" } });
+    expect(etaxMyNumberCount(etax339Of([{ record: n0, result: resultOf(n0), person: person("退職 一郎") }], payer, null))).toBe(0);
+    expect(etaxMyNumberCount(etax339Of([{ record: n0, result: resultOf(n0), person: person("退職 一郎") }], payer, { 7: "123456789012" }))).toBe(1);
   });
 });

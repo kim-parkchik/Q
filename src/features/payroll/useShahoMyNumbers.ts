@@ -124,7 +124,7 @@ export function useShahoMyNumbers(db: any, user: MyNumberUser | null) {
   ): Promise<boolean> => {
     const resolved = await resolve(rows);
     if (!resolved) return false;
-    const ok = await file.exportFile(resolved.lines.map((v) => v.join(",")), label, count, resolved.count > 0 ? `マイナンバーあり ${resolved.count}人分` : "");
+    const ok = await file.exportFile(resolved.lines.map((v) => v.join(",")), label, count, resolved.count);
     if (ok && resolved.count > 0) await logWritten(label, resolved.count, SHAHO_FILE_NAME);
     return ok;
   }, [resolve, logWritten]);

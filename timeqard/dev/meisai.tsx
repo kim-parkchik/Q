@@ -17,6 +17,8 @@
  *   9月14日〜10月9日を「その他の休職」にしてある。10月5日だけ3時間働いた
  * マイナンバー：事務取扱担当者でログインしている。鍵のパスワードは「mihon-password-2026」
  * 「…を保存」で保存の窓の代わりに、保存したバイトを window.__savedFiles に足す
+ * マイナンバーを書いたファイルの確かめと知らせ（見直しの P6）：window.__savePaths に場所を入れておくと、保存の窓はその順に選ぶ
+ *   （なくなれば初めの場所）。場所に「Mobile Documents」が入っていれば、iCloud Drive と同期する場所とみなす（cloud_place_of の代わり）
  */
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -43,17 +45,22 @@ const deriveKey: DeriveKey = async (password, salt) => {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
 };
 
-const saved: { name: string; bytes: Uint8Array }[] = [];
+const saved: { name: string; path: string; bytes: Uint8Array }[] = [];
 (window as any).__savedFiles = saved;
+/** 保存の窓で選ぶ場所（入れた順に使い、なくなれば初めの場所） */
+const savePaths: string[] = [];
+(window as any).__savePaths = savePaths;
 let lastSavePath = "";
 (window as any).__TAURI_INTERNALS__ = {
   invoke: async (cmd: string, args: any) => {
     if (cmd === "plugin:dialog|save") {
-      lastSavePath = String(args?.options?.defaultPath ?? "/tmp/file.csv");
+      lastSavePath = savePaths.shift() ?? String(args?.options?.defaultPath ?? "/tmp/file.csv");
       return lastSavePath;
     }
+    // 保存する場所がクラウドと同期しているか（「Mobile Documents」の中なら iCloud Drive）
+    if (cmd === "cloud_place_of") return String(args?.path ?? "").includes("Mobile Documents") ? "iCloud Drive" : null;
     if (cmd === "plugin:fs|write_file") {
-      saved.push({ name: lastSavePath.split("/").pop() ?? "", bytes: args instanceof Uint8Array ? args : new Uint8Array(args) });
+      saved.push({ name: lastSavePath.split("/").pop() ?? "", path: lastSavePath, bytes: args instanceof Uint8Array ? args : new Uint8Array(args) });
       return null;
     }
     if (cmd === "derive_key") return Array.from(await deriveKey(args.password, new Uint8Array(args.salt), {} as any));

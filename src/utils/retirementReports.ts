@@ -273,6 +273,15 @@ export const etax339Of = (
   return { code: "339", rows, problems, notes };
 };
 
+/** 退職した人（受給者）の個人番号の項番 */
+const PERSONAL_NUMBER_ITEMS: Record<EtaxCode, number> = { "316": 38, "325": 36, "339": 48 };
+
+/** ファイルに書いたマイナンバーの人数（同じ人の番号は1人。マイナンバーの取扱いの記録と、保存したあとの知らせに使う） */
+export const etaxMyNumberCount = (file: EtaxFile): number => {
+  const at = ETAX_LAYOUTS[file.code].findIndex((item) => item.no === PERSONAL_NUMBER_ITEMS[file.code]);
+  return new Set(file.rows.map((r) => (r[at] ?? "").trim()).filter(Boolean)).size;
+};
+
 /** ファイルにする（シフトJIS・CR LF。書けない字があれば知らせる） */
 export const encodeEtaxFile = (file: EtaxFile): { bytes: Uint8Array; unknown: string[] } =>
   encodeSjisText(file.rows.map((r) => r.join(",")).join("\r\n") + "\r\n");

@@ -156,8 +156,7 @@ function UnionGroup({ file, insurer, rows, label, blocked, resolve, onSaved }: {
   const save = async () => {
     const resolved = resolve ? await resolve(records) : { lines: records.map((r) => r.values), count: 0 };
     if (!resolved) return;
-    const ok = await file.exportUnionFile(insurer, mediaNo, resolved.lines.map((v) => v.join(",")), label, rows.length,
-      resolved.count > 0 ? `マイナンバーあり ${resolved.count}人分` : "");
+    const ok = await file.exportUnionFile(insurer, mediaNo, resolved.lines.map((v) => v.join(",")), label, rows.length, resolved.count);
     if (ok) onSaved(resolved.count);
   };
   return (

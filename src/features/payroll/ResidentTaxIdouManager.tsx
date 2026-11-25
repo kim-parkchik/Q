@@ -26,6 +26,7 @@ import {
 } from "../../utils/residentTaxIdou";
 import { hasMyNumberAccess, logMyNumber, type MyNumberUser } from "../mynumber/myNumberStore";
 import { useMyNumberUnlock } from "../mynumber/MyNumberUnlock";
+import { useMyNumberFileGuard } from "../mynumber/useMyNumberFileGuard";
 import * as S from "./reportStyles";
 import ResidentTaxKirikaePanel from "./ResidentTaxKirikaePanel";
 
@@ -74,6 +75,7 @@ export default function ResidentTaxIdouManager({ db, staffList, currentUser, onD
   const toast = useToast();
   const dialog = useMessageDialog();
   const unlock = useMyNumberUnlock();
+  const guard = useMyNumberFileGuard();
   const [salaries, setSalaries] = useState<Record<string, IdouSalary[]> | null>(null);
   const [designations, setDesignations] = useState<Record<string, string>>({});
   const [company, setCompany] = useState<CompanyInfo>({ name: "", address: "", kana: "", corporateNumber: "", dept: "", contactName: "", phone: "" });
@@ -199,14 +201,16 @@ export default function ResidentTaxIdouManager({ db, staffList, currentUser, onD
         const person = { staffId: id, name: String(e.staff.name ?? ""), furigana: String(e.staff.furigana ?? ""), birthday: String(e.staff.birthday ?? ""), address: String(e.staff.address ?? ""), myNumber: numbers?.[id]?.[SELF_KEY] };
         return e.rows.map((r) => buildIdouRow(r.form, person, e.resolved, designations[r.form.municipality] ?? "", id));
       });
-      const saved = await saveCsvFile(buildIdouCsv(rows), `給与所得者異動届出書_${todayStr().replace(/-/g, "")}.csv`);
-      if (!saved) return;
       const withNumbers = numbers ? targets.filter((e) => numbers![String(e.staff.id)]?.[SELF_KEY]).length : 0;
+      const saved = await saveCsvFile(buildIdouCsv(rows), `給与所得者異動届出書_${todayStr().replace(/-/g, "")}.csv`, guard.saveOptions(withNumbers));
+      if (!saved) return;
       if (myNumberAccess) await logMyNumber(db, currentUser, `給与所得者異動届出書の CSV（${rows.length}枚。本人のマイナンバー ${withNumbers}人分）を書き出しました：${saved.name}`);
       for (const e of targets) await saveInput(String(e.staff.id), e.input.date, { reportedOn: todayStr() });
       await onDataChange();
       toast.success(`「${saved.name}」を保存しました（${rows.length}枚）。PCdesk に取り込んで出します`);
       if (!myNumberAccess) await dialog.warning("マイナンバーは書いていません（事務取扱担当者の印がある人が書き出すと書きます）。");
+      // マイナンバーを書いたときは、出し終わったら消すことなどを知らせる
+      await guard.notice(saved, withNumbers, "tax");
     } catch (e) {
       console.error(e);
       dialog.error(`CSV を保存できませんでした。\n${e}`);
