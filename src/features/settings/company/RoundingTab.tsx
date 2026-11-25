@@ -18,6 +18,7 @@ import {
     btnStyle
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
+import { OVERTIME_ROUNDING_OPTIONS, toOvertimeRounding } from '../../../utils/overtimeRounding';
 
 interface Props {
     cm: CompanyManagerState;
@@ -54,18 +55,17 @@ export default function RoundingTab({ cm }: Props) {
                                 <Clock size={16} color="#e67e22" /> 残業代・深夜手当
                             </strong>
                             <small style={{ color: "#95a5a6", marginLeft: "22px", display: "block" }}>
-                                ※1か月の時間外・休日・深夜（と法定内残業）の手当ごとの合計に使います（基発第150号）。明細の行を足すと支給合計になります。
+                                ※1か月の時間外・休日・深夜（と法定内残業）の手当ごとの合計に使います。明細の行を足すと支給合計になります。
+                                50銭未満を切り捨て、それ以上を切り上げる方法は、いつも働く人に不利になるものではなく、事務を簡単にするための方法として認められています（基発第150号）。
+                                50銭ちょうども切り捨てる方法や、いつも切り捨てる方法は、働く人に不利になり、割増賃金の未払いになる（労働基準法24条・37条）ので選べません。
                             </small>
                         </div>
                         <select 
                             value={roundOvertime} 
-                            onChange={e => setRoundOvertime(e.target.value)} 
+                            onChange={e => setRoundOvertime(toOvertimeRounding(e.target.value))} 
                             style={{ ...inputStyle, width: "320px", flexShrink: 0 }}
                         >
-                            <option value="round">50銭以上切り上げ（四捨五入。通貨法・基発第150号の方法）</option>
-                            <option value="currency_law">50銭以下切り捨て（50銭ちょうどは切り捨て）</option>
-                            <option value="ceil">常に切り上げ（従業員に有利）</option>
-                            <option value="floor">常に切り捨て（⚠️未払いのリスクあり）</option>
+                            {OVERTIME_ROUNDING_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                         </select>
                     </div>
 

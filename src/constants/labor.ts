@@ -17,13 +17,3 @@ export const NIGHT_END_HOUR = NIGHT_HOURS.end;
 /** 労働時間の法的基準（労働基準法32条） */
 export const LEGAL_WORK_HOURS_DAILY = LEGAL_WORK_HOURS.daily;
 export const LEGAL_WORK_HOURS_WEEKLY = LEGAL_WORK_HOURS.weekly;
-
-/** 端数処理のモード定義 */
-export type RoundingMode = 'floor' | 'round' | 'ceil';
-
-/** UIでの表示用ラベルと値のセット */
-export const ROUNDING_OPTIONS: { label: string; value: RoundingMode }[] = [
-  { label: '切り捨て', value: 'floor' },
-  { label: '四捨五入', value: 'round' },
-  { label: '切り上げ', value: 'ceil' },
-];

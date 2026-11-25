@@ -10,6 +10,9 @@
  *   → 6月は、8時間目までが年360時間の内、それより後が年360時間を超えた分。45時間を超えた3時間は月の限度時間を超えた分
  *   法律の率なら 1,200円 × 25% × 48時間 ＝ 14,400円。1か月35%・1年30% にすると
  *   1,200円 ×（25% × 8時間 ＋ 30% × 37時間 ＋ 35% × 3時間）＝ 1,200円 × 14.15 ＝ 16,980円
+ * ・会社設定の「端数処理」（src/features/settings/company/RoundingTab.tsx。見直しの P11）：残業代は、四捨五入（基発第150号の方法）と
+ *   常に切り上げの2つから選ぶ。保存すると window.__company に残る。URL に ?round=floor（前の版の「切り捨て」）を付けて開くと、
+ *   会社ファイルに前の値が残っているときの見え方（四捨五入として出る）を確かめられる
  */
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -17,6 +20,7 @@ import { ToastProvider } from "../../src/components/Toast";
 import { MessageDialogProvider } from "../../src/components/MessageDialog";
 import PayStubModal from "../../src/features/payroll/PayStubModal";
 import PayrollGroupTab from "../../src/features/settings/company/PayrollGroupTab";
+import RoundingTab from "../../src/features/settings/company/RoundingTab";
 import { useCompanyManager } from "../../src/features/settings/useCompanyManager";
 
 // ── Tauri の代わり（確かめを出す画面は、いつも「はい」にする） ──
@@ -52,8 +56,11 @@ const kyotei36 = JSON.stringify({
   },
 });
 const company: Record<string, unknown> = {
-  id: 1, name: "割増サンプル株式会社", week_start_day: 0, round_overtime: "round", round_social_ins: "currency_law", round_emp_ins: "currency_law", kyotei36,
+  id: 1, name: "割増サンプル株式会社", week_start_day: 0, round_social_ins: "currency_law", round_emp_ins: "currency_law", kyotei36,
+  // 残業代の端数処理（URL の ?round= で、前の版の値（floor・currency_law）も試せる）
+  round_overtime: new URLSearchParams(location.search).get("round") ?? "round",
 };
+(window as any).__company = company;
 const branches = [{ id: 1, name: "本店", prefecture: "東京都", health_ins_num: "" }];
 const groups: any[] = [{
   id: 1, name: "全社", closing_day: 99, is_next_month: 0, payment_day: 25, tax_calc_method: "table", social_ins_collection: "current",
@@ -96,6 +103,10 @@ const fakeDb = {
   },
   async execute(sql: string, params: any[] = []) {
     const q = sql.replace(/\s+/g, " ").trim();
+    if (q.startsWith("UPDATE company SET round_overtime = ?, round_social_ins = ?, round_emp_ins = ? WHERE id = 1")) {
+      [company.round_overtime, company.round_social_ins, company.round_emp_ins] = params;
+      return { rowsAffected: 1 };
+    }
     if (q.startsWith("UPDATE payroll_groups SET")) {
       const cols = /SET (.*) WHERE id=\?/.exec(q)?.[1].split(",").map((c) => c.trim().replace(/=\?$/, "")) ?? [];
       const g = groups.find((x) => x.id === params[params.length - 1]);
@@ -111,6 +122,11 @@ function GroupTab() {
   return <PayrollGroupTab cm={cm} />;
 }
 
+function RoundingSettings() {
+  const cm = useCompanyManager({ db: fakeDb as any });
+  return <RoundingTab cm={cm} />;
+}
+
 function Page() {
   const [version, setVersion] = useState(0);
   onGroupsChanged = () => setVersion((v) => v + 1);
@@ -120,6 +136,10 @@ function Page() {
       <section id="groups" style={{ background: "white", borderRadius: 8, padding: 12 }}>
         <h2 style={{ fontSize: 16 }}>1. 会社設定の「給与規定グループ」</h2>
         <GroupTab />
+      </section>
+      <section id="rounding" style={{ background: "white", borderRadius: 8, padding: 12 }}>
+        <h2 style={{ fontSize: 16 }}>1-2. 会社設定の「端数処理」</h2>
+        <RoundingSettings />
       </section>
       <section>
         <h2 style={{ fontSize: 16 }}>2. 給与明細（長時間 働子さん・2026年6月分）</h2>

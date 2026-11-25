@@ -24,6 +24,7 @@ import { toLeaveProrationMethod, type LeaveProrationMethod } from "../../utils/l
 import { SHUTDOWN_ALLOWANCE_MIN_RATE, toShutdownRate } from "../../utils/averageWage";
 import { branchWorkerCount, parseWeekly44Business } from "../../utils/weekly44";
 import { WEEKLY_44 } from "../../constants/workHours";
+import { toOvertimeRounding, type OvertimeRounding } from "../../utils/overtimeRounding";
 
 interface UseCompanyManagerArgs {
     db: Database;
@@ -106,7 +107,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
 
     // --- 🆕 端数処理設定用ステート ---
     // 残業代：労基法で「四捨五入」が明確に認められているため round が標準的
-    const [roundOvertime, setRoundOvertime] = useState("round"); 
+    const [roundOvertime, setRoundOvertime] = useState<OvertimeRounding>("round"); // 残業代の端数処理（utils/overtimeRounding.ts）
 
     // 社会保険：法的原則は「50銭以下切り捨て」のため currency_law が最も正確
     const [roundSocialIns, setRoundSocialIns] = useState("currency_law"); 
@@ -187,7 +188,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                 setCompShahoNumber(c.shaho_office_number || "");
                 setCompLabor(c.labor_ins_num || "");
                 // --- 👇 🆕 端数処理設定をDBから読み込む ---
-                setRoundOvertime(c.round_overtime || "round");
+                setRoundOvertime(toOvertimeRounding(c.round_overtime));
                 setRoundSocialIns(c.round_social_ins || "currency_law");
                 setRoundEmpIns(c.round_emp_ins || "currency_law");
                 setKyotei36Settings(parseKyotei36Settings(c.kyotei36));
@@ -218,7 +219,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
                     halfDayLeave: Number(c.half_day_leave ?? 1) !== 0 ? 1 : 0,
                 });
                 setSavedRounding({
-                    roundOvertime: c.round_overtime || "round",
+                    roundOvertime: toOvertimeRounding(c.round_overtime),
                     roundSocialIns: c.round_social_ins || "currency_law",
                     roundEmpIns: c.round_emp_ins || "currency_law",
                 });

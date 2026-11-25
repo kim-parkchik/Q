@@ -117,6 +117,7 @@ import { LEGAL_PREMIUM_RATES, overtimeSegments, type PremiumRates } from "./prem
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import { applyRounding } from './payrollUtils';
+import { toOvertimeRounding } from './overtimeRounding';
 import { calcPremium } from './socialInsurance';
 import { 
   parseToDayjs, 
@@ -2152,7 +2153,8 @@ export const calculateSalary = (
   // 明細の行にはこの処理した額を出し、支給合計は明細の行の合計にする（行を足すと、ちょうど支給合計になる）
   // 出典：鹿児島労働局「時間外労働・休日労働・深夜労働 Q10」https://jsite.mhlw.go.jp/kagoshima-roudoukyoku/yokuaru_goshitsumon/kyushokuchu/0310.html
   //       厚生労働省「確かめよう労働条件」Q&A https://www.check-roudou.mhlw.go.jp/qa/roudousya/chingin/q3.html （5 端数処理の方法について）
-  const roundOvertime = companySettings?.round_overtime || 'round';
+  // 選べるのは、四捨五入（基発第150号の方法）と常に切り上げだけ（ほかの値は四捨五入にする。utils/overtimeRounding.ts）
+  const roundOvertime = toOvertimeRounding(companySettings?.round_overtime);
   const statutoryLine = applyRounding(statutoryOvertimePay || 0, roundOvertime);
   // 時間外労働の手当（25%・50%）は、合わせて1つの総額として端数を処理し、明細の2行に分ける（2行の合計が総額になる）
   const overtimeLegalTotal = applyRounding((standardOvertimePay || 0) + (highOvertimePay || 0), roundOvertime);
