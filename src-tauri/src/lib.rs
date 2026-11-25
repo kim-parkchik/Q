@@ -212,11 +212,6 @@ fn cloud_place_of(app: tauri::AppHandle, path: String) -> Result<Option<String>,
     Ok(q_folder::cloud_place(Path::new(&path), &dirs.home, &env_var))
 }
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -237,9 +232,8 @@ pub fn run() {
             }
             Ok(())
         })
-        // 🆕 ここに hash_password を追加して登録！
+        // 画面（TypeScript）から呼ぶコマンド。画面から使わないコマンドは置かない（src/utils/tauriCommands.test.ts で確かめる）
         .invoke_handler(tauri::generate_handler![
-            greet,
             hash_password,
             verify_password,
             derive_key,
