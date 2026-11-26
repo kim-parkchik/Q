@@ -13,6 +13,7 @@ import { describeFlatTaxPayment } from '../../utils/flatTaxReduction';
 import { LEAVE_PRORATION_METHOD_LABELS, LEAVE_TYPE_NAMES } from '../../utils/leaveOfAbsence';
 import { SAME_MONTH_CHILDCARE_MIN_DAYS } from '../../utils/leaveExemption';
 import { KYOTEI36_LIMITS } from '../../constants/roumu';
+import { minorWorkExceptionsNote } from '../../utils/minorWork';
 
 interface Props {
   db: any;
@@ -28,7 +29,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, loadingParts, loadErrors, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageLines, minimumWagePay, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageLines, minimumWagePay, minorWorkLines, minorWorkIssue, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
     monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem, kenpoPrefectureProblem, kenpoOfficeNote,
     remunerationMissing,
   } = usePayStubModal(props);
@@ -359,6 +360,14 @@ export default function PayStubModal(props: Props) {
                 通勤手当・固定残業代・残業代・休日や深夜の手当は入れません。{minimumWagePay && minimumWagePay.skipped.length > 0 && `${minimumWagePay.skipped.join("・")}は、時間あたりにできないので入れていません。`}
                 「給与確定」を押すと確かめます）
               </div>
+            </div>
+          )}
+          {minorWorkLines.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: minorWorkIssue ? "#b91c1c" : "#b45309" }} data-note="minor-work">
+              {minorWorkLines.map((line, i) => (
+                <div key={i} style={i === 0 && minorWorkIssue ? { fontWeight: "bold" } : undefined}>{i === 0 && minorWorkIssue && "⚠ "}{line}</div>
+              ))}
+              {minorWorkIssue && <div style={{ color: "#64748b" }}>{minorWorkExceptionsNote()}「給与確定」を押すと確かめます。</div>}
             </div>
           )}
           {(!salary.isSocialInsEnrolled || !salary.isEmploymentInsEnrolled || !salary.isInsuredMonth || salary.isLeaveExemptMonth || !!salary.leaveSameMonthDays || !salary.isHealthInsAgeTarget || !salary.isPensionAgeTarget) && (

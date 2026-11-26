@@ -1,5 +1,5 @@
 // このファイルは scripts/import_labor_standards.py で作る（手で書き換えない）
-// 労働基準法（roumu-forms/labor-standards-act.xml SHA-256 7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0）37条1項・4項・39条4項・附則
+// 労働基準法（roumu-forms/labor-standards-act.xml SHA-256 7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0）37条1項・4項・39条4項・56条・60条・61条・別表第一・附則
 // 労働基準法第三十七条第一項の時間外及び休日の割増賃金に係る率の最低限度を定める政令（平成六年政令第五号。
 //   roumu-forms/wage-premium-order.xml SHA-256 90442057b982e16e8393fa6e97d94ec3fda09557064156e09551c110f51cd04a）
 
@@ -28,3 +28,34 @@ export const SME_OVER60_FROM = "2023-04-01";
 
 /** 時間を単位として与えることができる年次有給休暇の日数の上限（1年に。労働基準法39条4項2号：5日以内） */
 export const HOURLY_PAID_LEAVE_MAX_DAYS = 5;
+
+/**
+ * 年少者（労働基準法60条1項・61条1項）：満18歳に満たない人には、変形労働時間制・フレックスタイム制（32条の2〜32条の5）、
+ * 時間外と休日の労働（36条。36協定）、週44時間の特例など（40条）、高度プロフェッショナル制度（41条の2）を使わない。
+ * 午後10時から午前5時までの間（深夜）に使わない（例外は MINOR_NIGHT_EXCEPTIONS）
+ */
+export const MINOR_AGE = 18;
+
+/** 最低年齢（労働基準法56条1項）：満15歳に達した日以後の最初の3月31日が終わるまで使えない（2項の許可を受けたときを除く） */
+export const MINIMUM_WORK_AGE = 15;
+
+/**
+ * 満15歳以上18歳未満の人の、1週間の労働時間の例外（労働基準法60条3項1号）：1週間の労働時間が法定労働時間を超えない範囲で、
+ * 1日を4時間以内にすれば、ほかの日を10時間まで延ばせる
+ */
+export const MINOR_SHORTENED_DAY_HOURS = { short: 4, long: 10 } as const;
+
+/**
+ * 年少者の深夜業の禁止の例外（労働基準法61条）
+ * ・shiftMaleAge：交替制で使う満16歳以上の男性（1項ただし書）
+ * ・businesses：禁止を使わない事業（4項。名前は労働基準法 別表第一）。ほかに、電話交換の業務と、
+ *   災害など臨時の必要で33条1項により時間を延ばし・休日に働かせるとき
+ */
+export const MINOR_NIGHT_EXCEPTIONS = {
+  shiftMaleAge: 16,
+  businesses: [
+    { item: 6, name: "土地の耕作若しくは開墾又は植物の栽植、栽培、採取若しくは伐採の事業その他農林の事業" },
+    { item: 7, name: "動物の飼育又は水産動植物の採捕若しくは養殖の事業その他の畜産、養蚕又は水産の事業" },
+    { item: 13, name: "病者又は虚弱者の治療、看護その他保健衛生の事業" },
+  ],
+} as const;

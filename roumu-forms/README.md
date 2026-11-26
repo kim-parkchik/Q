@@ -27,7 +27,7 @@ PDF と Word と、健康保険法の全文（source/health-insurance-act.xml）
 |---|---|---|---|---|
 | labor-standards-act-36.xml | 労働基準法 第36条（時間外及び休日の労働） | https://laws.e-gov.go.jp/api/1/articles;lawId=322AC0000000049;article=36 | 11,115 | 0e710ea4cbe62071a5684e012cc3cba510ef2ba1ce7d7c5e1faa3bbfc0dfb667 |
 | disability-employment-order-9.xml | 障害者の雇用の促進等に関する法律施行令 第9条（障害者雇用率） | https://laws.e-gov.go.jp/api/1/articles;lawId=335CO0000000292;article=9 | 743 | f465720cdf2585aab39c9e869f34f59aa2c948417b26a45eaf3cfb07d51fc6e7 |
-| labor-standards-act.xml | 労働基準法（全文。32条・32条の3・37条・39条・別表第一・附則を読む） | https://laws.e-gov.go.jp/api/1/lawdata/322AC0000000049 | 431,309 | `7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0` |
+| labor-standards-act.xml | 労働基準法（全文。32条・32条の3・37条・39条・56条・60条・61条・別表第一・附則を読む） | https://laws.e-gov.go.jp/api/1/lawdata/322AC0000000049 | 431,309 | `7ff8d8701deac403bccf47636e6f220d226d69568e0c6ba458dd46efd6e197d0` |
 | labor-standards-rule-25-2.xml | 労働基準法施行規則 第25条の2（週44時間の特例） | https://laws.e-gov.go.jp/api/1/articles;lawId=322M40000100023;article=25の2 | 5,830 | `730484b373d15e9798fbd7fcb773d7e64586debc3fa2ab56b85049f5fe0a1718` |
 | wage-premium-order.xml | 労働基準法第三十七条第一項の時間外及び休日の割増賃金に係る率の最低限度を定める政令（平成六年政令第五号。全文） | https://laws.e-gov.go.jp/api/1/lawdata/406CO0000000005 | 3,192 | `90442057b982e16e8393fa6e97d94ec3fda09557064156e09551c110f51cd04a` |
 | health-insurance-act-159.xml | 健康保険法 第159条（育児休業等の期間中の保険料の免除） | https://laws.e-gov.go.jp/api/1/articles;lawId=211AC0000000070;article=159 | 3,016 | `e5c4688e5a1e9bd6ac9adf94decacd6300fa786c97152cfd68b7f07f0c6ef652` |
@@ -93,6 +93,11 @@ python3 -I scripts/import_childcare_exemption.py roumu-forms src/constants/insur
 「第一条中労働基準法第百三十八条の改正規定 令和五年四月一日」（中小事業主には60時間超の率を使わないとしていた附則138条を削った日）と、
 割増賃金令の「二割五分」（時間外）・「三割五分」（休日）を読みます。政令の率が37条1項の範囲の外にある、60時間超の率が時間外の率より低い、
 附則138条がまだあるときは止まります。
+18歳未満の人（年少者）の決まりとして、56条1項の「満十五歳に達した日以後の最初の三月三十一日」、60条1項の「満十八才に満たない者」
+（32条の2〜32条の5・36条・40条・41条の2を使わない）、3項の「満十五歳以上で満十八歳に満たない者」と1号の「四時間以内」「十時間まで」、
+61条1項の「満十八才に満たない者を午後十時から午前五時までの間において使用してはならない」・ただし書の「満十六才以上の男性」、
+4項の「別表第一第六号、第七号若しくは第十三号に掲げる事業若しくは電話交換の業務」も読み、別表第一の号の事業の名前を引きます。
+60条・61条の年齢がそろわない、56条と60条3項の15歳が違う、61条1項の深夜の時間が37条4項と違うときも止まります。
 
 `import_childcare_exemption.py` は、health-insurance-act-159.xml・employees-pension-act-81-2.xml と、取得して source/ に置いた健康保険法の全文を読みます。
 2つの条の1項の「一月以下」（賞与の保険料を免除しない育児休業等の期間）と2号の「十四日以上」、健康保険法の附則（令和3年法律第66号）1条3号の

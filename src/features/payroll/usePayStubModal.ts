@@ -6,6 +6,7 @@ import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { averageDailyHoursOf, hasWeekdayHours, sumScheduledHours } from '../../utils/scheduledHours';
 import { checkMinimumWage, describeMinimumWage, describeMinimumWagePay, minimumWagePayOf } from '../../utils/minimumWage';
+import { describeMinorWork, hasMinorWorkIssue, minorWorkLogText } from '../../utils/minorWork';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
@@ -400,6 +401,10 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     "最低賃金を下回る賃金は払えません（最低賃金法4条）。基本給か手当を直すか、給与項目設定の「最低賃金に入れる」を確かめてください。",
   ] : null;
 
+  // 18歳未満の人の時間外・法定休日・深夜の労働と、使わなかった決まり（フレックスタイム制・週44時間の特例）（見直しの P13。utils/minorWork.ts）
+  const minorWorkLines = describeMinorWork(salary.minorWork);
+  const minorWorkIssue = hasMinorWorkIssue(salary.minorWork);
+
   // 勤怠を確定したときの時給・日給が、基本給の履歴のこの月の値と違う日の数（昇給などを履歴に入れている人だけ）
   // 給与は勤怠に残した時給・日給で計算するので、履歴の値で計算し直すなら勤怠を確定し直す
   const wageMismatchDays = staff.wage_type !== 'monthly' && hasWageChanges(staffRecord)
@@ -498,6 +503,15 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       );
       if (!ok) return;
     }
+    // 18歳未満の人の時間外・法定休日・深夜の労働：確定の前に確かめる（見直しの P13。utils/minorWork.ts）
+    if (minorWorkIssue) {
+      const ok = await ask(
+        `${staff.name}さんの${year}年${month}月分の給与です。\n\n${minorWorkLines.join("\n\n")}\n\n`
+          + `例外（災害などで許可を受けたとき・深夜業の禁止が当たらない事業や人など）に当たるか確かめてください。このまま確定しますか？`,
+        { title: "18歳未満の人の時間外・休日・深夜の労働があります", kind: "warning", okLabel: "このまま確定する", cancelLabel: "やめる" },
+      );
+      if (!ok) return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });
     if (result.success) {
       setIsSaved(true);
@@ -506,6 +520,9 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       }
       if (minimumWageLines) {
         await writeLog(db, "WARN", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を、最低賃金を下回ったまま確定しました（時間あたり ${Math.floor(minimumWageCheck!.perHour).toLocaleString()}円・最低賃金 ${minimumWageCheck!.minimum.amount.toLocaleString()}円）`);
+      }
+      if (minorWorkIssue) {
+        await writeLog(db, "WARN", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を、18歳未満の人の${minorWorkLogText(salary.minorWork)}があるまま確定しました`);
       }
       await writeLog(db, "INFO", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を確定しました`);
       alert(`${staff.name}さん ${year}年${month}月分の給与を確定しました。\nこの月の勤怠は、確定を取り消すまで変えられません。`);
@@ -589,6 +606,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     minimumWageCheck,
     minimumWageLines,
     minimumWagePay,
+    minorWorkLines,
+    minorWorkIssue,
     workOnCalendarHolidays,
     absentOnCalendarHolidays,
     yearEndYear,

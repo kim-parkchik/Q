@@ -13,6 +13,13 @@
              ただし書「一箇月について六十時間を超えた場合 … 五割以上の率」
     ・37条4項「午後十時から午前五時まで（…）の間において労働させた場合 … 二割五分以上の率」
     ・39条4項2号「時間を単位として与えることができることとされる有給休暇の日数（五日以内に限る。）」
+    ・56条1項「児童が満十五歳に達した日以後の最初の三月三十一日が終了するまで、これを使用してはならない」
+    ・60条1項「第三十二条の二から第三十二条の五まで、第三十六条、第四十条及び第四十一条の二の規定は、満十八才に満たない者については、
+      これを適用しない」、3項「満十五歳以上で満十八歳に満たない者」・1号「一日の労働時間を四時間以内に短縮する場合において、
+      他の日の労働時間を十時間まで延長すること」
+    ・61条1項「満十八才に満たない者を午後十時から午前五時までの間において使用してはならない」・ただし書「交替制によつて使用する
+      満十六才以上の男性」、4項「別表第一第六号、第七号若しくは第十三号に掲げる事業若しくは電話交換の業務については、適用しない」
+    ・別表第一 第六号・第七号・第十三号の事業の名前
     ・附則（平成三〇年七月六日法律第七一号）1条3号「第一条中労働基準法第百三十八条の改正規定 令和五年四月一日」
       （中小事業主には60時間超の率を使わないとしていた附則138条を削った日）と、附則138条がいまはないこと
   roumu-forms/wage-premium-order.xml    労働基準法第三十七条第一項の時間外及び休日の割増賃金に係る率の最低限度を定める政令（平成六年政令第五号）
@@ -22,6 +29,7 @@
   ・条文の言い回しが見つからない・漢数字や「○割○分」を読めない
   ・政令の率が、37条1項の範囲（二割五分以上五割以下）の外にある、60時間超の率が時間外の率より低い
   ・附則138条がまだある（削られていない）、附則137条・139条が見つからない（読む場所がちがう）
+  ・60条・61条の年齢がそろわない、61条1項の深夜の時間が37条4項とちがう、56条・60条3項の年齢がそろわない
 """
 import hashlib
 import os
@@ -95,6 +103,23 @@ def article_paragraphs(scope, num, label):
     fail(f"{label}が見つかりません")
 
 
+def appendix1_items(root):
+    """労働基準法 別表第一の号 → 事業の名前"""
+    for ap in root.iter("AppdxTable"):
+        title = ap.find("AppdxTableTitle")
+        if title is None or flat(title) != "別表第一":
+            continue
+        out = {}
+        for item in ap.iter("Item"):
+            sentence = item.find("ItemSentence")
+            if item.get("Num") and sentence is not None:
+                out[int(item.get("Num"))] = flat(sentence)
+        if not out:
+            fail("労働基準法 別表第一に号がありません")
+        return out
+    fail("労働基準法に別表第一が見つかりません")
+
+
 def main():
     if len(sys.argv) != 3:
         fail("使い方: python3 -I scripts/import_labor_standards.py roumu-forms src/constants/laborStandards.ts")
@@ -126,6 +151,39 @@ def main():
     # ── 労働基準法39条4項（時間単位の年次有給休暇） ──
     a39 = article_paragraphs(main_provision, "39", "労働基準法39条")
     (hourly_days,) = find(a39.get("4", ""), "時間を単位として与えることができることとされる有給休暇の日数（{n}日以内に限る。）", "労働基準法39条4項2号")
+
+    # ── 年少者（56条・60条・61条） ──
+    a56 = article_paragraphs(main_provision, "56", "労働基準法56条")
+    (minimum_age,) = find(a56.get("1", ""), "児童が満{n}歳に達した日以後の最初の三月三十一日が終了するまで、これを使用してはならない", "労働基準法56条1項")
+    a60 = article_paragraphs(main_provision, "60", "労働基準法60条")
+    (minor_age,) = find(
+        a60.get("1", ""), "第三十二条の二から第三十二条の五まで、第三十六条、第四十条及び第四十一条の二の規定は、満{n}才に満たない者については、これを適用しない",
+        "労働基準法60条1項",
+    )
+    low_age, high_age = find(a60.get("3", ""), "満{n}歳以上で満{n}歳に満たない者", "労働基準法60条3項")
+    short_day, long_day = find(
+        a60.get("3", ""), "一週間のうち一日の労働時間を{n}時間以内に短縮する場合において、他の日の労働時間を{n}時間まで延長すること", "労働基準法60条3項1号",
+    )
+    a61 = article_paragraphs(main_provision, "61", "労働基準法61条")
+    minor_age61, minor_night_start, minor_night_end = find(
+        a61.get("1", ""), "満{n}才に満たない者を午後{n}時から午前{n}時までの間において使用してはならない", "労働基準法61条1項",
+    )
+    (shift_male_age,) = find(a61.get("1", ""), "交替制によつて使用する満{n}才以上の男性については、この限りでない", "労働基準法61条1項ただし書")
+    night_exempt_items = find(
+        a61.get("4", ""), "別表第一第{n}号、第{n}号若しくは第{n}号に掲げる事業若しくは電話交換の業務については、適用しない", "労働基準法61条4項",
+    )
+    if not (minor_age == minor_age61 == high_age):
+        fail(f"年少者の年齢が、60条1項（{minor_age}）・60条3項（{high_age}）・61条1項（{minor_age61}）でそろいません")
+    if low_age != minimum_age:
+        fail(f"60条3項の年齢（{low_age}）が、56条1項の最低年齢（{minimum_age}）とちがいます")
+    if (minor_night_start + 12, minor_night_end) != (night_start, night_end):
+        fail(f"61条1項の深夜の時間（{minor_night_start + 12}時から{minor_night_end}時まで）が、37条4項とちがいます")
+    if not (minimum_age < shift_male_age < minor_age and short_day < long_day):
+        fail("61条1項ただし書の年齢・60条3項1号の時間の大きさの順がおかしいです")
+    items = appendix1_items(act)
+    for item in night_exempt_items:
+        if item not in items:
+            fail(f"労働基準法 別表第一に第{item}号がありません")
 
     # ── 割増賃金令 ──
     order_title = order.find(".//LawTitle")
@@ -168,7 +226,7 @@ def main():
         fail("労働基準法の附則138条（中小事業主には60時間超の率を使わない）が、まだあります")
 
     ts = f"""// このファイルは scripts/import_labor_standards.py で作る（手で書き換えない）
-// 労働基準法（roumu-forms/labor-standards-act.xml SHA-256 {sha256(act_path)}）37条1項・4項・39条4項・附則
+// 労働基準法（roumu-forms/labor-standards-act.xml SHA-256 {sha256(act_path)}）37条1項・4項・39条4項・56条・60条・61条・別表第一・附則
 // 労働基準法第三十七条第一項の時間外及び休日の割増賃金に係る率の最低限度を定める政令（平成六年政令第五号。
 //   roumu-forms/wage-premium-order.xml SHA-256 {sha256(order_path)}）
 
@@ -197,11 +255,40 @@ export const SME_OVER60_FROM = "{sme_from}";
 
 /** 時間を単位として与えることができる年次有給休暇の日数の上限（1年に。労働基準法39条4項2号：{hourly_days}日以内） */
 export const HOURLY_PAID_LEAVE_MAX_DAYS = {hourly_days};
+
+/**
+ * 年少者（労働基準法60条1項・61条1項）：満{minor_age}歳に満たない人には、変形労働時間制・フレックスタイム制（32条の2〜32条の5）、
+ * 時間外と休日の労働（36条。36協定）、週44時間の特例など（40条）、高度プロフェッショナル制度（41条の2）を使わない。
+ * 午後{minor_night_start}時から午前{minor_night_end}時までの間（深夜）に使わない（例外は MINOR_NIGHT_EXCEPTIONS）
+ */
+export const MINOR_AGE = {minor_age};
+
+/** 最低年齢（労働基準法56条1項）：満{minimum_age}歳に達した日以後の最初の3月31日が終わるまで使えない（2項の許可を受けたときを除く） */
+export const MINIMUM_WORK_AGE = {minimum_age};
+
+/**
+ * 満{minimum_age}歳以上{minor_age}歳未満の人の、1週間の労働時間の例外（労働基準法60条3項1号）：1週間の労働時間が法定労働時間を超えない範囲で、
+ * 1日を{short_day}時間以内にすれば、ほかの日を{long_day}時間まで延ばせる
+ */
+export const MINOR_SHORTENED_DAY_HOURS = {{ short: {short_day}, long: {long_day} }} as const;
+
+/**
+ * 年少者の深夜業の禁止の例外（労働基準法61条）
+ * ・shiftMaleAge：交替制で使う満{shift_male_age}歳以上の男性（1項ただし書）
+ * ・businesses：禁止を使わない事業（4項。名前は労働基準法 別表第一）。ほかに、電話交換の業務と、
+ *   災害など臨時の必要で33条1項により時間を延ばし・休日に働かせるとき
+ */
+export const MINOR_NIGHT_EXCEPTIONS = {{
+  shiftMaleAge: {shift_male_age},
+  businesses: [
+{chr(10).join(f'    {{ item: {i}, name: "{items[i]}" }},' for i in night_exempt_items)}
+  ],
+}} as const;
 """
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(ts)
     print(f"{out_path} を作りました：時間外 {overtime}%・休日 {holiday}%・月{over60_hours}時間超 {over60}%・深夜 {night}%（{night_start}時〜{night_end}時）、"
-          f"中小事業主は {sme_from} から、時間単位の年休 {hourly_days}日まで")
+          f"中小事業主は {sme_from} から、時間単位の年休 {hourly_days}日まで、年少者 {minor_age}歳未満（最低年齢 {minimum_age}歳）")
 
 
 if __name__ == "__main__":

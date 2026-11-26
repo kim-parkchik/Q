@@ -5,6 +5,7 @@
 import { Search, Loader2 } from 'lucide-react';
 import { inputStyle, labelStyle } from '../StaffManager.styles';
 import type { StaffManagerState } from '../useStaffManager';
+import MinorNotice from './MinorNotice';
 
 interface Props {
     cm: StaffManagerState;
@@ -105,6 +106,7 @@ export default function BasicInfoSection({ cm }: Props) {
                     </select>
                 </div>
             </div>
+            <MinorNotice cm={cm} />
 
             {/* 郵便番号セクションをグループ化 */}
             <div style={{ width: "50%" }}> {/* 幅を半分に制限 */}

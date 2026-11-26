@@ -141,6 +141,7 @@ import {
   type AverageWageKind, type AverageWagePay,
 } from './averageWage';
 import * as Master from '../constants';
+import { createMinorWorkCollector, isMinorOn, type MinorWork } from './minorWork';
 
 // プラグインの有効化
 dayjs.extend(isSameOrAfter);
@@ -293,6 +294,11 @@ export interface SalaryResult {
   weekly44: boolean;
   /** 拠点は特例の事業場だが、清算期間が1か月を超えるフレックスタイム制なので40時間で数えた（労基則25条の2 4項） */
   weekly44FlexIgnored: boolean;
+  /**
+   * 18歳未満の人の、時間外・法定休日・深夜の労働の日と、使えない決まり（フレックスタイム制・週44時間の特例）を使わずに数えたか
+   * （計算期間に18歳未満の日がなければ null。utils/minorWork.ts。見直しの P13）
+   */
+  minorWork: MinorWork | null;
   basePay: number;
   /** 欠勤控除（月給制の人だけ。給与規定グループの設定で計算する） */
   absenceDeduction: number;
@@ -1408,13 +1414,22 @@ const heiDaysOf = (
 };
 
 export const calculateSalary = (
-  staff: any,
+  staffIn: any,
   rawAttendanceData: any[],
   extras: SalaryExtras,
   targetYear: number,
   targetMonth: number,
   companySettings: any,
 ): SalaryResult => {
+
+  // ── 18歳未満の人（年少者。utils/minorWork.ts。見直しの P13）────────────────────
+  // 満18歳に満たない人にはフレックスタイム制を使わない（労働基準法60条1項）。計算期間の初めの日に18歳未満なら、
+  // その計算期間はフレックスタイム制の人としてではなく、1日8時間・週40時間で数える
+  const minorPeriodStart = extras.period?.start
+    || rawAttendanceData.map(row => String(row?.work_date ?? '')).filter(Boolean).sort()[0] || '';
+  const minorFlexIgnored = isFlexStaff(staffIn) && isMinorOn(staffIn?.birthday, minorPeriodStart);
+  const staff = minorFlexIgnored ? { ...staffIn, is_flex: 0 } : staffIn;
+  const minor = createMinorWorkCollector(staff?.birthday);
 
   // ── 休業・休職（utils/leaveOfAbsence.ts）────────────────────────────
   // 休業の日は働いていないので、その日の分は払わない。休業の日の勤怠は、働いた時間がある日だけを使う
@@ -1569,9 +1584,13 @@ export const calculateSalary = (
     const before = weeklyLegalHours[wk] ?? 0;
     const after = before + Math.min(Number(row.work_hours) || 0, Master.LEGAL_WORK_HOURS_DAILY);
     weeklyLegalHours[wk] = after;
+    // 18歳未満の日は、週44時間の特例を使わず週40時間で数える（労働基準法60条1項・40条）
+    const limit = minor.isMinorDay(row.work_date) ? Master.LEGAL_WORK_HOURS_WEEKLY : weeklyLegal.hours;
     weeklyOvertimeByDate[row.work_date] =
-      Math.max(0, after - weeklyLegal.hours) - Math.max(0, before - weeklyLegal.hours);
+      Math.max(0, after - limit) - Math.max(0, before - limit);
   }
+  const minorWeekly44Ignored = weeklyLegal.special && sorted.some(row => minor.isMinorDay(row.work_date));
+  const minorAllDays = sorted.length > 0 && sorted.every(row => minor.isMinorDay(row.work_date));
 
   // ── 計算期間の途中で入社・退職した人の日割り ─────────────────────
   const joinProration = prorationOf(
@@ -1963,6 +1982,17 @@ export const calculateSalary = (
   // ── 残業代の対象外（管理監督者など。労働基準法41条）────────────────────
   // 時間外（法定内残業を含む）・休日労働の手当は払わない。時間は記録のため残し、深夜の割増賃金は払う
   const isOvertimeEligible = Number(staff.is_overtime_eligible ?? 1) !== 0;
+  // 18歳未満の日の、時間外労働（1日8時間・週40時間を超えた時間）・法定休日の労働・深夜の労働（知らせに使う。上の計算と同じ数え方）
+  // 残業代の対象外の人（管理監督者など。労働基準法41条）は、時間外・休日の決まりを使わないので、深夜だけを見る
+  for (const row of sorted) {
+    const h = Number(row.work_hours) || 0;
+    minor.add(row.work_date, 'night', Number(row.night_hours) || 0);
+    if (!isOvertimeEligible) continue;
+    if (row.work_type === 'statutory_holiday') minor.add(row.work_date, 'holiday', h);
+    else minor.add(row.work_date, 'overtime', Math.max(0, h - Master.LEGAL_WORK_HOURS_DAILY) + (weeklyOvertimeByDate[row.work_date] ?? 0));
+  }
+  const minorWork = minor.result(extras.period ?? null, { flexIgnored: minorFlexIgnored, weekly44Ignored: minorWeekly44Ignored });
+
   if (!isOvertimeEligible) {
     statutoryOvertimePay = 0;
     standardOvertimePay = 0;
@@ -2288,9 +2318,11 @@ export const calculateSalary = (
     scheduledHoursMissing: scheduledHoursUnset,
     scheduledHoursVary,
     dailyRateHours: averageHours,
-    weeklyLegalHours: weeklyLegal.hours,
-    weekly44: weeklyLegal.special,
+    // 計算期間がまるごと18歳未満の人は、週44時間の特例を使っていない（週40時間）
+    weeklyLegalHours: minorAllDays ? Master.LEGAL_WORK_HOURS_WEEKLY : weeklyLegal.hours,
+    weekly44: weeklyLegal.special && !minorAllDays,
     weekly44FlexIgnored: weeklyLegal.flexIgnored,
+    minorWork,
 
     // --- 支給額 (Earnings) ---
     basePay: Math.floor(basePay),

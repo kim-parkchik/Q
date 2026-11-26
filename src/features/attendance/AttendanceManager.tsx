@@ -13,6 +13,7 @@ import SummaryBoard from "./manager/SummaryBoard";
 import PaidLeaveNotice from "./manager/PaidLeaveNotice";
 import FlexSummary from "./manager/FlexSummary";
 import BreakNotice from "./manager/BreakNotice";
+import MinorWorkNotice from "./manager/MinorWorkNotice";
 
 export default function AttendanceManager(props: AttendanceManagerProps) {
   const am: AttendanceViewModel = {
@@ -82,6 +83,7 @@ export default function AttendanceManager(props: AttendanceManagerProps) {
                 <PaidLeaveNotice am={am} />
                 <FlexSummary am={am} />
                 <BreakNotice am={am} />
+                <MinorWorkNotice am={am} />
                 <AttendanceTable am={am} />
 
                 <SummaryBoard am={am} />
