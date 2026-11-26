@@ -5,7 +5,7 @@ import { isFlexStaff, loadFlexPeriod, parseFlexRule, stringifyFlexRule } from '.
 import { flatTaxReductionTotal, toTaxColumn } from '../../utils/incomeTax';
 import { countPrescribedWorkDays, isPrescribedWorkDay, loadCalendarContext, type CalendarContext } from '../../utils/annualWorkDays';
 import { averageDailyHoursOf, hasWeekdayHours, sumScheduledHours } from '../../utils/scheduledHours';
-import { baseWagePerHour, checkMinimumWage } from '../../utils/minimumWage';
+import { checkMinimumWage, describeMinimumWage, describeMinimumWagePay, minimumWagePayOf } from '../../utils/minimumWage';
 import { hasWageChanges, staffAsOf } from '../../utils/staffHistory';
 import { residentTaxFor } from '../../utils/residentTax';
 import { writeLog } from '../../utils/logUtils';
@@ -375,16 +375,30 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     .map(r => String(r.work_date))
     .sort(), [attendanceData, calendarCtx, staff.wage_type, salary.absenceDeductionMethod]);
 
-  // 最低賃金のチェック：基本給を時間あたりにして、給与の計算期間の終わりの日の最低賃金と比べる（詳しくは utils/minimumWage.ts）
-  // 月給は「1年間における1月平均所定労働時間」で割る（曜日で時間が違う人は、1年間の所定労働時間の合計 ÷ 12。最低賃金法施行規則2条）
+  // 最低賃金のチェック：基本給と、給与項目で「最低賃金に入れる」にした支給項目を時間あたりにして、給与の計算期間の終わりの日の
+  // 最低賃金（拠点に特定最低賃金を入れていて、この人を除いていなければ、高いほう）と比べる（見直しの P12。詳しくは utils/minimumWage.ts）
+  // 月給と月で決まる手当は「1年間における1月平均所定労働時間」で割る（曜日で時間が違う人は、1年間の所定労働時間の合計 ÷ 12）。
+  // 変動の項目で「日・時間・出来高で決まる賃金」は、この月に働いた時間で割る（最低賃金法施行規則2条）
   const monthlyAverageHours = hasWeekdayHours(staff) && extras.annualWorkHours
     ? extras.annualWorkHours / 12
     : extras.annualWorkDays ? extras.annualWorkDays * dailyHours / 12 : null;
+  const minimumWagePay = minimumWagePayOf({
+    wageType: staff.wage_type, baseWage: Number(staff.base_wage) || 0, dailyHours, monthlyAverageHours,
+    items: extras.customItems, workedHours: Number(salary.totalWorkHours) || 0,
+  });
+  const minimumWagePref = Master.toKenpoPrefName(staff.prefecture);
   const minimumWageCheck = checkMinimumWage(
-    Master.toKenpoPrefName(staff.prefecture),
+    minimumWagePref,
     periodEnd,
-    baseWagePerHour(staff.wage_type, Number(staff.base_wage) || 0, dailyHours, monthlyAverageHours)
+    minimumWagePay?.perHour ?? null,
+    Number(staff.specific_min_wage_exempt) ? null : staff.specificMinimumWage ?? null,
   );
+  // 下回るときの知らせの文（明細と、確定の前の確かめに使う）
+  const minimumWageLines = minimumWageCheck && !minimumWageCheck.ok && minimumWagePay ? [
+    `${minimumWagePay.monthly > 0 || minimumWagePay.piece > 0 ? "最低賃金の対象になる賃金（基本給と手当）" : "基本給"}を時間あたりにすると ${Math.floor(minimumWageCheck.perHour).toLocaleString()}円`
+      + `${describeMinimumWagePay(minimumWagePay) ? `（${describeMinimumWagePay(minimumWagePay)}）` : ""}で、${describeMinimumWage(minimumWagePref ?? "", minimumWageCheck.minimum)}を下回っています。`,
+    "最低賃金を下回る賃金は払えません（最低賃金法4条）。基本給か手当を直すか、給与項目設定の「最低賃金に入れる」を確かめてください。",
+  ] : null;
 
   // 勤怠を確定したときの時給・日給が、基本給の履歴のこの月の値と違う日の数（昇給などを履歴に入れている人だけ）
   // 給与は勤怠に残した時給・日給で計算するので、履歴の値で計算し直すなら勤怠を確定し直す
@@ -476,11 +490,22 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
       );
       if (!ok) return;
     }
+    // 最低賃金を下回る：確定の前に確かめる（見直しの P12。utils/minimumWage.ts）
+    if (minimumWageLines) {
+      const ok = await ask(
+        `${staff.name}さんの${year}年${month}月分の給与です。\n\n${minimumWageLines.join("\n\n")}\n\nこのまま確定しますか？`,
+        { title: "最低賃金を下回っています", kind: "warning", okLabel: "このまま確定する", cancelLabel: "やめる" },
+      );
+      if (!ok) return;
+    }
     const result = await saveSalaryResult(db, staff.id, year, month, salary, staff, { allowanceName: extras.allowanceName, period: extras.period ?? null });
     if (result.success) {
       setIsSaved(true);
       if (remunerationMissing) {
         await writeLog(db, "WARN", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を、標準報酬月額が入っていないまま確定しました（社会保険料を引いていません）`);
+      }
+      if (minimumWageLines) {
+        await writeLog(db, "WARN", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を、最低賃金を下回ったまま確定しました（時間あたり ${Math.floor(minimumWageCheck!.perHour).toLocaleString()}円・最低賃金 ${minimumWageCheck!.minimum.amount.toLocaleString()}円）`);
       }
       await writeLog(db, "INFO", "salary", `${staff.name}さん（${staff.id}）の${year}年${month}月分の給与を確定しました`);
       alert(`${staff.name}さん ${year}年${month}月分の給与を確定しました。\nこの月の勤怠は、確定を取り消すまで変えられません。`);
@@ -562,6 +587,8 @@ export function usePayStubModal({ db, staff: staffRecord, attendanceData, year, 
     rateWarnings,
     empInsMaster,
     minimumWageCheck,
+    minimumWageLines,
+    minimumWagePay,
     workOnCalendarHolidays,
     absentOnCalendarHolidays,
     yearEndYear,

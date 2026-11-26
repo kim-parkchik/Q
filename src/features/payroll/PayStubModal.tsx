@@ -5,7 +5,6 @@ import * as Master from '../../constants';
 import { ABSENCE_DEDUCTION_METHOD_LABELS, PREFECTURES, TARDY_DEDUCTION_METHOD_LABELS } from '../../utils/calcSalary';
 import { describeFlexSettlement, flexHoursLabel } from '../../utils/flexTime';
 import { TAX_CALC_METHOD_LABELS } from '../../utils/incomeTax';
-import { describeMinimumWage } from '../../utils/minimumWage';
 import { PREFECTURE_UNKNOWN_EFFECT } from '../../utils/branchPrefecture';
 import { premiumLineNames } from "../../utils/premiumRates";
 import { COMMUTE_METHOD_LABELS } from '../../utils/commuteAllowance';
@@ -29,7 +28,7 @@ export default function PayStubModal(props: Props) {
   const {
     salary, extras, setExtras, isSaved, loadingParts, loadErrors, handleSaveResult, handleCancelResult,
     wageLabel, customEarningItems, customDeductionItems,
-    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageCheck, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
+    earningItemsCount, deductionItemsCount, targetRows, insMaster, rateWarnings, minimumWageLines, minimumWagePay, yearEndYear, flatTaxTotal, flatTaxLaterUsed, fmtH,
     monthStaff, wageMismatchDays, empInsMaster, workOnCalendarHolidays, absentOnCalendarHolidays, branchPrefectureProblem, kenpoPrefectureProblem, kenpoOfficeNote,
     remunerationMissing,
   } = usePayStubModal(props);
@@ -352,12 +351,13 @@ export default function PayStubModal(props: Props) {
               )}
             </div>
           )}
-          {minimumWageCheck && !minimumWageCheck.ok && (
-            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }}>
-              ⚠ 基本給を時間あたりにすると {Math.floor(minimumWageCheck.perHour).toLocaleString()}円で、
-              {describeMinimumWage(Master.toKenpoPrefName(props.staff.prefecture) ?? "", minimumWageCheck.minimum)}を下回っています。
+          {minimumWageLines && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", fontWeight: "bold" }} data-note="minimum-wage">
+              ⚠ {minimumWageLines[0]}
               <div style={{ fontWeight: "normal" }}>
-                （給与の計算期間の終わりの日の最低賃金と比べています。対象になる手当を合わせると上回る場合もあります。通勤手当・家族手当・精皆勤手当・残業代などは含めません）
+                （給与の計算期間の終わりの日の最低賃金と比べています。基本給と、給与項目設定で「最低賃金に入れる」にした支給項目を足します。
+                通勤手当・固定残業代・残業代・休日や深夜の手当は入れません。{minimumWagePay && minimumWagePay.skipped.length > 0 && `${minimumWagePay.skipped.join("・")}は、時間あたりにできないので入れていません。`}
+                「給与確定」を押すと確かめます）
               </div>
             </div>
           )}

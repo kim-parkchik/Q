@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { getPeriodForPayMonth } from "../../utils/payrollPeriod";
 import { branchPrefectureOf, kenpoPrefectureOf } from "../../utils/branchPrefecture";
 import { weekly44BusinessOf } from "../../utils/weekly44";
+import { specificMinimumWageOf } from '../../utils/minimumWage';
 
 export function usePaySlipManager(db: any, staffList: any[], initialYear: number, initialMonth: number) {
   const [year, setYear] = useState(initialYear);
@@ -105,6 +106,8 @@ export function usePaySlipManager(db: any, staffList: any[], initialYear: number
         kenpoPrefecture: kenpo.prefecture ?? "", kenpoPrefectureProblem: kenpo.problem, kenpoOfficeBranchId: kenpo.officeBranchId,
         // 拠点の週44時間の特例の事業（労働基準法施行規則25条の2。null なら週40時間。utils/weekly44.ts）
         weekly44Business: weekly44BusinessOf(branches, staff.branch_id),
+        // 拠点の特定最低賃金（地域別最低賃金と高いほうで比べる。見直しの P12。utils/minimumWage.ts）
+        specificMinimumWage: specificMinimumWageOf(branches, staff.branch_id),
         periodLabel: period.displayRange, periodStart: period.startStr, periodEnd: period.endStr });
       setShowModal(true);
     } catch (err) {

@@ -88,7 +88,8 @@ export const DB_SCHEMAS = [
     koyo_hello_work TEXT,     -- 雇用保険の届書を出すハローワーク（別の適用事業所のときだけ。空なら会社の設定）
     rousai_business TEXT,     -- 労災保険率表の事業の種類の番号（別の労働保険番号のときだけ。空なら会社の設定）
     rousai_rate REAL,         -- 労災保険率（1,000分の。メリット制などで表の率と違うときだけ）
-    weekly44_business INTEGER -- 週44時間の特例の事業（労働基準法 別表第一の号 8・10・13・14。NULL なら週40時間。utils/weekly44.ts）
+    weekly44_business INTEGER, -- 週44時間の特例の事業（労働基準法 別表第一の号 8・10・13・14。NULL なら週40時間。utils/weekly44.ts）
+    specific_minimum_wage TEXT -- この拠点に当たる特定最低賃金（名前と、時間額・発効日の行。JSON。NULL なら地域別最低賃金だけ。utils/minimumWage.ts）
   );`,
 
   // 3. カレンダーパターン
@@ -155,6 +156,7 @@ export const DB_SCHEMAS = [
     is_overtime_eligible INTEGER DEFAULT 1,
     fixed_overtime_hours REAL DEFAULT 0.0,
     fixed_overtime_allowance INTEGER DEFAULT 0,
+    specific_min_wage_exempt INTEGER DEFAULT 0, -- 拠点の特定最低賃金から除かれる人（18歳未満・65歳以上・雇入れ後の一定期間など、決定で除かれる人。1: 除く。地域別最低賃金とは比べる）
     commute_type TEXT DEFAULT 'none',
     commute_amount INTEGER DEFAULT 0,
     commute_setting TEXT,              -- 通勤の方法・片道の距離・定期代・有料道路・駐車場等（JSON。非課税限度額に使う。詳しくは utils/commuteAllowance.ts）
@@ -288,7 +290,8 @@ export const DB_SCHEMAS = [
     category TEXT NOT NULL, 
     display_order INTEGER DEFAULT 0,
     in_overtime_base INTEGER DEFAULT 1, -- 支給項目を残業代の時給（割増賃金の基礎）に入れるか（1: 入れる / 0: 入れない。家族手当・通勤手当・住宅手当など）
-    average_wage TEXT                   -- 支給項目の平均賃金での扱い 'month':月で決まる賃金 / 'time':日・時間・出来高で決まる賃金 / 'none':入れない（臨時の賃金など）。NULL は固定の項目なら month、変動なら time（utils/averageWage.ts）
+    average_wage TEXT,                  -- 支給項目の平均賃金での扱い 'month':月で決まる賃金 / 'time':日・時間・出来高で決まる賃金 / 'none':入れない（臨時の賃金など）。NULL は固定の項目なら month、変動なら time（utils/averageWage.ts）
+    in_minimum_wage INTEGER DEFAULT 1   -- 支給項目を最低賃金と比べる賃金に入れるか（1: 入れる / 0: 入れない。精皆勤手当・通勤手当・家族手当など。utils/minimumWage.ts）
   );`,
 
   // 11. スタッフ個別給与設定

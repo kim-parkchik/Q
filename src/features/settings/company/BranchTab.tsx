@@ -31,6 +31,7 @@ import {
     editingBadgeStyle
 } from '../CompanyManager.styles';
 import type { CompanyManagerState } from '../useCompanyManager';
+import SpecificMinimumWageEditor from './SpecificMinimumWageEditor';
 import { parseWeekly44Business, weekly44Problem, WEEKLY_44_OPTIONS } from '../../../utils/weekly44';
 import { LEGAL_WORK_HOURS, WEEKLY_44, WEEKLY_44_BUSINESSES } from '../../../constants/workHours';
 
@@ -70,6 +71,7 @@ export default function BranchTab({ cm }: Props) {
         startEditBranch,
         deleteBranch,
         saveBranchWeekly44,
+        saveBranchSpecificMinimumWage,
         branchWorkers,
     } = cm;
 
@@ -134,6 +136,8 @@ export default function BranchTab({ cm }: Props) {
                                             ⚠ {weekly44Problem(b.weekly44_business, branchWorkers[Number(b.id)] ?? 0)}
                                         </div>
                                     )}
+                                    {/* 特定最低賃金：名前と時間額・発効日の行を入れて保存する（本店も支店も、ここで入れる。見直しの P12） */}
+                                    <SpecificMinimumWageEditor branchId={b.id} value={b.specific_minimum_wage} onSave={saveBranchSpecificMinimumWage} />
                                 </div>
 
                                 <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>

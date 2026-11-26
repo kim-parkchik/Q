@@ -39,6 +39,8 @@
  *     （salary_results.applied_fixed_overtime。いままでの給与は、払った固定残業代を入れる）を足す
  *   ・v16: TimeQard の設定に、打刻の CSV の確かめの印の鍵（timeqard_settings.csv_key。従業員ファイルを書き出すときに作る）を足す
  *   ・v17: ユーザーに、パスワードを続けてまちがえた回数（users.failed_logins）と、ログインを止めている終わり（users.locked_until）を足す
+ *   ・v18: 給与項目に最低賃金に入れるか（salary_item_master.in_minimum_wage。いままでの項目は入れる）、拠点に特定最低賃金（branches.specific_minimum_wage）、
+ *     従業員に特定最低賃金から除かれる人の印（staff.specific_min_wage_exempt）を足す
  *
  * ■ 新しく列を足すときの手順
  *   1. dbSchema.ts の CREATE TABLE に列を追加する（新規ファイル用）
@@ -224,6 +226,15 @@ export const MIGRATIONS: Migration[] = [
     up: async (db) => {
       await addColumnIfMissing(db, "users", "failed_logins", "INTEGER DEFAULT 0");
       await addColumnIfMissing(db, "users", "locked_until", "TEXT");
+    },
+  },
+  {
+    version: 18,
+    description: "給与項目に最低賃金に入れるかの列（いままでの項目は入れる）を、拠点に特定最低賃金の列を、従業員に特定最低賃金から除かれる人の印の列を足す",
+    up: async (db) => {
+      await addColumnIfMissing(db, "salary_item_master", "in_minimum_wage", "INTEGER DEFAULT 1");
+      await addColumnIfMissing(db, "branches", "specific_minimum_wage", "TEXT");
+      await addColumnIfMissing(db, "staff", "specific_min_wage_exempt", "INTEGER DEFAULT 0");
     },
   },
 ];

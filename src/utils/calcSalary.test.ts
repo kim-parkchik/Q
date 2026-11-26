@@ -1741,19 +1741,21 @@ describe("残業代の時給（1年間における1か月平均所定労働時�
         const off = calc(hourly, rows, { annualWorkDays: 240, customItems: [{ ...allowance[0], inOvertimeBase: false }] });
         expect([off.standardOvertimePay, off.nightPay]).toEqual([2400, 600]);
     });
-    test("給与項目の読み込み：金額が入った項目だけを読み、「残業代の時給に入れる」を外した支給項目に印を付ける", async () => {
+    test("給与項目の読み込み：金額が入った項目だけを読み、「残業代の時給に入れる」「最低賃金に入れる」を外した支給項目に印を付ける", async () => {
         const db = new Database(":memory:");
         for (const s of DB_SCHEMAS) db.exec(s);
         db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order) VALUES (1, '役職手当', 'earning', 'fixed', 10)");
         db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order, in_overtime_base) VALUES (2, '住宅手当', 'earning', 'fixed', 20, 0)");
         db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order) VALUES (3, '資格手当', 'earning', 'fixed', 30)");
         db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order) VALUES (4, '社宅費', 'deduction', 'fixed', 10)");
-        db.exec("INSERT INTO staff_salary_values (staff_id, item_id, amount) VALUES ('S001', 1, 20000), ('S001', 2, 15000), ('S001', 3, 0), ('S001', 4, 5000)");
+        db.exec("INSERT INTO salary_item_master (id, name, type, category, display_order, in_overtime_base, in_minimum_wage) VALUES (5, '家族手当', 'earning', 'fixed', 40, 0, 0)");
+        db.exec("INSERT INTO staff_salary_values (staff_id, item_id, amount) VALUES ('S001', 1, 20000), ('S001', 2, 15000), ('S001', 3, 0), ('S001', 4, 5000), ('S001', 5, 10000)");
         const asyncDb = { select: async (sql: string, params: any[]) => db.prepare(sql).all(...params) };
         expect(await loadCustomItems(asyncDb, "S001")).toEqual([
-            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true, fixed: true, averageWage: "month" },
-            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false, fixed: true, averageWage: "month" },
-            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true, fixed: true, averageWage: "month" },
+            { name: "役職手当", amount: 20000, type: "earning", inOvertimeBase: true, fixed: true, averageWage: "month", inMinimumWage: true },
+            { name: "住宅手当", amount: 15000, type: "earning", inOvertimeBase: false, fixed: true, averageWage: "month", inMinimumWage: true },
+            { name: "家族手当", amount: 10000, type: "earning", inOvertimeBase: false, fixed: true, averageWage: "month", inMinimumWage: false },
+            { name: "社宅費", amount: 5000, type: "deduction", inOvertimeBase: true, fixed: true, averageWage: "month", inMinimumWage: true },
         ]);
     });
 });

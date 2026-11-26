@@ -13,6 +13,8 @@ export interface SalaryItem {
   in_overtime_base: number;
   /** 支給項目の平均賃金での扱い（設定がなければ、固定なら月で決まる賃金、変動なら日・時間で決まる賃金。utils/averageWage.ts） */
   average_wage: AverageWageKind;
+  /** 支給項目を最低賃金と比べる賃金に入れるか（1: 入れる / 0: 入れない。精皆勤手当・通勤手当・家族手当など。utils/minimumWage.ts） */
+  in_minimum_wage: number;
 }
 
 interface Database {
@@ -43,7 +45,7 @@ export function useCustomItemManager(db: Database) {
   const loadMasterItems = async () => {
     try {
       const res = await db.select<SalaryItem[]>(
-        "SELECT id, name, type, category, display_order, COALESCE(in_overtime_base, 1) AS in_overtime_base, average_wage FROM salary_item_master ORDER BY display_order ASC, id ASC"
+        "SELECT id, name, type, category, display_order, COALESCE(in_overtime_base, 1) AS in_overtime_base, average_wage, COALESCE(in_minimum_wage, 1) AS in_minimum_wage FROM salary_item_master ORDER BY display_order ASC, id ASC"
       );
       // 平均賃金での扱いが入っていない項目は、固定なら月で決まる賃金、変動なら日・時間で決まる賃金として出す
       setItems((res || []).map(i => ({ ...i, average_wage: toAverageWageKind(i.average_wage, i.category) })));
@@ -179,6 +181,17 @@ export function useCustomItemManager(db: Database) {
     }
   };
 
+  // 支給項目を、最低賃金と比べる賃金に入れるかを切り替える（見直しの P12。utils/minimumWage.ts）
+  const setMinimumWage = async (id: number, include: boolean) => {
+    try {
+      await db.execute("UPDATE salary_item_master SET in_minimum_wage = ? WHERE id = ?", [include ? 1 : 0, id]);
+      setItems(prev => prev.map(i => i.id === id ? { ...i, in_minimum_wage: include ? 1 : 0 } : i));
+    } catch (e) {
+      console.error("最低賃金に入れるかの保存に失敗しました:", e);
+      alert("保存に失敗しました。");
+    }
+  };
+
   const saveAmount = async (itemId: number, amount: number) => {
     if (!selectedStaffId) return;
     await db.execute(
@@ -210,6 +223,7 @@ export function useCustomItemManager(db: Database) {
     saveAmount,
     setOvertimeBase,
     setAverageWage,
+    setMinimumWage,
     moveItem
   };
 }

@@ -23,6 +23,7 @@ import { parseKyotei36Settings, type Kyotei36Settings } from "../../utils/kyotei
 import { toLeaveProrationMethod, type LeaveProrationMethod } from "../../utils/leaveOfAbsence";
 import { SHUTDOWN_ALLOWANCE_MIN_RATE, toShutdownRate } from "../../utils/averageWage";
 import { branchWorkerCount, parseWeekly44Business } from "../../utils/weekly44";
+import { stringifySpecificMinimumWage, type SpecificMinimumWage } from "../../utils/minimumWage";
 import { WEEKLY_44 } from "../../constants/workHours";
 import { toOvertimeRounding, type OvertimeRounding } from "../../utils/overtimeRounding";
 
@@ -425,6 +426,24 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         }
     };
 
+    /**
+     * 拠点の特定最低賃金（名前と、時間額・発効日の行。null なら地域別最低賃金だけ）を保存する（見直しの P12。utils/minimumWage.ts）
+     */
+    const saveBranchSpecificMinimumWage = async (id: number, value: SpecificMinimumWage | null) => {
+        if (!db) return false;
+        const saved = stringifySpecificMinimumWage(value);
+        try {
+            await db.execute("UPDATE branches SET specific_minimum_wage = ? WHERE id = ?", [saved, id]);
+            setBranches(prev => prev.map(b => (Number(b.id) === Number(id) ? { ...b, specific_minimum_wage: saved } : b)));
+            toast.success(saved ? "特定最低賃金を保存しました" : "特定最低賃金を消しました（地域別最低賃金だけで比べます）");
+            return true;
+        } catch (e) {
+            console.error(e);
+            dialog.error(`特定最低賃金を保存できませんでした。\n${e}`);
+            return false;
+        }
+    };
+
     const saveBranch = async () => {
         if (!bName || !bPref) return dialog.warning("名称と都道府県は必須です");
         
@@ -701,6 +720,7 @@ export function useCompanyManager({ db, onSetupComplete }: UseCompanyManagerArgs
         deletePayrollGroup,
         saveBranch,
         saveBranchWeekly44,
+        saveBranchSpecificMinimumWage,
         branchWorkers,
         resetBranchForm,
         startEditBranch,

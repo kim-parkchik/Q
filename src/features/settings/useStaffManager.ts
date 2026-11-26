@@ -29,7 +29,7 @@ import {
     type DependentsEntry, type WageEntry,
 } from "../../utils/staffHistory";
 import { residentTaxScheduleOf, stringifyResidentTaxSchedule, type ResidentTaxYear } from "../../utils/residentTax";
-import { loadCustomItems } from "../../utils/calcSalary";
+import { loadCustomItems, type SalaryExtras } from "../../utils/calcSalary";
 import { overtimeHourlyRateOf } from "../../utils/fixedOvertime";
 import { parsePremiumRates } from "../../utils/premiumRates";
 import { DEFAULT_COMMUTE_SETTING, parseCommuteSetting, stringifyCommuteSetting, type CommuteSetting } from "../../utils/commuteAllowance";
@@ -129,6 +129,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
     const [targetCommuteSetting, setTargetCommuteSetting] = useState<CommuteSetting>({ ...DEFAULT_COMMUTE_SETTING });
     // 給与規定グループの「決まった休憩」を使うか（初めは使う。utils/fixedBreak.ts）
     const [targetFixedBreakApply, setTargetFixedBreakApply] = useState(true);
+    const [targetSpecificMinWageExempt, setTargetSpecificMinWageExempt] = useState(false); // 拠点の特定最低賃金から除く（18歳未満など。見直しの P12）
     const [targetDependents, setTargetDependents] = useState(0);
     // 基本給・扶養人数の履歴（utils/staffHistory.ts）。上の入力欄は、いちばん新しい履歴の値と「何年何月分から」（From）
     // 〜Past は、それより前の履歴
@@ -382,6 +383,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetFixedOvertimeHours(0); setTargetFixedOvertimeAmount(0);
         setTargetCommuteType("daily"); setTargetCommuteAmount(0); setTargetCommuteSetting({ ...DEFAULT_COMMUTE_SETTING });
         setTargetFixedBreakApply(true);
+        setTargetSpecificMinWageExempt(false);
         setTargetDependents(0); setTargetResidentTax(0); setTargetResidentTaxSchedule([]); setTargetResidentTaxMunicipality(""); setTargetFlatTaxReductionPersons(0);
         setTargetWageHistoryPast([]); setTargetWageFrom("");
         setTargetDependentsHistoryPast([]); setTargetDependentsFrom("");
@@ -452,6 +454,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteAmount(s.commute_amount);
         setTargetCommuteSetting(parseCommuteSetting(s.commute_setting));
         setTargetFixedBreakApply(Number(s.fixed_break_apply ?? 1) !== 0);
+        setTargetSpecificMinWageExempt(Number(s.specific_min_wage_exempt ?? 0) !== 0);
         setTargetWageType(latestWage.wageType);
         // 0 は「カレンダーを使わない（契約曜日で決める）」。0 を 1 にすると、保存し直したときに会社カレンダーの人に変わってしまう
         setTargetPatternId(Number(s.calendar_pattern_id ?? 1));
@@ -554,6 +557,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
             Number(targetCommuteAmount) !== Number(original.commute_amount) ||
             stringifyCommuteSetting(targetCommuteSetting) !== stringifyCommuteSetting(parseCommuteSetting(original.commute_setting)) ||
             targetFixedBreakApply !== (Number(original.fixed_break_apply ?? 1) !== 0) ||
+            targetSpecificMinWageExempt !== (Number(original.specific_min_wage_exempt ?? 0) !== 0) ||
             Number(targetBranchId) !== Number(original.branch_id || 1) ||
             Number(targetDependents) !== Number(original.dependents || 0) ||
             Number(targetFlatTaxReductionPersons) !== Number(original.flat_tax_reduction_persons || 0) ||
@@ -692,6 +696,8 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                 stringifyShahoLoss(targetShahoLoss),
                 // 曜日ごとの所定労働時間（契約曜日にチェックした曜日だけ）
                 stringifyWeekdayHours(effectiveWeekdayHours),
+                // 拠点の特定最低賃金から除く人（見直しの P12）
+                targetSpecificMinWageExempt ? 1 : 0,
             ];
 
             if (editingId) {
@@ -715,7 +721,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         job_type=?, career_history=?, retirement_reason=?, death_date=?, death_cause=?,
                         probation_end=?, basic_pension_number=?, multi_office=?, address_kana=?, in_kind=?,
                         health_dependents=?, kouki_date=?, koyo_info=?, foreign_info=?, department=?, shaho_loss=?,
-                        weekday_hours=?
+                        weekday_hours=?, specific_min_wage_exempt=?
                     WHERE id=?`,
                     [...baseParams, safeId]
                 );
@@ -740,7 +746,7 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
                         job_type, career_history, retirement_reason, death_date, death_cause,
                         probation_end, basic_pension_number, multi_office, address_kana, in_kind,
                         health_dependents, kouki_date, koyo_info, foreign_info, department, shaho_loss,
-                        weekday_hours,
+                        weekday_hours, specific_min_wage_exempt,
                         id
                     ) VALUES (${Array(baseParams.length + 1).fill("?").join(", ")})`,
                     [...baseParams, safeId]
@@ -832,13 +838,16 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
 
     // 残業代の時給に入れる手当（「給与項目設定」で入れた、この人の支給項目の額。固定残業代の時間の目安に使う。utils/fixedOvertime.ts）
     const [overtimeBaseAllowances, setOvertimeBaseAllowances] = useState(0);
+    // この人の給与項目（最低賃金と比べる賃金に、「最低賃金に入れる」にした固定の支給項目を足す。見直しの P12。utils/minimumWage.ts）
+    const [payItems, setPayItems] = useState<SalaryExtras['customItems']>([]);
     useEffect(() => {
-        if (!db || !editingId) { setOvertimeBaseAllowances(0); return; }
+        if (!db || !editingId) { setOvertimeBaseAllowances(0); setPayItems([]); return; }
         let cancelled = false;
         loadCustomItems(db, editingId)
             .then(items => {
                 if (cancelled) return;
                 setOvertimeBaseAllowances(items.filter(i => i.type === 'earning' && i.inOvertimeBase !== false).reduce((sum, i) => sum + i.amount, 0));
+                setPayItems(items);
             })
             .catch(e => console.error("給与項目の読み込みに失敗しました:", e));
         return () => { cancelled = true; };
@@ -983,6 +992,9 @@ export function useStaffManager({ db, onDataChange, staffList }: UseStaffManager
         setTargetCommuteSetting,
         targetFixedBreakApply,
         setTargetFixedBreakApply,
+        targetSpecificMinWageExempt,
+        setTargetSpecificMinWageExempt,
+        payItems,
         targetDependents,
         setTargetDependents,
         targetWageHistoryPast, setTargetWageHistoryPast, targetWageFrom, setTargetWageFrom,

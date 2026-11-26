@@ -166,7 +166,7 @@ export interface SalaryExtras {
    * 給与項目。inOvertimeBase が false の支給項目は、残業代の時給に入れない（省略時は入れる）。fixed は「固定（毎月同額）」の項目（日割りする）
    * averageWage は平均賃金での扱い（省略時は、固定なら月で決まる賃金、変動なら日・時間で決まる賃金。utils/averageWage.ts）
    */
-  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean; fixed?: boolean; averageWage?: AverageWageKind }[];
+  customItems: { name: string; amount: number; type: 'earning' | 'deduction'; inOvertimeBase?: boolean; fixed?: boolean; averageWage?: AverageWageKind; inMinimumWage?: boolean }[];
   /** 源泉所得税の計算方法（給与規定グループの設定。省略時は月額表） */
   taxMethod?: TaxCalcMethod;
   /** 定額減税（令和6年分）の、この給与より前に引ききれずに残っている額（対象外・未設定なら 0） */
@@ -776,19 +776,21 @@ export const calcDetailedDiff = (inT: string, outT: string, bStart: string, bEnd
  */
 export const loadCustomItems = async (db: any, staffId: string | number): Promise<SalaryExtras['customItems']> => {
   const rows = await db.select(
-    `SELECT m.name, m.type, m.category, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base, m.average_wage
+    `SELECT m.name, m.type, m.category, COALESCE(v.amount, 0) as amount, COALESCE(m.in_overtime_base, 1) as in_overtime_base, m.average_wage, COALESCE(m.in_minimum_wage, 1) as in_minimum_wage
     FROM salary_item_master m
     LEFT JOIN staff_salary_values v ON m.id = v.item_id AND v.staff_id = ?
     WHERE m.category != 'formula'
     ORDER BY m.type DESC, m.id ASC`,
     [staffId]
-  ) as { name: string; type: 'earning' | 'deduction'; category: string; amount: number; in_overtime_base: number; average_wage: string | null }[];
+  ) as { name: string; type: 'earning' | 'deduction'; category: string; amount: number; in_overtime_base: number; average_wage: string | null; in_minimum_wage: number }[];
   return rows
     .filter(r => Number(r.amount) > 0)
     .map(r => ({
       name: r.name, amount: Number(r.amount), type: r.type, inOvertimeBase: Number(r.in_overtime_base) !== 0, fixed: r.category === 'fixed',
       // 平均賃金での扱い（給与項目設定。設定がなければ、固定なら月で決まる賃金、変動なら日・時間で決まる賃金）
       averageWage: toAverageWageKind(r.average_wage, r.category),
+      // 最低賃金と比べる賃金に入れるか（給与項目設定。utils/minimumWage.ts）
+      inMinimumWage: Number(r.in_minimum_wage) !== 0,
     }));
 };
 

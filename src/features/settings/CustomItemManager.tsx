@@ -25,7 +25,7 @@ export default function CustomItemManager({ db, staffList }: Props) {
     activeTab, setActiveTab,
     earnings, deductions, selectedStaffId, setSelectedStaffId, staffValues,
     newItemName, setNewItemName, newItemType, setNewItemType, newItemCategory, setNewItemCategory,
-    addMasterItem, deleteMasterItem, saveAmount, setOvertimeBase, setAverageWage,
+    addMasterItem, deleteMasterItem, saveAmount, setOvertimeBase, setAverageWage, setMinimumWage,
     moveItem // ← 忘れずに受け取る
   } = useCustomItemManager(db);
 
@@ -107,6 +107,9 @@ export default function CustomItemManager({ db, staffList }: Props) {
                   「残業代の時給に入れる」にチェックした手当は、基本給と合わせて残業代・休日手当・深夜手当の時給の計算に入れます。
                   入れなくてよいのは、家族手当・通勤手当・別居手当・子女教育手当・住宅手当・臨時に支払う賃金・1か月を超える期間ごとに支払う賃金だけです（労働基準法37条5項・施行規則21条）。
                   これに当たるかは名前ではなく中身で決まります（家族の人数に関係なく一律に払う家族手当、距離に関係なく一律に払う通勤手当などは入れます）。
+                  <br />「最低賃金に入れる」にチェックした手当は、基本給と合わせて最低賃金と比べます（時間あたりにして足します）。
+                  入れないのは、臨時に支払う賃金・1か月を超える期間ごとに支払う賃金・残業代や休日・深夜の手当と、地域別最低賃金で算入しないと定めた精皆勤手当・通勤手当・家族手当です（最低賃金法4条3項・施行規則1条）。
+                  固定の項目は月で決まる賃金として、変動の項目は給与明細でだけ、平均賃金が「月で決まる賃金」なら月で決まる賃金として、「日・時間・出来高で決まる賃金」ならその月に働いた時間で割って入れます（施行規則2条）。
                   <br />「平均賃金」は、休業手当・休業補償・解雇予告手当に使う平均賃金（労働基準法12条）での扱いです。結婚祝金・見舞金などの臨時の賃金と、3か月を超える期間ごとに払う賃金は「入れない」にします。
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -124,6 +127,18 @@ export default function CustomItemManager({ db, staffList }: Props) {
                             onChange={e => setOvertimeBase(item.id, e.target.checked)}
                           />
                           残業代の時給に入れる
+                        </label>
+                        {/* 最低賃金と比べる賃金に入れるか（見直しの P12。utils/minimumWage.ts）。平均賃金を「入れない」にした臨時の賃金などは入れない */}
+                        <label style={{ fontSize: "11px", color: item.average_wage === "none" ? "#94a3b8" : Number(item.in_minimum_wage) !== 0 ? "#333" : "#b45309", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px", cursor: item.average_wage === "none" ? "default" : "pointer" }}
+                          title="精皆勤手当・通勤手当・家族手当、臨時に支払う賃金、1か月を超える期間ごとに支払う賃金、残業代や休日・深夜の手当は入れません（最低賃金法4条3項・施行規則1条）">
+                          <input
+                            type="checkbox"
+                            data-item="in-minimum-wage"
+                            checked={item.average_wage !== "none" && Number(item.in_minimum_wage) !== 0}
+                            disabled={item.average_wage === "none"}
+                            onChange={e => setMinimumWage(item.id, e.target.checked)}
+                          />
+                          最低賃金に入れる{item.average_wage === "none" && "（平均賃金を「入れない」にした臨時の賃金などは入れません）"}
                         </label>
                         {/* 平均賃金（労働基準法12条）での扱い。休業手当・休業補償・解雇予告手当に使う（utils/averageWage.ts） */}
                         <label style={{ fontSize: "11px", color: item.average_wage === "none" ? "#b45309" : "#333", marginTop: "6px", display: "flex", alignItems: "center", gap: "4px" }}
